@@ -15,7 +15,7 @@ data class SendMessageRequest(
 ): ApiRequest<SendMessageRequestData, SendMessageResponse, ApiError> {
     override val method: HTTPMethod = HTTPMethod.POST
     override val requiresApiKey: Boolean = true
-    override val url: String = "/api/v1/messages"
+    override val url: String = "/messages"
     override val data = SendMessageRequestData(
         type,
         to,

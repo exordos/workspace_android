@@ -2,28 +2,33 @@ package ru.genesiscorporation.workspace.beta.data.remote
 
 import io.ktor.client.statement.HttpResponse
 import kotlinx.serialization.Serializable
-import ru.genesiscorporation.workspace.beta.data.remote.dto.LoginRequest
-import ru.genesiscorporation.workspace.beta.data.remote.dto.LoginResponse
-import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesRequest
-import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesResponse
-import ru.genesiscorporation.workspace.beta.data.remote.dto.SendMessageRequest
-import ru.genesiscorporation.workspace.beta.data.remote.dto.SendMessageResponse
-import ru.genesiscorporation.workspace.beta.data.remote.dto.SubscriptionsResponse
 
 interface APIClient {
-
-    suspend fun subscriptions(): SubscriptionsResponse?
 
 }
 
 @Serializable
-data class ApiError(val errorMessage: String) : Throwable()
+data class ApiError(
+    val errorMessage: String,
+    val code: String
+) : Throwable()
 
 interface ApiRequest<RequestData, Response, ResponseError> {
     val url: String
     val method: HTTPMethod
     val requiresApiKey: Boolean
         get() = true
+    val isAbsoluteUrl: Boolean
+        get() = false
+
+    val shouldReturnUrl: Boolean
+        get() = false
+    val shouldApplySuffix: Boolean
+        get() = true
+    val hasSessionCookie: Boolean
+        get() = false
+    val isJson: Boolean
+        get() = false
     val data: RequestData
 }
 
@@ -34,5 +39,7 @@ data class EmptyRequestData(
 
 enum class HTTPMethod(val value: String) {
     GET("GET"),
-    POST("POST")
+    POST("POST"),
+    PATCH("PATCH"),
+    DELETE("DELETE")
 }

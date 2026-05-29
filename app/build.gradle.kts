@@ -2,7 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
-    alias { libs.plugins.firebase }
+    alias(libs.plugins.firebase)
 }
 
 android {
@@ -17,8 +17,8 @@ android {
         applicationId = "ru.genesiscorporation.workspace.beta"
         minSdk = 30
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1"
+        versionCode = 7
+        versionName = "0.8"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -55,7 +55,9 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.ktor.client.core)
     implementation(libs.ktor.client.cio)
+    implementation(libs.ktor.serialization)
     implementation(libs.ktor.client.serialization)
+    implementation(libs.ktor.client.negotiation)
     implementation(libs.ktor.client.logging)
     implementation(libs.jetbrains.kotlin.serialization.json)
     implementation(libs.androidx.data.store.preferencies)
@@ -64,6 +66,13 @@ dependencies {
     implementation(libs.kotlinx.serialization.properties)
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.cloud.messaging)
+    implementation(libs.androidx.material3)
+    implementation(libs.coil.compose)
+    implementation(libs.coil.network)
+    implementation(libs.compose.markdown)
+    implementation(libs.androidx.app.compat)
+    implementation(libs.androidx.compose.foundation.layout)
+    implementation(libs.androidx.compose.ui.text)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

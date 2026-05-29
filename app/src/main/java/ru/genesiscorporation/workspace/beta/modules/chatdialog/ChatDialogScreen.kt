@@ -1,31 +1,63 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
 package ru.genesiscorporation.workspace.beta.modules.chatdialog
 
+import android.R.attr.end
+import android.net.Uri
 import android.util.Patterns
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.exclude
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextFieldDefaults.contentPadding
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -38,14 +70,25 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
+import coil3.compose.AsyncImage
+import coil3.network.NetworkHeaders
+import coil3.network.httpHeaders
+import coil3.request.ImageRequest
 import kotlinx.coroutines.launch
 import org.jitsi.meet.sdk.JitsiMeetActivity
 import org.jitsi.meet.sdk.JitsiMeetConferenceOptions
@@ -55,14 +98,24 @@ import java.net.URL
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.Instant
+import kotlin.io.encoding.Base64
+import dev.jeziellago.compose.markdowntext.MarkdownText
+import ru.genesiscorporation.workspace.beta.ChatFlow
+import ru.genesiscorporation.workspace.beta.data.remote.dto.UsersResponseData
+import ru.genesiscorporation.workspace.beta.ui.Avatar
+import java.time.Duration
+import java.util.Locale
+import androidx.compose.ui.platform.LocalLocale
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ChatDialogScreen(
     viewModel: ChatDialogViewModel,
     navController: NavHostController
 ) {
     val messages by viewModel.messages.collectAsState()
-    val messageText by viewModel.messageText.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+    val presense by viewModel.presense.collectAsState()
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -71,338 +124,259 @@ fun ChatDialogScreen(
 
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
+            val firstUnreadIndex = messages.first()
             listState.scrollToItem(messages.lastIndex)
             hasDoneInitialScroll = true
         }
     }
-
-    Box(modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .imePadding()
-                .background(LocalWorkspaceColorsPalette.current.background)
-        ) {
-            Row(
-                modifier = Modifier
-                    .background(LocalWorkspaceColorsPalette.current.surface)
-                    .padding(start = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Button(
-                    onClick = {
-                        navController.popBackStack()
-                    },
-                    modifier = Modifier
-                        .padding(end = 12.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color.Transparent,
-                        contentColor = LocalWorkspaceColorsPalette.current.iconBase
-                    )
-                ) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.arrow_back),
-                        contentDescription = "Back"
-                    )
-                }
-                Column(
-                    horizontalAlignment = Alignment.Start,
-                    modifier = Modifier
-                        .weight(1f)
-                ) {
-                    Text(
-                        viewModel.chatTitle,
-                        color = LocalWorkspaceColorsPalette.current.textHeaders,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    if (viewModel.topic != null) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = LocalWorkspaceColorsPalette.current.surface,
+                    titleContentColor = LocalWorkspaceColorsPalette.current.textHeaders,
+                ),
+                expandedHeight = 60.dp,
+                windowInsets = WindowInsets(0, 0, 0, 0),
+                title = {
+                    Column(modifier = Modifier
+                        .clickable(
+                            onClick = {
+                                val user = viewModel.user
+                                if (user != null) {
+                                    navController.navigate(
+                                        ChatFlow.ChatUserInfo(
+                                            user.fullName,
+                                            "${user.userId}",
+                                            user.avatarUrl ?: "",
+                                            user.email
+                                        )
+                                    )
+                                }
+                            }
+                        )) {
                         Text(
-                            viewModel.topic,
-                            color = LocalWorkspaceColorsPalette.current.textAdditional30,
-                            fontSize = 14.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            viewModel.chatTitle,
+                            color = LocalWorkspaceColorsPalette.current.textHeaders,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium
                         )
-                    }
-                }
-                Spacer(
-                    modifier = Modifier.fillMaxWidth()
-                        .weight(1f)
-                )
-                Button(
-                    onClick = {
-                        val roomName = JitsiStyleRoomNameGenerator.generate()
-                        val messageText = "https://meet.example.com/${roomName}"
-                        scope.launch {
-                            viewModel.sendMessage(messageText)
-                        }
-                        val options = JitsiMeetConferenceOptions.Builder()
-                            .setServerURL(URL("https://meet.example.com"))
-                            .setRoom(roomName)
-                            .build()
-
-                        JitsiMeetActivity.launch(context, options)
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color.Transparent,
-                        contentColor = LocalWorkspaceColorsPalette.current.iconBase
-                    )
-                ) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.call),
-                        contentDescription = "Call"
-                    )
-                }
-            }
-            if (messages.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "Loading"
-                    )
-                }
-            } else {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .padding(start = 16.dp, top = 0.dp, end = 16.dp, bottom = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(
-                        space = 8.dp,
-                        alignment = Alignment.Bottom
-                    )
-                ) {
-                    items(items = messages) { item ->
-                        ChatMessage(item)
-                    }
-                }
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .defaultMinSize(minHeight = 60.dp)
-                        .background(LocalWorkspaceColorsPalette.current.surface)
-                        .padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        contentAlignment = Alignment.CenterStart,
-                        modifier = Modifier
-                            .padding(end = 12.dp)
-                            .weight(1f)
-                            .fillMaxWidth()
-                            .heightIn(min = 40.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(
-                                LocalWorkspaceColorsPalette.current.background,
-                                RoundedCornerShape(8.dp)
+                        var aggregatedPresense = presense?.aggregated
+                        if (aggregatedPresense != null) {
+                            val presenseString = if (aggregatedPresense.status == "active") "В сети" else "Был(а) в сети ${pastEpochSecondsToRelativeRu(aggregatedPresense.timestamp)}"
+                            Text(
+                                presenseString,
+                                color = LocalWorkspaceColorsPalette.current.textAdditional30,
+                                fontSize = 14.sp
                             )
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                    ) {
-                        BasicTextField(
-                            value = messageText,
-                            onValueChange = viewModel::onMessageChange,
-                            textStyle = TextStyle(
-                                color = LocalWorkspaceColorsPalette.current.textHeaders,
-                                fontSize = 16.sp
-                            ),
-                            maxLines = 4,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp),
+                        } else if (viewModel.topic != null) {
+                            Text(
+                                viewModel.topic,
+                                color = LocalWorkspaceColorsPalette.current.textAdditional30,
+                                fontSize = 14.sp
+                            )
+                        }
+                    }
+                },
+                navigationIcon = {
+                    IconButton(onClick = { navController.popBackStack() }) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.arrow_back),
+                            contentDescription = "Back"
                         )
                     }
+                },
+                actions = {
                     Button(
                         onClick = {
+                            val roomName = JitsiStyleRoomNameGenerator.generate()
+                            val messageText = "https://meet.example.com/${roomName}"
                             scope.launch {
-                                viewModel.onSendClicked()
+                                viewModel.sendTextMessage(messageText)
                             }
+                            val options = JitsiMeetConferenceOptions.Builder()
+                                .setServerURL(URL("https://meet.example.com"))
+                                .setRoom(roomName)
+                                .build()
+
+                            JitsiMeetActivity.launch(context, options)
                         },
-                        modifier = Modifier.size(46.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(0.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = LocalWorkspaceColorsPalette.current.primary,
-                            contentColor = LocalWorkspaceColorsPalette.current.onPrimary
+                            containerColor = Color.Transparent,
+                            contentColor = LocalWorkspaceColorsPalette.current.iconBase
                         )
                     ) {
                         Icon(
-                            painter = painterResource(id = R.drawable.send),
-                            contentDescription = "Send"
+                            painter = painterResource(id = R.drawable.call),
+                            contentDescription = "Call"
                         )
                     }
+                }
+            )
+        },
+    ) { innerPadding ->
+        val density = LocalDensity.current
+        val imeVisible = WindowInsets.isImeVisible
+        val navBarHeight = 70.dp
+        Box(
+            modifier = Modifier.fillMaxSize()
+                .padding(
+                    top = if (imeVisible) 0.dp else innerPadding.calculateTopPadding(),
+                    start = innerPadding.calculateStartPadding(LocalLayoutDirection.current),
+                    end = innerPadding.calculateEndPadding(LocalLayoutDirection.current),
+                )
+                .windowInsetsPadding(
+                    WindowInsets.ime
+                        .exclude(WindowInsets.navigationBars)
+                        .only(WindowInsetsSides.Bottom)
+                )
+                .offset {
+                    // Pull field down by nav bar height so it meets the keyboard
+                    val extra = if (imeVisible) {
+                        with(density) { navBarHeight.roundToPx() }
+                    } else 0
+                    IntOffset(0, extra)
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(LocalWorkspaceColorsPalette.current.background)
+            ) {
+                if (isLoading) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator()
+                    }
+                } else {
+                    if (messages.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Сообщений нет"
+                            )
+                        }
+                    } else {
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .padding(start = 16.dp, top = 0.dp, end = 16.dp, bottom = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(
+                                space = 8.dp,
+                                alignment = Alignment.Bottom
+                            )
+                        ) {
+                            items(items = messages, key = { "${it.id ?: -1}${it.content}" }) { item ->
+                                ChatMessage(
+                                    item,
+                                    viewModel,
+                                    navController,
+                                    {
+                                        scope.launch {
+                                            listState.scrollToItem(messages.lastIndex)
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    SendMessageView(viewModel)
                 }
             }
         }
     }
+}
+
+data class UserUploadMarkdownParts(
+    val caption: String,
+    val relativePath: String,
+)
+private val captionThenLink = Regex(
+    """^(?:(.*?)\r?\n)?\[[^\]]*]\((/user_uploads/[^)]+)\)""",
+)
+
+fun String.parseUserUploadMarkdownOrNull(): UserUploadMarkdownParts? {
+    val m = captionThenLink.find(this) ?: return null
+    val caption = m.groupValues[1]
+    val path = m.groupValues[2]
+    return UserUploadMarkdownParts(caption = caption, relativePath = path)
 }
 
 @Composable
 fun ChatMessage(
-    item: Message
+    item: Message,
+    viewModel: ChatDialogViewModel,
+    navController: NavHostController,
+    onImageLoad: () -> Unit
 ) {
-    if (Patterns.WEB_URL.matcher(item.content).matches() && URL(item.content).host == "meet.example.com") {
-        CallMessageView(item)
-    } else {
-        TextMessageView(item)
-    }
-
-}
-
-@Composable
-fun TextMessageView(
-    item: Message
-) {
-    val bubbleShape = if (item.isFromCurrentUser) {
-        RoundedCornerShape(
-            topStart = 8.dp,
-            topEnd = 8.dp,
-            bottomStart = 8.dp,
-            bottomEnd = 0.dp
-        )
-    } else {
-        RoundedCornerShape(
-            topStart = 8.dp,
-            topEnd = 8.dp,
-            bottomStart = 0.dp,
-            bottomEnd = 8.dp
-        )
-    }
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (item.isFromCurrentUser) Arrangement.End else Arrangement.Start,
-        ) {
-        Row(
-            verticalAlignment = Alignment.Bottom,
-            modifier = Modifier
-                .background(
-                    if (item.isFromCurrentUser)
-                    LocalWorkspaceColorsPalette.current.messageOwnBackground
-                else LocalWorkspaceColorsPalette.current.messageBackground,
-                    shape = bubbleShape
-                )
-                .padding(10.dp)
-        ) {
-            Column(
-                horizontalAlignment = Alignment.Start,
-                modifier = Modifier
-                    .weight(2f, fill = false)
-            ) {
-                Text(
-                    text = item.senderFullName,
-                    color = if (item.isFromCurrentUser) LocalWorkspaceColorsPalette.current.indicatorBlue else LocalWorkspaceColorsPalette.current.indicatorPurple,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium
-                )
-                Text(
-                    text = item.content,
-                    color = LocalWorkspaceColorsPalette.current.textHeaders,
-                    fontSize = 14.sp
-                )
-            }
-            Spacer(modifier = Modifier.widthIn(min = 20.dp))
-            Text(
-                text = item.timestamp.formatHHmm(),
-                color = LocalWorkspaceColorsPalette.current.messageTimeColor,
-                fontSize = 14.sp,
-            )
-        }
-    }
-}
-
-@Composable
-fun CallMessageView(
-    item: Message
-) {
-    val scope = rememberCoroutineScope()
-    val context = LocalContext.current
-    val itemUrl = URL(item.content)
-    val bubbleShape = if (item.isFromCurrentUser) {
-        RoundedCornerShape(
-            topStart = 8.dp,
-            topEnd = 8.dp,
-            bottomStart = 8.dp,
-            bottomEnd = 0.dp
-        )
-    } else {
-        RoundedCornerShape(
-            topStart = 8.dp,
-            topEnd = 8.dp,
-            bottomStart = 0.dp,
-            bottomEnd = 8.dp
-        )
-    }
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (item.isFromCurrentUser) Arrangement.End else Arrangement.Start,
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Row(
-            verticalAlignment = Alignment.Bottom,
-            modifier = Modifier
-                .background(
-                    LocalWorkspaceColorsPalette.current.messageActiveCallBackground,
-                    shape = bubbleShape
+        val previousMessage = viewModel.previousMessageById(item.id ?: -1)
+        if (previousMessage != null) {
+            val currentMessageDate = Instant.ofEpochSecond(item.timestamp).atZone(ZoneId.systemDefault()).toLocalDate()
+            val previousMessageDate = Instant.ofEpochSecond(previousMessage.timestamp).atZone(ZoneId.systemDefault()).toLocalDate()
+            if (currentMessageDate != previousMessageDate) {
+                val zone = ZoneId.systemDefault()
+                val locale = LocalLocale.current.platformLocale
+                val formatter = DateTimeFormatter.ofPattern("d MMM", locale)
+                Text(
+                    text = currentMessageDate.format(formatter),
+                    color = LocalWorkspaceColorsPalette.current.textHeaders,
+                    fontSize = 14.sp,
+                    modifier = Modifier
+                        .padding(vertical = 16.dp)
+                        .background(
+                            LocalWorkspaceColorsPalette.current.surface,
+                            shape = RoundedCornerShape(100.dp)
+                        )
+                        .padding(vertical = 4.dp, horizontal = 12.dp)
                 )
-                .padding(10.dp)
-                .clickable {
-                    val options = JitsiMeetConferenceOptions.Builder()
-                        .setServerURL(URL("https://meet.example.com"))
-                        .setRoom(itemUrl.path.drop(1))
-                        .build()
-
-                    JitsiMeetActivity.launch(context, options)
-                }
-        ) {
-            Column(
-                horizontalAlignment = Alignment.End
-            ) {
-                Row {
-                    Text(
-                        text = "Звонок",
-                        color = LocalWorkspaceColorsPalette.current.indicatorGreen,
-                        fontSize = 14.sp
-                    )
-                    Text(
-                        text = itemUrl.path.drop(1),
-                        color = LocalWorkspaceColorsPalette.current.textHeaders,
-                        fontSize = 14.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier
-                            .padding(horizontal = 12.dp)
-                    )
-                    Icon(
-                        painter = painterResource(R.drawable.call),
-                        "Call",
-                        tint = LocalWorkspaceColorsPalette.current.indicatorGreen
-                    )
-                }
-                Row(
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    Text(
-                        text = item.timestamp.formatHHmm(),
-                        color = LocalWorkspaceColorsPalette.current.messageTimeColor,
-                        fontSize = 14.sp,
-                    )
-                }
             }
+            if (previousMessage.flags.contains("read") && !item.flags.contains("read")) {
+                Text(
+                    text = "Новые сообщения",
+                    color = LocalWorkspaceColorsPalette.current.textHeaders,
+                    fontSize = 14.sp,
+                    modifier = Modifier
+                        .padding(vertical = 16.dp)
+                        .background(
+                            LocalWorkspaceColorsPalette.current.surface,
+                            shape = RoundedCornerShape(100.dp)
+                        )
+                        .padding(vertical = 4.dp, horizontal = 12.dp)
+                )
+                }
+        }
+        if (Patterns.WEB_URL.matcher(item.content)
+                .matches() && URL(item.content).host == "meet.example.com"
+        ) {
+            CallMessageView(item, viewModel, navController)
+        } else if (item.content.parseUserUploadMarkdownOrNull() != null) {
+            val text = item.content.parseUserUploadMarkdownOrNull()!!.caption
+            val imageUrl = item.content.parseUserUploadMarkdownOrNull()!!.relativePath
+            ImageMessageView(text, imageUrl, viewModel, item, navController, onImageLoad)
+        } else {
+            TextMessageView(item, viewModel, navController)
         }
     }
 }
+
+
 
 private val HHMM: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
-fun Int.formatHHmm(zoneId: ZoneId = ZoneId.systemDefault()): String =
-    HHMM.format(Instant.ofEpochSecond(this.toLong()).atZone(zoneId))
+fun Long.formatHHmm(zoneId: ZoneId = ZoneId.systemDefault()): String =
+    HHMM.format(Instant.ofEpochSecond(this).atZone(zoneId))
 
 object JitsiStyleRoomNameGenerator {
     private val adjectives = listOf(
@@ -434,5 +408,47 @@ object JitsiStyleRoomNameGenerator {
             part.lowercase().replaceFirstChar { it.titlecase() }
         }
         return head + tail
+    }
+}
+
+private fun ruPlural(n: Long, one: String, few: String, many: String): String {
+    val nAbs = kotlin.math.abs(n) % 100
+    val n10 = nAbs % 10
+    return when {
+        nAbs in 11L..14L -> many
+        n10 == 1L -> one
+        n10 in 2L..4L -> few
+        else -> many
+    }
+}
+fun pastEpochSecondsToRelativeRu(
+    pastEpochSeconds: Long,
+    now: Instant = Instant.now()
+): String {
+    val past = Instant.ofEpochSecond(pastEpochSeconds)
+    val seconds = Duration.between(past, now).seconds.coerceAtLeast(0)
+    return when {
+        seconds < 60 -> "только что"
+        seconds < 3600 -> {
+            val m: Long = seconds / 60
+            val word = ruPlural(m, "минуту", "минуты", "минут")
+            "$m $word назад"
+        }
+        seconds < 86400 -> {
+            val h: Long = seconds / 3600
+            val word = ruPlural(h, "час", "часа", "часов")
+            "$h $word назад"
+        }
+        seconds < 604800 -> {
+            val d: Long = seconds / 86400
+            val word = ruPlural(d, "день", "дня", "дней")
+            "$d $word назад"
+        }
+        else -> {
+            val z = java.time.ZoneId.systemDefault()
+            java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy", java.util.Locale("ru", "RU"))
+                .withZone(z)
+                .format(past)
+        }
     }
 }

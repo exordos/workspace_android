@@ -4,13 +4,18 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import ru.genesiscorporation.workspace.beta.data.ApiKeyRepository
+import ru.genesiscorporation.workspace.beta.data.EventsRepository
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
+import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponse
+import ru.genesiscorporation.workspace.beta.data.remote.dto.UsersResponseData
 import ru.genesiscorporation.workspace.beta.modules.chatchannels.ChatViewModel
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.ChatDialogViewModel
+import ru.genesiscorporation.workspace.beta.modules.chatuserinfo.ChatUserInfoViewModel
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.ChooseServerViewModel
 import ru.genesiscorporation.workspace.beta.modules.login.LoginViewModel
 import ru.genesiscorporation.workspace.beta.modules.profile.ProfileViewModel
 import ru.genesiscorporation.workspace.beta.modules.topics.TopicsViewModel
+import ru.genesiscorporation.workspace.beta.modules.users.UsersViewModel
 
 class UserViewModelFactory(
     private val appContext: Context
@@ -22,11 +27,11 @@ class UserViewModelFactory(
     }
 }
 
-class WorkspaceViewModelFactory(private val client: WorkspaceAPIClient) : ViewModelProvider.Factory {
+class WorkspaceViewModelFactory(private val client: WorkspaceAPIClient, val repo: EventsRepository) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(WorkspaceViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return WorkspaceViewModel(client) as T
+            return WorkspaceViewModel(client, repo) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
@@ -52,27 +57,27 @@ class LoginViewModelFactory(private val client: WorkspaceAPIClient, private val 
     }
 }
 
-class ChatViewModelFactory(private val client: WorkspaceAPIClient, private val userViewModel: UserViewModel) : ViewModelProvider.Factory {
+class ChatViewModelFactory(private val client: WorkspaceAPIClient, private val userViewModel: UserViewModel, private  val repo: EventsRepository) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(ChatViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return ChatViewModel(client, userViewModel) as T
+            return ChatViewModel(client, userViewModel, repo) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
 }
 
-class ChatTopicsViewModelFactory(private val client: WorkspaceAPIClient, private val userViewModel: UserViewModel, private val channelName: String, private val channelStreamId: String) : ViewModelProvider.Factory {
+class ChatTopicsViewModelFactory(private val client: WorkspaceAPIClient, private val userViewModel: UserViewModel, private val channelName: String, private val channelStreamId: String, private  val repo: EventsRepository) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(TopicsViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return TopicsViewModel(client, userViewModel, channelName, channelStreamId) as T
+            return TopicsViewModel(client, userViewModel, channelName, channelStreamId, repo) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
 }
 
-class ChatDialogViewModelFactory(private val client: WorkspaceAPIClient, private val userViewModel: UserViewModel, private val chatTitle: String, private val chatId: String, private val topicId: String?, private val isDirectMessages: Boolean) : ViewModelProvider.Factory {
+class ChatDialogViewModelFactory(private val client: WorkspaceAPIClient, private val userViewModel: UserViewModel, private val chatTitle: String, private val chatId: String, private val topicId: String?, private val isDirectMessages: Boolean, private  val repo: EventsRepository, val userId: Int?) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(ChatDialogViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
@@ -82,17 +87,39 @@ class ChatDialogViewModelFactory(private val client: WorkspaceAPIClient, private
                 chatTitle,
                 chatId,
                 topicId,
-                isDirectMessages
+                isDirectMessages,
+                repo,
+                userId
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
 }
-class ProfileViewModelFactory(private val client: WorkspaceAPIClient, private val userViewModel: UserViewModel) : ViewModelProvider.Factory {
+class ProfileViewModelFactory(private val client: WorkspaceAPIClient, private val userViewModel: UserViewModel, private val repo: EventsRepository) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(ProfileViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return ProfileViewModel(client, userViewModel) as T
+            return ProfileViewModel(client, userViewModel, repo) as T
+        }
+        throw IllegalArgumentException("Unknown ViewModel class")
+    }
+}
+
+class UsersViewModelFactory(private val client: WorkspaceAPIClient) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        if (modelClass.isAssignableFrom(UsersViewModel::class.java)) {
+            @Suppress("UNCHECKED_CAST")
+            return UsersViewModel(client) as T
+        }
+        throw IllegalArgumentException("Unknown ViewModel class")
+    }
+}
+
+class ChatUserInfoViewModelFactory(private val client: WorkspaceAPIClient, val userName: String, val userId: String, val avatarUrl: String, val email: String, val repo: EventsRepository) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        if (modelClass.isAssignableFrom(ChatUserInfoViewModel::class.java)) {
+            @Suppress("UNCHECKED_CAST")
+            return ChatUserInfoViewModel(userName, userId, avatarUrl, email, client, repo) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }

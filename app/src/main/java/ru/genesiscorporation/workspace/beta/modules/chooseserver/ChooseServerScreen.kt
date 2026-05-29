@@ -1,7 +1,10 @@
 package ru.genesiscorporation.workspace.beta.modules.chooseserver
 
+import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,21 +18,28 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
+import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.LoginFlow
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.UserState
@@ -41,8 +51,25 @@ fun ChooseServerScreen(
     navController: NavHostController
 ) {
     val serverText by viewModel.serverText.collectAsState()
+    val state by viewModel.queryState.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val user = UserState.current
+    val context = LocalContext.current
+
+    LaunchedEffect(state) {
+        if (state is QueryState.Idle) {
+            user.clearAll()
+        }
+        if (state is QueryState.Success) {
+            navController.navigate(LoginFlow.Login)
+            viewModel.returnToIdleState()
+        }
+        if (state is QueryState.Error) {
+            Toast
+                .makeText(context, (state as QueryState.Error).message, Toast.LENGTH_SHORT)
+                .show()
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize()
         .background(LocalWorkspaceColorsPalette.current.background),
@@ -81,7 +108,7 @@ fun ChooseServerScreen(
                     .fillMaxWidth()
                     .height(40.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .padding(vertical = 4.dp)
                     .background(LocalWorkspaceColorsPalette.current.searchBackground,
                         RoundedCornerShape(8.dp))
             ) {
@@ -92,8 +119,10 @@ fun ChooseServerScreen(
                         color = LocalWorkspaceColorsPalette.current.textHeaders,
                         fontSize = 14.sp
                     ),
+                    cursorBrush = SolidColor(LocalWorkspaceColorsPalette.current.textHeaders),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
+                        .padding(horizontal = 12.dp)
                 )
             }
             Text(
@@ -106,6 +135,7 @@ fun ChooseServerScreen(
             Button(
                 onClick = {
                     viewModel.onServerChange("https://workspace.example.com")
+//                    viewModel.onServerChange("https://sys.platform.example.com")
                 },
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Color.Transparent,
@@ -127,11 +157,9 @@ fun ChooseServerScreen(
             }
             Button(
                 onClick = {
-//                    scope.launch {
-//                        viewModel.getServerSettings()
-                        user.setBaseUrl(viewModel.serverText.value)
-                        navController.navigate(LoginFlow.Login)
-//                    }
+                    scope.launch {
+                        viewModel.getServerSettings()
+                    }
                 },
                 colors = ButtonDefaults.buttonColors(
                     containerColor = LocalWorkspaceColorsPalette.current.primary,
@@ -142,6 +170,20 @@ fun ChooseServerScreen(
             ) {
                 Text("Добавить")
             }
+        }
+    }
+    if (state is QueryState.Loading) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.4f))
+                .clickable(
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() }
+                ) {  },
+            contentAlignment = Alignment.Center
+        ) {
+            CircularProgressIndicator()
         }
     }
 }

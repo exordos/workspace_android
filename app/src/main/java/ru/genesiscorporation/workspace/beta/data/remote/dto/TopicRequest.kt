@@ -12,7 +12,7 @@ data class TopicsRequest(
 ): ApiRequest<EmptyRequestData, TopicsResponse, ApiError> {
     override val method: HTTPMethod = HTTPMethod.GET
     override val requiresApiKey: Boolean = true
-    override val url: String = "/api/v1/users/me/${streamId}/topics"
+    override val url: String = "/users/me/${streamId}/topics"
     override val data = EmptyRequestData("")
 }
 

@@ -1,6 +1,7 @@
 package ru.genesiscorporation.workspace.beta.data.remote.dto
 
 import kotlinx.serialization.Serializable
+import ru.genesiscorporation.workspace.beta.MessageDto
 import ru.genesiscorporation.workspace.beta.data.remote.ApiError
 import ru.genesiscorporation.workspace.beta.data.remote.ApiRequest
 import ru.genesiscorporation.workspace.beta.data.remote.HTTPMethod
@@ -12,10 +13,10 @@ data class MessagesRequest(
     val num_after: String,
     val narrow: String,
     val apply_markdown: String = "false"
-): ApiRequest<MessagesRequestData, MessagesResponse, ApiError> {
+): ApiRequest<MessagesRequestData, MessagesDtoResponse, ApiError> {
     override val method: HTTPMethod = HTTPMethod.GET
     override val requiresApiKey: Boolean = true
-    override val url: String = "/api/v1/messages"
+    override val url: String = "/messages"
     override val data = MessagesRequestData(
         anchor, num_before, num_after, narrow, apply_markdown
     )
@@ -28,12 +29,24 @@ data class DirectMessagesRequest(
     var num_after: String,
     val narrow: String,
     val apply_markdown: String = "false"
-): ApiRequest<MessagesRequestData, DirectMessagesResponse, ApiError> {
+): ApiRequest<MessagesRequestData, MessagesDtoResponse, ApiError> {
     override val method: HTTPMethod = HTTPMethod.GET
     override val requiresApiKey: Boolean = true
-    override val url: String = "/api/v1/messages"
+    override val url: String = "/messages"
     override val data = MessagesRequestData(
         anchor, num_before, num_after, narrow, apply_markdown
+    )
+}
+
+@Serializable
+data class MessagesByIdsRequest(
+    val messageIds: List<Int>
+): ApiRequest<MessagesByIdsRequestData, MessagesDtoResponse, ApiError> {
+    override val method: HTTPMethod = HTTPMethod.GET
+    override val requiresApiKey: Boolean = true
+    override val url: String = "/messages"
+    override val data = MessagesByIdsRequestData(
+       "[${messageIds.joinToString(",")}]", "false"
     )
 }
 
@@ -45,43 +58,16 @@ data class MessagesRequestData(
     var num_after: String,
     val narrow: String,
     val apply_markdown: String
-) {
-}@Serializable
-data class MessagesResponse(
-    val messages: List<MessageData>
-) {
+)
+
+@Serializable
+data class MessagesByIdsRequestData(
+    val message_ids: String,
+    val apply_markdown: String
+)
+
+@Serializable
+data class MessagesDtoResponse(
+    val messages: List<MessageDto>
+){
 }
-
-@Serializable
-data class MessageData(
-    val id: Int,
-    val sender_full_name: String,
-    val sender_id: Int,
-    val content: String,
-    val timestamp: Int,
-    val avatar_url: String,
-    val subject: String,
-    val display_recipient: String
-)
-
-@Serializable
-data class DirectMessagesResponse(
-    val messages: List<DirectMessageData>
-)
-@Serializable
-data class DirectMessageData(
-    val id: Int,
-    val sender_full_name: String,
-    val sender_id: Int,
-    val content: String,
-    val timestamp: Int,
-    val avatar_url: String,
-    val subject: String,
-    val display_recipient: List<Recipient>
-)
-@Serializable
-data class Recipient(
-    val id: Int,
-    val full_name: String,
-    val email: String
-)

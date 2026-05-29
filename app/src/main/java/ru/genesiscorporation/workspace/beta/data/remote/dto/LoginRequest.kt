@@ -12,7 +12,7 @@ data class LoginRequest(
 ): ApiRequest<LoginRequestData, LoginResponse, ApiError> {
     override val method: HTTPMethod = HTTPMethod.POST
     override val requiresApiKey: Boolean = false
-    override val url: String = "/api/v1/fetch_api_key"
+    override val url: String = "/fetch_api_key"
     override val data = LoginRequestData(
         username, password
     )

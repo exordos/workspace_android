@@ -1,11 +1,9 @@
 package ru.genesiscorporation.workspace.beta
 
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Call
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.ui.graphics.vector.ImageVector
 import kotlinx.serialization.Serializable
+import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponse
+import ru.genesiscorporation.workspace.beta.data.remote.dto.UsersResponseData
 
 interface Destinations {
     val route: String
@@ -24,9 +22,12 @@ object ChatFlow {
     object ChatList
 
     @Serializable
-    data class ChatDialog(val title: String, val chatId: String, val topicId: String?, val isDirectMessages: Boolean)
+    data class ChatDialog(val title: String, val chatId: String, val topicId: String?, val isDirectMessages: Boolean, val userId: Int?)
     @Serializable
     data class ChatTopic(val channelName: String, val channelId: String)
+
+    @Serializable
+    data class ChatUserInfo(val userName: String, val userId: String, val avatarUrl: String, val email: String)
 }
 
 
@@ -46,6 +47,6 @@ object Calls: Destinations {
 
 object Profile: Destinations {
     override val route = "Profile"
-    override val icon = R.drawable.group
+    override val icon = R.drawable.ic_profile
     override val title = "Profile"
 }

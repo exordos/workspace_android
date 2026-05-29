@@ -11,7 +11,7 @@ data class EventRequest(
 ): ApiRequest<EventRequestData, String, ApiError> {
     override val method: HTTPMethod = HTTPMethod.GET
     override val requiresApiKey: Boolean = true
-    override val url: String = "/api/v1/events"
+    override val url: String = "/events"
     override val data = EventRequestData(
         queueId, lastEventId
     )
@@ -21,12 +21,4 @@ data class EventRequest(
 data class EventRequestData(
     val queue_id: String,
     val last_event_id: String
-)
-@Serializable
-data class EventResponse(
-    val events: List<EventResponseData>
-)
-@Serializable
-data class EventResponseData(
-    val id: Int
 )
