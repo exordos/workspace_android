@@ -2,11 +2,14 @@ package ru.genesiscorporation.workspace.beta.modules.chatchannels
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
+import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.MessageDto
 import ru.genesiscorporation.workspace.beta.DisplayRecipient
 import ru.genesiscorporation.workspace.beta.UserViewModel
@@ -34,10 +37,21 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import kotlin.collections.first
 
+sealed interface ChatNavEvent {
+    data class OpenDialog(
+        val title: String,
+        val chatId: String,
+        val topicId: String?,
+        val isDirectMessages: Boolean,
+        val userId: Int
+    ) : ChatNavEvent
+}
 class ChatViewModel(
     val client: WorkspaceAPIClient,
     val userViewModel: UserViewModel,
-    private val repo: EventsRepository
+    private val repo: EventsRepository,
+    val pendingDeepLink: String?,
+    val onDeepLinkHandled: () -> Unit
 ): ViewModel() {
     private val _subscriptions = MutableStateFlow<List<ChatHeader>>(emptyList())
     val subscriptions: StateFlow<List<ChatHeader>> = _subscriptions
@@ -66,6 +80,9 @@ class ChatViewModel(
     private val _queryState = MutableStateFlow<QueryState>(QueryState.Idle)
     val queryState: StateFlow<QueryState> = _queryState
     private val folderCreationFormatter = DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ss.SSSSSS")
+
+    private val _navEvents = MutableSharedFlow<ChatNavEvent>(extraBufferCapacity = 1)
+    val navEvents: SharedFlow<ChatNavEvent> = _navEvents
 
     val map: Map<String, Int> = emptyMap()
 
@@ -237,6 +254,47 @@ class ChatViewModel(
                     }
                 }
                 _subscriptions.update { current -> current + channelChatHeaders }
+                if (pendingDeepLink != null) {
+                    when {
+                        pendingDeepLink.startsWith("dialog/") -> {
+                            val userId = pendingDeepLink.removePrefix("dialog/").substringBefore("/").toInt()
+                            if (userId != null) {
+                                val messageUser = repo.users.value.firstOrNull { it.userId == userId }
+                                if (messageUser != null && currentUserId != null) {
+                                    _navEvents.tryEmit(
+                                        ChatNavEvent.OpenDialog(
+                                            title = messageUser.fullName,
+                                            chatId = "[${messageUser.userId}, ${currentUserId}]",
+                                            null,
+                                            true,
+                                            userId = messageUser.userId
+                                        )
+                                    )
+                                    onDeepLinkHandled()
+                                }
+                            }
+                        }
+                        pendingDeepLink.startsWith("stream/") -> {
+                            val rest = pendingDeepLink.removePrefix("stream/")
+                            val parts = rest.split("/", limit = 2) // [channelName, topic]
+                            val channelName = parts[0]
+                            val topic = parts[1]
+                            val channel = _subscriptions.value.firstOrNull { it.title == channelName }
+                            if (channel != null) {
+                                _navEvents.tryEmit(
+                                    ChatNavEvent.OpenDialog(
+                                        title = channelName,
+                                        "${channel.chatId}",
+                                        topic,
+                                        false,
+                                        channel.streamId.toInt()
+                                    )
+                                )
+                                onDeepLinkHandled()
+                            }
+                        }
+                    }
+                }
             }
             is ApiResult.Error -> {
 
@@ -245,7 +303,7 @@ class ChatViewModel(
     }
 
     suspend fun loadTopics(subscription: ChatHeader) {
-        val response = client.performRequest(TopicsRequest(subscription.streamId.toString()))
+        val response = client.performRequest(TopicsRequest(subscription.streamId))
         when(response) {
             is ApiResult.Success -> {
                 val messageIds = response.value.topics.map { it.max_id }
@@ -295,7 +353,17 @@ class ChatViewModel(
                         }
                         val firstRecipient = filteredRecipients.first()
                         val streamId = "[${firstRecipient.id}, ${currentUserId}]"
-                        updateUnreadCount(streamId, message)
+                        val chatHeader = _subscriptions.value.firstOrNull { it.streamId == streamId }
+                        if (chatHeader != null) {
+                            updateUnreadCount(streamId, message)
+                        } else {
+                                val user = users.firstOrNull { it.userId == firstRecipient.id }
+                                if (user != null) {
+                                    val unreadUserMessagesCount = initialUnreaMessages?.pms?.firstOrNull { it.otherUserId == user.userId }?.unreadMessageIds?.size
+                                    val chatHeader = ChatHeader.from(user, message, "$currentUserId", unreadUserMessagesCount)
+                                    _subscriptions.update { current -> current + chatHeader }
+                                }
+                        }
                     }
                 }
                 is DisplayRecipient.StreamName -> {

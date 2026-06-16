@@ -40,7 +40,7 @@ import ru.genesiscorporation.workspace.beta.SessionCookieStore
 import ru.genesiscorporation.workspace.beta.UserViewModel
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UploadFileResponseData
 import kotlin.io.encoding.Base64
-import kotlin.math.log
+import ru.genesiscorporation.workspace.beta.BuildConfig
 
 class WorkspaceAPIClient(
     val client: HttpClient,
@@ -70,7 +70,7 @@ class WorkspaceAPIClient(
                     HTTPMethod.PATCH -> HttpMethod.Patch
                     HTTPMethod.DELETE -> HttpMethod.Delete
                 }
-                header("User-Agent", "Workspace/android/0.8")
+                header("User-Agent", "Workspace/android/${BuildConfig.VERSION_NAME}")
 
                 if (RequestData::class != EmptyRequestData::class) {
                     val bodyDict = Properties.encodeToStringMap(request.data)
@@ -116,7 +116,7 @@ class WorkspaceAPIClient(
                         }
                     }
                 }
-                if (request.requiresApiKey == true) {
+                if (request.requiresApiKey) {
                     if (isOidc) {
                         header("cookie", apiKey)
                         val csrfToken = apiKey.substringAfter(';')
@@ -168,12 +168,15 @@ class WorkspaceAPIClient(
         val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
         val fileName = "image.jpg"
         val baseUrl = userViewModel.repo.baseUrlFlow.first()
-        val httpResponse: HttpResponse = client.post("$baseUrl/api/v1/user_uploads") {
+        val apiKey = if (baseApiKey != null) baseApiKey ?: "" else userViewModel.repo.apiKeyFlow.first() ?: ""
+        val isOidc = apiKey.contains("__Host-sessionid=")
+        val urlSuffix = if (isOidc) "/json" else "/api/v1"
+        val httpResponse: HttpResponse = client.post("${baseUrl}${urlSuffix}/user_uploads") {
             setBody(
                 MultiPartFormDataContent(
                     formData {
                         append(
-                            key = "body", // must match what your API expects
+                            key = "body",
                             value = bytes,
                             headers = Headers.build {
                                 append(HttpHeaders.ContentType, mime)
@@ -186,11 +189,21 @@ class WorkspaceAPIClient(
                     }
                 )
             )
-            header("User-Agent", "Workspace/android/0.8")
-            val apiKey = userViewModel.repo.apiKeyFlow.first()
-            val email = userViewModel.repo.emailFlow.first()
-            val authHeader = Base64.encode("$email:$apiKey".encodeToByteArray())
-            header("Authorization", "Basic $authHeader")
+            header("User-Agent", "Workspace/android/${BuildConfig.VERSION_NAME}")
+            if (isOidc) {
+                header("cookie", apiKey)
+                val csrfToken = apiKey.substringAfter(';')
+                    .takeIf { it.startsWith(" __Host-csrftoken=") }
+                    ?.substringAfter('=')
+                    ?.takeIf { it.isNotBlank() }
+                if (csrfToken != null) {
+                    header("X-CSRFToken", csrfToken)
+                }
+            } else {
+                val email = if (baseEmail != null) baseEmail else userViewModel.repo.emailFlow.first()
+                val authHeader = Base64.encode("$email:$apiKey".encodeToByteArray())
+                header("Authorization", "Basic $authHeader")
+            }
         }
         if (httpResponse.status.isSuccess()) {
             val json = Json { ignoreUnknownKeys = true }
@@ -210,6 +223,27 @@ class WorkspaceAPIClient(
             context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                 ?: error("Could not open $uri")
         }
+
+    fun authHeaders(backupApiKey: String, backupEmail: String): List<AuthHeader> {
+        val authHeadersList: MutableList<AuthHeader> = mutableListOf()
+        val apiKey = if (baseApiKey != null) baseApiKey ?: "" else backupApiKey
+        val isOidc = apiKey.contains("__Host-sessionid=")
+        if (isOidc) {
+            authHeadersList += AuthHeader("cookie", apiKey)
+            val csrfToken = apiKey.substringAfter(';')
+                .takeIf { it.startsWith(" __Host-csrftoken=") }
+                ?.substringAfter('=')
+                ?.takeIf { it.isNotBlank() }
+            if (csrfToken != null) {
+                authHeadersList += AuthHeader("X-CSRFToken", csrfToken)
+            }
+        } else {
+            val email = if (baseEmail != null) baseEmail else backupEmail
+            val authHeader = Base64.encode("$email:$apiKey".encodeToByteArray())
+            authHeadersList += AuthHeader("Authorization", "Basic $authHeader")
+        }
+        return  authHeadersList
+    }
 }
 
 @Serializable
@@ -227,3 +261,8 @@ sealed class ApiResult<out R, out E> {
     data class Success<R>(val value: R) : ApiResult<R, Nothing>()
     data class Error<E>(val error: E) : ApiResult<Nothing, E>()
 }
+
+data class AuthHeader(
+    val title: String,
+    val value: String
+)

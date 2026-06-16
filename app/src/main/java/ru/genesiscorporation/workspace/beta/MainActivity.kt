@@ -3,6 +3,7 @@ package ru.genesiscorporation.workspace.beta
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -42,6 +43,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -94,6 +96,7 @@ class MainActivity : ComponentActivity() {
     private val TARGET_REFERER_HOST = "oidc.platform.example.com"
     private val NEW_REDIRECT_URI = "https://workspace.example.com/oidc"
 
+    private var pendingDeepLink by mutableStateOf<String?>(null)
     val sessionCookieStore = SessionCookieStore()
     private fun rewriteRefererRedirectUri(referer: String): String {
         val uri = Uri.parse(referer)
@@ -152,14 +155,21 @@ class MainActivity : ComponentActivity() {
     val messagesRepository = EventsRepository()
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        pendingDeepLink = intent.getStringExtra("deeplink")
         enableEdgeToEdge()
         setContent {
             WokspaceTheme {
                 CompositionLocalProvider(UserState provides userState) {
-                    ApplicationSwitcher(workspaceApiClient, messagesRepository)
+                    ApplicationSwitcher(workspaceApiClient, messagesRepository, pendingDeepLink, onDeepLinkHandled = { pendingDeepLink = null })
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        pendingDeepLink = intent.getStringExtra("deeplink")
     }
 }
 
@@ -190,8 +200,12 @@ fun RequestNotificationPermissionIfNeeded() {
 }
 
 @Composable
-fun ApplicationSwitcher(workspaceApiClient: WorkspaceAPIClient,
-                        messagesRepository: EventsRepository) {
+fun ApplicationSwitcher(
+    workspaceApiClient: WorkspaceAPIClient,
+    messagesRepository: EventsRepository,
+    pendingDeepLink: String?,
+    onDeepLinkHandled: () -> Unit
+) {
     val user = UserState.current
     val userId by user.userId.collectAsState()
     val isApiKeyLoaded by user.isApiKeyLoaded.collectAsState()
@@ -211,7 +225,7 @@ fun ApplicationSwitcher(workspaceApiClient: WorkspaceAPIClient,
     } else if (userId == null) {
         LoginNavigation(workspaceApiClient)
     } else {
-        WokspaceApp( workspaceViewModel, workspaceApiClient, messagesRepository)
+        WokspaceApp( workspaceViewModel, workspaceApiClient, messagesRepository, pendingDeepLink, onDeepLinkHandled)
     }
 }
 
@@ -219,7 +233,9 @@ fun ApplicationSwitcher(workspaceApiClient: WorkspaceAPIClient,
 fun WokspaceApp(
     viewModel: WorkspaceViewModel,
     workspaceApiClient: WorkspaceAPIClient,
-    messagesRepository: EventsRepository
+    messagesRepository: EventsRepository,
+    pendingDeepLink: String?,
+    onDeepLinkHandled: () -> Unit
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
     var navController = rememberNavController()
@@ -296,7 +312,7 @@ fun WokspaceApp(
                 RequestNotificationPermissionIfNeeded()
                 NavHost(navController = navController, startDestination = Chat.route) {
                     composable(Chat.route) {
-                        ChatNavigation(workspaceApiClient, messagesRepository)
+                        ChatNavigation(workspaceApiClient, messagesRepository, pendingDeepLink, onDeepLinkHandled)
                     }
                     composable(Profile.route) {
                         ProfileScreen(profileViewModel)
@@ -312,10 +328,15 @@ fun WokspaceApp(
 }
 
 @Composable
-fun ChatNavigation(workspaceApiClient: WorkspaceAPIClient, eventsRepository: EventsRepository) {
+fun ChatNavigation(
+    workspaceApiClient: WorkspaceAPIClient,
+    eventsRepository: EventsRepository,
+    pendingDeepLink: String?,
+    onDeepLinkHandled: () -> Unit
+) {
     val navController = rememberNavController()
     val user = UserState.current
-    val chatViewModelFactory = remember { ChatViewModelFactory(workspaceApiClient, user, eventsRepository) }
+    val chatViewModelFactory = remember { ChatViewModelFactory(workspaceApiClient, user, eventsRepository, pendingDeepLink, onDeepLinkHandled) }
     val chatViewModel: ChatViewModel = viewModel(factory = chatViewModelFactory)
     NavHost(navController = navController, startDestination = ChatFlow.ChatList) {
         composable<ChatFlow.ChatList> {

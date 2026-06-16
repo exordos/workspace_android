@@ -57,11 +57,15 @@ class LoginViewModelFactory(private val client: WorkspaceAPIClient, private val 
     }
 }
 
-class ChatViewModelFactory(private val client: WorkspaceAPIClient, private val userViewModel: UserViewModel, private  val repo: EventsRepository) : ViewModelProvider.Factory {
+class ChatViewModelFactory(private val client: WorkspaceAPIClient,
+                           private val userViewModel: UserViewModel,
+                           private  val repo: EventsRepository,
+                           private  val pendingDeepLink: String?,
+                           private  val onDeepLinkHandled: () -> Unit) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(ChatViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return ChatViewModel(client, userViewModel, repo) as T
+            return ChatViewModel(client, userViewModel, repo, pendingDeepLink, onDeepLinkHandled) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }

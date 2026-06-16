@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.exclude
@@ -30,6 +31,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBarDefaults
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -44,6 +46,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -61,6 +65,7 @@ fun SendMessageView(
     val messageText by viewModel.messageText.collectAsState()
     val scope = rememberCoroutineScope()
     val imageUri by viewModel.imageUri.collectAsState()
+    val editingMessageBackupText by viewModel.editingMessageBackupText.collectAsState()
     val context = LocalContext.current
     val launcher = rememberLauncherForActivityResult(
         contract =
@@ -92,6 +97,37 @@ fun SendMessageView(
                         .align(Alignment.TopEnd)
                         .size(24.dp)
                         .clickable { viewModel.onImageUriChange(null) },
+                )
+            }
+        }
+        val message = editingMessageBackupText
+        if (message != null) {
+            Row(
+                modifier = Modifier.padding(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 0.dp)
+            ) {
+                Column {
+                    Text(
+                        "Сообщение",
+                        color = LocalWorkspaceColorsPalette.current.primary,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        message,
+                        color = LocalWorkspaceColorsPalette.current.textAdditional50,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Spacer(modifier = Modifier.weight(1f))
+                Icon(
+                    painter = painterResource(R.drawable.ic_close_small),
+                    contentDescription = "Close",
+                    modifier = Modifier
+                        .size(24.dp)
+                        .clickable { viewModel.clearEditingMessage() },
                 )
             }
         }
@@ -165,10 +201,17 @@ fun SendMessageView(
                     contentColor = LocalWorkspaceColorsPalette.current.onPrimary
                 )
             ) {
-                Icon(
-                    painter = painterResource(id = R.drawable.send),
-                    contentDescription = "Send"
-                )
+                if (viewModel.editingMessage == null) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.send),
+                        contentDescription = "Send"
+                    )
+                } else {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_check),
+                        contentDescription = "Send edit"
+                    )
+                }
             }
         }
     }

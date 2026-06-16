@@ -20,10 +20,52 @@ class MyFirebaseMessagingService: FirebaseMessagingService() {
         Log.d(TAG, "From: ${message.from}")
 
         // Check if message contains a data payload.
-        if (message.data.isNotEmpty() && message.data["sender_full_name"] != null && message.data["content"] != null) {
-            showNotification("${message.data["sender_full_name"]}", "${
-                message.data["content"]}", null)
-            Log.d(TAG, "Message data payload: ${message.data}")
+
+
+        if (message.data.isNotEmpty() && message.data["kind"] != null) {
+            val dataKind = "${message.data["kind"]}"
+            when(dataKind) {
+                "remove_notification_message" -> {
+                    val messageIds = message.data["message_ids"]
+                    if (messageIds != null) {
+                        val messageIdsList: List<Int> = messageIds.split(',')
+                            .map { it.trim().toInt() }
+                        for (messageId in messageIdsList) {
+                            cancelNotification(messageId)
+                        }
+                    }
+                }
+                "private_chat_message" -> {
+                    if (message.data["sender_full_name"] != null && message.data["content"] != null) {
+                        var deepLink: String? = null
+                        val userId = message.data["sender_id"]
+                        if (userId != null) {
+                            deepLink = "dialog/${userId}"
+                        }
+
+                        showNotification(message.data["workspace_message_id"]?.toInt() ?: 0, "${message.data["sender_full_name"]}", "${
+                            message.data["content"]}", deepLink)
+                        Log.d(TAG, "Message data payload: ${message.data}")
+                    }
+                }
+                "stream_chat_message" -> {
+                    if (message.data["sender_full_name"] != null && message.data["content"] != null && message.data["stream"] != null && message.data["topic"] != null) {
+                        var deepLink: String? = "stream/${message.data["stream"]}/${message.data["topic"]}"
+                        val title = "${message.data["stream"]} -> ${message.data["topic"]}"
+                        val body = "${message.data["sender_full_name"]}: ${message.data["content"]}"
+                        showNotification(
+                            message.data["workspace_message_id"]?.toInt() ?: 0,
+                            title,
+                            body,
+                            deepLink
+                        )
+                        Log.d(TAG, "Message data payload: ${message.data}")
+                    }
+                }
+                else -> {
+
+                }
+            }
         }
 
         // Check if message contains a notification payload.
@@ -36,11 +78,16 @@ class MyFirebaseMessagingService: FirebaseMessagingService() {
     }
 
     @SuppressLint("ServiceCast")
-    private fun showNotification(title: String, body: String, deepLink: String?) {
+    private fun showNotification(
+        notificationId: Int,
+        title: String,
+        body: String,
+        deepLink: String?
+    ) {
         val channelId = "fcm_default_channel"
         // Intent opened when user taps notification
         val intent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra("deeplink", deepLink)
         }
         val pendingIntent = PendingIntent.getActivity(
@@ -69,13 +116,19 @@ class MyFirebaseMessagingService: FirebaseMessagingService() {
             .setContentIntent(pendingIntent)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .build()
-        notificationManager.notify(System.currentTimeMillis().toInt(), notification)
+        notificationManager.notify(notificationId, notification)
     }
     override fun onNewToken(token: String) {
         super.onNewToken(token)
         // handle token refresh
         FCMTokenHolder.token = token
         Log.d(TAG, "New token: ${token}")
+    }
+
+    fun cancelNotification(notificationId: Int) {
+        val notificationManager =
+            getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.cancel(notificationId)
     }
 }
 

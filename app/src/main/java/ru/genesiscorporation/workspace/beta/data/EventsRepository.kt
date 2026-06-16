@@ -48,6 +48,21 @@ class EventsRepository {
         }
     }
 
+    fun didReadMessages(messageIds: List<Int>) {
+        for (messageId in messageIds) {
+            _unreadMessages.update { current ->
+                current.copy(
+                    pms = current.pms.map { pm ->
+                        pm.copy(unreadMessageIds = pm.unreadMessageIds.filter { it != messageId })
+                    },
+                    streams = current.streams.map { stream ->
+                        stream.copy(unreadMessageIds = stream.unreadMessageIds.filter { it != messageId })
+                    }
+                )
+            }
+        }
+    }
+
     fun didReadChannelMessages(messageIds: List<Int>, streamId: Int, topicName: String) {
         val streamsUnreadMessages = _unreadMessages.value.streams
         val filteredStreamsUnreadMessages = streamsUnreadMessages.map { stream ->

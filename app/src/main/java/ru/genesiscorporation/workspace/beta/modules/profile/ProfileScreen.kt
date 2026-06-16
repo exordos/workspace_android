@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.exclude
@@ -44,6 +45,7 @@ import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
+import ru.genesiscorporation.workspace.beta.BuildConfig
 
 @Composable
 fun ProfileScreen(
@@ -135,36 +137,6 @@ fun ProfileScreen(
                         )
                     }
                 }
-                if (viewModel.currentPushToken() != null) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .padding(vertical = 8.dp)
-                    ) {
-                        Image(
-                            painter = painterResource(id = R.drawable.ic_userid),
-                            contentDescription = null,
-                            modifier = Modifier
-                                .padding(end = 16.dp)
-                        )
-                        Column(
-                            horizontalAlignment = Alignment.Start
-                        ) {
-                            Text(
-                                text = "Пуш токен",
-                                color = LocalWorkspaceColorsPalette.current.textAdditional30,
-                                fontSize = 12.sp
-                            )
-                            SelectionContainer() {
-                                Text(
-                                    text = viewModel.currentPushToken() ?: "",
-                                    color = LocalWorkspaceColorsPalette.current.textHeaders,
-                                    fontSize = 14.sp
-                                )
-                            }
-                        }
-                    }
-                }
             }
             Row(
                 verticalAlignment = Alignment.CenterVertically
@@ -185,6 +157,10 @@ fun ProfileScreen(
                     )
                 }
             }
+            Spacer(modifier = Modifier.weight(1f))
+            Text(BuildConfig.VERSION_NAME,
+                color = LocalWorkspaceColorsPalette.current.textAdditional30,
+                fontSize = 10.sp)
         }
     }
 }

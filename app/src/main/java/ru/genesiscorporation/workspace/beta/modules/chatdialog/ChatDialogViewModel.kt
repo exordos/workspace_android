@@ -72,13 +72,16 @@ class ChatDialogViewModel(
     val presense: StateFlow<Presense?> = _presense
 
 
-    private var editingMessage: Message? = null
-    private var editingMessageBackupText: String? = null
+    var editingMessage: Message? = null
+    private val _editingMessageBackupText = MutableStateFlow<String?>(null)
+    val editingMessageBackupText: StateFlow<String?> = _editingMessageBackupText
     private val _messageText = MutableStateFlow("")
     val messageText: StateFlow<String> = _messageText
 
     private val _imageUri = MutableStateFlow<Uri?>(null)
     val imageUri: StateFlow<Uri?> = _imageUri
+
+    var shouldScrollToBottom: Boolean = true
 
     fun onMessageChange(newText: String) {
         _messageText.value = newText
@@ -101,6 +104,7 @@ class ChatDialogViewModel(
     fun onEditMessageClicked(message: Message) {
         if (message.id != null) {
             editingMessage = message
+            _editingMessageBackupText.value = message.content
             _messageText.value = message.content
         }
     }
@@ -110,7 +114,18 @@ class ChatDialogViewModel(
         _messageText.value = "@_**${message.senderFullName}**\n```quote\n${message.content}\n```\n"
     }
 
+    fun onScroll() {
+        shouldScrollToBottom = false
+    }
+
+    fun clearEditingMessage() {
+        _editingMessageBackupText.value = null
+        editingMessage = null
+    }
+
     suspend fun onSendClicked(context: Context) {
+        val text = _messageText.value
+        if (text.isBlank()) return
         val messageId = editingMessage?.id
         if (messageId != null) {
             sendEditMessage(messageId, _messageText.value)
@@ -200,12 +215,12 @@ class ChatDialogViewModel(
                     updateMessage(newMessage)
                 }
                 editingMessage = null
-                editingMessageBackupText = null
+                _editingMessageBackupText.value = null
             }
             is ApiResult.Error -> {
-                editingMessage?.let { it.content = editingMessageBackupText ?: it.content }
+                editingMessage?.let { it.content = editingMessageBackupText.value ?: it.content }
                 editingMessage = null
-                editingMessageBackupText = null
+                _editingMessageBackupText.value = null
             }
         }
         _messageText.value = ""
@@ -325,6 +340,7 @@ class ChatDialogViewModel(
         }
         val filteredMessages = filteredMessageDtos.map { Message.from(it, userId?.toInt() ?: 0) }
         val newMessages = filteredMessages.filter { message -> !_messages.value.any { it.id == message.id } }.filter { possibleMessage?.content != it.content }
+        processUnreadMessages(newMessages)
         _messages.update { current -> current + newMessages }
     }
 
@@ -351,6 +367,7 @@ class ChatDialogViewModel(
         }
         val filteredMessages = filteredMessageDtos.map { Message.from(it, userId?.toInt() ?: 0) }
         val newMessages = filteredMessages.filter { message -> !_messages.value.any { it.id == message.id} }.filter { possibleMessage?.content != it.content }
+        processUnreadMessages(newMessages)
         _messages.update { current -> current + newMessages }
     }
 }

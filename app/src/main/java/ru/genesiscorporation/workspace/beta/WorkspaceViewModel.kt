@@ -52,7 +52,7 @@ class WorkspaceViewModel(
     val currentCallMessage: StateFlow<MessageDto?> = _currentCallMessage
 
     init {
-        viewModelScope.launch {
+            viewModelScope.launch {
             repo.queueId.collect { updated ->
                 if (updated != null) {
                     messagesQueueId = updated
@@ -110,8 +110,9 @@ class WorkspaceViewModel(
                             if (!newMessages.isEmpty()) {
                                 repo.updateMessages(newMessages)
                                 val userId = client.userViewModel.userId.value?.toInt()
-                                if (userId != null) {
-                                    repo.updateUnreadsForNewMessages(newMessages, userId)
+                                val newUnreadMessages = newMessages.filter { !it.flags.contains("read") }
+                                if (userId != null && !newUnreadMessages.isEmpty()) {
+                                    repo.updateUnreadsForNewMessages(newUnreadMessages, userId)
                                 }
                             }
                             val presenses = events
@@ -128,6 +129,14 @@ class WorkspaceViewModel(
                                 }
                                 repo.updateNewPresenses(flatPresenses)
                                 repo.updatePresenses(presenses)
+                            }
+                            val messageFlagsUpdate = events
+                                .filterIsInstance<UpdateMessageFlagsEvent>()
+                                .filter { it.flag == "read" }
+                            if (!messageFlagsUpdate.isEmpty()) {
+                                for (flagUpdateEvents in messageFlagsUpdate) {
+                                    repo.didReadMessages(flagUpdateEvents.messages)
+                                }
                             }
                         }
                         is ApiResult.Error -> {
@@ -151,6 +160,7 @@ class WorkspaceViewModel(
             when (obj["type"]?.toString()?.trim('"')) {
                 "message" -> json.decodeFromJsonElement<MessageEvent>(raw)
                 "presence" -> json.decodeFromJsonElement<PresenceEvent>(raw)
+                "update_message_flags" -> json.decodeFromJsonElement<UpdateMessageFlagsEvent>(raw)
                 else -> null
             }
         }
@@ -193,6 +203,13 @@ data class PresenceEvent(
     val email: String,
     @SerialName("server_timestamp") val serverTimestamp: Double,
     val presence: Map<String, PresenseAggregated>
+) : Event
+@Serializable
+data class UpdateMessageFlagsEvent(
+    override val id: Int,
+    val type: String,
+    val messages: List<Int>,
+    val flag:String
 ) : Event
 
 @Serializable

@@ -103,7 +103,7 @@ fun LoginScreen(
 
     Box(modifier = Modifier.fillMaxSize()
         .background(LocalWorkspaceColorsPalette.current.background),
-        contentAlignment = Alignment.TopCenter
+        contentAlignment = if (user.externalAuthenticationMethods.isEmpty()) Alignment.TopCenter else Alignment.Center
     ) {
         Column(modifier = Modifier.fillMaxWidth()
             .background(LocalWorkspaceColorsPalette.current.background)
@@ -141,88 +141,107 @@ fun LoginScreen(
             Column(
                 horizontalAlignment = Alignment.Start
             ) {
-                Text(
-                    "Email",
-                    color = LocalWorkspaceColorsPalette.current.textAdditional30,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.padding(horizontal = 20.dp)
-                )
-                Box(
-                    contentAlignment = Alignment.CenterStart,
-                    modifier = Modifier
-                        .padding(horizontal = 20.dp)
-                        .fillMaxWidth()
-                        .height(40.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .padding(vertical = 4.dp)
-                        .background(
-                            LocalWorkspaceColorsPalette.current.searchBackground,
-                            RoundedCornerShape(8.dp)
-                        )
-                ) {
-                    BasicTextField(
-                        value = loginText,
-                        onValueChange = viewModel::onLoginChange,
-                        textStyle = TextStyle(
-                            color = LocalWorkspaceColorsPalette.current.textHeaders,
-                            fontSize = 14.sp
-                        ),
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Email
-                        ),
-                        cursorBrush = SolidColor(LocalWorkspaceColorsPalette.current.textHeaders),
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                            .padding(horizontal = 12.dp)
+                if (user.externalAuthenticationMethods.isEmpty()) {
+                    Text(
+                        "Email",
+                        color = LocalWorkspaceColorsPalette.current.textAdditional30,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(horizontal = 20.dp)
                     )
-                }
-                Text(
-                    "Пароль",
-                    color = LocalWorkspaceColorsPalette.current.textAdditional30,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.padding(horizontal = 20.dp)
-                )
-                Box(
-                    contentAlignment = Alignment.CenterStart,
-                    modifier = Modifier
-                        .padding(horizontal = 20.dp)
-                        .fillMaxWidth()
-                        .height(40.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .padding(vertical = 4.dp)
-                        .background(
-                            LocalWorkspaceColorsPalette.current.searchBackground,
-                            RoundedCornerShape(8.dp)
-                        )
-                ) {
-                    BasicTextField(
-                        value = passwordText,
-                        onValueChange = viewModel::onPasswordChange,
-                        textStyle = TextStyle(
-                            color = LocalWorkspaceColorsPalette.current.textHeaders,
-                            fontSize = 14.sp
-                        ),
-                        cursorBrush = SolidColor(LocalWorkspaceColorsPalette.current.textHeaders),
-                        singleLine = true,
-                        visualTransformation = if (passwordVisible) {
-                            VisualTransformation.None
-                        } else {
-                            PasswordVisualTransformation()
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                            .padding(start = 12.dp, end = 44.dp)
-                    )
-                    IconButton(
-                        onClick = { passwordVisible = !passwordVisible },
+                    Box(
+                        contentAlignment = Alignment.CenterStart,
                         modifier = Modifier
-                            .align(Alignment.CenterEnd)
+                            .padding(horizontal = 20.dp)
+                            .fillMaxWidth()
+                            .height(40.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .padding(vertical = 4.dp)
+                            .background(
+                                LocalWorkspaceColorsPalette.current.searchBackground,
+                                RoundedCornerShape(8.dp)
+                            )
                     ) {
-                        Image(
-                            painter = if (passwordVisible) painterResource(id = R.drawable.ic_visibility_off) else painterResource(id = R.drawable.ic_visibility),
-                            contentDescription = null
+                        BasicTextField(
+                            value = loginText,
+                            onValueChange = viewModel::onLoginChange,
+                            textStyle = TextStyle(
+                                color = LocalWorkspaceColorsPalette.current.textHeaders,
+                                fontSize = 14.sp
+                            ),
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Email
+                            ),
+                            cursorBrush = SolidColor(LocalWorkspaceColorsPalette.current.textHeaders),
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                                .padding(horizontal = 12.dp)
                         )
+                    }
+                    Text(
+                        "Пароль",
+                        color = LocalWorkspaceColorsPalette.current.textAdditional30,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(horizontal = 20.dp)
+                    )
+                    Box(
+                        contentAlignment = Alignment.CenterStart,
+                        modifier = Modifier
+                            .padding(horizontal = 20.dp)
+                            .fillMaxWidth()
+                            .height(40.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .padding(vertical = 4.dp)
+                            .background(
+                                LocalWorkspaceColorsPalette.current.searchBackground,
+                                RoundedCornerShape(8.dp)
+                            )
+                    ) {
+                        BasicTextField(
+                            value = passwordText,
+                            onValueChange = viewModel::onPasswordChange,
+                            textStyle = TextStyle(
+                                color = LocalWorkspaceColorsPalette.current.textHeaders,
+                                fontSize = 14.sp
+                            ),
+                            cursorBrush = SolidColor(LocalWorkspaceColorsPalette.current.textHeaders),
+                            singleLine = true,
+                            visualTransformation = if (passwordVisible) {
+                                VisualTransformation.None
+                            } else {
+                                PasswordVisualTransformation()
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                                .padding(start = 12.dp, end = 44.dp)
+                        )
+                        IconButton(
+                            onClick = { passwordVisible = !passwordVisible },
+                            modifier = Modifier
+                                .align(Alignment.CenterEnd)
+                        ) {
+                            Image(
+                                painter = if (passwordVisible) painterResource(id = R.drawable.ic_visibility_off) else painterResource(
+                                    id = R.drawable.ic_visibility
+                                ),
+                                contentDescription = null
+                            )
+                        }
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    viewModel.onLoginClick()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = LocalWorkspaceColorsPalette.current.primary,
+                                contentColor = LocalWorkspaceColorsPalette.current.onPrimary
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                                .padding(6.dp)
+                        ) {
+                            Text("Войти")
+                        }
                     }
                 }
                 for (method in user.externalAuthenticationMethods) {
@@ -242,21 +261,6 @@ fun LoginScreen(
                     ) {
                         Text("Войти c ${method.display_name}")
                     }
-                }
-                Button(
-                    onClick = {
-                        scope.launch {
-                            viewModel.onLoginClick()
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = LocalWorkspaceColorsPalette.current.primary,
-                        contentColor = LocalWorkspaceColorsPalette.current.onPrimary
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                        .padding(6.dp)
-                ) {
-                    Text("Войти")
                 }
                 Button(
                     onClick = {

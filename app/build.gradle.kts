@@ -13,12 +13,23 @@ android {
         }
     }
 
+    flavorDimensions += "brand"
+    productFlavors {
+        create("genesis") {
+            dimension = "brand"
+            applicationId = "ru.genesiscorporation.workspace.beta"
+        }
+        create("exordos") {
+            dimension = "brand"
+            applicationId = "com.exordos.workspace"
+        }
+    }
+
     defaultConfig {
-        applicationId = "ru.genesiscorporation.workspace.beta"
         minSdk = 30
         targetSdk = 36
-        versionCode = 7
-        versionName = "0.8"
+        versionCode = 10
+        versionName = "1.0.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -38,6 +49,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

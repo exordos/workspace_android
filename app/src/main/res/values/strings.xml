@@ -1,3 +1,3 @@
 <resources>
-    <string name="app_name">Wokspace</string>
+    <!-- app_name is defined per product flavor in src/genesis and src/exordos -->
 </resources>

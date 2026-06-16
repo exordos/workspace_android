@@ -155,6 +155,27 @@ fun ChatScreen(
         }
     }
 
+    LaunchedEffect(Unit) {
+        chatViewModel.navEvents.collect { event ->
+            when (event) {
+                is ChatNavEvent.OpenDialog -> {
+                    navController.navigate(
+                        ChatFlow.ChatDialog(
+                            event.title,
+                            event.chatId,
+                            event.topicId,
+                            event.isDirectMessages,
+                            event.userId
+                        )
+                    ) {
+                        popUpTo<ChatFlow.ChatList> { inclusive = false }
+                        launchSingleTop = true
+                    }
+                }
+            }
+        }
+    }
+
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -482,8 +503,8 @@ fun ChatScreen(
                         scope.launch {
                             chatViewModel.addChatFolder(
                                 chat.chatId,
-                                folder.uuid,
-                                if (chat.isDirectMessages) "private" else "stream"
+                                if (chat.isDirectMessages) "private" else "stream",
+                                folder.uuid
                             )
                         }
                         chatToAdd = null
