@@ -301,29 +301,6 @@ fun LoginScreen(
     }
 }
 
-private const val TARGET_REFERER_HOST = "oidc.platform.example.com"
-private const val NEW_REDIRECT_URI = "https://workspace.example.com/oidc"
-private fun rewriteRefererRedirectUri(referer: String): String {
-    val uri = Uri.parse(referer)
-    if (uri.host != TARGET_REFERER_HOST) return referer
-    // Replace redirect_uri query param
-    return uri.buildUpon()
-        .clearQuery()
-        .apply {
-            for (name in uri.queryParameterNames) {
-                if (name == "redirect_uri") {
-                    appendQueryParameter(name, NEW_REDIRECT_URI)
-                } else {
-                    uri.getQueryParameters(name).forEach { value ->
-                        appendQueryParameter(name, value)
-                    }
-                }
-            }
-        }
-        .build()
-        .toString()
-}
-
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
 fun FullscreenWebViewDialog(

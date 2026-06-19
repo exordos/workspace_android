@@ -121,6 +121,7 @@ class ChatDialogViewModel(
     fun clearEditingMessage() {
         _editingMessageBackupText.value = null
         editingMessage = null
+        _messageText.value = ""
     }
 
     suspend fun onSendClicked(context: Context) {

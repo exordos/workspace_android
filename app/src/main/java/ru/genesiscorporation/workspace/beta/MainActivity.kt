@@ -93,51 +93,9 @@ import io.ktor.serialization.kotlinx.json.*
 
 class MainActivity : ComponentActivity() {
 
-    private val TARGET_REFERER_HOST = "oidc.platform.example.com"
-    private val NEW_REDIRECT_URI = "https://workspace.example.com/oidc"
-
     private var pendingDeepLink by mutableStateOf<String?>(null)
     val sessionCookieStore = SessionCookieStore()
-    private fun rewriteRefererRedirectUri(referer: String): String {
-        val uri = Uri.parse(referer)
-        if (uri.host != TARGET_REFERER_HOST) return referer
 
-        return uri.buildUpon()
-            .clearQuery()
-            .apply {
-                for (name in uri.queryParameterNames) {
-                    if (name == "redirect_uri") {
-                        appendQueryParameter(name, NEW_REDIRECT_URI)
-                    } else {
-                        uri.getQueryParameters(name).forEach { value ->
-                            appendQueryParameter(name, value)
-                        }
-                    }
-                }
-            }
-            .build()
-            .toString()
-    }
-    val plugin = createClientPlugin("redirect interceptor") {
-        on(Send) { request ->
-            var call = proceed(request)
-            println("Redirect: ${call.response.headers["Location"]}")
-            val location = call.response.headers["Location"]
-            if (location != null && location.contains("oidc.platform.example.com")) {
-                val newLocation = rewriteRefererRedirectUri(location)
-                val redirectedRequest = HttpRequestBuilder().apply {
-                    method = HttpMethod.Get
-                    url(newLocation)
-                    headers.appendAll(request.headers.build())
-
-                }
-                call = proceed(redirectedRequest)
-                call
-            } else {
-                call
-            }
-        }
-    }
     private val workspaceApiClient: WorkspaceAPIClient by lazy {
         val client = HttpClient() {
 //            install(plugin)

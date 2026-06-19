@@ -231,27 +231,13 @@ class ChatViewModel(
                 }
                 val channelChatHeaders = loadedSubscriptions.mapNotNull { subscription ->
                     var channelUnreadMessageCount: Int? = null
-                    val message = messagesResponse.value.messages.firstOrNull {
-                        when (it.displayRecipient) {
-                            is DisplayRecipient.Users -> {
-                                false
-                            }
-                            is DisplayRecipient.StreamName -> {
-                                it.displayRecipient.value == subscription.name
-                            }
-                        }
-                    }
                     val unreadChannelMessages = initialUnreaMessages?.streams?.filter { it.streamId == subscription.streamId }
                     if (unreadChannelMessages != null) {
                         if (unreadChannelMessages.size > 0) {
                             channelUnreadMessageCount = unreadChannelMessages.flatMap { it.unreadMessageIds }.size
                         }
                     }
-                    if (message != null) {
-                        ChatHeader.from(subscription, channelUnreadMessageCount, message)
-                    } else {
-                        null
-                    }
+                        ChatHeader.from(subscription, channelUnreadMessageCount, null)
                 }
                 _subscriptions.update { current -> current + channelChatHeaders }
                 if (pendingDeepLink != null) {
@@ -505,7 +491,7 @@ data class ChatHeader(
     var unreadCount: Int
 ) {
     companion object {
-        fun from(subscription: Subscription, unreadCount: Int?, firstMessage: MessageDto) = ChatHeader(
+        fun from(subscription: Subscription, unreadCount: Int?, firstMessage: MessageDto?) = ChatHeader(
             subscription.streamId,
             subscription.name,
             null,

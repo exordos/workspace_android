@@ -135,7 +135,6 @@ fun ChooseServerScreen(
             Button(
                 onClick = {
                     viewModel.onServerChange("https://workspace.example.com")
-//                    viewModel.onServerChange("https://sys.platform.example.com")
                 },
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Color.Transparent,

@@ -24,6 +24,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Wokspace"
+rootProject.name = "Workspace"
 include(":app")
  

@@ -11,6 +11,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -125,7 +126,25 @@ fun ChatDialogScreen(
     val context = LocalContext.current
 
     var hasDoneInitialScroll by remember { mutableStateOf(false) }
+    var imeHeight = remember { mutableStateOf(0) }
+    val ime = WindowInsets.ime
+    val localDensity = LocalDensity.current
+    LaunchedEffect(key1 = Unit) {
+        val keyboardFlow = snapshotFlow {
+            ime.getBottom(localDensity)
+        }
 
+        keyboardFlow.collect { keyboardHeight ->
+            if (keyboardHeight > 0) {
+                if (imeHeight.value < keyboardHeight) {
+                    listState.scrollBy((keyboardHeight - imeHeight.value).toFloat())
+                }
+                imeHeight.value = keyboardHeight
+            } else if (keyboardHeight == 0) {
+                imeHeight.value = 0
+            }
+        }
+    }
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
             val firstUnreadIndex = messages.first()

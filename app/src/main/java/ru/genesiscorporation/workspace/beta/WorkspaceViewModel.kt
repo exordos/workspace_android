@@ -110,9 +110,12 @@ class WorkspaceViewModel(
                             if (!newMessages.isEmpty()) {
                                 repo.updateMessages(newMessages)
                                 val userId = client.userViewModel.userId.value?.toInt()
-                                val newUnreadMessages = newMessages.filter { !it.flags.contains("read") }
-                                if (userId != null && !newUnreadMessages.isEmpty()) {
-                                    repo.updateUnreadsForNewMessages(newUnreadMessages, userId)
+                                if (userId != null) {
+                                    val newUnreadMessages =
+                                        newMessages.filter { !it.flags.contains("read") && it.senderId != userId }
+                                    if (!newUnreadMessages.isEmpty()) {
+                                        repo.updateUnreadsForNewMessages(newUnreadMessages, userId)
+                                    }
                                 }
                             }
                             val presenses = events

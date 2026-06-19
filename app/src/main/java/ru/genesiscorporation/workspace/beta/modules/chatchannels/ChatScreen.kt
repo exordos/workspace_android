@@ -121,9 +121,24 @@ fun ChatScreen(
         val folderSubscriptions = if (currentlySelectedFolder?.systemType == "all") {
             subscriptions
         } else {
-            val folderItems = currentlySelectedFolder?.items?.map { it.chatId }
+            val folderItems = currentlySelectedFolder?.items
             if (folderItems != null) {
-                subscriptions.filter { folderItems.contains(it.chatId) }
+                val directSubscriptions = subscriptions.filter { it.isDirectMessages }
+                val streamSubscriptions = subscriptions.filter { !it.isDirectMessages }
+                var folderSubscriptions: List<ChatHeader> = emptyList()
+                for (folderItem in folderItems) {
+                    when (folderItem.chatType) {
+                        "private" -> {
+                            val filteredSubscriptions = directSubscriptions.filter { folderItem.chatId == it.chatId }
+                            folderSubscriptions += filteredSubscriptions
+                        }
+                        "stream" -> {
+                            val filteredSubscriptions = streamSubscriptions.filter { folderItem.chatId == it.chatId }
+                            folderSubscriptions += filteredSubscriptions
+                        }
+                    }
+                }
+                folderSubscriptions
             } else {
                 subscriptions
             }
