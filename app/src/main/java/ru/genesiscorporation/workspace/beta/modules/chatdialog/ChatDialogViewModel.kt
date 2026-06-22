@@ -43,7 +43,7 @@ class ChatDialogViewModel(
     var chatId: String,
     val topic: String?,
     val isDirectMessages: Boolean,
-    private val repo: EventsRepository,
+    val repo: EventsRepository,
     val userId: Int?
 ): ViewModel() {
 

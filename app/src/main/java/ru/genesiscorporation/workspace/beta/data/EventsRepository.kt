@@ -171,6 +171,8 @@ class EventsRepository {
     var pushId: String? = null
 
     var customProfileFields: List<CustomProfileField> = emptyList()
+
+    var jitsiServerUrl: String = ""
 }
 
 data class FlatPresense(

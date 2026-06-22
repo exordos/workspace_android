@@ -130,7 +130,7 @@ fun CallMessageView(
                 .padding(10.dp)
                 .clickable {
                     val options = JitsiMeetConferenceOptions.Builder()
-                        .setServerURL(URL("https://meet.example.com"))
+                        .setServerURL(URL(viewModel.repo.jitsiServerUrl))
                         .setRoom(itemUrl.path.drop(1))
                         .build()
 

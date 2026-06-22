@@ -224,12 +224,12 @@ fun ChatDialogScreen(
                     Button(
                         onClick = {
                             val roomName = JitsiStyleRoomNameGenerator.generate()
-                            val messageText = "https://meet.example.com/${roomName}"
+                            val messageText = "${viewModel.repo.jitsiServerUrl}/${roomName}"
                             scope.launch {
                                 viewModel.sendTextMessage(messageText)
                             }
                             val options = JitsiMeetConferenceOptions.Builder()
-                                .setServerURL(URL("https://meet.example.com"))
+                                .setServerURL(URL(viewModel.repo.jitsiServerUrl))
                                 .setRoom(roomName)
                                 .build()
 
@@ -394,7 +394,7 @@ fun ChatMessage(
                 }
         }
         if (Patterns.WEB_URL.matcher(item.content)
-                .matches() && URL(item.content).host == "meet.example.com"
+                .matches() && item.content.contains(viewModel.repo.jitsiServerUrl)
         ) {
             CallMessageView(item, viewModel, navController)
         } else if (item.content.parseUserUploadMarkdownOrNull() != null) {

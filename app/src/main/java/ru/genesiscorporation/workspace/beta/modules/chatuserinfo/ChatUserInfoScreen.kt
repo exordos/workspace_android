@@ -125,7 +125,7 @@ fun ChatUserInfoScreen(
                             viewModel.callButtonTapped(roomName)
                         }
                         val options = JitsiMeetConferenceOptions.Builder()
-                            .setServerURL(URL("https://meet.example.com"))
+                            .setServerURL(URL(viewModel.repo.jitsiServerUrl))
                             .setRoom(roomName)
                             .build()
                         JitsiMeetActivity.launch(context, options)

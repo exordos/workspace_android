@@ -41,7 +41,7 @@ import java.net.URL
 
 class WorkspaceViewModel(
     val client: WorkspaceAPIClient,
-    private val repo: EventsRepository
+    val repo: EventsRepository
 ): ViewModel() {
     private var pollingJob: Job? = null
 

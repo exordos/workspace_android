@@ -23,7 +23,7 @@ class ChatUserInfoViewModel(
 ): ViewModel() {
 
     suspend fun callButtonTapped(roomName: String) {
-        val messageText = "https://meet.example.com/${roomName}"
+        val messageText = "${repo.jitsiServerUrl}/${roomName}"
         val currentUserId = client.userViewModel.repo.userIdFlow.first()
         var newMessage = Message(null,
             client.userViewModel.userData?.full_name ?: "",

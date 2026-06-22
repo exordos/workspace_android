@@ -33,6 +33,7 @@ import androidx.navigation.NavHostController
 import dev.jeziellago.compose.markdowntext.MarkdownText
 import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.ui.Avatar
+import ru.genesiscorporation.workspace.beta.ui.EnhancedMarkdown
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 
 @Composable
@@ -151,7 +152,7 @@ fun TextMessageView(
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Medium
                     )
-                    MarkdownText(
+                    EnhancedMarkdown(
                         markdown = item.content,
                         style = TextStyle(
                             color = LocalWorkspaceColorsPalette.current.textHeaders,

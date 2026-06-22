@@ -117,6 +117,7 @@ class ChatViewModel(
                 repo.updatePresenses(response.value.presences)
                 repo.updateUnreadMessages(response.value.unreadMessages)
                 repo.customProfileFields = response.value.customProfileFields ?: emptyList()
+                repo.jitsiServerUrl = response.value.jitsiServerUrl
                 loadedSubscriptions = response.value.subscriptions
                 recentPrivateConversations = response.value.recentPrivateConversations
                 initialUnreaMessages = response.value.unreadMessages

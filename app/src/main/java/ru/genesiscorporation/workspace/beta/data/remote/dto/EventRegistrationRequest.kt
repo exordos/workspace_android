@@ -34,7 +34,8 @@ data class EventRegistrationResponse(
     @SerialName("recent_private_conversations") val recentPrivateConversations: List<RecentPrivateConversation>,
     val subscriptions: List<Subscription>,
     @SerialName("unread_msgs") val unreadMessages: UnreadMessages,
-    @SerialName("custom_profile_fields") val customProfileFields: List<CustomProfileField>? = emptyList()
+    @SerialName("custom_profile_fields") val customProfileFields: List<CustomProfileField>? = emptyList(),
+    @SerialName("jitsi_server_url") val jitsiServerUrl: String
 )
 @Serializable
 data class Presense(
