@@ -31,14 +31,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
-import ru.genesiscorporation.workspace.beta.modules.chatchannels.ChatHeader
+import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 
 @Composable
 fun AddChatToFolder(
     folders: List<FolderResponseData>,
-    chat: ChatHeader,
-    onAddButtonTap: (FolderResponseData, ChatHeader) -> Unit
+    chat: Stream,
+    onAddButtonTap: (FolderResponseData, Stream) -> Unit
 ) {
     var folderName by remember { mutableStateOf("") }
     Column(

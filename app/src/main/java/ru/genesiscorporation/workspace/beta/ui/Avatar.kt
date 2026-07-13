@@ -14,27 +14,31 @@ import coil3.request.ImageRequest
 
 @Composable
 fun Avatar(
-    avatarUrlString: String,
+    avatarUrlString: String?,
     baseUrl: String,
+    color: Int?,
+    name: String,
     size: Int,
     hasPadding: Boolean
 ) {
-    val finalAvatarUrl: String
-    if (avatarUrlString.startsWith("https://", ignoreCase = true)) {
-        finalAvatarUrl = avatarUrlString
-    } else {
-        finalAvatarUrl = "${baseUrl}${avatarUrlString}"
+    if (avatarUrlString != null) {
+        val finalAvatarUrl: String
+        if (avatarUrlString.startsWith("https://", ignoreCase = true)) {
+            finalAvatarUrl = avatarUrlString
+        } else {
+            finalAvatarUrl = "${baseUrl}${avatarUrlString}"
+        }
+        val imageRequest = ImageRequest.Builder(LocalContext.current)
+            .data(finalAvatarUrl)
+            .build()
+        AsyncImage(
+            model = imageRequest,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .padding(end = if (hasPadding) 12.dp else 0.dp)
+                .size(size.dp)
+                .clip(CircleShape),
+        )
     }
-    val imageRequest = ImageRequest.Builder(LocalContext.current)
-        .data(finalAvatarUrl)
-        .build()
-    AsyncImage(
-        model = imageRequest,
-        contentDescription = null,
-        contentScale = ContentScale.Crop,
-        modifier = Modifier
-            .padding(end = if (hasPadding) 12.dp else 0.dp)
-            .size(size.dp)
-            .clip(CircleShape),
-    )
 }

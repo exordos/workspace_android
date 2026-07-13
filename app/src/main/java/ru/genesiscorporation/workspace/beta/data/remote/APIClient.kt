@@ -24,11 +24,11 @@ interface ApiRequest<RequestData, Response, ResponseError> {
     val shouldReturnUrl: Boolean
         get() = false
     val shouldApplySuffix: Boolean
-        get() = true
+        get() = false
     val hasSessionCookie: Boolean
         get() = false
     val isJson: Boolean
-        get() = false
+        get() = true
     val data: RequestData
 }
 

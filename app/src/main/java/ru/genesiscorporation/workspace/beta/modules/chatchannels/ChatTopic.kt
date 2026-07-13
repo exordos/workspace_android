@@ -22,17 +22,23 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
 import ru.genesiscorporation.workspace.beta.ChatFlow
+import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
+import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.formatHHmm
-import ru.genesiscorporation.workspace.beta.modules.topics.TopicHeader
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 @Composable
 fun ChatTopic(
     viewModel: ChatViewModel,
-    item: TopicHeader,
+    item: TopicsResponseData,
+    stream: Stream,
     navController: NavHostController
 ) {
-    val currentlySelectedSubscription by viewModel.currentlySelectedSubscription.collectAsState()
+    val folderCreationFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
+    val HHMMFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -45,11 +51,8 @@ fun ChatTopic(
             .padding(start = 16.dp)
             .clickable(
                 onClick = {
-                    viewModel.currentTopicName = item.title
-                    val subscription = currentlySelectedSubscription
-                    if (subscription != null) {
-                        navController.navigate(ChatFlow.ChatDialog(item.channelName, item.channelId, item.title, false, subscription.streamId.toInt()))
-                    }
+                    viewModel.currentTopicName = item.name
+                    navController.navigate(ChatFlow.ChatDialog(stream.name, stream.uuid, item.name, item.uuid, stream.isPrivate, null))
                 }
             )
     ) {
@@ -62,7 +65,7 @@ fun ChatTopic(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = item.title,
+                    text = item.name,
                     color = LocalWorkspaceColorsPalette.current.textHeaders,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium,
@@ -72,8 +75,9 @@ fun ChatTopic(
                 val lastMessage = item.lastMessage
                 if (lastMessage != null) {
                     Spacer(modifier = Modifier.weight(1f))
+                    val messageDate = LocalDateTime.parse(lastMessage.createdAt, folderCreationFormatter)
                     Text(
-                        text = lastMessage.timestamp.formatHHmm(),
+                        text = messageDate.format(HHMMFormatter),
                         color = LocalWorkspaceColorsPalette.current.messageTimeColor,
                         fontSize = 12.sp,
                     )
@@ -86,7 +90,7 @@ fun ChatTopic(
                 val lastMessage = item.lastMessage
                 if (lastMessage != null) {
                     Text(
-                        text = lastMessage.content,
+                        text = lastMessage.payload.content,
                         color = LocalWorkspaceColorsPalette.current.textAdditional50,
                         fontSize = 12.sp,
                         maxLines = 1,

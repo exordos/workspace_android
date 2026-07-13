@@ -7,7 +7,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.HTTPMethod
 
 @Serializable
 data class EditMessageRequest(
-    val messageId: Int,
+    val messageId: String,
     val content: String
 ): ApiRequest<EditMessageRequestData, EditMessageResponse, ApiError> {
     override val method: HTTPMethod = HTTPMethod.PATCH

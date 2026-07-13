@@ -32,19 +32,22 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.toColorInt
-import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
+import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.formatHHmm
 import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 @Composable
 fun ChatChannel(
-    item: ChatHeader,
+    item: Stream,
     viewModel: ChatViewModel,
     showDetail: Boolean,
     currentlySelectedFolder: FolderResponseData?,
-    onChatNumberToAddChange: (ChatHeader?) -> Unit,
+    onChatNumberToAddChange: (Stream?) -> Unit,
     onClick: () -> Unit
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
@@ -56,6 +59,8 @@ fun ChatChannel(
         label = "chatHeaderBackground"
     )
     val scope = rememberCoroutineScope()
+    val folderCreationFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
+    val HHMMFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -74,16 +79,19 @@ fun ChatChannel(
                 }
             )
     ) {
-        if (item.gravatar != null) {
+        val avatar = item.avatar
+        if (avatar != null) {
             Avatar(
-                item.gravatar,
+                avatar,
                 viewModel.client.userViewModel.baseUrl.value ?: "",
+                null,
+                "",
                 40,
                 false
             )
-        } else if (item.color != null) {
+        } else {
             val color = try {
-                Color(item.color.toColorInt())
+                Color(0xFF000000 or item.color.toLong())
             } catch (e: IllegalArgumentException) {
                 Color.Gray
             }
@@ -97,76 +105,58 @@ fun ChatChannel(
             modifier = Modifier
                 .padding(10.dp)
         ) {
+            val lastMessage = item.lastMessage
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = item.title,
+                    text = item.name,
                     color = LocalWorkspaceColorsPalette.current.textHeaders,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                if (!item.isDirectMessages) {
+                if (lastMessage != null) {
                     Spacer(modifier = Modifier.weight(1f))
-                    if (item.unreadCount > 0) {
-                        Text(
-                            text = "${item.unreadCount}",
-                            color = LocalWorkspaceColorsPalette.current.noticeOnBadge,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier
-                                .background(
-                                    color = LocalWorkspaceColorsPalette.current.noticeCounterBadge,
-                                    shape = RoundedCornerShape(100.dp)
-                                )
-                                .padding(horizontal = 8.dp)
-                        )
-                    }
-                } else {
-                    val lastMessage = item.lastMessage
-                    if (lastMessage != null) {
-                        Spacer(modifier = Modifier.weight(1f))
-                        Text(
-                            text = lastMessage.timestamp.formatHHmm(),
-                            color = LocalWorkspaceColorsPalette.current.messageTimeColor,
-                            fontSize = 12.sp,
-                        )
-                    }
+                    val messageDate = LocalDateTime.parse(lastMessage.createdAt, folderCreationFormatter)
+                    Text(
+                        text = messageDate.format(HHMMFormatter),
+                        color = LocalWorkspaceColorsPalette.current.messageTimeColor,
+                        fontSize = 12.sp,
+                    )
                 }
             }
-            if (item.isDirectMessages) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    val lastMessage = item.lastMessage
-                    if (lastMessage != null) {
-                        Text(
-                            text = lastMessage.content,
-                            color = LocalWorkspaceColorsPalette.current.textAdditional50,
-                            fontSize = 12.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (lastMessage != null) {
+                    Text(
+                        text = lastMessage.payload.content,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = LocalWorkspaceColorsPalette.current.textAdditional50,
+                        fontSize = 12.sp,
+                    )
+                } else {
                     Spacer(modifier = Modifier.weight(1f))
-                    if (item.unreadCount > 0) {
-                        Text(
-                            text = "${item.unreadCount}",
-                            color = LocalWorkspaceColorsPalette.current.noticeOnBadge,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier
-                                .background(
-                                    color = LocalWorkspaceColorsPalette.current.noticeCounterBadge,
-                                    shape = RoundedCornerShape(100.dp)
-                                )
-                                .padding(horizontal = 8.dp)
-                        )
-                    }
+                }
+                if (item.unreadCount > 0) {
+                    Text(
+                        text = "${item.unreadCount}",
+                        color = LocalWorkspaceColorsPalette.current.noticeOnBadge,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier
+                            .background(
+                                color = LocalWorkspaceColorsPalette.current.noticeCounterBadge,
+                                shape = RoundedCornerShape(100.dp)
+                            )
+                            .padding(horizontal = 8.dp)
+                    )
                 }
             }
         }
@@ -186,14 +176,14 @@ fun ChatChannel(
                 DropdownMenuItem(
                     text = { Text("Удалить из папки") },
                     onClick = {
-                        if (currentlySelectedFolder != null) {
-                            scope.launch {
-                                viewModel.deleteChatFromFolder(
-                                    item.chatId,
-                                    currentlySelectedFolder
-                                )
-                            }
-                        }
+//                        if (currentlySelectedFolder != null) {
+//                            scope.launch {
+//                                viewModel.deleteChatFromFolder(
+//                                    item.chatId,
+//                                    currentlySelectedFolder
+//                                )
+//                            }
+//                        }
                         menuExpanded = false
                     }
                 )

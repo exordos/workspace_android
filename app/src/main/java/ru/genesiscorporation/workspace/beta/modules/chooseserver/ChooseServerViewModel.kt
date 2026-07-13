@@ -38,8 +38,7 @@ class ChooseServerViewModel(
         val response = client.performRequest(ServerSettingsRequest(baseUrl = serverText.value))
         when(response) {
             is ApiResult.Success -> {
-                userViewModel.setBaseUrl(serverText.value)
-                userViewModel.externalAuthenticationMethods = response.value.external_authentication_methods
+                userViewModel.addBaseUrl(serverText.value)
                 _queryState.value = QueryState.Success
             }
             is ApiResult.Error -> {

@@ -28,20 +28,25 @@ import org.jitsi.meet.sdk.JitsiMeetActivity
 import org.jitsi.meet.sdk.JitsiMeetConferenceOptions
 import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.R
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.net.URL
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 @Composable
 fun CallMessageView(
-    item: Message,
+    item: MessageResponse,
     viewModel: ChatDialogViewModel,
     navController: NavHostController
 ) {
+    val folderCreationFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
+    val hhmmFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val itemUrl = URL(item.content)
-    val bubbleShape = if (item.isFromCurrentUser) {
+    val itemUrl = URL(item.payload.content)
+    val bubbleShape = if (item.isOwn) {
         RoundedCornerShape(
             topStart = 8.dp,
             topEnd = 8.dp,
@@ -58,68 +63,68 @@ fun CallMessageView(
     }
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (item.isFromCurrentUser) Arrangement.End else Arrangement.Start,
+        horizontalArrangement = if (item.isOwn) Arrangement.End else Arrangement.Start,
         verticalAlignment = Alignment.Bottom
     ) {
-        val nextMessage = viewModel.nextMessageById(item.id)
-        if (!viewModel.isDirectMessages && !item.isFromCurrentUser) {
-            if (nextMessage != null) {
-                if (nextMessage.senderId != item.senderId) {
-                    Box(
-                        Modifier
-                            .clickable(
-                                onClick = {
-                                    navController.navigate(
-                                        ChatFlow.ChatUserInfo(
-                                            item.senderFullName,
-                                            "${item.senderId}",
-                                            item.avatarUrl,
-                                            ""
-                                        )
-                                    )
-                                }
-                            )
-                    ) {
-                        Avatar(
-                            item.avatarUrl,
-                            viewModel.userViewModel.baseUrl.value ?: "",
-                            30,
-                            true
-                        )
-                    }
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .padding(end = 12.dp)
-                            .size(30.dp)
-                            .background(color = Color.Transparent, shape = CircleShape)
-                    )
-                }
-            } else {
-                Box(
-                    Modifier
-                        .clickable(
-                            onClick = {
-                                navController.navigate(
-                                    ChatFlow.ChatUserInfo(
-                                        item.senderFullName,
-                                        "${item.senderId}",
-                                        item.avatarUrl,
-                                        ""
-                                    )
-                                )
-                            }
-                        )
-                ) {
-                    Avatar(
-                        item.avatarUrl,
-                        viewModel.userViewModel.baseUrl.value ?: "",
-                        30,
-                        true
-                    )
-                }
-            }
-        }
+//        val nextMessage = viewModel.nextMessageById(item.id)
+//        if (!viewModel.isDirectMessages && !item.isFromCurrentUser) {
+//            if (nextMessage != null) {
+//                if (nextMessage.senderId != item.senderId) {
+//                    Box(
+//                        Modifier
+//                            .clickable(
+//                                onClick = {
+//                                    navController.navigate(
+//                                        ChatFlow.ChatUserInfo(
+//                                            item.senderFullName,
+//                                            "${item.senderId}",
+//                                            item.avatarUrl,
+//                                            ""
+//                                        )
+//                                    )
+//                                }
+//                            )
+//                    ) {
+//                        Avatar(
+//                            item.avatarUrl,
+//                            viewModel.userViewModel.baseUrl.value ?: "",
+//                            30,
+//                            true
+//                        )
+//                    }
+//                } else {
+//                    Box(
+//                        modifier = Modifier
+//                            .padding(end = 12.dp)
+//                            .size(30.dp)
+//                            .background(color = Color.Transparent, shape = CircleShape)
+//                    )
+//                }
+//            } else {
+//                Box(
+//                    Modifier
+//                        .clickable(
+//                            onClick = {
+//                                navController.navigate(
+//                                    ChatFlow.ChatUserInfo(
+//                                        item.senderFullName,
+//                                        "${item.senderId}",
+//                                        item.avatarUrl,
+//                                        ""
+//                                    )
+//                                )
+//                            }
+//                        )
+//                ) {
+//                    Avatar(
+//                        item.avatarUrl,
+//                        viewModel.userViewModel.baseUrl.value ?: "",
+//                        30,
+//                        true
+//                    )
+//                }
+//            }
+//        }
         Row(
             verticalAlignment = Alignment.Bottom,
             modifier = Modifier
@@ -164,8 +169,9 @@ fun CallMessageView(
                 Row(
                     horizontalArrangement = Arrangement.End
                 ) {
+                    val messageDate = LocalDateTime.parse(item.updatedAt, folderCreationFormatter)
                     Text(
-                        text = item.timestamp.formatHHmm(),
+                        text = messageDate.format(hhmmFormatter),
                         color = LocalWorkspaceColorsPalette.current.messageTimeColor,
                         fontSize = 14.sp,
                     )

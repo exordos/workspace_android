@@ -32,7 +32,7 @@ data class EventRegistrationResponse(
     val presences: Map<String, Presense>,
     @SerialName("user_status") val userStatus: Map<String, UserStatus>,
     @SerialName("recent_private_conversations") val recentPrivateConversations: List<RecentPrivateConversation>,
-    val subscriptions: List<Subscription>,
+    val subscriptions: List<Stream>,
     @SerialName("unread_msgs") val unreadMessages: UnreadMessages,
     @SerialName("custom_profile_fields") val customProfileFields: List<CustomProfileField>? = emptyList(),
     @SerialName("jitsi_server_url") val jitsiServerUrl: String

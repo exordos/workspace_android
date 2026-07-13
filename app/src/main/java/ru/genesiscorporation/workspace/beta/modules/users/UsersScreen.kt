@@ -46,10 +46,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.navigation.NavHostController
 import ru.genesiscorporation.workspace.beta.ChatFlow
-import ru.genesiscorporation.workspace.beta.data.remote.dto.UsersResponseData
-import ru.genesiscorporation.workspace.beta.modules.chatchannels.ChatChannel
-import ru.genesiscorporation.workspace.beta.modules.chatchannels.ChatHeader
-import ru.genesiscorporation.workspace.beta.modules.chatchannels.ChatViewModel
+import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
@@ -61,7 +58,7 @@ import ru.genesiscorporation.workspace.beta.ui.Avatar
 @Composable
 fun UsersScreen(
     viewModel: UsersViewModel,
-    onUserSelected: (UsersResponseData) -> Unit,
+    onUserSelected: (UserResponseData) -> Unit,
     onDismiss: () -> Unit
 ) {
     val users by viewModel.users.collectAsState()
@@ -73,7 +70,7 @@ fun UsersScreen(
             users
         } else {
             users.filter {
-                it.fullName.contains(searchQuery, ignoreCase = true)
+                it.lastName?.contains(searchQuery, ignoreCase = true) ?: false || it.firstName?.contains(searchQuery, ignoreCase = true) ?: false || it.email?.contains(searchQuery, ignoreCase = true) ?: false
             }
         }
     }
@@ -163,8 +160,8 @@ fun UsersScreen(
 
 @Composable
 fun UserCell(
-    item: UsersResponseData,
-    onUserSelected: (UsersResponseData) -> Unit,
+    item: UserResponseData,
+    onUserSelected: (UserResponseData) -> Unit,
     viewModel: UsersViewModel
 ) {
     Column(
@@ -184,19 +181,19 @@ fun UserCell(
         Row(
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Avatar(
-                item.avatarUrl ?: "",
-                viewModel.client.userViewModel.baseUrl.value ?: "",
-                40,
-                false
-            )
+//            Avatar(
+//                item.avatarUrl ?: "",
+//                viewModel.client.userViewModel.baseUrl.value ?: "",
+//                40,
+//                false
+//            )
             Column(
                 modifier = Modifier
                     .padding(10.dp)
             ) {
                 Row {
                     Text(
-                        text = item.fullName,
+                        text = "${item.firstName} ${item.lastName}",
                         color = LocalWorkspaceColorsPalette.current.textHeaders,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Medium,
@@ -204,15 +201,17 @@ fun UserCell(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                Row {
-                    Text(
-                        text = item.email,
-                        color = LocalWorkspaceColorsPalette.current.textAdditional50,
-                        fontSize = 12.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(Modifier.fillMaxWidth())
+                if (item.email != null) {
+                    Row {
+                        Text(
+                            text = item.email,
+                            color = LocalWorkspaceColorsPalette.current.textAdditional50,
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(Modifier.fillMaxWidth())
+                    }
                 }
             }
         }

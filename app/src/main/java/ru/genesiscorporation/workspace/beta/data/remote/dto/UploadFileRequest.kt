@@ -14,12 +14,11 @@ data class UploadFileRequest(
 ): ApiRequest<SendMessageRequestData, UploadFileResponseData, ApiError> {
     override val method: HTTPMethod = HTTPMethod.POST
     override val requiresApiKey: Boolean = true
-    override val url: String = "/user_uploads"
+    override val url: String = "/api/messenger/v1/files/"
     override val data = SendMessageRequestData(
         type,
         to,
-        content,
-        topic
+        MessageResponsePayload("markdown", content)
     )
 }
 
@@ -29,6 +28,6 @@ class UploadFileRequestData()
 
 @Serializable
 data class UploadFileResponseData(
-    val url: String,
-    val filename: String
+    val uuid: String,
+    val name: String
 )

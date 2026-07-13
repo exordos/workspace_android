@@ -6,8 +6,6 @@ import androidx.lifecycle.ViewModelProvider
 import ru.genesiscorporation.workspace.beta.data.ApiKeyRepository
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
-import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponse
-import ru.genesiscorporation.workspace.beta.data.remote.dto.UsersResponseData
 import ru.genesiscorporation.workspace.beta.modules.chatchannels.ChatViewModel
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.ChatDialogViewModel
 import ru.genesiscorporation.workspace.beta.modules.chatuserinfo.ChatUserInfoViewModel
@@ -81,7 +79,7 @@ class ChatTopicsViewModelFactory(private val client: WorkspaceAPIClient, private
     }
 }
 
-class ChatDialogViewModelFactory(private val client: WorkspaceAPIClient, private val userViewModel: UserViewModel, private val chatTitle: String, private val chatId: String, private val topicId: String?, private val isDirectMessages: Boolean, private  val repo: EventsRepository, val userId: Int?) : ViewModelProvider.Factory {
+class ChatDialogViewModelFactory(private val client: WorkspaceAPIClient, private val userViewModel: UserViewModel, private val chatTitle: String, private val chatId: String, private val topicName: String?, private val topicUuid: String?, private val isDirectMessages: Boolean, private  val repo: EventsRepository, val userId: Int?) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(ChatDialogViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
@@ -90,7 +88,8 @@ class ChatDialogViewModelFactory(private val client: WorkspaceAPIClient, private
                 userViewModel,
                 chatTitle,
                 chatId,
-                topicId,
+                topicName,
+                topicUuid,
                 isDirectMessages,
                 repo,
                 userId

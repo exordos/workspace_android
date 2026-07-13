@@ -64,7 +64,7 @@ fun ChatUserInfoScreen(
     val currentUserId by viewModel.client.userViewModel.repo.userIdFlow.collectAsStateWithLifecycle(
         initialValue = 0
     )
-    val profile = viewModel.repo.users.collectAsState().value.firstOrNull { it.userId.toString() == viewModel.userId }
+//    val profile = viewModel.repo.users.collectAsState().value.firstOrNull { it.userId.toString() == viewModel.userId }
 
     Scaffold(
         topBar = {
@@ -101,6 +101,8 @@ fun ChatUserInfoScreen(
                 Avatar(
                     viewModel.avatarUrl,
                     viewModel.client.userViewModel.baseUrl.value ?: "",
+                    null,
+                    "",
                     64,
                     true
                 )
@@ -152,6 +154,7 @@ fun ChatUserInfoScreen(
                                     viewModel.userName,
                                     "[${viewModel.userId}, ${currentUserId}]",
                                     null,
+                                    null,
                                     true,
                                     viewModel.userId.toInt()
                                 )
@@ -188,16 +191,16 @@ fun ChatUserInfoScreen(
                 "${viewModel.userId}",
                 R.drawable.ic_userid
             )
-            for (customProfileField in viewModel.repo.customProfileFields) {
-                if (profile != null && (profile.profileData?.get(customProfileField.id.toString()) != null)) {
-                    ProfileRow(
-                        customProfileField.name,
-                        profile.profileData[customProfileField.id.toString()]?.value
-                            ?: "",
-                        viewModel.imageId(customProfileField.id)
-                    )
-                }
-            }
+//            for (customProfileField in viewModel.repo.customProfileFields) {
+//                if (profile != null && (profile.profileData?.get(customProfileField.id.toString()) != null)) {
+//                    ProfileRow(
+//                        customProfileField.name,
+//                        profile.profileData[customProfileField.id.toString()]?.value
+//                            ?: "",
+//                        viewModel.imageId(customProfileField.id)
+//                    )
+//                }
+//            }
         }
     }
 }

@@ -6,18 +6,9 @@ import ru.genesiscorporation.workspace.beta.data.remote.ApiRequest
 import ru.genesiscorporation.workspace.beta.data.remote.EmptyRequestData
 import ru.genesiscorporation.workspace.beta.data.remote.HTTPMethod
 
-class OwnUserRequest(): ApiRequest<EmptyRequestData, UserResponse, ApiError> {
+class OwnUserRequest(): ApiRequest<EmptyRequestData, UserResponseData, ApiError> {
     override val method: HTTPMethod = HTTPMethod.GET
     override val requiresApiKey: Boolean = true
-    override val url: String = "/users/me"
+    override val url: String = "/api/messenger/v1/me/"
     override val data = EmptyRequestData()
 }
-
-@Serializable
-data class UserResponse(
-    val avatar_url: String,
-    val email: String,
-    val full_name: String,
-    val user_id: Int,
-    val delivery_email: String
-)

@@ -42,65 +42,16 @@ class LoginViewModel(
         _passwordText.value = newText
     }
 
-    suspend fun onOidcLoginClick(urlSuffix: String) {
-        _queryState.value = QueryState.Loading
-        val response = client.performRequest(OidcLoginRequest(urlSuffix))
-        when(response) {
-            is ApiResult.Success -> {
-                setWebUrl(response.value)
-                _queryState.value = QueryState.Success
-            }
-            is ApiResult.Error -> {
-                _queryState.value = QueryState.Error(response.error.message ?: "Error")
-            }
-        }
-    }
-
-    suspend fun onOidcPathCapture(path: String) {
-        if (!path.isEmpty()) {
-            _queryState.value = QueryState.Loading
-            val response = client.performRequest(OidcCompleteRequest(path))
-            when(response) {
-                is ApiResult.Success -> {
-                    userViewModel.setApiKey(response.value)
-                    client.baseApiKey = response.value
-                    loadUserInfo()
-                }
-                is ApiResult.Error -> {
-                    _queryState.value = QueryState.Error(response.error.message ?: "Error")
-                }
-            }
-        }
-    }
-
     suspend fun onLoginClick() {
         _queryState.value = QueryState.Loading
         val response = client.performRequest(LoginRequest(loginText.value, passwordText.value))
         when(response) {
             is ApiResult.Success -> {
                 val userResponse = response.value
-                userViewModel.setApiKey(userResponse.api_key)
-                client.baseApiKey = userResponse.api_key
-                userViewModel.setEmail(userResponse.email)
-                client.baseEmail = userResponse.email
-                loadUserInfo()
+                userViewModel.setAccessToken(userResponse.accessToken)
+                userViewModel.setRefreshToken(userResponse.refreshToken)
+                client.baseAccessToken = userResponse.accessToken
             }
-            is ApiResult.Error -> {
-                _queryState.value = QueryState.Error(response.error.message ?: "Error")
-            }
-        }
-    }
-
-    suspend fun loadUserInfo() {
-        val response = client.performRequest(OwnUserRequest())
-        when(response) {
-            is ApiResult.Success -> {
-                userViewModel.userData = response.value
-                userViewModel.setEmail(response.value.delivery_email)
-                userViewModel.setUserId("${response.value.user_id}")
-                _queryState.value = QueryState.Success
-            }
-
             is ApiResult.Error -> {
                 _queryState.value = QueryState.Error(response.error.message ?: "Error")
             }

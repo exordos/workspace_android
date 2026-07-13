@@ -51,109 +51,12 @@ class WorkspaceViewModel(
     private val _currentCallMessage = MutableStateFlow<MessageDto?>(null)
     val currentCallMessage: StateFlow<MessageDto?> = _currentCallMessage
 
-    init {
-            viewModelScope.launch {
-            repo.queueId.collect { updated ->
-                if (updated != null) {
-                    messagesQueueId = updated
-                    startLongPolling()
-                }
-            }
-        }
-    }
     fun setCurrentCallMessage(callMessage: MessageDto?) {
         _currentCallMessage.value = callMessage
     }
 
-    suspend fun registerForEvents() {
-        val response = client.performRequest(EventRegistrationRequest("[\"messages\"]", null))
-        when(response) {
-            is ApiResult.Success -> {
-                messagesQueueId = response.value.queueId
-                lastEventId = -1
-                repo.updatePresenses(response.value.presences)
-            }
-            is ApiResult.Error -> {
-                stopLongPolling()
-            }
-        }
-    }
-
     suspend fun sendToken(token: String) {
         client.performRequest(SendFcmTokenRequest(token))
-    }
-
-    suspend fun startLongPolling() {
-        if (pollingJob?.isActive == true) return
-        pollingJob = viewModelScope.launch {
-            while (isActive) {
-                try {
-                    val messagesResponse = client.performRequest(EventRequest(messagesQueueId, "${lastEventId}"))
-                    when(messagesResponse) {
-                        is ApiResult.Success -> {
-                            val events = parseEvents(messagesResponse.value)
-                            val messages = events
-                                .filterIsInstance<MessageEvent>()
-                                .filter { it.type == "message" }
-                                .map { it.message }
-                            val maxEventId = events.map { it.id }.maxOrNull()
-                            if (maxEventId != null) {
-                                lastEventId = maxEventId
-                            }
-                            val newMessages = messages.filter { !repo.messages.value.contains(it) }
-                            val callMessage = newMessages.firstOrNull() {
-                                Patterns.WEB_URL.matcher(it.content).matches() && URL(it.content).host == "meet.example.com"
-                            }
-                            if (callMessage != null && "${callMessage.senderId}" != (client.userViewModel.userId.value ?: -1) && _currentCallMessage.value == null) {
-                                _currentCallMessage.value = callMessage
-                            }
-                            if (!newMessages.isEmpty()) {
-                                repo.updateMessages(newMessages)
-                                val userId = client.userViewModel.userId.value?.toInt()
-                                if (userId != null) {
-                                    val newUnreadMessages =
-                                        newMessages.filter { !it.flags.contains("read") && it.senderId != userId }
-                                    if (!newUnreadMessages.isEmpty()) {
-                                        repo.updateUnreadsForNewMessages(newUnreadMessages, userId)
-                                    }
-                                }
-                            }
-                            val presenses = events
-                                .filterIsInstance<PresenceEvent>()
-                                .mapNotNull { event ->
-                                    event.presence["website"]?.let { agg ->
-                                        event.email to Presense(aggregated = agg)
-                                    }
-                                }
-                                .toMap()
-                            if (!presenses.isEmpty()) {
-                                val flatPresenses = presenses.map {
-                                    FlatPresense(it.value, it.key)
-                                }
-                                repo.updateNewPresenses(flatPresenses)
-                                repo.updatePresenses(presenses)
-                            }
-                            val messageFlagsUpdate = events
-                                .filterIsInstance<UpdateMessageFlagsEvent>()
-                                .filter { it.flag == "read" }
-                            if (!messageFlagsUpdate.isEmpty()) {
-                                for (flagUpdateEvents in messageFlagsUpdate) {
-                                    repo.didReadMessages(flagUpdateEvents.messages)
-                                }
-                            }
-                        }
-                        is ApiResult.Error -> {
-                            if (messagesResponse.error.code == "BAD_EVENT_QUEUE_ID") {
-                                registerForEvents()
-                            }
-                        }
-                    }
-                    delay(10000)
-                } catch (e: Exception) {
-                    delay(2000)
-                }
-            }
-        }
     }
 
     fun parseEvents(responseText: String): List<Event> {
@@ -161,7 +64,7 @@ class WorkspaceViewModel(
         return root.events.mapNotNull { raw ->
             val obj = raw.jsonObject
             when (obj["type"]?.toString()?.trim('"')) {
-                "message" -> json.decodeFromJsonElement<MessageEvent>(raw)
+                "message" -> json.decodeFromJsonElement<OldMessageEvent>(raw)
                 "presence" -> json.decodeFromJsonElement<PresenceEvent>(raw)
                 "update_message_flags" -> json.decodeFromJsonElement<UpdateMessageFlagsEvent>(raw)
                 else -> null
@@ -192,7 +95,7 @@ sealed interface Event {
 }
 
 @Serializable
-data class MessageEvent(
+data class OldMessageEvent(
     override val id: Int,
     val type: String,
     val message: MessageDto,

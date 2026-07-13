@@ -102,15 +102,14 @@ import java.net.URL
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.Instant
-import kotlin.io.encoding.Base64
-import dev.jeziellago.compose.markdowntext.MarkdownText
-import ru.genesiscorporation.workspace.beta.ChatFlow
-import ru.genesiscorporation.workspace.beta.data.remote.dto.UsersResponseData
-import ru.genesiscorporation.workspace.beta.ui.Avatar
 import java.time.Duration
 import java.util.Locale
 import androidx.compose.ui.platform.LocalLocale
 import kotlinx.coroutines.flow.distinctUntilChanged
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
+import ru.genesiscorporation.workspace.beta.ui.AnimatedGif
+import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
+import java.time.LocalDateTime
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -118,12 +117,14 @@ fun ChatDialogScreen(
     viewModel: ChatDialogViewModel,
     navController: NavHostController
 ) {
-    val messages by viewModel.messages.collectAsState()
+    val streamTopicMessages by viewModel.streamTopicMessages.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsState()
     val presense by viewModel.presense.collectAsState()
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+
+    val messageFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
 
     var hasDoneInitialScroll by remember { mutableStateOf(false) }
     var imeHeight = remember { mutableStateOf(0) }
@@ -145,11 +146,13 @@ fun ChatDialogScreen(
             }
         }
     }
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) {
-            val firstUnreadIndex = messages.first()
-            listState.scrollToItem(messages.lastIndex)
-            hasDoneInitialScroll = true
+    LaunchedEffect(streamTopicMessages["${viewModel.chatId}.${viewModel.topicUuid ?: ""}"]?.size) {
+        val messages = streamTopicMessages["${viewModel.chatId}.${viewModel.topicUuid ?: ""}"]
+        if (messages != null) {
+            if (messages.isNotEmpty()) {
+                listState.scrollToItem(messages.lastIndex)
+                hasDoneInitialScroll = true
+            }
         }
     }
 
@@ -178,14 +181,14 @@ fun ChatDialogScreen(
                             onClick = {
                                 val user = viewModel.user
                                 if (user != null) {
-                                    navController.navigate(
-                                        ChatFlow.ChatUserInfo(
-                                            user.fullName,
-                                            "${user.userId}",
-                                            user.avatarUrl ?: "",
-                                            user.email
-                                        )
-                                    )
+//                                    navController.navigate(
+//                                        ChatFlow.ChatUserInfo(
+//                                            user.fullName,
+//                                            "${user.userId}",
+//                                            user.avatarUrl ?: "",
+//                                            user.email
+//                                        )
+//                                    )
                                 }
                             }
                         )) {
@@ -203,9 +206,9 @@ fun ChatDialogScreen(
                                 color = LocalWorkspaceColorsPalette.current.textAdditional30,
                                 fontSize = 14.sp
                             )
-                        } else if (viewModel.topic != null) {
+                        } else if (viewModel.topicName != null) {
                             Text(
-                                viewModel.topic,
+                                viewModel.topicName,
                                 color = LocalWorkspaceColorsPalette.current.textAdditional30,
                                 fontSize = 14.sp
                             )
@@ -278,15 +281,16 @@ fun ChatDialogScreen(
                     .fillMaxSize()
                     .background(LocalWorkspaceColorsPalette.current.background)
             ) {
+                val messages = streamTopicMessages["${viewModel.chatId}.${viewModel.topicUuid ?: ""}"]
                 if (isLoading) {
                     Box(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
                     ) {
-                        CircularProgressIndicator()
+                        AnimatedGif(Modifier.size(80.dp))
                     }
                 } else {
-                    if (messages.isEmpty()) {
+                    if (messages?.isEmpty() ?: true) {
                         Box(
                             modifier = Modifier
                                 .weight(1f)
@@ -309,7 +313,7 @@ fun ChatDialogScreen(
                                 alignment = Alignment.Bottom
                             )
                         ) {
-                            items(items = messages, key = { "${it.id ?: -1}${it.content}" }) { item ->
+                            items(items = messages.sortedBy { LocalDateTime.parse(it.createdAt, messageFormatter) }, key = { "${it.uuid}${it.payload.content}" }) { item ->
                                 ChatMessage(
                                     item,
                                     viewModel,
@@ -334,22 +338,24 @@ fun ChatDialogScreen(
 
 data class UserUploadMarkdownParts(
     val caption: String,
+    val fileName: String,
     val relativePath: String,
 )
 private val captionThenLink = Regex(
-    """^(?:(.*?)\r?\n)?\[[^\]]*]\((/user_uploads/[^)]+)\)""",
+    """^(?:(.*?)\r?\n)?\[([^\]]*)]\(([^)]+)\)""",
 )
 
 fun String.parseUserUploadMarkdownOrNull(): UserUploadMarkdownParts? {
     val m = captionThenLink.find(this) ?: return null
     val caption = m.groupValues[1]
-    val path = m.groupValues[2]
-    return UserUploadMarkdownParts(caption = caption, relativePath = path)
+    val fileName = m.groupValues[2]
+    val path = m.groupValues[3]
+    return UserUploadMarkdownParts(caption, fileName, path)
 }
 
 @Composable
 fun ChatMessage(
-    item: Message,
+    item: MessageResponse,
     viewModel: ChatDialogViewModel,
     navController: NavHostController,
     onImageLoad: () -> Unit
@@ -357,52 +363,80 @@ fun ChatMessage(
     Column(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        val previousMessage = viewModel.previousMessageById(item.id ?: -1)
-        if (previousMessage != null) {
-            val currentMessageDate = Instant.ofEpochSecond(item.timestamp).atZone(ZoneId.systemDefault()).toLocalDate()
-            val previousMessageDate = Instant.ofEpochSecond(previousMessage.timestamp).atZone(ZoneId.systemDefault()).toLocalDate()
-            if (currentMessageDate != previousMessageDate) {
-                val zone = ZoneId.systemDefault()
-                val locale = LocalLocale.current.platformLocale
-                val formatter = DateTimeFormatter.ofPattern("d MMM", locale)
-                Text(
-                    text = currentMessageDate.format(formatter),
-                    color = LocalWorkspaceColorsPalette.current.textHeaders,
-                    fontSize = 14.sp,
-                    modifier = Modifier
-                        .padding(vertical = 16.dp)
-                        .background(
-                            LocalWorkspaceColorsPalette.current.surface,
-                            shape = RoundedCornerShape(100.dp)
-                        )
-                        .padding(vertical = 4.dp, horizontal = 12.dp)
-                )
-            }
-            if (previousMessage.flags.contains("read") && !item.flags.contains("read")) {
-                Text(
-                    text = "Новые сообщения",
-                    color = LocalWorkspaceColorsPalette.current.textHeaders,
-                    fontSize = 14.sp,
-                    modifier = Modifier
-                        .padding(vertical = 16.dp)
-                        .background(
-                            LocalWorkspaceColorsPalette.current.surface,
-                            shape = RoundedCornerShape(100.dp)
-                        )
-                        .padding(vertical = 4.dp, horizontal = 12.dp)
-                )
-                }
-        }
-        if (Patterns.WEB_URL.matcher(item.content)
-                .matches() && item.content.contains(viewModel.repo.jitsiServerUrl)
+//        val previousMessage = viewModel.previousMessageById(item.id ?: -1)
+//        if (previousMessage != null) {
+//            val currentMessageDate = Instant.ofEpochSecond(item.timestamp).atZone(ZoneId.systemDefault()).toLocalDate()
+//            val previousMessageDate = Instant.ofEpochSecond(previousMessage.timestamp).atZone(ZoneId.systemDefault()).toLocalDate()
+//            if (currentMessageDate != previousMessageDate) {
+//                val zone = ZoneId.systemDefault()
+//                val locale = LocalLocale.current.platformLocale
+//                val formatter = DateTimeFormatter.ofPattern("d MMM", locale)
+//                Text(
+//                    text = currentMessageDate.format(formatter),
+//                    color = LocalWorkspaceColorsPalette.current.textHeaders,
+//                    fontSize = 14.sp,
+//                    modifier = Modifier
+//                        .padding(vertical = 16.dp)
+//                        .background(
+//                            LocalWorkspaceColorsPalette.current.surface,
+//                            shape = RoundedCornerShape(100.dp)
+//                        )
+//                        .padding(vertical = 4.dp, horizontal = 12.dp)
+//                )
+//            }
+//            if (previousMessage.flags.contains("read") && !item.flags.contains("read")) {
+//                Text(
+//                    text = "Новые сообщения",
+//                    color = LocalWorkspaceColorsPalette.current.textHeaders,
+//                    fontSize = 14.sp,
+//                    modifier = Modifier
+//                        .padding(vertical = 16.dp)
+//                        .background(
+//                            LocalWorkspaceColorsPalette.current.surface,
+//                            shape = RoundedCornerShape(100.dp)
+//                        )
+//                        .padding(vertical = 4.dp, horizontal = 12.dp)
+//                )
+//                }
+//        }
+        Column(
+            horizontalAlignment = Alignment.Start
         ) {
-            CallMessageView(item, viewModel, navController)
-        } else if (item.content.parseUserUploadMarkdownOrNull() != null) {
-            val text = item.content.parseUserUploadMarkdownOrNull()!!.caption
-            val imageUrl = item.content.parseUserUploadMarkdownOrNull()!!.relativePath
-            ImageMessageView(text, imageUrl, viewModel, item, navController, onImageLoad)
-        } else {
-            TextMessageView(item, viewModel, navController)
+            if (Patterns.WEB_URL.matcher(item.payload.content)
+                    .matches() && item.payload.content.contains(viewModel.repo.jitsiServerUrl)
+            ) {
+                CallMessageView(item, viewModel, navController)
+            } else if (item.payload.content.parseUserUploadMarkdownOrNull() != null) {
+                val text = item.payload.content.parseUserUploadMarkdownOrNull()!!.caption
+                val imageName = item.payload.content.parseUserUploadMarkdownOrNull()!!.fileName
+                val imageUrl = item.payload.content.parseUserUploadMarkdownOrNull()!!.relativePath
+                ImageMessageView(text, "$imageUrl", viewModel, item, navController, onImageLoad)
+            } else {
+                TextMessageView(item, viewModel, navController)
+            }
+            if (!item.reactions.isEmpty()) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    for (reaction in item.reactions) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .background(
+                                    LocalWorkspaceColorsPalette.current.textAdditional50,
+                                    shape = RoundedCornerShape(16.dp)
+                                )
+                                .padding(4.dp)
+                        ) {
+                            Text(reaction.key)
+                            Text(text ="${reaction.value}",
+                                color = LocalWorkspaceColorsPalette.current.textHeaders,
+                                fontSize = 12.sp,
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }

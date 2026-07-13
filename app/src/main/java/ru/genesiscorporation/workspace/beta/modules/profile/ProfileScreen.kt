@@ -66,20 +66,20 @@ fun ProfileScreen(
                     modifier = Modifier
                         .padding(vertical = 8.dp)
                 ) {
-                    val imageRequest = ImageRequest.Builder(LocalContext.current)
-                        .data(userData.avatar_url)
-                        .build()
-                    AsyncImage(
-                        model = imageRequest,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .padding(end = 16.dp)
-                            .size(64.dp)
-                            .clip(CircleShape),
-                    )
+//                    val imageRequest = ImageRequest.Builder(LocalContext.current)
+//                        .data(userData.avatar_url)
+//                        .build()
+//                    AsyncImage(
+//                        model = imageRequest,
+//                        contentDescription = null,
+//                        contentScale = ContentScale.Crop,
+//                        modifier = Modifier
+//                            .padding(end = 16.dp)
+//                            .size(64.dp)
+//                            .clip(CircleShape),
+//                    )
                     Text(
-                        text = userData.full_name,
+                        text = "${userData.firstName} ${userData.lastName}" ,
                         color = LocalWorkspaceColorsPalette.current.textHeaders,
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Medium
@@ -96,19 +96,21 @@ fun ProfileScreen(
                         modifier = Modifier
                             .padding(end = 16.dp)
                     )
-                    Column(
-                        horizontalAlignment = Alignment.Start
-                    ) {
-                        Text(
-                            text = "Email",
-                            color = LocalWorkspaceColorsPalette.current.textAdditional30,
-                            fontSize = 12.sp
-                        )
-                        Text(
-                            text = userData.email,
-                            color = LocalWorkspaceColorsPalette.current.textHeaders,
-                            fontSize = 14.sp
-                        )
+                    if (userData.email != null) {
+                        Column(
+                            horizontalAlignment = Alignment.Start
+                        ) {
+                            Text(
+                                text = "Email",
+                                color = LocalWorkspaceColorsPalette.current.textAdditional30,
+                                fontSize = 12.sp
+                            )
+                            Text(
+                                text = userData.email,
+                                color = LocalWorkspaceColorsPalette.current.textHeaders,
+                                fontSize = 14.sp
+                            )
+                        }
                     }
                 }
                 Row(
@@ -126,18 +128,33 @@ fun ProfileScreen(
                         horizontalAlignment = Alignment.Start
                     ) {
                         Text(
-                            text = "ID пользователя",
+                            text = "Имя пользователя",
                             color = LocalWorkspaceColorsPalette.current.textAdditional30,
                             fontSize = 12.sp
                         )
                         Text(
-                            text = "${userData.user_id}",
+                            text = userData.username,
                             color = LocalWorkspaceColorsPalette.current.textHeaders,
                             fontSize = 14.sp
                         )
                     }
                 }
             }
+//            Button(
+//                onClick = {
+//
+//                }
+//            ) {
+//                Row {
+//                    Image(
+//                        painter = painterResource(id = R.drawable.ic_add),
+//                        contentDescription = null
+//                    )
+//                    Text(
+//                        text = "Добавить организацию"
+//                    )
+//                }
+//            }
             Row(
                 verticalAlignment = Alignment.CenterVertically
             ) {

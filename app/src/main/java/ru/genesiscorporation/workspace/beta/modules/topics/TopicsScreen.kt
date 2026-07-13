@@ -53,6 +53,7 @@ import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.R
+import ru.genesiscorporation.workspace.beta.modules.chatchannels.TopicHeader
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.formatHHmm
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 
@@ -155,7 +156,7 @@ fun ChatOldTopic(
             .clickable(
                 onClick = {
                     topicsViewModel.currentTopicName = item.title
-                    navController.navigate(ChatFlow.ChatDialog(item.channelName, item.channelId, item.title, false, topicsViewModel.channelStreamId.toInt()))
+                    navController.navigate(ChatFlow.ChatDialog(item.channelName, item.channelId, item.title, item.uuid,false, topicsViewModel.channelStreamId.toInt()))
                 }
             )
     ) {

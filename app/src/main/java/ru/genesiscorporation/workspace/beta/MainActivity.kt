@@ -88,6 +88,7 @@ import io.ktor.http.HttpMethod
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
 import ru.genesiscorporation.workspace.beta.ui.IncomingCall
 import io.ktor.client.plugins.contentnegotiation.*
+import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.serialization.kotlinx.json.*
 
 
@@ -98,7 +99,7 @@ class MainActivity : ComponentActivity() {
 
     private val workspaceApiClient: WorkspaceAPIClient by lazy {
         val client = HttpClient() {
-//            install(plugin)
+            install(WebSockets)
             install(createSessionCapturePlugin(sessionCookieStore))
             install(ContentNegotiation) {
                 json()
@@ -110,15 +111,16 @@ class MainActivity : ComponentActivity() {
     private val userState by viewModels<UserViewModel>()  {
         UserViewModelFactory(applicationContext)
     }
-    val messagesRepository = EventsRepository()
+    val eventsRepository = EventsRepository()
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        eventsRepository.client = workspaceApiClient
         pendingDeepLink = intent.getStringExtra("deeplink")
         enableEdgeToEdge()
         setContent {
             WokspaceTheme {
                 CompositionLocalProvider(UserState provides userState) {
-                    ApplicationSwitcher(workspaceApiClient, messagesRepository, pendingDeepLink, onDeepLinkHandled = { pendingDeepLink = null })
+                    ApplicationSwitcher(workspaceApiClient, eventsRepository, pendingDeepLink, onDeepLinkHandled = { pendingDeepLink = null })
                 }
             }
         }
@@ -160,18 +162,18 @@ fun RequestNotificationPermissionIfNeeded() {
 @Composable
 fun ApplicationSwitcher(
     workspaceApiClient: WorkspaceAPIClient,
-    messagesRepository: EventsRepository,
+    eventsRepository: EventsRepository,
     pendingDeepLink: String?,
     onDeepLinkHandled: () -> Unit
 ) {
     val user = UserState.current
-    val userId by user.userId.collectAsState()
-    val isApiKeyLoaded by user.isApiKeyLoaded.collectAsState()
+    val accessToken by user.accessToken.collectAsState()
+    val isAccessTokenLoaded by user.isAccessTokenLoaded.collectAsState()
 
-    Log.d("RepoCheck", "initnav repo instance = ${System.identityHashCode(messagesRepository)}")
-    val workspaceViewModelFactory = remember { WorkspaceViewModelFactory(workspaceApiClient, messagesRepository) }
+    Log.d("RepoCheck", "initnav repo instance = ${System.identityHashCode(eventsRepository)}")
+    val workspaceViewModelFactory = remember { WorkspaceViewModelFactory(workspaceApiClient, eventsRepository) }
     var workspaceViewModel: WorkspaceViewModel = viewModel(factory = workspaceViewModelFactory)
-    if (!isApiKeyLoaded) {
+    if (!isAccessTokenLoaded) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -180,10 +182,10 @@ fun ApplicationSwitcher(
         ) {
             CircularProgressIndicator()
         }
-    } else if (userId == null) {
+    } else if (accessToken == null) {
         LoginNavigation(workspaceApiClient)
     } else {
-        WokspaceApp( workspaceViewModel, workspaceApiClient, messagesRepository, pendingDeepLink, onDeepLinkHandled)
+        WokspaceApp( workspaceViewModel, workspaceApiClient, eventsRepository, pendingDeepLink, onDeepLinkHandled)
     }
 }
 
@@ -191,7 +193,7 @@ fun ApplicationSwitcher(
 fun WokspaceApp(
     viewModel: WorkspaceViewModel,
     workspaceApiClient: WorkspaceAPIClient,
-    messagesRepository: EventsRepository,
+    eventsRepository: EventsRepository,
     pendingDeepLink: String?,
     onDeepLinkHandled: () -> Unit
 ) {
@@ -206,15 +208,13 @@ fun WokspaceApp(
     val user = UserState.current
     val currentCallMessage by viewModel.currentCallMessage.collectAsState()
     var currentDestination = rememberSaveable { mutableStateOf(0 ) }
-    val profileViewModelFactory = remember { ProfileViewModelFactory(workspaceApiClient, user, messagesRepository) }
-    var profileViewModel: ProfileViewModel = viewModel(factory = profileViewModelFactory)
 
 
     LaunchedEffect(lifecycleOwner) {
 
         FirebaseMessaging.getInstance().token
             .addOnSuccessListener { token ->
-                messagesRepository.pushId = token
+                eventsRepository.pushId = token
                 Log.d("FCM", "fetched token $token")
                 scope.launch {
                     viewModel.sendToken("workspace:android:$token")
@@ -254,26 +254,17 @@ fun WokspaceApp(
             }
         }
     ) {
-        Log.d("RepoCheck", "mainnav repo instance = ${System.identityHashCode(messagesRepository)}")
-//        Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
             Box(
                 Modifier
                     .windowInsetsPadding(WindowInsets.statusBars)
-//                .padding(
-//                    top = innerPadding.calculateTopPadding(),
-//                    start = innerPadding.calculateStartPadding(LocalLayoutDirection.current),
-//                    end = innerPadding.calculateEndPadding(LocalLayoutDirection.current),
-//                )
-//                .recalculateWindowInsets()
-//                .consumeWindowInsets(insets = WindowInsets(0.dp, 0.dp, 0.dp, 70.dp))
             ) {
                 RequestNotificationPermissionIfNeeded()
                 NavHost(navController = navController, startDestination = Chat.route) {
                     composable(Chat.route) {
-                        ChatNavigation(workspaceApiClient, messagesRepository, pendingDeepLink, onDeepLinkHandled)
+                        ChatNavigation(workspaceApiClient, eventsRepository, pendingDeepLink, onDeepLinkHandled)
                     }
                     composable(Profile.route) {
-                        ProfileScreen(profileViewModel)
+                        ProfileNavigation(workspaceApiClient, eventsRepository)
                     }
                 }
                 val callMessage = currentCallMessage
@@ -303,7 +294,7 @@ fun ChatNavigation(
         composable<ChatFlow.ChatDialog> {
             val args = it.toRoute<ChatFlow.ChatDialog>()
             Log.d("RepoCheck", "chatnav repo instance = ${System.identityHashCode(eventsRepository)}")
-            val chatDialogViewModelFactory = remember { ChatDialogViewModelFactory(workspaceApiClient, user, args.title, args.chatId, args.topicId, args.isDirectMessages, eventsRepository, args.userId) }
+            val chatDialogViewModelFactory = remember { ChatDialogViewModelFactory(workspaceApiClient, user, args.title, args.chatId, args.topicName, args.topicUuid, args.isDirectMessages, eventsRepository, args.userId) }
             val chatDialogViewModel: ChatDialogViewModel = viewModel(factory = chatDialogViewModelFactory)
             ChatDialogScreen(chatDialogViewModel, navController)
         }
@@ -336,6 +327,24 @@ fun LoginNavigation(workspaceApiClient: WorkspaceAPIClient) {
         }
         composable<LoginFlow.Login> {
 
+            val loginViewModelFactory = remember { LoginViewModelFactory(workspaceApiClient, user) }
+            val loginViewModel: LoginViewModel = viewModel(factory = loginViewModelFactory)
+            LoginScreen(loginViewModel, navController)
+        }
+    }
+}
+
+@Composable
+fun ProfileNavigation(workspaceApiClient: WorkspaceAPIClient, eventsRepository: EventsRepository,) {
+    val navController = rememberNavController()
+    val user = UserState.current
+    NavHost(navController = navController, startDestination = ProfileFlow.Main) {
+        composable<ProfileFlow.Main> {
+            val profileViewModelFactory = remember { ProfileViewModelFactory(workspaceApiClient, user, eventsRepository) }
+            var profileViewModel: ProfileViewModel = viewModel(factory = profileViewModelFactory)
+            ProfileScreen(profileViewModel)
+        }
+        composable<ProfileFlow.Login> {
             val loginViewModelFactory = remember { LoginViewModelFactory(workspaceApiClient, user) }
             val loginViewModel: LoginViewModel = viewModel(factory = loginViewModelFactory)
             LoginScreen(loginViewModel, navController)

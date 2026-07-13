@@ -47,8 +47,11 @@ import coil3.network.NetworkHeaders
 import coil3.network.httpHeaders
 import coil3.request.ImageRequest
 import ru.genesiscorporation.workspace.beta.ChatFlow
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import kotlin.io.encoding.Base64
 
 @Composable
@@ -56,12 +59,14 @@ fun ImageMessageView(
     text: String,
     imageUrl: String?,
     viewModel: ChatDialogViewModel,
-    item: Message,
+    item: MessageResponse,
     navController: NavHostController,
     onImageLoad: () -> Unit
 ) {
+    val folderCreationFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
+    val hhmmFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
     var showFullscreen by remember { mutableStateOf(false) }
-    val bubbleShape = if (item.isFromCurrentUser) {
+    val bubbleShape = if (item.isOwn) {
         RoundedCornerShape(
             topStart = 8.dp,
             topEnd = 8.dp,
@@ -78,73 +83,73 @@ fun ImageMessageView(
     }
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (item.isFromCurrentUser) Arrangement.End else Arrangement.Start,
+        horizontalArrangement = if (item.isOwn) Arrangement.End else Arrangement.Start,
         verticalAlignment = Alignment.Bottom
     ) {
-        val nextMessage = viewModel.nextMessageById(item.id)
-        if (!viewModel.isDirectMessages && !item.isFromCurrentUser) {
-            if (nextMessage != null) {
-                if (nextMessage.senderId != item.senderId) {
-                    Box(
-                        Modifier
-                        .clickable(
-                            onClick = {
-                                navController.navigate(
-                                    ChatFlow.ChatUserInfo(
-                                        item.senderFullName,
-                                        "${item.senderId}",
-                                        item.avatarUrl,
-                                        ""
-                                    )
-                                )
-                            }
-                        )
-                    ) {
-                        Avatar(
-                            item.avatarUrl,
-                            viewModel.userViewModel.baseUrl.value ?: "",
-                            30,
-                            true
-                        )
-                    }
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .padding(end = 12.dp)
-                            .size(30.dp)
-                            .background(color = Color.Transparent, shape = CircleShape)
-                    )
-                }
-            } else {
-                Box(
-                    Modifier
-                        .clickable(
-                            onClick = {
-                                navController.navigate(
-                                    ChatFlow.ChatUserInfo(
-                                        item.senderFullName,
-                                        "${item.senderId}",
-                                        item.avatarUrl,
-                                        ""
-                                    )
-                                )
-                            }
-                        )
-                ) {
-                    Avatar(
-                        item.avatarUrl,
-                        viewModel.userViewModel.baseUrl.value ?: "",
-                        30,
-                        true
-                    )
-                }
-            }
-        }
+//        val nextMessage = viewModel.nextMessageById(item.id)
+//        if (!viewModel.isDirectMessages && !item.isFromCurrentUser) {
+//            if (nextMessage != null) {
+//                if (nextMessage.senderId != item.senderId) {
+//                    Box(
+//                        Modifier
+//                        .clickable(
+//                            onClick = {
+//                                navController.navigate(
+//                                    ChatFlow.ChatUserInfo(
+//                                        item.senderFullName,
+//                                        "${item.senderId}",
+//                                        item.avatarUrl,
+//                                        ""
+//                                    )
+//                                )
+//                            }
+//                        )
+//                    ) {
+//                        Avatar(
+//                            item.avatarUrl,
+//                            viewModel.userViewModel.baseUrl.value ?: "",
+//                            30,
+//                            true
+//                        )
+//                    }
+//                } else {
+//                    Box(
+//                        modifier = Modifier
+//                            .padding(end = 12.dp)
+//                            .size(30.dp)
+//                            .background(color = Color.Transparent, shape = CircleShape)
+//                    )
+//                }
+//            } else {
+//                Box(
+//                    Modifier
+//                        .clickable(
+//                            onClick = {
+//                                navController.navigate(
+//                                    ChatFlow.ChatUserInfo(
+//                                        item.senderFullName,
+//                                        "${item.senderId}",
+//                                        item.avatarUrl,
+//                                        ""
+//                                    )
+//                                )
+//                            }
+//                        )
+//                ) {
+//                    Avatar(
+//                        item.avatarUrl,
+//                        viewModel.userViewModel.baseUrl.value ?: "",
+//                        30,
+//                        true
+//                    )
+//                }
+//            }
+//        }
         Row(
             verticalAlignment = Alignment.Bottom,
             modifier = Modifier
                 .background(
-                    if (item.isFromCurrentUser)
+                    if (item.isOwn)
                         LocalWorkspaceColorsPalette.current.messageOwnBackground
                     else LocalWorkspaceColorsPalette.current.messageBackground,
                     shape = bubbleShape
@@ -157,15 +162,15 @@ fun ImageMessageView(
                     .weight(2f, fill = false)
             ) {
                 Text(
-                    text = item.senderFullName,
-                    color = if (item.isFromCurrentUser) LocalWorkspaceColorsPalette.current.indicatorBlue else LocalWorkspaceColorsPalette.current.indicatorPurple,
+                    text = "User",
+                    color = if (item.isOwn) LocalWorkspaceColorsPalette.current.indicatorBlue else LocalWorkspaceColorsPalette.current.indicatorPurple,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium
                 )
-                val apiKey by viewModel.userViewModel.repo.apiKeyFlow.collectAsStateWithLifecycle(initialValue = "")
+                val accessToken by viewModel.userViewModel.repo.accessTokenFlow.collectAsStateWithLifecycle(initialValue = "")
                 val email by viewModel.userViewModel.repo.emailFlow.collectAsStateWithLifecycle(initialValue = "")
                 val baseUrl by viewModel.userViewModel.repo.baseUrlFlow.collectAsStateWithLifecycle(initialValue = "")
-                val authHeaders = viewModel.client.authHeaders(apiKey ?: "", email ?: "")
+                val authHeaders = viewModel.client.authHeaders(accessToken ?: "", email ?: "")
                 val headers = NetworkHeaders.Builder()
                     .set(authHeaders.first().title, authHeaders.first().value)
                     .build()
@@ -206,8 +211,9 @@ fun ImageMessageView(
                 }
             }
             Spacer(modifier = Modifier.widthIn(min = 20.dp))
+            val messageDate = LocalDateTime.parse(item.updatedAt, folderCreationFormatter)
             Text(
-                text = item.timestamp.formatHHmm(),
+                text = messageDate.format(hhmmFormatter),
                 color = LocalWorkspaceColorsPalette.current.messageTimeColor,
                 fontSize = 14.sp,
             )

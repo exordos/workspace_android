@@ -9,9 +9,11 @@ import androidx.lifecycle.viewModelScope
 import coil3.request.ImageRequest
 import io.ktor.client.request.header
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
@@ -23,14 +25,22 @@ import ru.genesiscorporation.workspace.beta.data.EventsRepository
 import ru.genesiscorporation.workspace.beta.data.FlatPresense
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
+import ru.genesiscorporation.workspace.beta.data.remote.dto.AddMessageReactionRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.DirectMessagesRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.EditMessageRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MarkMessagesReadRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageReaction
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponsePayload
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Presense
+import ru.genesiscorporation.workspace.beta.data.remote.dto.SendDirectMessageRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.SendMessageRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UsersRequest
-import ru.genesiscorporation.workspace.beta.data.remote.dto.UsersResponseData
+import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
+import java.time.OffsetDateTime
+import java.time.format.DateTimeFormatter
 import kotlin.collections.filter
 import kotlin.collections.firstOrNull
 import kotlin.io.encoding.Base64
@@ -41,29 +51,23 @@ class ChatDialogViewModel(
     val userViewModel: UserViewModel,
     val chatTitle: String,
     var chatId: String,
-    val topic: String?,
+    val topicName: String?,
+    val topicUuid: String?,
     val isDirectMessages: Boolean,
     val repo: EventsRepository,
     val userId: Int?
 ): ViewModel() {
 
-    var items: List<Message> = emptyList()
-    private val _messages = MutableStateFlow<List<Message>>(emptyList())
-    val messages: StateFlow<List<Message>> = _messages
+    val streamTopicMessages: StateFlow<Map<String, List<MessageResponse>>> = repo.streamTopicMessages
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyMap()
+        )
 
-    fun updateMessage(updated: Message) {
-        _messages.update { list ->
-            list.map { if (it.id == updated.id)
-                it.copy(content = updated?.content ?: it.content)
-            else
-                it
-            }
-        }
-    }
+    private var possibleMessage: MessageResponse? = null
 
-    private var possibleMessage: Message? = null
-
-    var user: UsersResponseData? = null
+    var user: UserResponseData? = null
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading
@@ -72,7 +76,7 @@ class ChatDialogViewModel(
     val presense: StateFlow<Presense?> = _presense
 
 
-    var editingMessage: Message? = null
+    var editingMessage: MessageResponse? = null
     private val _editingMessageBackupText = MutableStateFlow<String?>(null)
     val editingMessageBackupText: StateFlow<String?> = _editingMessageBackupText
     private val _messageText = MutableStateFlow("")
@@ -91,27 +95,29 @@ class ChatDialogViewModel(
         _imageUri.value = newUri
     }
 
-    fun nextMessageById(currentId: Int?): Message? {
-        val i = _messages.value.indexOfFirst { it.id == currentId }
-        return if (i >= 0) _messages.value.getOrNull(i + 1) else null
-    }
+//    fun nextMessageById(currentId: Int?): Message? {
+//        val i = _messages.value.indexOfFirst { it.id == currentId }
+//        return if (i >= 0) _messages.value.getOrNull(i + 1) else null
+//    }
+//
+//    fun previousMessageById(currentId: Int): Message? {
+//        val i = _messages.value.indexOfFirst { it.id == currentId }
+//        return if (i >= 0) _messages.value.getOrNull(i - 1) else null
+//    }
 
-    fun previousMessageById(currentId: Int): Message? {
-        val i = _messages.value.indexOfFirst { it.id == currentId }
-        return if (i >= 0) _messages.value.getOrNull(i - 1) else null
-    }
-
-    fun onEditMessageClicked(message: Message) {
-        if (message.id != null) {
+    fun onEditMessageClicked(message: MessageResponse) {
+        if (message.uuid != "") {
             editingMessage = message
-            _editingMessageBackupText.value = message.content
-            _messageText.value = message.content
+            _editingMessageBackupText.value = message.payload.content
+            _messageText.value = message.payload.content
         }
     }
 
-    fun onQuoteMessageClicked(message: Message) {
+    fun onQuoteMessageClicked(message: MessageResponse) {
         editingMessage = null
-        _messageText.value = "@_**${message.senderFullName}**\n```quote\n${message.content}\n```\n"
+        val users = repo.users.value
+        val messageUser = users.firstOrNull { it.uuid == message.userUuid }
+        _messageText.value = "@_**${messageUser?.username}**\n```quote\n${message.payload.content}\n```\n"
     }
 
     fun onScroll() {
@@ -127,7 +133,7 @@ class ChatDialogViewModel(
     suspend fun onSendClicked(context: Context) {
         val text = _messageText.value
         if (text.isBlank()) return
-        val messageId = editingMessage?.id
+        val messageId = editingMessage?.uuid
         if (messageId != null) {
             sendEditMessage(messageId, _messageText.value)
         } else {
@@ -138,7 +144,7 @@ class ChatDialogViewModel(
     suspend fun sendMessage(context: Context) {
         val imageUri = _imageUri.value
         if (imageUri != null) {
-            val response = client.uploadImage(context, imageUri)
+            val response = client.uploadImage(context, imageUri, chatId)
             when(response) {
                 is ApiResult.Success -> {
                     var messageText = ""
@@ -146,7 +152,7 @@ class ChatDialogViewModel(
                     if (!text.isBlank()) {
                         messageText += "$text\r\n"
                     }
-                    messageText += "[${response.value.filename}](${response.value.url})"
+                    messageText += "[${response.value.name}](urn:image:${response.value.uuid})"
                     sendTextMessage(messageText)
                 }
                 is ApiResult.Error -> {
@@ -162,64 +168,69 @@ class ChatDialogViewModel(
 
     suspend fun sendTextMessage(messageText: String) {
         val userId = userViewModel.repo.userIdFlow.first()
-        var newMessage = Message(null,
-            userViewModel.userData?.full_name ?: "",
-            userId?.toInt() ?: 0,
-            messageText,
-            (System.currentTimeMillis() / 1000),
-            userViewModel.userData?.avatar_url ?: "",
+        var newMessage = MessageResponse(
             "",
+            OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
+            OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
+            chatId,
+            topicUuid ?: "",
+            "",
+            MessageResponsePayload("markdown", messageText),
             true,
-            emptyList()
+            emptyMap()
         )
         possibleMessage = newMessage
-        _messages.update { current -> current + newMessage }
         _messageText.value = ""
         _imageUri.value = null
-        val sendMessageRequest = SendMessageRequest(
-            type = if (isDirectMessages) "direct" else "stream",
-            to = chatId,
-            content = messageText,
-            topic = if (isDirectMessages) null else topic
-        )
-        val response = client.performRequest(sendMessageRequest)
-        when(response) {
-            is ApiResult.Success -> {
-                newMessage.id = response.value.id
-                possibleMessage = null
-            }
-            is ApiResult.Error -> {
+        if (isDirectMessages) {
+            val sendMessageRequest = SendDirectMessageRequest(
+                chatId,
+                messageText
+            )
+            val response = client.performRequest(sendMessageRequest)
+            when (response) {
+                is ApiResult.Success -> {
+                    newMessage.uuid = response.value.uuid
+                    newMessage.topicUuid = response.value.topicUuid
+                    possibleMessage = null
+                }
 
+                is ApiResult.Error -> {
+
+                }
+            }
+        } else {
+            val sendMessageRequest = SendMessageRequest(
+                chatId,
+                topicUuid,
+                messageText
+            )
+            val response = client.performRequest(sendMessageRequest)
+            when (response) {
+                is ApiResult.Success -> {
+                    newMessage.uuid = response.value.uuid
+                    newMessage.topicUuid = response.value.topicUuid
+                    possibleMessage = null
+                }
+
+                is ApiResult.Error -> {
+
+                }
             }
         }
         _messageText.value = ""
     }
 
-    suspend fun sendEditMessage(messageId: Int, messageText: String) {
-        val editMessageRequest = EditMessageRequest(messageId, messageText)
+    suspend fun sendEditMessage(messageUuid: String, messageText: String) {
+        val editMessageRequest = EditMessageRequest(messageUuid, messageText)
         val response = client.performRequest(editMessageRequest)
         when(response) {
             is ApiResult.Success -> {
-                var message = editingMessage?.copy()
-                if (message != null) {
-                    var newMessage = Message(
-                        message.id,
-                        message.senderFullName,
-                        message.senderId,
-                        messageText,
-                        message.timestamp,
-                        message.avatarUrl,
-                        message.subject,
-                        message.isFromCurrentUser,
-                        emptyList()
-                    )
-                    updateMessage(newMessage)
-                }
                 editingMessage = null
                 _editingMessageBackupText.value = null
             }
             is ApiResult.Error -> {
-                editingMessage?.let { it.content = editingMessageBackupText.value ?: it.content }
+                editingMessage?.let { it.payload.content = editingMessageBackupText.value ?: it.payload.content }
                 editingMessage = null
                 _editingMessageBackupText.value = null
             }
@@ -229,147 +240,39 @@ class ChatDialogViewModel(
 
     init {
         _isLoading.value = true
-        if (isDirectMessages) {
-            user = repo.users.value.firstOrNull { it.userId == userId }
-            _presense.value = repo.presences.value[user?.email]
-        }
         viewModelScope.launch {
-            if (isDirectMessages) {
-                loadLatestDirectMessages()
-            } else {
+            val key = "${chatId}.${topicUuid}"
+            if (streamTopicMessages.value[key]?.isEmpty() ?: true) {
                 loadLatestMessages()
-            }
-            repo.messages.collect { updated ->
-                processNewMessages(updated)
-            }
-            repo.presences.collect { updated ->
-                if (isDirectMessages) {
-                    if (updated[user?.email] != null) {
-                        _presense.update { updated[user?.email] }
-                    }
-                }
-            }
-        }
-        viewModelScope.launch {
-            repo.newPresences.collect { updated ->
-                processNewPresenses(updated)
             }
         }
     }
 
     suspend fun loadLatestMessages() {
-        val narrow: String = "[{\"operand\": \"${chatTitle}\", \"operator\": \"channel\"},{\"operand\": \"${topic ?: ""}\", \"operator\": \"topic\"}]"
-        val messagesRequest = MessagesRequest("newest", "100",  "0", narrow)
+        val messagesRequest = MessagesRequest(chatId, topicUuid)
         val messagesResponse = client.performRequest(messagesRequest)
-        val userId = userViewModel.repo.userIdFlow.first()
         when(messagesResponse) {
             is ApiResult.Success -> {
-                val messages = messagesResponse.value.messages.map { Message.from(it, userId?.toInt() ?: 0) }
-                _messages.value = messages
+                repo.addStreamTopicMessages(chatId, topicUuid ?: "", messagesResponse.value)
                 _isLoading.value = false
-                processUnreadMessages(messages)
+            }
+            is ApiResult.Error -> {
+                _isLoading.value = false
+            }
+        }
+    }
+
+    suspend fun onReactionTap(messageUuid: String, emoji: String) {
+        val addReactionResponse = client.performRequest(AddMessageReactionRequest(messageUuid, emoji))
+        when(addReactionResponse) {
+            is ApiResult.Success -> {
 
             }
+
             is ApiResult.Error -> {
 
             }
         }
-    }
-
-    suspend fun loadLatestDirectMessages() {
-        val narrow: String = "[{\"operand\": ${chatId}, \"operator\": \"dm\"}]"
-        val messagesRequest = DirectMessagesRequest("newest", "100", "0", narrow)
-        val messagesResponse = client.performRequest(messagesRequest)
-        val userId = userViewModel.repo.userIdFlow.first()
-        when(messagesResponse) {
-            is ApiResult.Success -> {
-                val messages = messagesResponse.value.messages.map { Message.from(it, userId?.toInt() ?: 0) }
-                _messages.value = messages
-                _isLoading.value = false
-                processUnreadMessages(messages)
-            }
-            is ApiResult.Error -> {
-
-            }
-        }
-    }
-
-    suspend fun processUnreadMessages(messages: List<Message>) {
-        val unreadMessageIds = messages.filter { !it.flags.contains("read") }.mapNotNull { it.id }
-        if (!unreadMessageIds.isEmpty()) {
-            val markMessagesReadResponse = client.performRequest(MarkMessagesReadRequest(unreadMessageIds))
-            when(markMessagesReadResponse) {
-                is ApiResult.Success -> {
-                    if (isDirectMessages && userId != null) {
-                        repo.didReadDirectMessages(unreadMessageIds, userId)
-                    } else if (topic != null && userId != null) {
-                        repo.didReadChannelMessages(unreadMessageIds, userId, topic)
-                    }
-                }
-
-                is ApiResult.Error -> {
-
-                }
-            }
-        }
-    }
-
-    suspend fun processNewMessages(messages: List<MessageDto>) {
-        if (isDirectMessages) {
-            processNewDirectMessages(messages)
-        } else {
-            processNewChannelMessages(messages)
-        }
-    }
-
-    fun processNewPresenses(presenses: List<FlatPresense>) {
-        if (isDirectMessages) {
-            val currentUserPresense = presenses.firstOrNull { it.email == user?.email }
-            if (currentUserPresense != null) {
-                _presense.update { currentUserPresense?.presense }
-            }
-        }
-    }
-
-    suspend fun processNewDirectMessages(messages: List<MessageDto>) {
-        val userId = userViewModel.repo.userIdFlow.first()
-        val filteredMessageDtos = messages.filter {
-            when (val dr = it.displayRecipient) {
-                is DisplayRecipient.Users -> isFromCurrentChat(dr.value)
-                is DisplayRecipient.StreamName -> false
-            }
-        }
-        val filteredMessages = filteredMessageDtos.map { Message.from(it, userId?.toInt() ?: 0) }
-        val newMessages = filteredMessages.filter { message -> !_messages.value.any { it.id == message.id } }.filter { possibleMessage?.content != it.content }
-        processUnreadMessages(newMessages)
-        _messages.update { current -> current + newMessages }
-    }
-
-    suspend fun isFromCurrentChat(recipients: List<RecipientUser>): Boolean {
-        val userId = userViewModel.repo.userIdFlow.first()
-        if (userId != null) {
-            val filteredRecipients = recipients.filter { it.id != userId.toInt() }
-            val firstRecipient = filteredRecipients.first()
-            val possibleStreamId = "[${firstRecipient.id}, ${userId}]"
-            return  possibleStreamId == chatId
-        } else {
-            return  false
-        }
-    }
-
-    suspend fun processNewChannelMessages(messages: List<MessageDto>) {
-        val userId = userViewModel.repo.userIdFlow.first()
-        val filteredMessageDtos = messages.filter {
-            when (val dr = it.displayRecipient) {
-                is DisplayRecipient.Users -> false
-                is DisplayRecipient.StreamName ->
-                    dr.value == chatTitle && it.subject == topic
-            }
-        }
-        val filteredMessages = filteredMessageDtos.map { Message.from(it, userId?.toInt() ?: 0) }
-        val newMessages = filteredMessages.filter { message -> !_messages.value.any { it.id == message.id} }.filter { possibleMessage?.content != it.content }
-        processUnreadMessages(newMessages)
-        _messages.update { current -> current + newMessages }
     }
 }
 

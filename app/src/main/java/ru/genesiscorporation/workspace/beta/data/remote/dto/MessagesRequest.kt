@@ -1,5 +1,6 @@
 package ru.genesiscorporation.workspace.beta.data.remote.dto
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import ru.genesiscorporation.workspace.beta.MessageDto
 import ru.genesiscorporation.workspace.beta.data.remote.ApiError
@@ -8,62 +9,52 @@ import ru.genesiscorporation.workspace.beta.data.remote.HTTPMethod
 
 @Serializable
 data class MessagesRequest(
-    val anchor: String,
-    val num_before: String,
-    val num_after: String,
-    val narrow: String,
-    val apply_markdown: String = "false"
-): ApiRequest<MessagesRequestData, MessagesDtoResponse, ApiError> {
+    val streamId: String,
+    val topicId: String?
+): ApiRequest<MessagesRequestData, List<MessageResponse>, ApiError> {
     override val method: HTTPMethod = HTTPMethod.GET
     override val requiresApiKey: Boolean = true
-    override val url: String = "/messages"
+    override val url: String = "/api/messenger/v1/messages/"
     override val data = MessagesRequestData(
-        anchor, num_before, num_after, narrow, apply_markdown
+        streamId, topicId
     )
 }
 
 @Serializable
 data class DirectMessagesRequest(
-    val anchor: String,
-    val num_before: String,
-    var num_after: String,
-    val narrow: String,
-    val apply_markdown: String = "false"
-): ApiRequest<MessagesRequestData, MessagesDtoResponse, ApiError> {
+    val streamId: String,
+    val topicId: String?
+): ApiRequest<MessagesRequestData, List<MessageResponse>, ApiError> {
     override val method: HTTPMethod = HTTPMethod.GET
     override val requiresApiKey: Boolean = true
-    override val url: String = "/messages"
+    override val url: String = "/api/messenger/v1/messages/"
     override val data = MessagesRequestData(
-        anchor, num_before, num_after, narrow, apply_markdown
+        streamId, topicId
     )
 }
 
 @Serializable
 data class MessagesByIdsRequest(
-    val messageIds: List<Int>
-): ApiRequest<MessagesByIdsRequestData, MessagesDtoResponse, ApiError> {
+    val messageIds: List<String>
+): ApiRequest<MessagesByIdsRequestData, List<MessageResponse>, ApiError> {
     override val method: HTTPMethod = HTTPMethod.GET
     override val requiresApiKey: Boolean = true
-    override val url: String = "/messages"
+    override val url: String = "/api/messenger/v1/messages/"
     override val data = MessagesByIdsRequestData(
-       "[${messageIds.joinToString(",")}]", "false"
+       messageIds//"${messageIds.joinToString("&uuid=")}"
     )
 }
 
 
 @Serializable
 data class MessagesRequestData(
-    val anchor: String,
-    val num_before: String,
-    var num_after: String,
-    val narrow: String,
-    val apply_markdown: String
+    @SerialName("stream_uuid") val streamUuid: String,
+    @SerialName("topic_uuid") val topicUuid: String?
 )
 
 @Serializable
 data class MessagesByIdsRequestData(
-    val message_ids: String,
-    val apply_markdown: String
+    val uuid: List<String>
 )
 
 @Serializable
@@ -71,3 +62,22 @@ data class MessagesDtoResponse(
     val messages: List<MessageDto>
 ){
 }
+@Serializable
+data class MessageResponse(
+    var uuid: String,
+    @SerialName("updated_at") val updatedAt: String,
+    @SerialName("created_at") val createdAt: String,
+    @SerialName("stream_uuid") val streamUuid: String,
+    @SerialName("topic_uuid") var topicUuid: String,
+    @SerialName("user_uuid") var userUuid: String,
+    var payload: MessageResponsePayload,
+    @SerialName("is_own") val isOwn: Boolean,
+    var reactions: Map<String, Int>,
+    var user: UserResponseData? = null
+)
+
+@Serializable
+data class MessageResponsePayload(
+    val kind: String,
+    var content: String
+)
