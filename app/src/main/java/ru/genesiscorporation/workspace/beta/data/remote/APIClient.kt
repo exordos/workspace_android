@@ -30,6 +30,9 @@ interface ApiRequest<RequestData, Response, ResponseError> {
     val isJson: Boolean
         get() = true
     val data: RequestData
+
+    val additionalHeaders: Map<String, String>
+            get() = emptyMap()
 }
 
 @Serializable

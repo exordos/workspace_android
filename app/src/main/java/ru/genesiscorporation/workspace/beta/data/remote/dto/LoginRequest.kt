@@ -9,7 +9,8 @@ import ru.genesiscorporation.workspace.beta.data.remote.HTTPMethod
 @Serializable
 data class LoginRequest(
     val username: String,
-    val password: String
+    val password: String,
+    val otp: String
 ): ApiRequest<LoginRequestData, LoginResponse, ApiError> {
     override val method: HTTPMethod = HTTPMethod.POST
     override val requiresApiKey: Boolean = false
@@ -18,6 +19,13 @@ data class LoginRequest(
     override val data = LoginRequestData(
         username, password, "login+password", "openid email profile project:fe02e55d-4548-4b3e-a175-fcae928f41b2", "3600", "172800"
     )
+
+    override val additionalHeaders: Map<String, String> =
+        if (!otp.isEmpty()) {
+            mapOf("X-OTP" to otp)
+        } else {
+            emptyMap()
+        }
 }
 
 @Serializable

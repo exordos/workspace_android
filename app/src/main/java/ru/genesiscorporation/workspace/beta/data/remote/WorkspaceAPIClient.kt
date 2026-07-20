@@ -44,6 +44,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.UploadFileResponseDa
 import kotlin.io.encoding.Base64
 import ru.genesiscorporation.workspace.beta.BuildConfig
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
+import ru.genesiscorporation.workspace.beta.data.remote.dto.LoginRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TokenRefreshRequest
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 
@@ -156,6 +157,11 @@ class WorkspaceAPIClient(
                 if (request.requiresApiKey) {
                     header("Authorization", "Bearer $accessToken")
                 }
+                if (!request.additionalHeaders.isEmpty()) {
+                    request.additionalHeaders.forEach { additionalHeader ->
+                        header(additionalHeader.key, additionalHeader.value)
+                    }
+                }
             }
             val httpResponse: HttpResponse = client.request(requestBuilder)
 
@@ -170,7 +176,7 @@ class WorkspaceAPIClient(
                     val response = json.decodeFromString<Response>(responseString)
                     ApiResult.Success(response)
                 }
-            } else if (httpResponse.status.value == 401) {
+            } else if (httpResponse.status.value == 401 && request !is LoginRequest) {
                 refreshToken()
                 requestBuilder.headers.set("Authorization", "Bearer ${baseAccessToken ?: ""}")
                 val httpResponseAfterRefresh: HttpResponse = client.request(requestBuilder)
@@ -201,8 +207,7 @@ class WorkspaceAPIClient(
             }  else {
                 val json = Json { ignoreUnknownKeys = true }
                 val responseString: String = httpResponse.body()
-                val response = json.decodeFromString<ResponseStatusError>(responseString)
-                val error = ApiError(response.msg, response.code)
+                val error = ApiError(responseString, "${httpResponse.status.value}")
 
                 ApiResult.Error(error)
             }

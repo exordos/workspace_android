@@ -74,6 +74,8 @@ fun LoginScreen(
 ) {
     val loginText by viewModel.loginText.collectAsState()
     val passwordText by viewModel.passwordText.collectAsState()
+    val otpText by viewModel.otpText.collectAsState()
+    val needsOtp by viewModel.needsOtp.collectAsState()
     val scope = rememberCoroutineScope()
     val user = UserState.current
     val webUrl by viewModel.webUrl.collectAsStateWithLifecycle()
@@ -131,7 +133,7 @@ fun LoginScreen(
             ) {
 
                 Text(
-                    "Email",
+                    "Логин",
                     color = LocalWorkspaceColorsPalette.current.textAdditional30,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium,
@@ -213,6 +215,44 @@ fun LoginScreen(
                                 id = R.drawable.ic_visibility
                             ),
                             contentDescription = null
+                        )
+                    }
+                }
+                if (needsOtp) {
+                    Text(
+                        "Одноразовый код-пароль",
+                        color = LocalWorkspaceColorsPalette.current.textAdditional30,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(horizontal = 20.dp)
+                    )
+                    Box(
+                        contentAlignment = Alignment.CenterStart,
+                        modifier = Modifier
+                            .padding(horizontal = 20.dp)
+                            .fillMaxWidth()
+                            .height(40.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .padding(vertical = 4.dp)
+                            .background(
+                                LocalWorkspaceColorsPalette.current.searchBackground,
+                                RoundedCornerShape(8.dp)
+                            )
+                    ) {
+                        BasicTextField(
+                            value = otpText,
+                            onValueChange = viewModel::onOtpTextChange,
+                            textStyle = TextStyle(
+                                color = LocalWorkspaceColorsPalette.current.textHeaders,
+                                fontSize = 14.sp
+                            ),
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Email
+                            ),
+                            cursorBrush = SolidColor(LocalWorkspaceColorsPalette.current.textHeaders),
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                                .padding(horizontal = 12.dp)
                         )
                     }
                 }

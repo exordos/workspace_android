@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.buffer
 import ru.genesiscorporation.workspace.beta.UserViewModel
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
@@ -33,6 +34,8 @@ class LoginViewModel(
 
     fun onLoginChange(newText: String) {
         _loginText.value = newText
+        _needsOtp.value = false
+        _otpText.value = ""
     }
 
     private val _passwordText = MutableStateFlow("")
@@ -40,11 +43,24 @@ class LoginViewModel(
 
     fun onPasswordChange(newText: String) {
         _passwordText.value = newText
+        _needsOtp.value = false
+        _otpText.value = ""
+    }
+
+    private val _needsOtp = MutableStateFlow(false)
+    val needsOtp: StateFlow<Boolean> = _needsOtp
+
+
+    private val _otpText = MutableStateFlow("")
+    val otpText: StateFlow<String> = _otpText
+
+    fun onOtpTextChange(newText: String) {
+        _otpText.value = newText
     }
 
     suspend fun onLoginClick() {
         _queryState.value = QueryState.Loading
-        val response = client.performRequest(LoginRequest(loginText.value, passwordText.value))
+        val response = client.performRequest(LoginRequest(loginText.value, passwordText.value, otpText.value))
         when(response) {
             is ApiResult.Success -> {
                 val userResponse = response.value
@@ -53,7 +69,12 @@ class LoginViewModel(
                 client.baseAccessToken = userResponse.accessToken
             }
             is ApiResult.Error -> {
-                _queryState.value = QueryState.Error(response.error.message ?: "Error")
+                if (response.error.code == "401") {
+                    _needsOtp.value = true
+                    _queryState.value = QueryState.Idle
+                } else {
+                    _queryState.value = QueryState.Error(response.error.message ?: "Error")
+                }
             }
         }
     }
