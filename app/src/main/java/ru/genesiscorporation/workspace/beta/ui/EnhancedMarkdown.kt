@@ -1,5 +1,7 @@
 package ru.genesiscorporation.workspace.beta.ui
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -8,19 +10,26 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.navigation.NavHostController
 import dev.jeziellago.compose.markdowntext.MarkdownText
+import ru.genesiscorporation.workspace.beta.ChatFlow
+import ru.genesiscorporation.workspace.beta.modules.chatdialog.ChatDialogViewModel
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 
 @Composable
 fun EnhancedMarkdown(
     markdown: String,
     modifier: Modifier = Modifier,
-    style: TextStyle
+    style: TextStyle,
+    navController: NavHostController?,
+    viewModel: ChatDialogViewModel?
 ) {
+    val context = LocalContext.current
     if (MarkdownParser.hasQuotes(markdown)) {
         val nodes = remember(markdown) { MarkdownParser.parse(markdown) }
         MessageNodes(
@@ -28,11 +37,35 @@ fun EnhancedMarkdown(
             modifier = modifier,
             style = style,
             depth = 0,
+            navController,
+            viewModel
         )
     } else {
         MarkdownText(
             markdown = markdown,
-            style = style
+            style = style,
+            onLinkClicked = { url ->
+                when {
+                    url.startsWith("urn:user:") -> {
+                        val userId = url.removePrefix("urn:user:")
+                        val user = viewModel?.getUser(userId)
+                        if (user != null) {
+                            navController?.navigate(
+                                ChatFlow.ChatUserInfo(
+                                    user.displayableName(),
+                                    user.uuid,
+                                    user.avatar,
+                                    user.email ?: ""
+                                )
+                            )
+                        }
+                    }
+                    else -> {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                        runCatching { context.startActivity(intent) }
+                    }
+                }
+            }
         )
     }
 }
@@ -149,18 +182,45 @@ private fun MessageNodes(
     modifier: Modifier = Modifier,
     style: TextStyle,
     depth: Int,
+    navController: NavHostController?,
+    viewModel: ChatDialogViewModel?
 ) {
+    val context = LocalContext.current
     Column(modifier = modifier.fillMaxWidth()) {
         nodes.forEach { node ->
             when (node) {
                 is QouteNode.Text -> MarkdownText(
                     markdown = node.content,
                     style = style,
+                    onLinkClicked = { url ->
+                        when {
+                            url.startsWith("urn:user:") -> {
+                                val userId = url.removePrefix("urn:user:")
+                                val user = viewModel?.getUser(userId)
+                                if (user != null) {
+                                    navController?.navigate(
+                                        ChatFlow.ChatUserInfo(
+                                            user.displayableName(),
+                                            user.uuid,
+                                            user.avatar,
+                                            user.email ?: ""
+                                        )
+                                    )
+                                }
+                            }
+                            else -> {
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                runCatching { context.startActivity(intent) }
+                            }
+                        }
+                    }
                 )
                 is QouteNode.Quote -> ZulipQuoteBlock(
                     quote = node,
                     style = style,
                     depth = depth,
+                    navController = navController,
+                    viewModel
                 )
             }
         }
@@ -174,7 +234,10 @@ private fun ZulipQuoteBlock(
     quote: QouteNode.Quote,
     style: TextStyle,
     depth: Int,
+    navController: NavHostController?,
+    viewModel: ChatDialogViewModel?
 ) {
+    val context = LocalContext.current
     val colors = LocalWorkspaceColorsPalette.current
     val borderColor = colors.textAdditional30.copy(alpha = 0.7f)
     val headerStyle = style.copy(
@@ -200,6 +263,28 @@ private fun ZulipQuoteBlock(
             MarkdownText(
                 markdown = header.toMarkdownLine(),
                 style = headerStyle,
+                onLinkClicked = { url ->
+                    when {
+                        url.startsWith("urn:user:") -> {
+                            val userId = url.removePrefix("urn:user:")
+                            val user = viewModel?.getUser(userId)
+                            if (user != null) {
+                                navController?.navigate(
+                                    ChatFlow.ChatUserInfo(
+                                        user.displayableName(),
+                                        user.uuid,
+                                        user.avatar,
+                                        user.email ?: ""
+                                    )
+                                )
+                            }
+                        }
+                        else -> {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                            runCatching { context.startActivity(intent) }
+                        }
+                    }
+                }
             )
         }
         if (quote.children.isNotEmpty()) {
@@ -207,6 +292,8 @@ private fun ZulipQuoteBlock(
                 nodes = quote.children,
                 style = style,
                 depth = depth + 1,
+                navController = navController,
+                viewModel = viewModel
             )
         }
     }

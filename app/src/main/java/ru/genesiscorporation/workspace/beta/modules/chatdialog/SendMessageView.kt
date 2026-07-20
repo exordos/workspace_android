@@ -17,11 +17,6 @@ import androidx.compose.foundation.layout.exclude
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.isImeVisible
-import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -66,6 +61,7 @@ fun SendMessageView(
     val scope = rememberCoroutineScope()
     val imageUri by viewModel.imageUri.collectAsState()
     val editingMessageBackupText by viewModel.editingMessageBackupText.collectAsState()
+    val quotedMessage by viewModel.quotedMessage.collectAsState()
     val context = LocalContext.current
     val launcher = rememberLauncherForActivityResult(
         contract =
@@ -101,6 +97,7 @@ fun SendMessageView(
             }
         }
         val message = editingMessageBackupText
+        val currentlyQuotedMessage = quotedMessage
         if (message != null) {
             Row(
                 modifier = Modifier.padding(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 0.dp)
@@ -115,6 +112,35 @@ fun SendMessageView(
                     )
                     Text(
                         message,
+                        color = LocalWorkspaceColorsPalette.current.textAdditional50,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Spacer(modifier = Modifier.weight(1f))
+                Icon(
+                    painter = painterResource(R.drawable.ic_close_small),
+                    contentDescription = "Close",
+                    modifier = Modifier
+                        .size(24.dp)
+                        .clickable { viewModel.clearEditingMessage() },
+                )
+            }
+        } else if (currentlyQuotedMessage != null){
+            Row(
+                modifier = Modifier.padding(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 0.dp)
+            ) {
+                Column {
+                    Text(
+                        "Цитируемое сообщение",
+                        color = LocalWorkspaceColorsPalette.current.primary,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        currentlyQuotedMessage.payload.content,
                         color = LocalWorkspaceColorsPalette.current.textAdditional50,
                         fontSize = 12.sp,
                         maxLines = 1,

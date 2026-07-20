@@ -9,6 +9,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.scrollBy
@@ -106,6 +107,7 @@ import java.time.Duration
 import java.util.Locale
 import androidx.compose.ui.platform.LocalLocale
 import kotlinx.coroutines.flow.distinctUntilChanged
+import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.ui.AnimatedGif
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
@@ -268,7 +270,6 @@ fun ChatDialogScreen(
                         .only(WindowInsetsSides.Bottom)
                 )
                 .offset {
-                    // Pull field down by nav bar height so it meets the keyboard
                     val extra = if (imeVisible) {
                         with(density) { navBarHeight.roundToPx() }
                     } else 0
@@ -342,7 +343,7 @@ data class UserUploadMarkdownParts(
     val relativePath: String,
 )
 private val captionThenLink = Regex(
-    """^(?:(.*?)\r?\n)?\[([^\]]*)]\(([^)]+)\)""",
+    """^(?:(.*?)\r?\n)?\(([^)]+)\)\s*\[(urn:image:[^\]]+)\]""",
 )
 
 fun String.parseUserUploadMarkdownOrNull(): UserUploadMarkdownParts? {
@@ -360,30 +361,32 @@ fun ChatMessage(
     navController: NavHostController,
     onImageLoad: () -> Unit
 ) {
+    val scope = rememberCoroutineScope()
+    val messageFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
     Column(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-//        val previousMessage = viewModel.previousMessageById(item.id ?: -1)
-//        if (previousMessage != null) {
-//            val currentMessageDate = Instant.ofEpochSecond(item.timestamp).atZone(ZoneId.systemDefault()).toLocalDate()
-//            val previousMessageDate = Instant.ofEpochSecond(previousMessage.timestamp).atZone(ZoneId.systemDefault()).toLocalDate()
-//            if (currentMessageDate != previousMessageDate) {
-//                val zone = ZoneId.systemDefault()
-//                val locale = LocalLocale.current.platformLocale
-//                val formatter = DateTimeFormatter.ofPattern("d MMM", locale)
-//                Text(
-//                    text = currentMessageDate.format(formatter),
-//                    color = LocalWorkspaceColorsPalette.current.textHeaders,
-//                    fontSize = 14.sp,
-//                    modifier = Modifier
-//                        .padding(vertical = 16.dp)
-//                        .background(
-//                            LocalWorkspaceColorsPalette.current.surface,
-//                            shape = RoundedCornerShape(100.dp)
-//                        )
-//                        .padding(vertical = 4.dp, horizontal = 12.dp)
-//                )
-//            }
+        val previousMessage = viewModel.previousMessageByUuid(item.uuid)
+        if (previousMessage != null) {
+            val currentMessageDate = LocalDateTime.parse(item.createdAt, messageFormatter).toLocalDate()
+            val previousMessageDate = LocalDateTime.parse(previousMessage.createdAt, messageFormatter).toLocalDate()
+            if (currentMessageDate != previousMessageDate) {
+                val zone = ZoneId.systemDefault()
+                val locale = LocalLocale.current.platformLocale
+                val formatter = DateTimeFormatter.ofPattern("d MMM", locale)
+                Text(
+                    text = currentMessageDate.format(formatter),
+                    color = LocalWorkspaceColorsPalette.current.textHeaders,
+                    fontSize = 14.sp,
+                    modifier = Modifier
+                        .padding(vertical = 16.dp)
+                        .background(
+                            LocalWorkspaceColorsPalette.current.surface,
+                            shape = RoundedCornerShape(100.dp)
+                        )
+                        .padding(vertical = 4.dp, horizontal = 12.dp)
+                )
+            }
 //            if (previousMessage.flags.contains("read") && !item.flags.contains("read")) {
 //                Text(
 //                    text = "Новые сообщения",
@@ -398,7 +401,7 @@ fun ChatMessage(
 //                        .padding(vertical = 4.dp, horizontal = 12.dp)
 //                )
 //                }
-//        }
+        }
         Column(
             horizontalAlignment = Alignment.Start
         ) {
@@ -419,14 +422,28 @@ fun ChatMessage(
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     for (reaction in item.reactions) {
+                        val hasMyReaction = viewModel.hasMyReaction(reaction.key, item.uuid)
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
+                                .padding(4.dp)
+                                .border(
+                                    width = 1.dp,
+                                    color = LocalWorkspaceColorsPalette.current.onPrimary,
+                                    shape = RoundedCornerShape(16.dp)
+                                )
                                 .background(
-                                    LocalWorkspaceColorsPalette.current.textAdditional50,
+                                    if (hasMyReaction) LocalWorkspaceColorsPalette.current.primary else Color.Transparent,
                                     shape = RoundedCornerShape(16.dp)
                                 )
                                 .padding(4.dp)
+                                .clickable(
+                                    onClick = {
+                                        scope.launch {
+                                            viewModel.onMessageReactionTap(item.uuid, reaction.key)
+                                        }
+                                    }
+                                ),
                         ) {
                             Text(reaction.key)
                             Text(text ="${reaction.value}",

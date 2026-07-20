@@ -41,5 +41,6 @@ enum class HTTPMethod(val value: String) {
     GET("GET"),
     POST("POST"),
     PATCH("PATCH"),
-    DELETE("DELETE")
+    DELETE("DELETE"),
+    PUT("PUT")
 }

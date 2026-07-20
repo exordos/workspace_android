@@ -4,10 +4,12 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -27,11 +29,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.toColorInt
+import dev.jeziellago.compose.markdowntext.MarkdownText
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
@@ -66,7 +70,7 @@ fun ChatChannel(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .height(70.dp)
+            .height(76.dp)
             .clip(
                 RoundedCornerShape(8.dp)
             )
@@ -79,31 +83,23 @@ fun ChatChannel(
                 }
             )
     ) {
-        val avatar = item.avatar
-        if (avatar != null) {
-            Avatar(
-                avatar,
-                viewModel.client.userViewModel.baseUrl.value ?: "",
-                null,
-                "",
-                40,
-                false
-            )
+        val avatarUrn = if (item.isPrivate && item.lastMessage?.user?.avatar != null) {
+            item.lastMessage?.user?.avatar
         } else {
-            val color = try {
-                Color(0xFF000000 or item.color.toLong())
-            } catch (e: IllegalArgumentException) {
-                Color.Gray
-            }
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .background(color = color, shape = CircleShape)
-            )
+            null
         }
+        Avatar(
+            avatarUrn,
+            viewModel.client.userViewModel.baseUrl.value ?: "",
+            item.color,
+            item.name,
+            40,
+            false
+        )
         Column(
             modifier = Modifier
-                .padding(10.dp)
+                .padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
             val lastMessage = item.lastMessage
             Row(
@@ -114,6 +110,7 @@ fun ChatChannel(
                     text = item.name,
                     color = LocalWorkspaceColorsPalette.current.textHeaders,
                     fontSize = 14.sp,
+                    lineHeight = 20.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -130,17 +127,49 @@ fun ChatChannel(
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = if (item.isPrivate) Alignment.CenterVertically else Alignment.Bottom
             ) {
                 if (lastMessage != null) {
-                    Text(
-                        text = lastMessage.payload.content,
-                        modifier = Modifier.weight(1f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        color = LocalWorkspaceColorsPalette.current.textAdditional50,
-                        fontSize = 12.sp,
-                    )
+                    if (item.isPrivate) {
+                        MarkdownText(
+                            markdown = lastMessage.payload.content,
+                            modifier = Modifier.weight(1f),
+                            maxLines = 1,
+                            style = TextStyle(
+                                color = LocalWorkspaceColorsPalette.current.textAdditional50,
+                                fontSize = 12.sp
+                            )
+                        )
+                    } else {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            val lastMessageUser = lastMessage.user
+                            if (lastMessageUser != null) {
+                                Text(
+                                    text = lastMessageUser.displayableName(),
+                                    color = LocalWorkspaceColorsPalette.current.primary,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    lineHeight = 20.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            MarkdownText(
+                                markdown = lastMessage.payload.content,
+                                modifier = Modifier.weight(1f)
+                                    .fillMaxHeight(),
+                                maxLines = 1,
+                                style = TextStyle(
+                                    color = LocalWorkspaceColorsPalette.current.textAdditional50,
+                                    fontSize = 12.sp,
+                                    lineHeight = 20.sp
+                                ),
+                            )
+                        }
+                    }
                 } else {
                     Spacer(modifier = Modifier.weight(1f))
                 }

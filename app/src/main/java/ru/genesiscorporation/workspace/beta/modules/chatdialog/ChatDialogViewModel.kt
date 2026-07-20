@@ -11,22 +11,19 @@ import io.ktor.client.request.header
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
-import ru.genesiscorporation.workspace.beta.DisplayRecipient
-import ru.genesiscorporation.workspace.beta.MessageDto
-import ru.genesiscorporation.workspace.beta.RecipientUser
 import ru.genesiscorporation.workspace.beta.UserViewModel
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
 import ru.genesiscorporation.workspace.beta.data.FlatPresense
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.data.remote.dto.AddMessageReactionRequest
-import ru.genesiscorporation.workspace.beta.data.remote.dto.DirectMessagesRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.EditMessageRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MarkMessagesReadRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageReaction
@@ -34,11 +31,13 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponsePayload
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Presense
+import ru.genesiscorporation.workspace.beta.data.remote.dto.RemoveMessageReactionRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.SendDirectMessageRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.SendMessageRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UsersRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
+import java.time.LocalDateTime
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 import kotlin.collections.filter
@@ -52,7 +51,7 @@ class ChatDialogViewModel(
     val chatTitle: String,
     var chatId: String,
     val topicName: String?,
-    val topicUuid: String?,
+    val topicUuid: String,
     val isDirectMessages: Boolean,
     val repo: EventsRepository,
     val userId: Int?
@@ -79,6 +78,11 @@ class ChatDialogViewModel(
     var editingMessage: MessageResponse? = null
     private val _editingMessageBackupText = MutableStateFlow<String?>(null)
     val editingMessageBackupText: StateFlow<String?> = _editingMessageBackupText
+
+    private val _quotedMessage = MutableStateFlow<MessageResponse?>(null)
+    val quotedMessage: StateFlow<MessageResponse?> = _quotedMessage
+
+
     private val _messageText = MutableStateFlow("")
     val messageText: StateFlow<String> = _messageText
 
@@ -86,6 +90,8 @@ class ChatDialogViewModel(
     val imageUri: StateFlow<Uri?> = _imageUri
 
     var shouldScrollToBottom: Boolean = true
+
+    val messageFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
 
     fun onMessageChange(newText: String) {
         _messageText.value = newText
@@ -95,17 +101,36 @@ class ChatDialogViewModel(
         _imageUri.value = newUri
     }
 
-//    fun nextMessageById(currentId: Int?): Message? {
-//        val i = _messages.value.indexOfFirst { it.id == currentId }
-//        return if (i >= 0) _messages.value.getOrNull(i + 1) else null
-//    }
-//
-//    fun previousMessageById(currentId: Int): Message? {
-//        val i = _messages.value.indexOfFirst { it.id == currentId }
-//        return if (i >= 0) _messages.value.getOrNull(i - 1) else null
-//    }
+    fun nextMessageByUuid(currentUuid: String): MessageResponse? {
+        val streamTopicKey = "${chatId}.${topicUuid}"
+        val messages = streamTopicMessages.value[streamTopicKey]?.sortedBy { LocalDateTime.parse(it.createdAt, messageFormatter) }
+        if (messages != null) {
+            val i =
+                messages.indexOfFirst { it.uuid == currentUuid }
+            return if (i >= 0) messages.getOrNull(i + 1) else null
+        } else {
+            return null
+        }
+    }
+
+    fun previousMessageByUuid(currentUuid: String): MessageResponse? {
+        val streamTopicKey = "${chatId}.${topicUuid}"
+        val messages = streamTopicMessages.value[streamTopicKey]?.sortedBy { LocalDateTime.parse(it.createdAt, messageFormatter) }
+        if (messages != null) {
+            val i =
+                messages.indexOfFirst { it.uuid == currentUuid }
+            return if (i >= 0) messages.getOrNull(i - 1) else null
+        } else {
+            return null
+        }
+    }
+
+    fun getUser(userUuid: String): UserResponseData? {
+        return repo.users.value.firstOrNull { it.uuid == userUuid }
+    }
 
     fun onEditMessageClicked(message: MessageResponse) {
+        _quotedMessage.value = null
         if (message.uuid != "") {
             editingMessage = message
             _editingMessageBackupText.value = message.payload.content
@@ -115,9 +140,8 @@ class ChatDialogViewModel(
 
     fun onQuoteMessageClicked(message: MessageResponse) {
         editingMessage = null
-        val users = repo.users.value
-        val messageUser = users.firstOrNull { it.uuid == message.userUuid }
-        _messageText.value = "@_**${messageUser?.username}**\n```quote\n${message.payload.content}\n```\n"
+        _editingMessageBackupText.value = null
+        _quotedMessage.value = message
     }
 
     fun onScroll() {
@@ -128,6 +152,10 @@ class ChatDialogViewModel(
         _editingMessageBackupText.value = null
         editingMessage = null
         _messageText.value = ""
+    }
+
+    fun hasMyReaction(reaction: String, messageUuid: String): Boolean {
+        return  !repo.userReactions.value.none { it.emojiName == reaction && it.messageUuid == messageUuid }
     }
 
     suspend fun onSendClicked(context: Context) {
@@ -143,11 +171,15 @@ class ChatDialogViewModel(
 
     suspend fun sendMessage(context: Context) {
         val imageUri = _imageUri.value
+        var messageText = ""
+        val currentlyQuotedMessage = _quotedMessage.value
+        if (currentlyQuotedMessage != null) {
+            messageText += "[${currentlyQuotedMessage.user?.displayableName() ?: ""}](urn:user:${currentlyQuotedMessage.authorUuid}) [said](urn:message:${currentlyQuotedMessage.uuid})\n```quote\n${currentlyQuotedMessage.payload.content}\n```\n"
+        }
         if (imageUri != null) {
             val response = client.uploadImage(context, imageUri, chatId)
             when(response) {
                 is ApiResult.Success -> {
-                    var messageText = ""
                     val text = _messageText.value
                     if (!text.isBlank()) {
                         messageText += "$text\r\n"
@@ -161,8 +193,9 @@ class ChatDialogViewModel(
             }
         } else {
             val text = _messageText.value
+            messageText += text
             if (text.isBlank()) return
-            sendTextMessage(text)
+            sendTextMessage(messageText)
         }
     }
 
@@ -173,49 +206,37 @@ class ChatDialogViewModel(
             OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
             OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
             chatId,
-            topicUuid ?: "",
-            "",
+            topicUuid,
+            userId ?: "",
+            userId ?: "",
             MessageResponsePayload("markdown", messageText),
             true,
             emptyMap()
         )
+        repo.updateMessagesPool(listOf(newMessage))
+        repo.addMessageToStreamTopic(newMessage)
         possibleMessage = newMessage
         _messageText.value = ""
         _imageUri.value = null
-        if (isDirectMessages) {
-            val sendMessageRequest = SendDirectMessageRequest(
-                chatId,
-                messageText
-            )
-            val response = client.performRequest(sendMessageRequest)
-            when (response) {
-                is ApiResult.Success -> {
-                    newMessage.uuid = response.value.uuid
-                    newMessage.topicUuid = response.value.topicUuid
-                    possibleMessage = null
-                }
-
-                is ApiResult.Error -> {
-
-                }
+        editingMessage = null
+        _editingMessageBackupText.value = null
+        _quotedMessage.value = null
+        val sendMessageRequest = SendMessageRequest(
+            chatId,
+            topicUuid,
+            messageText
+        )
+        val response = client.performRequest(sendMessageRequest)
+        when (response) {
+            is ApiResult.Success -> {
+                newMessage.uuid = response.value.uuid
+                newMessage.topicUuid = response.value.topicUuid
+                repo.updateMessage(newMessage)
+                possibleMessage = null
             }
-        } else {
-            val sendMessageRequest = SendMessageRequest(
-                chatId,
-                topicUuid,
-                messageText
-            )
-            val response = client.performRequest(sendMessageRequest)
-            when (response) {
-                is ApiResult.Success -> {
-                    newMessage.uuid = response.value.uuid
-                    newMessage.topicUuid = response.value.topicUuid
-                    possibleMessage = null
-                }
 
-                is ApiResult.Error -> {
+            is ApiResult.Error -> {
 
-                }
             }
         }
         _messageText.value = ""
@@ -253,11 +274,28 @@ class ChatDialogViewModel(
         val messagesResponse = client.performRequest(messagesRequest)
         when(messagesResponse) {
             is ApiResult.Success -> {
+                val lastMessage = messagesResponse.value.sortedBy { LocalDateTime.parse(it.createdAt, messageFormatter) }.lastOrNull()
+                if (lastMessage != null) {
+                    markMessagesReadUpTo(lastMessage.uuid)
+                }
                 repo.addStreamTopicMessages(chatId, topicUuid ?: "", messagesResponse.value)
                 _isLoading.value = false
             }
             is ApiResult.Error -> {
                 _isLoading.value = false
+            }
+        }
+    }
+
+    suspend fun markMessagesReadUpTo(messageUuid: String) {
+        val markMessagesReadResponse = client.performRequest(MarkMessagesReadRequest(messageUuid))
+        when(markMessagesReadResponse) {
+            is ApiResult.Success -> {
+
+            }
+
+            is ApiResult.Error -> {
+
             }
         }
     }
@@ -271,6 +309,35 @@ class ChatDialogViewModel(
 
             is ApiResult.Error -> {
 
+            }
+        }
+    }
+
+    suspend fun onMessageReactionTap(messageUuid: String, emoji: String) {
+        val reaction = repo.userReactions.value.firstOrNull { it.emojiName == emoji && it.messageUuid == messageUuid }
+        if (reaction != null) {
+            val removeReactionResponse =
+                client.performRequest(RemoveMessageReactionRequest(reaction.uuid))
+            when (removeReactionResponse) {
+                is ApiResult.Success -> {
+
+                }
+
+                is ApiResult.Error -> {
+
+                }
+            }
+        } else {
+            val addReactionResponse =
+                client.performRequest(AddMessageReactionRequest(messageUuid, emoji))
+            when (addReactionResponse) {
+                is ApiResult.Success -> {
+
+                }
+
+                is ApiResult.Error -> {
+
+                }
             }
         }
     }
@@ -288,17 +355,5 @@ data class Message(
     val isFromCurrentUser: Boolean,
     val flags: List<String>
 ) {
-    companion object {
-        fun from(messageDto: MessageDto, currentUserId: Int) = Message(
-            messageDto.id,
-            messageDto.senderFullName,
-            messageDto.senderId,
-            messageDto.content,
-            messageDto.timestamp,
-            messageDto.avatarUrl ?: "",
-            messageDto.subject,
-            messageDto.senderId == currentUserId,
-            messageDto.flags
-        )
-    }
+
 }

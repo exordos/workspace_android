@@ -7,12 +7,19 @@ import ru.genesiscorporation.workspace.beta.data.remote.ApiRequest
 import ru.genesiscorporation.workspace.beta.data.remote.EmptyRequestData
 import ru.genesiscorporation.workspace.beta.data.remote.HTTPMethod
 
-class MessageReactionsRequest(): ApiRequest<EmptyRequestData, List<MessageReaction>, ApiError> {
+class MessageReactionsRequest(
+    userUuid: String
+): ApiRequest<MessageReactionsRequestData, List<MessageReaction>, ApiError> {
     override val method: HTTPMethod = HTTPMethod.GET
     override val requiresApiKey: Boolean = true
-    override val url: String = "/api/messenger/v1/streams/"
-    override val data = EmptyRequestData()
+    override val url: String = "/api/workspace/v1/messenger/message_reactions/"
+    override val data = MessageReactionsRequestData(userUuid)
 }
+
+@Serializable
+data class MessageReactionsRequestData(
+    @SerialName("user_uuid") val userUuid: String
+)
 
 @Serializable
 data class MessageReaction(

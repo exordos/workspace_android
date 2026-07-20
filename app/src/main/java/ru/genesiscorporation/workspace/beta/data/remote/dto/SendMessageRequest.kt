@@ -15,7 +15,7 @@ data class SendMessageRequest(
 ): ApiRequest<SendMessageRequestData, SendMessageResponse, ApiError> {
     override val method: HTTPMethod = HTTPMethod.POST
     override val requiresApiKey: Boolean = true
-    override val url: String = "/api/messenger/v1/messages/"
+    override val url: String = "/api/workspace/v1/messenger/messages/"
     override val data = SendMessageRequestData(
         streamUuid,
         topicUuid,
@@ -30,7 +30,7 @@ data class SendDirectMessageRequest(
 ): ApiRequest<SendDirectMessageRequestData, SendMessageResponse, ApiError> {
     override val method: HTTPMethod = HTTPMethod.POST
     override val requiresApiKey: Boolean = true
-    override val url: String = "/api/messenger/v1/messages/"
+    override val url: String = "/api/workspace/v1/messenger/messages/"
     override val data = SendDirectMessageRequestData(
         streamUuid,
         MessageResponsePayload("markdown", content)

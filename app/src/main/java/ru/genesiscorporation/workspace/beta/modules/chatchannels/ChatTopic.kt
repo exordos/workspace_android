@@ -2,9 +2,11 @@ package ru.genesiscorporation.workspace.beta.modules.chatchannels
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -16,11 +18,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
+import dev.jeziellago.compose.markdowntext.MarkdownText
 import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
@@ -43,7 +48,7 @@ fun ChatTopic(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .height(70.dp)
+            .height(76.dp)
             .clip(
                 RoundedCornerShape(8.dp)
             )
@@ -58,8 +63,10 @@ fun ChatTopic(
     ) {
         Column(
             modifier = Modifier
-                .padding(10.dp)
+                .padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
+            val lastMessage = item.lastMessage
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -68,11 +75,11 @@ fun ChatTopic(
                     text = item.name,
                     color = LocalWorkspaceColorsPalette.current.textHeaders,
                     fontSize = 14.sp,
+                    lineHeight = 20.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                val lastMessage = item.lastMessage
                 if (lastMessage != null) {
                     Spacer(modifier = Modifier.weight(1f))
                     val messageDate = LocalDateTime.parse(lastMessage.createdAt, folderCreationFormatter)
@@ -85,19 +92,41 @@ fun ChatTopic(
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.Bottom
             ) {
                 val lastMessage = item.lastMessage
                 if (lastMessage != null) {
-                    Text(
-                        text = lastMessage.payload.content,
-                        color = LocalWorkspaceColorsPalette.current.textAdditional50,
-                        fontSize = 12.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Column (
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        val lastMessageUser = lastMessage.user
+                        if (lastMessageUser != null) {
+                            Text(
+                                text = lastMessageUser.displayableName(),
+                                color = LocalWorkspaceColorsPalette.current.primary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                lineHeight = 20.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        MarkdownText(
+                            markdown = lastMessage.payload.content,
+                            modifier = Modifier.weight(1f)
+                                .fillMaxHeight(),
+                            maxLines = 1,
+                            style = TextStyle(
+                                color = LocalWorkspaceColorsPalette.current.textAdditional50,
+                                fontSize = 12.sp,
+                                lineHeight = 20.sp
+                            ),
+                        )
+                    }
+                } else {
+                    Spacer(modifier = Modifier.weight(1f))
                 }
-                Spacer(modifier = Modifier.weight(1f))
                 if (item.unreadCount > 0) {
                     Text(
                         text = "${item.unreadCount}",

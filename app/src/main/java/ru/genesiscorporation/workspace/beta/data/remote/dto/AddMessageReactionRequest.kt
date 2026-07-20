@@ -13,7 +13,7 @@ class AddMessageReactionRequest(
 ): ApiRequest<AddMessageReactionRequestData, AddMessageReactionResponse, ApiError> {
     override val method: HTTPMethod = HTTPMethod.POST
     override val requiresApiKey: Boolean = true
-    override val url: String = "/api/messenger/v1/message_reactions/"
+    override val url: String = "/api/workspace/v1/messenger/message_reactions/"
     override val data = AddMessageReactionRequestData(messageUuid, emojiName)
 }
 

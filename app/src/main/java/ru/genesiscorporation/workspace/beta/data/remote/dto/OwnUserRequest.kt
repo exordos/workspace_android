@@ -9,6 +9,6 @@ import ru.genesiscorporation.workspace.beta.data.remote.HTTPMethod
 class OwnUserRequest(): ApiRequest<EmptyRequestData, UserResponseData, ApiError> {
     override val method: HTTPMethod = HTTPMethod.GET
     override val requiresApiKey: Boolean = true
-    override val url: String = "/api/messenger/v1/me/"
+    override val url: String = "/api/workspace/v1/messenger/me/"
     override val data = EmptyRequestData()
 }

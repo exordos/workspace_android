@@ -75,6 +75,7 @@ class WorkspaceAPIClient(
                     HTTPMethod.POST -> HttpMethod.Post
                     HTTPMethod.PATCH -> HttpMethod.Patch
                     HTTPMethod.DELETE -> HttpMethod.Delete
+                    HTTPMethod.PUT -> HttpMethod.Put
                 }
                 header("User-Agent", "Workspace/android/${BuildConfig.VERSION_NAME}")
 
@@ -107,19 +108,48 @@ class WorkspaceAPIClient(
                         }
 
                         HTTPMethod.PATCH -> {
-                            setBody(FormDataContent(Parameters.build {
-                                for ((key, value) in bodyDict) {
-                                    append(key, value)
-                                }
-                            }))
+                            if (request.isJson) {
+                                contentType(ContentType.Application.Json)
+                                setBody(
+                                    request.data
+                                )
+                            } else {
+                                setBody(FormDataContent(Parameters.build {
+                                    for ((key, value) in bodyDict) {
+                                        append(key, value)
+                                    }
+                                }))
+                            }
                         }
 
                         HTTPMethod.DELETE -> {
-                            setBody(FormDataContent(Parameters.build {
-                                for ((key, value) in bodyDict) {
-                                    append(key, value)
-                                }
-                            }))
+                            if (request.isJson) {
+                                contentType(ContentType.Application.Json)
+                                setBody(
+                                    request.data
+                                )
+                            } else {
+                                setBody(FormDataContent(Parameters.build {
+                                    for ((key, value) in bodyDict) {
+                                        append(key, value)
+                                    }
+                                }))
+                            }
+                        }
+
+                        HTTPMethod.PUT -> {
+                            if (request.isJson) {
+                                contentType(ContentType.Application.Json)
+                                setBody(
+                                    request.data
+                                )
+                            } else {
+                                setBody(FormDataContent(Parameters.build {
+                                    for ((key, value) in bodyDict) {
+                                        append(key, value)
+                                    }
+                                }))
+                            }
                         }
                     }
                 }
@@ -189,7 +219,7 @@ class WorkspaceAPIClient(
         val fileName = "image.jpg"
         val baseUrl = userViewModel.repo.baseUrlFlow.first()
         val accessToken = if (baseAccessToken != null) baseAccessToken ?: "" else userViewModel.repo.accessTokenFlow.first() ?: ""
-        val httpResponse: HttpResponse = client.post("${baseUrl}/api/messenger/v1/files/") {
+        val httpResponse: HttpResponse = client.post("${baseUrl}/api/workspace/v1/messenger/files/") {
             setBody(
                 MultiPartFormDataContent(
                     formData {

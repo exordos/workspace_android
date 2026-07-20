@@ -79,7 +79,7 @@ class ChatTopicsViewModelFactory(private val client: WorkspaceAPIClient, private
     }
 }
 
-class ChatDialogViewModelFactory(private val client: WorkspaceAPIClient, private val userViewModel: UserViewModel, private val chatTitle: String, private val chatId: String, private val topicName: String?, private val topicUuid: String?, private val isDirectMessages: Boolean, private  val repo: EventsRepository, val userId: Int?) : ViewModelProvider.Factory {
+class ChatDialogViewModelFactory(private val client: WorkspaceAPIClient, private val userViewModel: UserViewModel, private val chatTitle: String, private val chatId: String, private val topicName: String?, private val topicUuid: String, private val isDirectMessages: Boolean, private  val repo: EventsRepository, val userId: Int?) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(ChatDialogViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")

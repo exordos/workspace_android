@@ -11,7 +11,7 @@ class FoldersRequest(): ApiRequest<EmptyRequestData, List<FolderResponseData>, A
     override val method: HTTPMethod = HTTPMethod.GET
     override val requiresApiKey: Boolean = true
     override val shouldApplySuffix: Boolean = false
-    override val url: String = "/api/messenger/v1/folders/"
+    override val url: String = "/api/workspace/v1/messenger/folders/"
     override val data = EmptyRequestData()
 }
 

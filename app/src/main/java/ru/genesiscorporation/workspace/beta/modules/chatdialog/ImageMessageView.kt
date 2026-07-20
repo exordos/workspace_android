@@ -161,8 +161,9 @@ fun ImageMessageView(
                 modifier = Modifier
                     .weight(2f, fill = false)
             ) {
+                val defaultName = if (item.isOwn) "Я" else "Собеседник"
                 Text(
-                    text = "User",
+                    text = item.user?.displayableName() ?: defaultName,
                     color = if (item.isOwn) LocalWorkspaceColorsPalette.current.indicatorBlue else LocalWorkspaceColorsPalette.current.indicatorPurple,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium

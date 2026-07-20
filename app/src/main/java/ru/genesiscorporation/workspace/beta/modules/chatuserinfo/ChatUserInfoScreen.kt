@@ -148,23 +148,23 @@ fun ChatUserInfoScreen(
                 }
                 Button(
                     onClick = {
-                        if (currentUserId != null) {
-                            navController.navigate(
-                                ChatFlow.ChatDialog(
-                                    viewModel.userName,
-                                    "[${viewModel.userId}, ${currentUserId}]",
-                                    null,
-                                    null,
-                                    true,
-                                    viewModel.userId.toInt()
-                                )
-                            ) {
-                                popUpTo<ChatFlow.ChatList> {
-                                    inclusive = false
-                                }
-                                launchSingleTop = true
-                            }
-                        }
+//                        if (currentUserId != null) {
+//                            navController.navigate(
+//                                ChatFlow.ChatDialog(
+//                                    viewModel.userName,
+//                                    "[${viewModel.userId}, ${currentUserId}]",
+//                                    null,
+//                                    null,
+//                                    true,
+//                                    viewModel.userId.toInt()
+//                                )
+//                            ) {
+//                                popUpTo<ChatFlow.ChatList> {
+//                                    inclusive = false
+//                                }
+//                                launchSingleTop = true
+//                            }
+//                        }
                     },
                     modifier = Modifier
                         .weight(1f)

@@ -177,29 +177,12 @@ fun ChatOldTopic(
                     overflow = TextOverflow.Ellipsis
                 )
                 val lastMessage = item.lastMessage
-                if (lastMessage != null) {
-                    Spacer(modifier = Modifier.weight(1f))
-                    Text(
-                        text = lastMessage.timestamp.formatHHmm(),
-                        color = LocalWorkspaceColorsPalette.current.messageTimeColor,
-                        fontSize = 12.sp,
-                    )
-                }
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 val lastMessage = item.lastMessage
-                if (lastMessage != null) {
-                    Text(
-                        text = lastMessage.content,
-                        color = LocalWorkspaceColorsPalette.current.textAdditional50,
-                        fontSize = 12.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
                 Spacer(modifier = Modifier.weight(1f))
                 if (item.unreadCount > 0) {
                     Text(

@@ -11,7 +11,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.HTTPMethod
 class UsersRequest(): ApiRequest<EmptyRequestData, List<UserResponseData>, ApiError> {
     override val method: HTTPMethod = HTTPMethod.GET
     override val requiresApiKey: Boolean = true
-    override val url: String = "/api/messenger/v1/users/"
+    override val url: String = "/api/workspace/v1/messenger/users/"
     override val data = EmptyRequestData()
 }
 
@@ -25,4 +25,25 @@ data class UserResponseData(
     @SerialName("status_emoji") val statusEmoji: String? = null,
     @SerialName("status_text") val statusText: String? = null,
     val status: String,
-)
+    val avatar: String
+) {
+    fun displayableName(): String {
+        var displayName = ""
+        if (firstName != null) {
+            displayName += firstName
+        }
+
+        if (lastName != null) {
+            if (!displayName.isEmpty()) {
+                displayName += " "
+            }
+            displayName += lastName
+        }
+
+        if (displayName.isEmpty()) {
+            displayName += username
+        }
+
+        return  displayName
+    }
+}

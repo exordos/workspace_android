@@ -14,7 +14,7 @@ class AddStreamRequest(
 ): ApiRequest<AddStreamRequestData, Stream, ApiError> {
     override val method: HTTPMethod = HTTPMethod.POST
     override val requiresApiKey: Boolean = true
-    override val url: String = "/api/messenger/v1/streams/"
+    override val url: String = "/api/workspace/v1/messenger/streams/"
     override val data = AddStreamRequestData(
         name, description, directUserUuid, "native"
     )

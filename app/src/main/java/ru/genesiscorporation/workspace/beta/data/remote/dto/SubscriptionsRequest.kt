@@ -10,7 +10,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.HTTPMethod
 class StreamsRequest(): ApiRequest<EmptyRequestData, List<Stream>, ApiError> {
     override val method: HTTPMethod = HTTPMethod.GET
     override val requiresApiKey: Boolean = true
-    override val url: String = "/api/messenger/v1/streams/"
+    override val url: String = "/api/workspace/v1/messenger/streams/"
     override val data = EmptyRequestData()
 }
 
@@ -23,6 +23,7 @@ data class Stream(
     @SerialName("private") val isPrivate: Boolean,
     val color: Int,
     @SerialName("last_message_uuid") var lastMessageUuid: String? = null,
+    @SerialName("default_topic_uuid") var defaultTopicUuid: String? = null,
     var avatar: String? = null,
     var lastMessage: MessageResponse? = null
 )

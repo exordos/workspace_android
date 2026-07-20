@@ -13,9 +13,6 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
-import ru.genesiscorporation.workspace.beta.ChatFlow
-import ru.genesiscorporation.workspace.beta.MessageDto
-import ru.genesiscorporation.workspace.beta.DisplayRecipient
 import ru.genesiscorporation.workspace.beta.UserViewModel
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
@@ -27,6 +24,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.DeleteChatFromFolder
 import ru.genesiscorporation.workspace.beta.data.remote.dto.EventRegistrationRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FoldersRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageReactionsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesByIdsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.OwnUserRequest
@@ -149,7 +147,7 @@ class ChatViewModel(
         when(response) {
             is ApiResult.Success -> {
                 repo.jitsiServerUrl = response.value.meetUrl
-                loadAllUsersInfo()
+                loadUserInfo()
             }
             is ApiResult.Error -> {
 
@@ -162,11 +160,26 @@ class ChatViewModel(
         when(response) {
             is ApiResult.Success -> {
                 userViewModel.userData = response.value
-                loadAllUsersInfo()
+                repo.currentUser = response.value
+                loadMessageReaction(response.value.uuid)
             }
 
             is ApiResult.Error -> {
 
+            }
+        }
+    }
+
+    suspend fun loadMessageReaction(userUuid: String) {
+        val response = client.performRequest(MessageReactionsRequest(userUuid))
+        when(response) {
+            is ApiResult.Success -> {
+                repo.setInitialMessageReactions(response.value)
+                loadAllUsersInfo()
+            }
+
+            is ApiResult.Error -> {
+                _queryState.value = QueryState.Error("")
             }
         }
     }
@@ -207,24 +220,31 @@ class ChatViewModel(
         when(response) {
             is ApiResult.Success -> {
                 val messageIds = response.value.mapNotNull { it.lastMessageUuid }
-                val messagesResponse = client.performRequest(MessagesByIdsRequest(messageIds))
-                when(messagesResponse) {
-                    is ApiResult.Success -> {
-                        repo.setInitialMessagesPool(messagesResponse.value)
-                        val streamsWithMessages = response.value.map { stream ->
-                            var updatedStream = stream
-                            updatedStream.lastMessage = poolMessage(stream.lastMessageUuid)
-                            updatedStream
+                if (!messageIds.isEmpty()) {
+                    val messagesResponse = client.performRequest(MessagesByIdsRequest(messageIds))
+                    when (messagesResponse) {
+                        is ApiResult.Success -> {
+                            repo.setInitialMessagesPool(messagesResponse.value)
+                            val streamsWithMessages = response.value.map { stream ->
+                                var updatedStream = stream
+                                updatedStream.lastMessage = poolMessage(stream.lastMessageUuid)
+                                updatedStream
+                            }
+                            repo.setInitialStreams(streamsWithMessages)
+                            _queryState.value = QueryState.Success
+                            repo.start()
                         }
-                        repo.setInitialStreams(streamsWithMessages)
-                        _queryState.value = QueryState.Success
-                        repo.start()
+
+                        is ApiResult.Error -> {
+                            repo.setInitialStreams(response.value)
+                            _queryState.value = QueryState.Success
+                            repo.start()
+                        }
                     }
-                    is ApiResult.Error -> {
-                        repo.setInitialStreams(response.value)
-                        _queryState.value = QueryState.Success
-                        repo.start()
-                    }
+                } else {
+                    repo.setInitialStreams(response.value)
+                    _queryState.value = QueryState.Success
+                    repo.start()
                 }
             }
 
@@ -232,82 +252,6 @@ class ChatViewModel(
                 _queryState.value = QueryState.Error("")
             }
         }
-//        val privateMessageIds = recentPrivateConversations.map { it.maxMessageId }
-//        val subscriptionMessageIds = loadedSubscriptions.map { it.firstMessageId }
-//        val messageIds = privateMessageIds + subscriptionMessageIds
-//        val messagesResponse = client.performRequest(MessagesByIdsRequest(messageIds))
-//        when(messagesResponse) {
-//            is ApiResult.Success -> {
-//                val currentUserId = userViewModel.userData?.user_id
-//                for (conversation in recentPrivateConversations.listIterator()) {
-//                    val message = messagesResponse.value.messages.firstOrNull { it.id == conversation.maxMessageId }
-//                    val userId = conversation.userIds.firstOrNull()
-//                    if (userId != null) {
-//                        val user = users.firstOrNull { it.userId == userId }
-//                        if (user != null && message != null) {
-//                            val unreadUserMessagesCount = initialUnreaMessages?.pms?.firstOrNull { it.otherUserId == user.userId }?.unreadMessageIds?.size
-//                            val chatHeader = ChatHeader.from(user, message, "$currentUserId", unreadUserMessagesCount)
-//                            _subscriptions.update { current -> current + chatHeader }
-//                        }
-//                    }
-//                }
-//                val channelChatHeaders = loadedSubscriptions.mapNotNull { subscription ->
-//                    var channelUnreadMessageCount: Int? = null
-//                    val unreadChannelMessages = initialUnreaMessages?.streams?.filter { it.streamId == subscription.streamId }
-//                    if (unreadChannelMessages != null) {
-//                        if (unreadChannelMessages.size > 0) {
-//                            channelUnreadMessageCount = unreadChannelMessages.flatMap { it.unreadMessageIds }.size
-//                        }
-//                    }
-//                        ChatHeader.from(subscription, channelUnreadMessageCount, null)
-//                }
-//                _subscriptions.update { current -> current + channelChatHeaders }
-//                if (pendingDeepLink != null) {
-//                    when {
-//                        pendingDeepLink.startsWith("dialog/") -> {
-//                            val userId = pendingDeepLink.removePrefix("dialog/").substringBefore("/").toInt()
-//                            if (userId != null) {
-//                                val messageUser = repo.users.value.firstOrNull { it.userId == userId }
-//                                if (messageUser != null && currentUserId != null) {
-//                                    _navEvents.tryEmit(
-//                                        ChatNavEvent.OpenDialog(
-//                                            title = messageUser.fullName,
-//                                            chatId = "[${messageUser.userId}, ${currentUserId}]",
-//                                            null,
-//                                            true,
-//                                            userId = messageUser.userId
-//                                        )
-//                                    )
-//                                    onDeepLinkHandled()
-//                                }
-//                            }
-//                        }
-//                        pendingDeepLink.startsWith("stream/") -> {
-//                            val rest = pendingDeepLink.removePrefix("stream/")
-//                            val parts = rest.split("/", limit = 2) // [channelName, topic]
-//                            val channelName = parts[0]
-//                            val topic = parts[1]
-//                            val channel = _subscriptions.value.firstOrNull { it.title == channelName }
-//                            if (channel != null) {
-//                                _navEvents.tryEmit(
-//                                    ChatNavEvent.OpenDialog(
-//                                        title = channelName,
-//                                        "${channel.chatId}",
-//                                        topic,
-//                                        false,
-//                                        channel.streamId.toInt()
-//                                    )
-//                                )
-//                                onDeepLinkHandled()
-//                            }
-//                        }
-//                    }
-//                }
-//            }
-//            is ApiResult.Error -> {
-//
-//            }
-//        }
     }
 
     suspend fun loadTopics(stream: Stream) {
@@ -316,24 +260,29 @@ class ChatViewModel(
         when(response) {
             is ApiResult.Success -> {
                 val messageIds = response.value.mapNotNull { it.lastMessageUuid }
-                val messagesResponse = client.performRequest(MessagesByIdsRequest(messageIds))
-                when(messagesResponse) {
-                    is ApiResult.Success -> {
-                        repo.setInitialMessagesPool(messagesResponse.value)
-                        val topicsWithMessages = response.value.map { topic ->
-                            var updatedTopic = topic
-                            updatedTopic.lastMessage = poolMessage(topic.lastMessageUuid)
-                            updatedTopic
+                if (!messageIds.isEmpty()) {
+                    val messagesResponse = client.performRequest(MessagesByIdsRequest(messageIds))
+                    when (messagesResponse) {
+                        is ApiResult.Success -> {
+                            repo.updateMessagesPool(messagesResponse.value)
+                            val topicsWithMessages = response.value.map { topic ->
+                                var updatedTopic = topic
+                                updatedTopic.lastMessage = poolMessage(topic.lastMessageUuid)
+                                updatedTopic
+                            }
+                            repo.addStreamTopics(stream.uuid, topicsWithMessages)
+                            _queryState.value = QueryState.Success
                         }
-                        repo.addStreamTopics(stream.uuid, topicsWithMessages)
-                        _queryState.value = QueryState.Success
+
+                        is ApiResult.Error -> {
+                            repo.addStreamTopics(stream.uuid, response.value)
+                            _queryState.value = QueryState.Success
+                        }
                     }
-                    is ApiResult.Error -> {
-                        repo.addStreamTopics(stream.uuid, response.value)
-                        _queryState.value = QueryState.Success
-                    }
+                } else {
+                    repo.addStreamTopics(stream.uuid, response.value)
+                    _queryState.value = QueryState.Success
                 }
-                _queryState.value = QueryState.Success
             }
             is ApiResult.Error -> {
                 _queryState.value = QueryState.Error("")
@@ -453,11 +402,11 @@ data class TopicHeader(
     val gravatar: String?,
     val channelName: String,
     val channelId: String,
-    val lastMessage: MessageDto?,
+    val lastMessage: MessageResponse?,
     val unreadCount: Int
 ) {
     companion object {
-        fun from(topic: TopicsResponseData, channelName: String, channelId: String, lastMessage: MessageDto?) = TopicHeader(
+        fun from(topic: TopicsResponseData, channelName: String, channelId: String, lastMessage: MessageResponse?) = TopicHeader(
             topic.name,
             topic.uuid,
             null,

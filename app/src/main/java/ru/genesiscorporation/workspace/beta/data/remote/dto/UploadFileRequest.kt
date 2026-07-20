@@ -14,7 +14,7 @@ data class UploadFileRequest(
 ): ApiRequest<SendMessageRequestData, UploadFileResponseData, ApiError> {
     override val method: HTTPMethod = HTTPMethod.POST
     override val requiresApiKey: Boolean = true
-    override val url: String = "/api/messenger/v1/files/"
+    override val url: String = "/api/workspace/v1/messenger/files/"
     override val data = SendMessageRequestData(
         type,
         to,

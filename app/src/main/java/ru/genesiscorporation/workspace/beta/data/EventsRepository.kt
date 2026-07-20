@@ -22,41 +22,58 @@ import kotlinx.serialization.json.jsonPrimitive
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.data.remote.dto.CustomProfileField
+import ru.genesiscorporation.workspace.beta.data.remote.dto.DeletedMessageReaction
 import ru.genesiscorporation.workspace.beta.data.remote.dto.EpochRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageReaction
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Presense
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
+import kotlin.plus
 
 
 class EventsRepository() {
 
     var client: WorkspaceAPIClient? = null
     var latestEpoch: Int = 0
+    var epochGeneration: String = ""
 
     private val json = Json {
         ignoreUnknownKeys = true
         isLenient = true
     }
 
+    var currentUser: UserResponseData? = null
+
 
     private val _streamTopicMessages = MutableStateFlow<Map<String, List<MessageResponse>>>(emptyMap())
     val streamTopicMessages: StateFlow<Map<String, List<MessageResponse>>> = _streamTopicMessages.asStateFlow()
 
     fun addStreamTopicMessages(streamUuid: String, topicUuid: String, messages: List<MessageResponse>) {
+        val messagesWithUser = messages.map { message ->
+            message.user = users.value.firstOrNull { it.uuid == message.authorUuid }
+            message
+        }
         val key = "$streamUuid.$topicUuid"
         _streamTopicMessages.update { current ->
-            current + (key to messages)
+            current + (key to messagesWithUser)
         }
     }
     fun addMessageToStreamTopic(message: MessageResponse) {
         val key = "${message.streamUuid}.${message.topicUuid}"
+        message.user = users.value.firstOrNull { it.uuid == message.authorUuid }
+
         _streamTopicMessages.update { current ->
             if (current[key] != null ) {
-                val existingTopics = current[key].orEmpty()
-                current + (key to (existingTopics + message))
+                val existingMessages = current[key].orEmpty()
+                val filteredExistingMessages = existingMessages.filter { it.uuid == message.uuid }
+                if (filteredExistingMessages.isEmpty()) {
+                    current + (key to (existingMessages + message))
+                } else {
+                    current
+                }
             } else {
                 current
             }
@@ -126,14 +143,51 @@ class EventsRepository() {
     private val _messagesPool = MutableStateFlow<List<MessageResponse>>(emptyList())
     val messagesPool: StateFlow<List<MessageResponse>> = _messagesPool.asStateFlow()
     fun setInitialMessagesPool(newList: List<MessageResponse>) {
+        val messagesWithUser = newList.map { message ->
+            message.user = users.value.firstOrNull { it.uuid == message.authorUuid }
+            message
+        }
         _messagesPool.update {
-            newList
+            messagesWithUser
         }
     }
 
     fun updateMessagesPool(newList: List<MessageResponse>) {
+        val messagesWithUser = newList.map { message ->
+            message.user = users.value.firstOrNull { it.uuid == message.authorUuid }
+            message
+        }
         _messagesPool.update { current ->
-            current + newList
+            current + messagesWithUser
+        }
+    }
+
+    private val _userReactions = MutableStateFlow<List<MessageReaction>>(emptyList())
+
+    val userReactions: StateFlow<List<MessageReaction>> = _userReactions.asStateFlow()
+
+    fun setInitialMessageReactions(newList: List<MessageReaction>) {
+        _userReactions.update {
+            newList
+        }
+    }
+
+    fun addReaction(reaction: MessageReaction) {
+        val user = currentUser
+        if (user != null) {
+            if (reaction.userUuid == user.uuid)
+                _userReactions.update { current ->
+                    current + reaction
+                }
+        }
+    }
+
+    fun deleteReaction(reaction: DeletedMessageReaction) {
+        val reactionToDelete = _userReactions.value.firstOrNull { it.uuid == reaction.uuid && it.userUuid == reaction.userUuid }
+        if (reactionToDelete != null) {
+            _userReactions.update { current ->
+                current.filterNot { it == reactionToDelete }
+            }
         }
     }
 
@@ -222,6 +276,7 @@ class EventsRepository() {
             when (response) {
                 is ApiResult.Success -> {
                     latestEpoch = response.value.epochVersion
+                    epochGeneration = response.value.epochGeneration
                     startWebsocketConnection(webSocketClient)
                 }
 
@@ -242,8 +297,9 @@ class EventsRepository() {
                         url {
                             protocol = URLProtocol.WS
                             this.host = baseUrl
-                            path("/api/messenger/ws")
+                            path("/api/workspace/v1/events/ws")
                             parameters.append("last_epoch_version", latestEpoch.toString())
+                            parameters.append("epoch_generation", epochGeneration)
                         }
                         headers {
                             append(HttpHeaders.SecWebSocketProtocol, "workspace.events.v1, bearer.$accessToken")
@@ -273,6 +329,9 @@ class EventsRepository() {
                                         }
                                         "topic" -> {
                                             didReceiveTopicEvent(payload, action)
+                                        }
+                                        "message_reaction" -> {
+                                            didReceiveReactionEvent(payload, action)
                                         }
                                         else -> Log.d("WebSocket", "Received: $receivedText")
                                     }
@@ -337,6 +396,19 @@ class EventsRepository() {
             }
             "deleted" -> {
 
+            }
+        }
+    }
+
+    fun didReceiveReactionEvent(payload: String, action: String) {
+        when(action) {
+            "created" -> {
+                val reaction = json.decodeFromString<MessageReaction>(payload)
+                addReaction(reaction)
+            }
+            "deleted" -> {
+                val reaction = json.decodeFromString<DeletedMessageReaction>(payload)
+                deleteReaction(reaction)
             }
         }
     }

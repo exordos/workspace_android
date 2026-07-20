@@ -171,7 +171,7 @@ fun ChatScreen(
                         createdStream.name,
                         createdStream.uuid,
                         null,
-                        null,
+                        createdStream.defaultTopicUuid ?: "",
                         true,
                         null
                     )
@@ -318,6 +318,10 @@ fun ChatScreen(
                                                 .padding(start = 16.dp, 0.dp, endPadding, 0.dp)
                                                 .clickable(
                                                     onClick = {
+                                                        scope.launch {
+                                                            showDetail = false
+                                                            chatViewModel.updateSelectedChat(null)
+                                                        }
                                                         chatViewModel.updateCurrentlySelectedFolder(
                                                             folder
                                                         )
@@ -397,24 +401,25 @@ fun ChatScreen(
                                             currentlySelectedFolder,
                                             onChatNumberToAddChange = { chatToAdd = it },
                                             onClick = {
-//                                                if (item.isPrivate) {
-//                                                    chatViewModel.currentStreamId = item.uuid
-//                                                    navController.navigate(
-//                                                        ChatFlow.ChatDialog(
-//                                                            item.name,
-//                                                            item.uuid,
-//                                                            null,
-//                                                            null,
-//                                                            true,
-//                                                            null
-//                                                        )
-//                                                    )
-//                                                } else {
+                                                val defaultTopicUuid = item.defaultTopicUuid
+                                                if (defaultTopicUuid != null) {
+                                                    chatViewModel.currentStreamId = item.uuid
+                                                    navController.navigate(
+                                                        ChatFlow.ChatDialog(
+                                                            item.name,
+                                                            item.uuid,
+                                                            null,
+                                                            defaultTopicUuid,
+                                                            true,
+                                                            null
+                                                        )
+                                                    )
+                                                } else {
                                                     scope.launch {
                                                         showDetail = true
                                                         chatViewModel.updateSelectedChat(item)
                                                     }
-//                                                }
+                                                }
                                             }
                                         )
                                     }
@@ -460,7 +465,7 @@ fun ChatScreen(
                                             if (state is QueryState.Loading) {
                                                 AnimatedGif(Modifier.size(80.dp))
                                             } else {
-                                                Text("Список каналов пуст")
+                                                Text("Список топиков пуст")
                                             }
                                         }
                                     } else {
@@ -469,7 +474,9 @@ fun ChatScreen(
                                             modifier = Modifier
                                                 .fillMaxSize()
                                         ) {
-                                            items(items = topics) { item ->
+                                            items(
+                                                items = topics.sortedByDescending { LocalDateTime.parse(it.lastMessage?.createdAt ?: it.updatedAt, messageFormatter) }
+                                            ) { item ->
                                                 ChatTopic(
                                                     chatViewModel,
                                                     item,

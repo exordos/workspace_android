@@ -34,9 +34,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -44,15 +41,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import androidx.navigation.NavHostController
-import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
-import coil3.compose.AsyncImage
-import coil3.compose.AsyncImagePainter
-import coil3.compose.rememberAsyncImagePainter
-import coil3.request.ImageRequest
-import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.ui.Avatar
 
 @Composable
@@ -181,19 +171,21 @@ fun UserCell(
         Row(
             verticalAlignment = Alignment.CenterVertically
         ) {
-//            Avatar(
-//                item.avatarUrl ?: "",
-//                viewModel.client.userViewModel.baseUrl.value ?: "",
-//                40,
-//                false
-//            )
+            Avatar(
+                item.avatar,
+                viewModel.client.userViewModel.baseUrl.value ?: "",
+                null,
+                item.displayableName(),
+                40,
+                false
+            )
             Column(
                 modifier = Modifier
                     .padding(10.dp)
             ) {
                 Row {
                     Text(
-                        text = "${item.firstName} ${item.lastName}",
+                        text = item.displayableName(),
                         color = LocalWorkspaceColorsPalette.current.textHeaders,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Medium,

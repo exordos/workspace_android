@@ -13,7 +13,7 @@ data class TopicsRequest(
 ): ApiRequest<TopicsRequestData, List<TopicsResponseData>, ApiError> {
     override val method: HTTPMethod = HTTPMethod.GET
     override val requiresApiKey: Boolean = true
-    override val url: String = "/api/messenger/v1/stream_topics/"
+    override val url: String = "/api/workspace/v1/messenger/stream_topics/"
     override val data = TopicsRequestData(streamUuid)
 }
 
@@ -28,6 +28,7 @@ data class TopicsResponseData(
     var name: String,
     val color: Int,
     @SerialName("stream_uuid") val streamUuid: String,
+    @SerialName("updated_at") var updatedAt: String,
     @SerialName("unread_count") var unreadCount: Int,
     @SerialName("is_done") var isDone: Boolean,
     @SerialName("is_default") val isDefault: Boolean,

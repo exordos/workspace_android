@@ -225,11 +225,6 @@ fun WokspaceApp(
             }
     }
 
-    DisposableEffect(Unit) {
-        onDispose {
-            viewModel.stopLongPolling()
-        }
-    }
 
     NavigationSuiteScaffold(
         layoutType = NavigationSuiteType.ShortNavigationBarCompact,
