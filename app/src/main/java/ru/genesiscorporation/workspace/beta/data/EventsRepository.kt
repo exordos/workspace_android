@@ -21,13 +21,11 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
-import ru.genesiscorporation.workspace.beta.data.remote.dto.CustomProfileField
 import ru.genesiscorporation.workspace.beta.data.remote.dto.DeletedMessageReaction
 import ru.genesiscorporation.workspace.beta.data.remote.dto.EpochRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageReaction
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
-import ru.genesiscorporation.workspace.beta.data.remote.dto.Presense
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
@@ -193,7 +191,34 @@ class EventsRepository() {
 
     private val _users = MutableStateFlow<List<UserResponseData>>(emptyList())
     val users: StateFlow<List<UserResponseData>> = _users.asStateFlow()
-    fun updateUsers(newList: List<UserResponseData>) {
+
+    fun updateUser(updatedUser: UserResponseData) {
+        _users.update { current ->
+            current.map { user ->
+                if (user.uuid == updatedUser.uuid) {
+                    user.copy(
+                        email = updatedUser.email,
+                        firstName = updatedUser.firstName,
+                        lastName = updatedUser.lastName,
+                        status = updatedUser.status,
+                        statusText = updatedUser.statusText,
+                        statusEmoji = updatedUser.statusEmoji,
+                        avatar = updatedUser.avatar
+                    )
+                } else {
+                    user
+                }
+            }
+        }
+    }
+
+    fun addUser(newUser: UserResponseData) {
+        _users.update { current ->
+            current + newUser
+        }
+    }
+
+    fun setInitialUsers(newList: List<UserResponseData>) {
         _users.update {
             newList
         }
@@ -257,14 +282,6 @@ class EventsRepository() {
 
     fun setInitialFolders(newList: List<FolderResponseData>) {
         _folders.update {
-            newList
-        }
-    }
-
-    private val _topics = MutableStateFlow<List<TopicsResponseData>>(emptyList())
-    val topics: StateFlow<List<TopicsResponseData>> = _topics.asStateFlow()
-    fun updateTopics(newList: List<TopicsResponseData>) {
-        _topics.update {
             newList
         }
     }
@@ -354,11 +371,11 @@ class EventsRepository() {
         when(action) {
             "created" -> {
                 val user = json.decodeFromString<UserResponseData>(payload)
-                updateUsers(listOf(user))
+                addUser(user)
             }
             "updated" -> {
                 val user = json.decodeFromString<UserResponseData>(payload)
-                updateUsers(listOf(user))
+                updateUser(user)
             }
             "deleted" -> {
 
@@ -447,15 +464,8 @@ class EventsRepository() {
 
     var pushId: String? = null
 
-    var customProfileFields: List<CustomProfileField> = emptyList()
-
     var jitsiServerUrl: String = ""
 }
-
-data class FlatPresense(
-    val presense: Presense,
-    val email: String
-)
 
 @Serializable
 data class PongMessage(

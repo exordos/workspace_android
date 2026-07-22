@@ -21,20 +21,17 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.AddChatToFolderReque
 import ru.genesiscorporation.workspace.beta.data.remote.dto.AddFolderRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.AddStreamRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.DeleteChatFromFolderRequest
-import ru.genesiscorporation.workspace.beta.data.remote.dto.EventRegistrationRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FoldersRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageReactionsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesByIdsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.OwnUserRequest
-import ru.genesiscorporation.workspace.beta.data.remote.dto.RecentPrivateConversation
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ServerSettingsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
-import ru.genesiscorporation.workspace.beta.data.remote.dto.UnreadMessages
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UsersRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
@@ -89,11 +86,8 @@ class ChatViewModel(
     private val _newFolderName = MutableStateFlow("")
     val newFolderName: StateFlow<String> = _newFolderName
 
-    private var initialUnreaMessages: UnreadMessages? = null
-
-    private var loadedSubscriptions: List<Stream> = emptyList()
-    private var recentPrivateConversations: List<RecentPrivateConversation> = emptyList()
-
+    private val _searchQuery = MutableStateFlow("")
+    var searchQuery: StateFlow<String> = _searchQuery
     private val _queryState = MutableStateFlow<QueryState>(QueryState.Idle)
     val queryState: StateFlow<QueryState> = _queryState
 
@@ -104,6 +98,9 @@ class ChatViewModel(
 
     private val _navEvents = MutableSharedFlow<ChatNavEvent>(extraBufferCapacity = 1)
     val navEvents: SharedFlow<ChatNavEvent> = _navEvents
+
+    private val _chatToAdd = MutableStateFlow<Stream?>(null)
+    var chatToAdd: StateFlow<Stream?> = _chatToAdd
 
     val map: Map<String, Int> = emptyMap()
 
@@ -130,6 +127,14 @@ class ChatViewModel(
         if (newFolder.uuid != currentlySelectedFolder.value?.uuid) {
             _currentlySelectedFolder.update { newFolder }
         }
+    }
+
+    fun onSearchQueryChange(query: String) {
+        _searchQuery.value = query
+    }
+
+    fun onChatToAddChange(chatToAdd: Stream?) {
+        _chatToAdd.value = chatToAdd
     }
 
     suspend fun updateSelectedChat(newChat: Stream?) {
@@ -161,7 +166,7 @@ class ChatViewModel(
             is ApiResult.Success -> {
                 userViewModel.userData = response.value
                 repo.currentUser = response.value
-                loadMessageReaction(response.value.uuid)
+                loadMessageReactions(response.value.uuid)
             }
 
             is ApiResult.Error -> {
@@ -170,7 +175,7 @@ class ChatViewModel(
         }
     }
 
-    suspend fun loadMessageReaction(userUuid: String) {
+    suspend fun loadMessageReactions(userUuid: String) {
         val response = client.performRequest(MessageReactionsRequest(userUuid))
         when(response) {
             is ApiResult.Success -> {
@@ -189,7 +194,7 @@ class ChatViewModel(
         when(response) {
             is ApiResult.Success -> {
                 users = response.value
-                repo.updateUsers(response.value)
+                repo.setInitialUsers(response.value)
                 loadFolders()
             }
 

@@ -9,8 +9,6 @@ import ru.genesiscorporation.workspace.beta.UserViewModel
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.data.remote.dto.LoginRequest
-import ru.genesiscorporation.workspace.beta.data.remote.dto.OidcCompleteRequest
-import ru.genesiscorporation.workspace.beta.data.remote.dto.OidcLoginRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.OwnUserRequest
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 

@@ -176,7 +176,7 @@ class WorkspaceAPIClient(
                     val response = json.decodeFromString<Response>(responseString)
                     ApiResult.Success(response)
                 }
-            } else if (httpResponse.status.value == 401 && request !is LoginRequest) {
+            } else if (httpResponse.status.value == 401 && request !is LoginRequest && request !is TokenRefreshRequest) {
                 refreshToken()
                 requestBuilder.headers.set("Authorization", "Bearer ${baseAccessToken ?: ""}")
                 val httpResponseAfterRefresh: HttpResponse = client.request(requestBuilder)

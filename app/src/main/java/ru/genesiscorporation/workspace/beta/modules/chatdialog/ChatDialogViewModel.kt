@@ -20,7 +20,6 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import ru.genesiscorporation.workspace.beta.UserViewModel
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
-import ru.genesiscorporation.workspace.beta.data.FlatPresense
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.data.remote.dto.AddMessageReactionRequest
@@ -30,7 +29,6 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageReaction
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponsePayload
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesRequest
-import ru.genesiscorporation.workspace.beta.data.remote.dto.Presense
 import ru.genesiscorporation.workspace.beta.data.remote.dto.RemoveMessageReactionRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.SendDirectMessageRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.SendMessageRequest
@@ -70,11 +68,6 @@ class ChatDialogViewModel(
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading
-
-    private val _presense = MutableStateFlow<Presense?>(null)
-    val presense: StateFlow<Presense?> = _presense
-
-
     var editingMessage: MessageResponse? = null
     private val _editingMessageBackupText = MutableStateFlow<String?>(null)
     val editingMessageBackupText: StateFlow<String?> = _editingMessageBackupText

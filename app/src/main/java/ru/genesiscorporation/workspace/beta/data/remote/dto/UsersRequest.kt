@@ -17,15 +17,15 @@ class UsersRequest(): ApiRequest<EmptyRequestData, List<UserResponseData>, ApiEr
 
 @Serializable
 data class UserResponseData(
-    val email: String? = null,
-    @SerialName("first_name") val firstName: String? = null,
-    @SerialName("last_name") val lastName: String? = null,
+    var email: String? = null,
+    @SerialName("first_name") var firstName: String? = null,
+    @SerialName("last_name") var lastName: String? = null,
     val username: String,
     val uuid: String,
-    @SerialName("status_emoji") val statusEmoji: String? = null,
-    @SerialName("status_text") val statusText: String? = null,
-    val status: String,
-    val avatar: String
+    @SerialName("status_emoji") var statusEmoji: String? = null,
+    @SerialName("status_text") var statusText: String? = null,
+    var status: String,
+    var avatar: String
 ) {
     fun displayableName(): String {
         var displayName = ""

@@ -193,10 +193,11 @@ fun UserCell(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                if (item.email != null) {
+                val email = item.email
+                if (email != null) {
                     Row {
                         Text(
-                            text = item.email,
+                            text = email,
                             color = LocalWorkspaceColorsPalette.current.textAdditional50,
                             fontSize = 12.sp,
                             maxLines = 1,

@@ -90,6 +90,8 @@ import ru.genesiscorporation.workspace.beta.ui.CreateFolder
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import kotlin.collections.mapNotNull
+import kotlin.collections.sortedByDescending
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -100,15 +102,12 @@ fun ChatScreen(
 ) {
     var showDetail by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    val streams by chatViewModel.streams.collectAsStateWithLifecycle()
-    val streamTopics by chatViewModel.streamTopics.collectAsStateWithLifecycle()
     val folders by chatViewModel.folders.collectAsStateWithLifecycle()
     val queryState by chatViewModel.queryState.collectAsState()
     val currentlySelectedFolder by chatViewModel.currentlySelectedFolder.collectAsState()
-    val currentlySelectedStream by chatViewModel.currentlySelectedStream.collectAsState()
     var showUserList by remember { mutableStateOf(false) }
     var showAddFolderView by remember { mutableStateOf(false) }
-    var chatToAdd: Stream? by remember { mutableStateOf(null) }
+    val chatToAdd by chatViewModel.chatToAdd.collectAsState()
     val usersViewModelFactory = remember { UsersViewModelFactory(chatViewModel.client) }
     var usersViewModel: UsersViewModel = viewModel(factory = usersViewModelFactory)
     val userId by chatViewModel.userViewModel.repo.userIdFlow.collectAsStateWithLifecycle(
@@ -118,30 +117,10 @@ fun ChatScreen(
     val cameBack = backStackEntry?.savedStateHandle
         ?.getStateFlow("from_detail_back", false)
         ?.collectAsState()
-    var searchQuery by remember { mutableStateOf("") }
+    val searchQuery by chatViewModel.searchQuery.collectAsState()
 
-    val state by chatViewModel.queryState.collectAsStateWithLifecycle()
     val createState by chatViewModel.createQueryState.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val messageFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
-
-    val filteredSubscriptions = remember(searchQuery, streams, currentlySelectedFolder) {
-        val folderItems = currentlySelectedFolder?.items
-        val folderSubscriptions = if (folderItems != null) {
-            folderItems.mapNotNull { folderItem ->
-                    streams.firstOrNull { it.uuid == folderItem.streamUuid }
-            }
-        } else {
-            streams
-        }
-        if (searchQuery.isBlank()) {
-            folderSubscriptions
-        } else {
-            folderSubscriptions.filter {
-                it.name.contains(searchQuery, ignoreCase = true)
-            }
-        }
-    }
 
     LaunchedEffect(cameBack?.value) {
         if (cameBack?.value == true) {
@@ -153,13 +132,13 @@ fun ChatScreen(
         }
     }
 
-    LaunchedEffect(state) {
-        if (state is QueryState.Error) {
-            Toast
-                .makeText(context, "Чат добавлен в папку", Toast.LENGTH_SHORT)
-                .show()
-        }
-    }
+//    LaunchedEffect(queryState) {
+//        if (queryState is QueryState.Error) {
+//            Toast
+//                .makeText(context, "Чат добавлен в папку", Toast.LENGTH_SHORT)
+//                .show()
+//        }
+//    }
 
     LaunchedEffect(createState) {
         if (createState is QueryState.Success) {
@@ -244,19 +223,6 @@ fun ChatScreen(
                     .imePadding()
                     .background(LocalWorkspaceColorsPalette.current.surface)
             ) {
-                if (filteredSubscriptions.isEmpty()) {
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier
-                            .fillMaxSize()
-                    ) {
-                        if (queryState is QueryState.Loading) {
-                            AnimatedGif(Modifier.size(80.dp))
-                        } else {
-                            Text("Список каналов пуст")
-                        }
-                    }
-                } else {
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
@@ -278,7 +244,7 @@ fun ChatScreen(
                                 value = searchQuery,
                                 onValueChange = {
                                     showDetail = false
-                                    searchQuery = it
+                                    chatViewModel.onSearchQueryChange(it)
                                 },
                                 textStyle = TextStyle(
                                     color = LocalWorkspaceColorsPalette.current.textAdditional30,
@@ -360,137 +326,8 @@ fun ChatScreen(
                                 }
                             }
                         }
-                        BoxWithConstraints(Modifier.fillMaxSize()) {
-                            val density = LocalDensity.current
-                            val screenWidthPx = with(density) { maxWidth.toPx() }
-                            val openOffsetPx =
-                                with(density) { 55.dp.toPx() }      // left edge when open
-                            val closedOffsetPx =
-                                screenWidthPx + 20                    // fully off-screen right
-                            val offsetX = remember { Animatable(closedOffsetPx) }
-                            // Animate open / close when showDetail changes
-                            LaunchedEffect(showDetail) {
-                                offsetX.animateTo(
-                                    targetValue = if (showDetail) openOffsetPx else closedOffsetPx,
-                                    animationSpec = spring(dampingRatio = 0.9f, stiffness = 400f)
-                                )
-                            }
-                            LazyColumn(
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier
-                                    .fillMaxSize()
-                            ) {
-                                items(
-                                    items = filteredSubscriptions.sortedByDescending { LocalDateTime.parse(it.lastMessage?.createdAt ?: it.updatedAt, messageFormatter) }
-                                ) { item ->
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        if (item.uuid == chatViewModel.currentlySelectedStream.collectAsState().value?.uuid) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .width(3.dp)
-                                                    .height(56.dp)
-                                                    .background(LocalWorkspaceColorsPalette.current.primary)
-                                            )
-                                        }
-                                        ChatChannel(
-                                            item,
-                                            chatViewModel,
-                                            showDetail,
-                                            currentlySelectedFolder,
-                                            onChatNumberToAddChange = { chatToAdd = it },
-                                            onClick = {
-                                                val defaultTopicUuid = item.defaultTopicUuid
-                                                if (defaultTopicUuid != null) {
-                                                    chatViewModel.currentStreamId = item.uuid
-                                                    navController.navigate(
-                                                        ChatFlow.ChatDialog(
-                                                            item.name,
-                                                            item.uuid,
-                                                            null,
-                                                            defaultTopicUuid,
-                                                            true,
-                                                            null
-                                                        )
-                                                    )
-                                                } else {
-                                                    scope.launch {
-                                                        showDetail = true
-                                                        chatViewModel.updateSelectedChat(item)
-                                                    }
-                                                }
-                                            }
-                                        )
-                                    }
-                                }
-                            }
-                            val scope = rememberCoroutineScope()
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxHeight()
-                                    .width(maxWidth - 55.dp)
-                                    .offset { IntOffset(offsetX.value.roundToInt(), 0) }
-                                    .background(LocalWorkspaceColorsPalette.current.surface)
-                                    .pointerInput(Unit) {
-                                        detectHorizontalDragGestures(
-                                            onDragEnd = {
-                                                scope.launch {
-                                                    val shouldOpen = offsetX.value < (openOffsetPx + closedOffsetPx) / 2f
-                                                    showDetail = shouldOpen
-                                                    offsetX.animateTo(
-                                                        if (shouldOpen) openOffsetPx else closedOffsetPx
-                                                    )
-                                                }
-                                            },
-                                            onHorizontalDrag = { _, dragAmount ->
-                                                scope.launch {
-                                                    offsetX.snapTo(
-                                                        (offsetX.value + dragAmount)
-                                                            .coerceIn(openOffsetPx, closedOffsetPx)
-                                                    )
-                                                }
-                                            }
-                                        )
-                                    }
-                            ) {
-                                val selectedStream = currentlySelectedStream
-                                if (selectedStream != null) {
-                                    val topics = streamTopics[selectedStream.uuid]
-                                    if (topics?.isEmpty() ?: true) {
-                                        Box(
-                                            modifier = Modifier.fillMaxSize(),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            if (state is QueryState.Loading) {
-                                                AnimatedGif(Modifier.size(80.dp))
-                                            } else {
-                                                Text("Список топиков пуст")
-                                            }
-                                        }
-                                    } else {
-                                        LazyColumn(
-                                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                        ) {
-                                            items(
-                                                items = topics.sortedByDescending { LocalDateTime.parse(it.lastMessage?.createdAt ?: it.updatedAt, messageFormatter) }
-                                            ) { item ->
-                                                ChatTopic(
-                                                    chatViewModel,
-                                                    item,
-                                                    selectedStream,
-                                                    navController
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        ChatWithTopics(chatViewModel, navController, showDetail, { showDetail = it })
                     }
-                }
             }
             if (showUserList) {
                 UsersScreen(
@@ -538,7 +375,7 @@ fun ChatScreen(
                         .clickable(
                             indication = null,
                             interactionSource = remember { MutableInteractionSource() },
-                            onClick = { chatToAdd = null },
+                            onClick = { chatViewModel.onChatToAddChange(null) },
                         ),
                 )
                 AddChatToFolder(
@@ -552,7 +389,7 @@ fun ChatScreen(
 //                                folder.uuid
 //                            )
                         }
-                        chatToAdd = null
+                        chatViewModel.onChatToAddChange(null)
                     }
                 )
             }

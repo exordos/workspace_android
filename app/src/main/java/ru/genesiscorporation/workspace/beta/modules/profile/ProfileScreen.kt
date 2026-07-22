@@ -96,7 +96,8 @@ fun ProfileScreen(
                         modifier = Modifier
                             .padding(end = 16.dp)
                     )
-                    if (userData.email != null) {
+                    val email = userData.email
+                    if (email != null) {
                         Column(
                             horizontalAlignment = Alignment.Start
                         ) {
@@ -106,7 +107,7 @@ fun ProfileScreen(
                                 fontSize = 12.sp
                             )
                             Text(
-                                text = userData.email,
+                                text = email,
                                 color = LocalWorkspaceColorsPalette.current.textHeaders,
                                 fontSize = 14.sp
                             )

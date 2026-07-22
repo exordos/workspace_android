@@ -121,7 +121,6 @@ fun ChatDialogScreen(
 ) {
     val streamTopicMessages by viewModel.streamTopicMessages.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsState()
-    val presense by viewModel.presense.collectAsState()
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -200,15 +199,7 @@ fun ChatDialogScreen(
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Medium
                         )
-                        var aggregatedPresense = presense?.aggregated
-                        if (aggregatedPresense != null) {
-                            val presenseString = if (aggregatedPresense.status == "active") "В сети" else "Был(а) в сети ${pastEpochSecondsToRelativeRu(aggregatedPresense.timestamp)}"
-                            Text(
-                                presenseString,
-                                color = LocalWorkspaceColorsPalette.current.textAdditional30,
-                                fontSize = 14.sp
-                            )
-                        } else if (viewModel.topicName != null) {
+                        if (viewModel.topicName != null) {
                             Text(
                                 viewModel.topicName,
                                 color = LocalWorkspaceColorsPalette.current.textAdditional30,

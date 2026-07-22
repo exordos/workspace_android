@@ -66,65 +66,69 @@ fun CallMessageView(
         horizontalArrangement = if (item.isOwn) Arrangement.End else Arrangement.Start,
         verticalAlignment = Alignment.Bottom
     ) {
-//        val nextMessage = viewModel.nextMessageById(item.id)
-//        if (!viewModel.isDirectMessages && !item.isFromCurrentUser) {
-//            if (nextMessage != null) {
-//                if (nextMessage.senderId != item.senderId) {
-//                    Box(
-//                        Modifier
-//                            .clickable(
-//                                onClick = {
-//                                    navController.navigate(
-//                                        ChatFlow.ChatUserInfo(
-//                                            item.senderFullName,
-//                                            "${item.senderId}",
-//                                            item.avatarUrl,
-//                                            ""
-//                                        )
-//                                    )
-//                                }
-//                            )
-//                    ) {
-//                        Avatar(
-//                            item.avatarUrl,
-//                            viewModel.userViewModel.baseUrl.value ?: "",
-//                            30,
-//                            true
-//                        )
-//                    }
-//                } else {
-//                    Box(
-//                        modifier = Modifier
-//                            .padding(end = 12.dp)
-//                            .size(30.dp)
-//                            .background(color = Color.Transparent, shape = CircleShape)
-//                    )
-//                }
-//            } else {
-//                Box(
-//                    Modifier
-//                        .clickable(
-//                            onClick = {
-//                                navController.navigate(
-//                                    ChatFlow.ChatUserInfo(
-//                                        item.senderFullName,
-//                                        "${item.senderId}",
-//                                        item.avatarUrl,
-//                                        ""
-//                                    )
-//                                )
-//                            }
-//                        )
-//                ) {
-//                    Avatar(
-//                        item.avatarUrl,
-//                        viewModel.userViewModel.baseUrl.value ?: "",
-//                        30,
-//                        true
-//                    )
-//                }
-//            }
-//        }
+        val nextMessage = viewModel.nextMessageByUuid(item.uuid)
+        if (!viewModel.isDirectMessages && !item.isOwn) {
+            if (nextMessage != null) {
+                if (nextMessage.authorUuid != item.authorUuid) {
+                    Box(
+                        Modifier
+                            .clickable(
+                                onClick = {
+                                    navController.navigate(
+                                        ChatFlow.ChatUserInfo(
+                                            item.user?.displayableName() ?: "",
+                                            item.authorUuid,
+                                            item.user?.avatar ?: "",
+                                            ""
+                                        )
+                                    )
+                                }
+                            )
+                    ) {
+                        Avatar(
+                            item.user?.avatar,
+                            viewModel.userViewModel.baseUrl.value ?: "",
+                            null,
+                            item.user?.displayableName() ?: "",
+                            30,
+                            true
+                        )
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .padding(end = 12.dp)
+                            .size(30.dp)
+                            .background(color = Color.Transparent, shape = CircleShape)
+                    )
+                }
+            } else {
+                Box(
+                    Modifier
+                        .clickable(
+                            onClick = {
+                                navController.navigate(
+                                    ChatFlow.ChatUserInfo(
+                                        item.user?.displayableName() ?: "",
+                                        item.authorUuid,
+                                        item.user?.avatar ?: "",
+                                        item.user?.email ?: ""
+                                    )
+                                )
+                            }
+                        )
+                ) {
+                    Avatar(
+                        item.user?.avatar,
+                        viewModel.userViewModel.baseUrl.value ?: "",
+                        null,
+                        item.user?.displayableName() ?: "",
+                        30,
+                        true
+                    )
+                }
+            }
+        }
         Row(
             verticalAlignment = Alignment.Bottom,
             modifier = Modifier
@@ -134,12 +138,16 @@ fun CallMessageView(
                 )
                 .padding(10.dp)
                 .clickable {
-                    val options = JitsiMeetConferenceOptions.Builder()
-                        .setServerURL(URL(viewModel.repo.jitsiServerUrl))
-                        .setRoom(itemUrl.path.drop(1))
-                        .build()
-
-                    JitsiMeetActivity.launch(context, options)
+                    val serverUrl = viewModel.repo.jitsiServerUrl
+                    if (serverUrl.isNotEmpty()) {
+                        runCatching {
+                            val options = JitsiMeetConferenceOptions.Builder()
+                                .setServerURL(URL(serverUrl))
+                                .setRoom(itemUrl.path.drop(1))
+                                .build()
+                            JitsiMeetActivity.launch(context, options)
+                        }
+                    }
                 }
         ) {
             Column(
