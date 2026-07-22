@@ -133,25 +133,25 @@ fun ChatWithTopics(
                             currentlySelectedFolder,
                             onChatNumberToAddChange = { chatViewModel.onChatToAddChange(it) },
                             onClick = {
-                                val defaultTopicUuid = item.defaultTopicUuid
-                                if (defaultTopicUuid != null) {
-                                    chatViewModel.currentStreamId = item.uuid
-                                    navController.navigate(
-                                        ChatFlow.ChatDialog(
-                                            item.name,
-                                            item.uuid,
-                                            null,
-                                            defaultTopicUuid,
-                                            true,
-                                            null
-                                        )
-                                    )
-                                } else {
+//                                val defaultTopicUuid = item.defaultTopicUuid
+//                                if (defaultTopicUuid != null) {
+//                                    chatViewModel.currentStreamId = item.uuid
+//                                    navController.navigate(
+//                                        ChatFlow.ChatDialog(
+//                                            item.name,
+//                                            item.uuid,
+//                                            null,
+//                                            defaultTopicUuid,
+//                                            true,
+//                                            null
+//                                        )
+//                                    )
+//                                } else {
                                     scope.launch {
                                         onShowDetailChange(true)
                                         chatViewModel.updateSelectedChat(item)
                                     }
-                                }
+//                                }
                             }
                         )
                     }
