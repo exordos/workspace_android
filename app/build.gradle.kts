@@ -28,8 +28,8 @@ android {
     defaultConfig {
         minSdk = 30
         targetSdk = 36
-        versionCode = 10
-        versionName = "1.0.1"
+        versionCode = 13
+        versionName = "1.0.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -71,6 +71,7 @@ dependencies {
     implementation(libs.ktor.client.serialization)
     implementation(libs.ktor.client.negotiation)
     implementation(libs.ktor.client.logging)
+    implementation(libs.ktor.client.websockets)
     implementation(libs.jetbrains.kotlin.serialization.json)
     implementation(libs.androidx.data.store.preferencies)
     implementation(libs.jitsi.meet)
@@ -80,6 +81,7 @@ dependencies {
     implementation(libs.firebase.cloud.messaging)
     implementation(libs.androidx.material3)
     implementation(libs.coil.compose)
+    implementation(libs.coil.gif)
     implementation(libs.coil.network)
     implementation(libs.compose.markdown)
     implementation(libs.androidx.app.compat)

@@ -1,179 +1,488 @@
 package ru.genesiscorporation.workspace.beta.data
 
+import android.util.Log
+import io.ktor.client.plugins.websocket.webSocket
+import io.ktor.client.request.headers
+import io.ktor.http.HttpHeaders
+import io.ktor.http.URLProtocol
+import io.ktor.http.path
+import io.ktor.websocket.Frame
+import io.ktor.websocket.readReason
+import io.ktor.websocket.readText
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import ru.genesiscorporation.workspace.beta.DisplayRecipient
-import ru.genesiscorporation.workspace.beta.MessageDto
-import ru.genesiscorporation.workspace.beta.data.remote.dto.CustomProfileField
-import ru.genesiscorporation.workspace.beta.data.remote.dto.Presense
-import ru.genesiscorporation.workspace.beta.data.remote.dto.PresenseAggregated
-import ru.genesiscorporation.workspace.beta.data.remote.dto.UnreadMessages
-import ru.genesiscorporation.workspace.beta.data.remote.dto.UnreadPrivateMessage
-import ru.genesiscorporation.workspace.beta.data.remote.dto.UnreadStreamMessage
-import ru.genesiscorporation.workspace.beta.data.remote.dto.UsersResponseData
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
+import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
+import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
+import ru.genesiscorporation.workspace.beta.data.remote.dto.DeletedMessageReaction
+import ru.genesiscorporation.workspace.beta.data.remote.dto.EpochRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageReaction
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
+import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
+import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
+import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
+import kotlin.plus
 
 
-class EventsRepository {
+class EventsRepository() {
 
-    private val _queueId = MutableStateFlow<String?>(null)
-    val queueId: StateFlow<String?> = _queueId.asStateFlow()
-    fun updateQueueId(newQueueid: String) {
-        _queueId.update {
-            newQueueid
+    var client: WorkspaceAPIClient? = null
+    var latestEpoch: Int = 0
+    var epochGeneration: String = ""
+
+    private val json = Json {
+        ignoreUnknownKeys = true
+        isLenient = true
+    }
+
+    var currentUser: UserResponseData? = null
+
+
+    private val _streamTopicMessages = MutableStateFlow<Map<String, List<MessageResponse>>>(emptyMap())
+    val streamTopicMessages: StateFlow<Map<String, List<MessageResponse>>> = _streamTopicMessages.asStateFlow()
+
+    fun addStreamTopicMessages(streamUuid: String, topicUuid: String, messages: List<MessageResponse>) {
+        val messagesWithUser = messages.map { message ->
+            message.user = users.value.firstOrNull { it.uuid == message.authorUuid }
+            message
+        }
+        val key = "$streamUuid.$topicUuid"
+        _streamTopicMessages.update { current ->
+            current + (key to messagesWithUser)
         }
     }
-    private val _messages = MutableStateFlow<List<MessageDto>>(emptyList())
-    val messages: StateFlow<List<MessageDto>> = _messages.asStateFlow()
-    fun updateMessages(newList: List<MessageDto>) {
-        _messages.update {
+    fun addMessageToStreamTopic(message: MessageResponse) {
+        val key = "${message.streamUuid}.${message.topicUuid}"
+        message.user = users.value.firstOrNull { it.uuid == message.authorUuid }
+
+        _streamTopicMessages.update { current ->
+            if (current[key] != null ) {
+                val existingMessages = current[key].orEmpty()
+                val filteredExistingMessages = existingMessages.filter { it.uuid == message.uuid }
+                if (filteredExistingMessages.isEmpty()) {
+                    current + (key to (existingMessages + message))
+                } else {
+                    current
+                }
+            } else {
+                current
+            }
+        }
+    }
+
+    fun updateMessage(updatedMessage: MessageResponse) {
+        val key = "${updatedMessage.streamUuid}.${updatedMessage.topicUuid}"
+        _streamTopicMessages.update { current ->
+            val messages = current[key] ?: return@update current
+            val updatedMessages = messages.map { message ->
+                if (message.uuid == updatedMessage.uuid) {
+                    message.copy(
+                        payload = updatedMessage.payload,
+                        reactions = updatedMessage.reactions
+                    )
+                } else {
+                    message
+                }
+            }
+
+            if (updatedMessages == messages) return@update current
+            current + (key to updatedMessages)
+        }
+    }
+
+    private val _streamTopics = MutableStateFlow<Map<String, List<TopicsResponseData>>>(emptyMap())
+    val streamTopics: StateFlow<Map<String, List<TopicsResponseData>>> = _streamTopics.asStateFlow()
+
+    fun addStreamTopics(streamUuid: String, topics: List<TopicsResponseData>) {
+        _streamTopics.update { current ->
+            current + (streamUuid to topics)
+        }
+    }
+    fun addTopicToStream(topic: TopicsResponseData) {
+        _streamTopics.update { current ->
+            if (current[topic.streamUuid] != null) {
+                val existingTopics = current[topic.streamUuid].orEmpty()
+                current + (topic.streamUuid to (existingTopics + topic))
+            } else {
+                current
+            }
+        }
+    }
+
+    fun updateTopic(updatedTopic: TopicsResponseData) {
+        _streamTopics.update { current ->
+            val topics = current[updatedTopic.streamUuid] ?: return@update current
+            val updatedTopics = topics.map { topic ->
+                if (topic.uuid == updatedTopic.uuid) {
+                    topic.copy(
+                        unreadCount = updatedTopic.unreadCount,
+                        name = updatedTopic.name,
+                        lastMessageUuid = updatedTopic.lastMessageUuid,
+                        isDone = updatedTopic.isDone
+                    )
+                } else {
+                    topic
+                }
+            }
+
+            if (updatedTopics == topics) return@update current
+            current + (updatedTopic.streamUuid to updatedTopics)
+        }
+    }
+
+    private val _messagesPool = MutableStateFlow<List<MessageResponse>>(emptyList())
+    val messagesPool: StateFlow<List<MessageResponse>> = _messagesPool.asStateFlow()
+    fun setInitialMessagesPool(newList: List<MessageResponse>) {
+        val messagesWithUser = newList.map { message ->
+            message.user = users.value.firstOrNull { it.uuid == message.authorUuid }
+            message
+        }
+        _messagesPool.update {
+            messagesWithUser
+        }
+    }
+
+    fun updateMessagesPool(newList: List<MessageResponse>) {
+        val messagesWithUser = newList.map { message ->
+            message.user = users.value.firstOrNull { it.uuid == message.authorUuid }
+            message
+        }
+        _messagesPool.update { current ->
+            current + messagesWithUser
+        }
+    }
+
+    private val _userReactions = MutableStateFlow<List<MessageReaction>>(emptyList())
+
+    val userReactions: StateFlow<List<MessageReaction>> = _userReactions.asStateFlow()
+
+    fun setInitialMessageReactions(newList: List<MessageReaction>) {
+        _userReactions.update {
             newList
         }
     }
-    private val _users = MutableStateFlow<List<UsersResponseData>>(emptyList())
-    val users: StateFlow<List<UsersResponseData>> = _users.asStateFlow()
-    fun updateUsers(newList: List<UsersResponseData>) {
+
+    fun addReaction(reaction: MessageReaction) {
+        val user = currentUser
+        if (user != null) {
+            if (reaction.userUuid == user.uuid)
+                _userReactions.update { current ->
+                    current + reaction
+                }
+        }
+    }
+
+    fun deleteReaction(reaction: DeletedMessageReaction) {
+        val reactionToDelete = _userReactions.value.firstOrNull { it.uuid == reaction.uuid && it.userUuid == reaction.userUuid }
+        if (reactionToDelete != null) {
+            _userReactions.update { current ->
+                current.filterNot { it == reactionToDelete }
+            }
+        }
+    }
+
+    private val _users = MutableStateFlow<List<UserResponseData>>(emptyList())
+    val users: StateFlow<List<UserResponseData>> = _users.asStateFlow()
+
+    fun updateUser(updatedUser: UserResponseData) {
+        _users.update { current ->
+            current.map { user ->
+                if (user.uuid == updatedUser.uuid) {
+                    user.copy(
+                        email = updatedUser.email,
+                        firstName = updatedUser.firstName,
+                        lastName = updatedUser.lastName,
+                        status = updatedUser.status,
+                        statusText = updatedUser.statusText,
+                        statusEmoji = updatedUser.statusEmoji,
+                        avatar = updatedUser.avatar
+                    )
+                } else {
+                    user
+                }
+            }
+        }
+    }
+
+    fun addUser(newUser: UserResponseData) {
+        _users.update { current ->
+            current + newUser
+        }
+    }
+
+    fun setInitialUsers(newList: List<UserResponseData>) {
         _users.update {
             newList
         }
     }
 
-    private val _unreadMessages = MutableStateFlow<UnreadMessages>(UnreadMessages(emptyList(), emptyList()))
-    val unreadMessages: StateFlow<UnreadMessages> = _unreadMessages.asStateFlow()
+    private val _streams = MutableStateFlow<List<Stream>>(emptyList())
+    val streams: StateFlow<List<Stream>> = _streams.asStateFlow()
 
-    fun updateUnreadMessages(newUnreadMessages: UnreadMessages) {
-        _unreadMessages.update {
-            newUnreadMessages
-        }
-    }
-
-    fun didReadMessages(messageIds: List<Int>) {
-        for (messageId in messageIds) {
-            _unreadMessages.update { current ->
-                current.copy(
-                    pms = current.pms.map { pm ->
-                        pm.copy(unreadMessageIds = pm.unreadMessageIds.filter { it != messageId })
-                    },
-                    streams = current.streams.map { stream ->
-                        stream.copy(unreadMessageIds = stream.unreadMessageIds.filter { it != messageId })
-                    }
-                )
-            }
-        }
-    }
-
-    fun didReadChannelMessages(messageIds: List<Int>, streamId: Int, topicName: String) {
-        val streamsUnreadMessages = _unreadMessages.value.streams
-        val filteredStreamsUnreadMessages = streamsUnreadMessages.map { stream ->
-            if (stream.streamId == streamId && stream.topic == topicName) {
-                val filteredStreamUnreadIds = stream.unreadMessageIds.filter { !messageIds.contains(it) }
-                stream.copy(
-                    unreadMessageIds = filteredStreamUnreadIds
-                )
-            } else {
-                stream
-            }
-        }
-        _unreadMessages.update { current ->
-            UnreadMessages(current.pms, filteredStreamsUnreadMessages)
-        }
-    }
-
-    fun didReadDirectMessages(messageIds: List<Int>, userId: Int) {
-        val directUnreadMessages = _unreadMessages.value.pms
-        val filteredDirectUnreadMessages = directUnreadMessages.map { pm ->
-            if (pm.otherUserId == userId) {
-                val filteredStreamUnreadIds = pm.unreadMessageIds.filter { !messageIds.contains(it) }
-                pm.copy(
-                    unreadMessageIds = filteredStreamUnreadIds
-                )
-            } else {
-                pm
-            }
-        }
-        _unreadMessages.update { current ->
-            UnreadMessages(filteredDirectUnreadMessages, current.streams)
-        }
-    }
-
-    fun updateUnreadsForNewMessages(newMessages: List<MessageDto>, currentUserId: Int) {
-        for (message in newMessages) {
-            when (val displayRecipient = message.displayRecipient) {
-                is DisplayRecipient.Users -> {
-                    val filteredRecipients = displayRecipient.value.filter {
-                        it.id != currentUserId
-                    }
-                    val firstRecipient = filteredRecipients.first()
-                    val directUnreadMessages = _unreadMessages.value.pms
-                    var chatFound = false
-                    var filteredDirectUnreadMessages = directUnreadMessages.map { pm ->
-                        if (pm.otherUserId == firstRecipient.id) {
-                            chatFound = true
-                            val updatedUnreadMessageIds = pm.unreadMessageIds + message.id
-                            pm.copy(
-                                unreadMessageIds = updatedUnreadMessageIds
-                            )
-                        } else {
-                            pm
-                        }
-                    }
-                    if (!chatFound) {
-                        filteredDirectUnreadMessages += UnreadPrivateMessage(firstRecipient.id, listOf(message.id))
-                    }
-                    _unreadMessages.update { current ->
-                        UnreadMessages(filteredDirectUnreadMessages, current.streams)
-                    }
-                }
-                is DisplayRecipient.StreamName -> {
-                    val streamsUnreadMessages = _unreadMessages.value.streams
-                    var chatFound = false
-                    var filteredStreamsUnreadMessages = streamsUnreadMessages.map { stream ->
-                        if (stream.streamId == message.streamId && stream.topic == message.subject) {
-                            chatFound = true
-                            val updatedUnreadMessageIds = stream.unreadMessageIds + message.id
-                            stream.copy(
-                                unreadMessageIds = updatedUnreadMessageIds
-                            )
-                        } else {
-                            stream
-                        }
-                    }
-                    val streamId = message.streamId
-                    if (!chatFound && streamId != null) {
-                        filteredStreamsUnreadMessages += UnreadStreamMessage(streamId, message.subject, listOf(message.id))
-                    }
-                    _unreadMessages.update { current ->
-                        UnreadMessages(current.pms, filteredStreamsUnreadMessages)
-                    }
+    fun updateStream(updatedStream: Stream) {
+        val message = messagesPool.value.firstOrNull { it.uuid == updatedStream.lastMessageUuid }
+        _streams.update { current ->
+            current.map { stream ->
+                if (stream.uuid == updatedStream.uuid) {
+                    stream.copy(
+                        lastMessageUuid = updatedStream.lastMessageUuid,
+                        unreadCount = updatedStream.unreadCount,
+                        lastMessage = message
+                    )
+                } else {
+                    stream
                 }
             }
         }
     }
 
-    private val _presences = MutableStateFlow<Map<String, Presense>>(emptyMap())
-    val presences: StateFlow<Map<String, Presense>> = _presences.asStateFlow()
-    fun updatePresenses(newMap: Map<String, Presense>) {
-        _presences.update {
-            current -> current + newMap
+    fun addStream(newStream: Stream) {
+        _streams.update { current ->
+            current + newStream
         }
     }
 
+    fun setInitialStreams(newList: List<Stream>) {
+        _streams.update {
+            newList
+        }
+    }
 
-    private val _newPresences = MutableStateFlow<List<FlatPresense>>(emptyList())
-    val newPresences: StateFlow<List<FlatPresense>> = _newPresences.asStateFlow()
-    fun updateNewPresenses(newPresenses: List<FlatPresense>) {
-        _newPresences.update {
-            newPresenses
+    private val _folders = MutableStateFlow<List<FolderResponseData>>(emptyList())
+    val folders: StateFlow<List<FolderResponseData>> = _folders.asStateFlow()
+    fun updateFolder(updatedFolder: FolderResponseData) {
+        _folders.update { current ->
+            current.map { folder ->
+                if (folder.uuid == updatedFolder.uuid) {
+                    folder.copy(
+                        unreadCount = updatedFolder.unreadCount,
+                        title = updatedFolder.title,
+                        items = updatedFolder.items
+                    )
+                } else {
+                    folder
+                }
+            }
+        }
+    }
+
+    fun addFolder(newFolder: FolderResponseData) {
+        _folders.update { current ->
+            current + newFolder
+        }
+    }
+
+    fun setInitialFolders(newList: List<FolderResponseData>) {
+        _folders.update {
+            newList
+        }
+    }
+
+    suspend fun start() {
+        val webSocketClient = client
+        if (webSocketClient != null) {
+            val response = webSocketClient.performRequest(EpochRequest())
+            when (response) {
+                is ApiResult.Success -> {
+                    latestEpoch = response.value.epochVersion
+                    epochGeneration = response.value.epochGeneration
+                    startWebsocketConnection(webSocketClient)
+                }
+
+                is ApiResult.Error -> {
+
+                }
+            }
+        }
+    }
+
+    suspend fun startWebsocketConnection(webSocketClient: WorkspaceAPIClient) {
+        val accessToken = webSocketClient.userViewModel.accessToken.value
+        val baseUrl = webSocketClient.userViewModel.baseUrl.value?.removePrefix("https://")
+        if (accessToken != null && baseUrl != null) {
+            try {
+                webSocketClient.client.webSocket(
+                    request = {
+                        url {
+                            protocol = URLProtocol.WS
+                            this.host = baseUrl
+                            path("/api/workspace/v1/events/ws")
+                            parameters.append("last_epoch_version", latestEpoch.toString())
+                            parameters.append("epoch_generation", epochGeneration)
+                        }
+                        headers {
+                            append(HttpHeaders.SecWebSocketProtocol, "workspace.events.v1, bearer.$accessToken")
+                        }
+                    }
+                ) {
+                    for (frame in incoming) {
+                        when (frame) {
+                            is Frame.Text -> {
+                                val receivedText = frame.readText()
+                                val jsonObject = json.decodeFromString<JsonObject>(receivedText)
+                                val action = jsonObject["action"]?.jsonPrimitive?.contentOrNull
+                                val payload = jsonObject["payload"]?.toString()
+                                if (action != null && payload != null) {
+                                    when (jsonObject["object_type"]?.toString()?.trim('"')) {
+                                        "message" -> {
+                                            didReceiveMessageEvent(payload, action)
+                                        }
+                                        "user" -> {
+                                            didReceiveUserEvent(payload, action)
+                                        }
+                                        "folder" -> {
+                                            didReceiveFolderEvent(payload, action)
+                                        }
+                                        "stream" -> {
+                                            didReceiveStreamEvent(payload, action)
+                                        }
+                                        "topic" -> {
+                                            didReceiveTopicEvent(payload, action)
+                                        }
+                                        "message_reaction" -> {
+                                            didReceiveReactionEvent(payload, action)
+                                        }
+                                        else -> Log.d("WebSocket", "Received: $receivedText")
+                                    }
+                                }
+                            }
+                            is Frame.Binary -> Log.d("WebSocket", "Received binary data bundle")
+                            is Frame.Close -> Log.d("WebSocket", "Connection closing reason: ${frame.readReason()}")
+                            else -> Log.d("WebSocket", "Received control or ping/pong frame")
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.d("WebSocket", "Failed: ${e::class.simpleName}: ${e.message}")
+                e.printStackTrace()
+            }
+        }
+    }
+
+    fun didReceiveUserEvent(payload: String, action: String) {
+        when(action) {
+            "created" -> {
+                val user = json.decodeFromString<UserResponseData>(payload)
+                addUser(user)
+            }
+            "updated" -> {
+                val user = json.decodeFromString<UserResponseData>(payload)
+                updateUser(user)
+            }
+            "deleted" -> {
+
+            }
+        }
+    }
+
+    fun didReceiveMessageEvent(payload: String, action: String) {
+        when(action) {
+            "created" -> {
+                val message = json.decodeFromString<MessageResponse>(payload)
+                updateMessagesPool(listOf(message))
+                addMessageToStreamTopic(message)
+            }
+            "updated" -> {
+                val message = json.decodeFromString<MessageResponse>(payload)
+                updateMessagesPool(listOf(message))
+                updateMessage(message)
+            }
+            "deleted" -> {
+
+            }
+        }
+    }
+
+    fun didReceiveFolderEvent(payload: String, action: String) {
+        when(action) {
+            "created" -> {
+                val folder = json.decodeFromString<FolderResponseData>(payload)
+                addFolder(folder)
+            }
+            "updated" -> {
+                val folder = json.decodeFromString<FolderResponseData>(payload)
+                updateFolder(folder)
+            }
+            "deleted" -> {
+
+            }
+        }
+    }
+
+    fun didReceiveReactionEvent(payload: String, action: String) {
+        when(action) {
+            "created" -> {
+                val reaction = json.decodeFromString<MessageReaction>(payload)
+                addReaction(reaction)
+            }
+            "deleted" -> {
+                val reaction = json.decodeFromString<DeletedMessageReaction>(payload)
+                deleteReaction(reaction)
+            }
+        }
+    }
+
+    fun didReceiveStreamEvent(payload: String, action: String) {
+        when(action) {
+            "created" -> {
+                val stream = json.decodeFromString<Stream>(payload)
+                addStream(stream)
+            }
+            "updated" -> {
+                val stream = json.decodeFromString<Stream>(payload)
+                updateStream(stream)
+            }
+            "deleted" -> {
+
+            }
+        }
+    }
+
+    fun didReceiveTopicEvent(payload: String, action: String) {
+        when(action) {
+            "created" -> {
+                val topic = json.decodeFromString< TopicsResponseData>(payload)
+                addTopicToStream(topic)
+            }
+            "updated" -> {
+                val topic = json.decodeFromString< TopicsResponseData>(payload)
+                updateTopic(topic)
+            }
+            "deleted" -> {
+
+            }
         }
     }
 
     var pushId: String? = null
 
-    var customProfileFields: List<CustomProfileField> = emptyList()
+    var jitsiServerUrl: String = ""
 }
 
-data class FlatPresense(
-    val presense: Presense,
-    val email: String
+@Serializable
+data class PongMessage(
+    val type: String,
+    val ts: String
+)
+
+@Serializable
+data class MessageEvent(
+    val type: String,
+    val message: MessageResponse,
+    @SerialName("epoch_version") val epoch_version: Int
+)
+
+@Serializable
+data class StreamEvent(
+    val type: String,
+    val stream: Stream,
+    @SerialName("epoch_version") val epoch_version: Int
 )

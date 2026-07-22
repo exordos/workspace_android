@@ -28,20 +28,25 @@ import org.jitsi.meet.sdk.JitsiMeetActivity
 import org.jitsi.meet.sdk.JitsiMeetConferenceOptions
 import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.R
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.net.URL
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 @Composable
 fun CallMessageView(
-    item: Message,
+    item: MessageResponse,
     viewModel: ChatDialogViewModel,
     navController: NavHostController
 ) {
+    val folderCreationFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
+    val hhmmFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val itemUrl = URL(item.content)
-    val bubbleShape = if (item.isFromCurrentUser) {
+    val itemUrl = URL(item.payload.content)
+    val bubbleShape = if (item.isOwn) {
         RoundedCornerShape(
             topStart = 8.dp,
             topEnd = 8.dp,
@@ -58,22 +63,22 @@ fun CallMessageView(
     }
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (item.isFromCurrentUser) Arrangement.End else Arrangement.Start,
+        horizontalArrangement = if (item.isOwn) Arrangement.End else Arrangement.Start,
         verticalAlignment = Alignment.Bottom
     ) {
-        val nextMessage = viewModel.nextMessageById(item.id)
-        if (!viewModel.isDirectMessages && !item.isFromCurrentUser) {
+        val nextMessage = viewModel.nextMessageByUuid(item.uuid)
+        if (!viewModel.isDirectMessages && !item.isOwn) {
             if (nextMessage != null) {
-                if (nextMessage.senderId != item.senderId) {
+                if (nextMessage.authorUuid != item.authorUuid) {
                     Box(
                         Modifier
                             .clickable(
                                 onClick = {
                                     navController.navigate(
                                         ChatFlow.ChatUserInfo(
-                                            item.senderFullName,
-                                            "${item.senderId}",
-                                            item.avatarUrl,
+                                            item.user?.displayableName() ?: "",
+                                            item.authorUuid,
+                                            item.user?.avatar ?: "",
                                             ""
                                         )
                                     )
@@ -81,8 +86,10 @@ fun CallMessageView(
                             )
                     ) {
                         Avatar(
-                            item.avatarUrl,
+                            item.user?.avatar,
                             viewModel.userViewModel.baseUrl.value ?: "",
+                            null,
+                            item.user?.displayableName() ?: "",
                             30,
                             true
                         )
@@ -102,18 +109,20 @@ fun CallMessageView(
                             onClick = {
                                 navController.navigate(
                                     ChatFlow.ChatUserInfo(
-                                        item.senderFullName,
-                                        "${item.senderId}",
-                                        item.avatarUrl,
-                                        ""
+                                        item.user?.displayableName() ?: "",
+                                        item.authorUuid,
+                                        item.user?.avatar ?: "",
+                                        item.user?.email ?: ""
                                     )
                                 )
                             }
                         )
                 ) {
                     Avatar(
-                        item.avatarUrl,
+                        item.user?.avatar,
                         viewModel.userViewModel.baseUrl.value ?: "",
+                        null,
+                        item.user?.displayableName() ?: "",
                         30,
                         true
                     )
@@ -129,12 +138,16 @@ fun CallMessageView(
                 )
                 .padding(10.dp)
                 .clickable {
-                    val options = JitsiMeetConferenceOptions.Builder()
-                        .setServerURL(URL("https://meet.example.com"))
-                        .setRoom(itemUrl.path.drop(1))
-                        .build()
-
-                    JitsiMeetActivity.launch(context, options)
+                    val serverUrl = viewModel.repo.jitsiServerUrl
+                    if (serverUrl.isNotEmpty()) {
+                        runCatching {
+                            val options = JitsiMeetConferenceOptions.Builder()
+                                .setServerURL(URL(serverUrl))
+                                .setRoom(itemUrl.path.drop(1))
+                                .build()
+                            JitsiMeetActivity.launch(context, options)
+                        }
+                    }
                 }
         ) {
             Column(
@@ -164,8 +177,9 @@ fun CallMessageView(
                 Row(
                     horizontalArrangement = Arrangement.End
                 ) {
+                    val messageDate = LocalDateTime.parse(item.updatedAt, folderCreationFormatter)
                     Text(
-                        text = item.timestamp.formatHHmm(),
+                        text = messageDate.format(hhmmFormatter),
                         color = LocalWorkspaceColorsPalette.current.messageTimeColor,
                         fontSize = 14.sp,
                     )

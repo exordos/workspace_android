@@ -1,5 +1,6 @@
 package ru.genesiscorporation.workspace.beta.data.remote.dto
 
+import android.text.EmojiConsistency
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import ru.genesiscorporation.workspace.beta.data.remote.ApiError
@@ -7,34 +8,42 @@ import ru.genesiscorporation.workspace.beta.data.remote.ApiRequest
 import ru.genesiscorporation.workspace.beta.data.remote.EmptyRequestData
 import ru.genesiscorporation.workspace.beta.data.remote.HTTPMethod
 
-class UsersRequest(): ApiRequest<UsersRequestData, UsersResponse, ApiError> {
+class UsersRequest(): ApiRequest<EmptyRequestData, List<UserResponseData>, ApiError> {
     override val method: HTTPMethod = HTTPMethod.GET
     override val requiresApiKey: Boolean = true
-    override val url: String = "/users"
-    override val data = UsersRequestData(true, false)
+    override val url: String = "/api/workspace/v1/messenger/users/"
+    override val data = EmptyRequestData()
 }
 
 @Serializable
-data class UsersRequestData(
-    @SerialName("include_custom_profile_fields") val includeCustomProfileFields: Boolean,
-    @SerialName("client_gravatar") val clientGravatar: Boolean
-)
+data class UserResponseData(
+    var email: String? = null,
+    @SerialName("first_name") var firstName: String? = null,
+    @SerialName("last_name") var lastName: String? = null,
+    val username: String,
+    val uuid: String,
+    @SerialName("status_emoji") var statusEmoji: String? = null,
+    @SerialName("status_text") var statusText: String? = null,
+    var status: String,
+    var avatar: String
+) {
+    fun displayableName(): String {
+        var displayName = ""
+        if (firstName != null) {
+            displayName += firstName
+        }
 
-@Serializable
-data class UsersResponse(
-    val members: List<UsersResponseData>
-)
+        if (lastName != null) {
+            if (!displayName.isEmpty()) {
+                displayName += " "
+            }
+            displayName += lastName
+        }
 
-@Serializable
-data class UsersResponseData(
-    @SerialName("avatar_url") val avatarUrl: String?,
-    val email: String,
-    @SerialName("full_name") val fullName: String,
-    @SerialName("user_id") val userId: Int,
-    @SerialName("profile_data") val profileData: Map<String, UserResonseProfileData>? = emptyMap()
-)
+        if (displayName.isEmpty()) {
+            displayName += username
+        }
 
-@Serializable
-data class UserResonseProfileData(
-    val value: String
-)
+        return  displayName
+    }
+}

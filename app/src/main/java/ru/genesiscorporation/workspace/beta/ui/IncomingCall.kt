@@ -23,19 +23,19 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.jitsi.meet.sdk.JitsiMeetActivity
 import org.jitsi.meet.sdk.JitsiMeetConferenceOptions
-import ru.genesiscorporation.workspace.beta.MessageDto
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.WorkspaceViewModel
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.net.URL
 
 @Composable
 fun IncomingCall(
-    callMessage: MessageDto,
+    callMessage: MessageResponse,
     viewModel: WorkspaceViewModel,
     context: Context
 ) {
-    val itemUrl = URL(callMessage.content)
+    val itemUrl = URL(callMessage.payload.content)
     Column(
         modifier = Modifier
             .padding(16.dp)
@@ -97,7 +97,7 @@ fun IncomingCall(
             Button(
                 onClick = {
                     val options = JitsiMeetConferenceOptions.Builder()
-                        .setServerURL(URL("https://meet.example.com"))
+                        .setServerURL(URL(viewModel.repo.jitsiServerUrl))
                         .setRoom(itemUrl.path.drop(1))
                         .build()
                     viewModel.setCurrentCallMessage(null)

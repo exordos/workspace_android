@@ -6,6 +6,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -16,11 +17,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -31,17 +35,25 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
 import dev.jeziellago.compose.markdowntext.MarkdownText
+import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.ChatFlow
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.ui.Avatar
+import ru.genesiscorporation.workspace.beta.ui.EnhancedMarkdown
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 @Composable
 fun TextMessageView(
-    item: Message,
+    item: MessageResponse,
     viewModel: ChatDialogViewModel,
     navController: NavHostController
 ) {
-    val bubbleShape = if (item.isFromCurrentUser) {
+    val folderCreationFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
+    val hhmmFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+    val scope = rememberCoroutineScope()
+    val bubbleShape = if (item.isOwn) {
         RoundedCornerShape(
             topStart = 8.dp,
             topEnd = 8.dp,
@@ -60,22 +72,22 @@ fun TextMessageView(
 
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (item.isFromCurrentUser) Arrangement.End else Arrangement.Start,
+        horizontalArrangement = if (item.isOwn) Arrangement.End else Arrangement.Start,
         verticalAlignment = Alignment.Bottom
     ) {
-        val nextMessage = viewModel.nextMessageById(item.id)
-        if (!viewModel.isDirectMessages && !item.isFromCurrentUser) {
+        val nextMessage = viewModel.nextMessageByUuid(item.uuid)
+        if (!viewModel.isDirectMessages && !item.isOwn) {
             if (nextMessage != null) {
-                if (nextMessage.senderId != item.senderId) {
+                if (nextMessage.authorUuid != item.authorUuid) {
                     Box(
                         Modifier
                             .clickable(
                                 onClick = {
                                     navController.navigate(
                                         ChatFlow.ChatUserInfo(
-                                            item.senderFullName,
-                                            "${item.senderId}",
-                                            item.avatarUrl,
+                                            item.user?.displayableName() ?: "",
+                                            item.authorUuid,
+                                            item.user?.avatar ?: "",
                                             ""
                                         )
                                     )
@@ -83,8 +95,10 @@ fun TextMessageView(
                             )
                     ) {
                         Avatar(
-                            item.avatarUrl,
+                            item.user?.avatar,
                             viewModel.userViewModel.baseUrl.value ?: "",
+                            null,
+                            item.user?.displayableName() ?: "",
                             30,
                             true
                         )
@@ -104,18 +118,20 @@ fun TextMessageView(
                             onClick = {
                                 navController.navigate(
                                     ChatFlow.ChatUserInfo(
-                                        item.senderFullName,
-                                        "${item.senderId}",
-                                        item.avatarUrl,
-                                        ""
+                                        item.user?.displayableName() ?: "",
+                                        item.authorUuid,
+                                        item.user?.avatar ?: "",
+                                        item.user?.email ?: ""
                                     )
                                 )
                             }
                         )
                 ) {
                     Avatar(
-                        item.avatarUrl,
+                        item.user?.avatar,
                         viewModel.userViewModel.baseUrl.value ?: "",
+                        null,
+                        item.user?.displayableName() ?: "",
                         30,
                         true
                     )
@@ -127,7 +143,7 @@ fun TextMessageView(
                 verticalAlignment = Alignment.Bottom,
                 modifier = Modifier
                     .background(
-                        if (item.isFromCurrentUser)
+                        if (item.isOwn)
                             LocalWorkspaceColorsPalette.current.messageOwnBackground
                         else LocalWorkspaceColorsPalette.current.messageBackground,
                         shape = bubbleShape
@@ -145,23 +161,27 @@ fun TextMessageView(
                     modifier = Modifier
                         .weight(2f, fill = false)
                 ) {
+                    val defaultName = if (item.isOwn) "Я" else "Собеседник"
                     Text(
-                        text = item.senderFullName,
-                        color = if (item.isFromCurrentUser) LocalWorkspaceColorsPalette.current.indicatorBlue else LocalWorkspaceColorsPalette.current.indicatorPurple,
+                        text = item.user?.displayableName() ?: defaultName,
+                        color = if (item.isOwn) LocalWorkspaceColorsPalette.current.indicatorBlue else LocalWorkspaceColorsPalette.current.indicatorPurple,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Medium
                     )
-                    MarkdownText(
-                        markdown = item.content,
+                    EnhancedMarkdown(
+                        markdown = item.payload.content,
                         style = TextStyle(
                             color = LocalWorkspaceColorsPalette.current.textHeaders,
                             fontSize = 14.sp
-                        )
+                        ),
+                        navController = navController,
+                        viewModel = viewModel
                     )
                 }
                 Spacer(modifier = Modifier.widthIn(min = 20.dp))
+                val messageDate = LocalDateTime.parse(item.updatedAt, folderCreationFormatter)
                 Text(
-                    text = item.timestamp.formatHHmm(),
+                    text = messageDate.format(hhmmFormatter),
                     color = LocalWorkspaceColorsPalette.current.messageTimeColor,
                     fontSize = 14.sp,
                 )
@@ -170,7 +190,29 @@ fun TextMessageView(
                 expanded = menuExpanded,
                 onDismissRequest = { menuExpanded = false }
             ) {
-                if (item.isFromCurrentUser) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    listOf("👍", "❤️", "😂", "😮", "😢").forEach { emoji ->
+                        TextButton(
+                            onClick = {
+                                scope.launch {
+                                    viewModel.onReactionTap(item.uuid, emoji)
+                                }
+                                menuExpanded = false
+                            },
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Text(text = emoji, fontSize = 20.sp)
+                        }
+                    }
+                }
+                HorizontalDivider()
+                if (item.isOwn) {
                     DropdownMenuItem(
                         text = { Text("Редактировать") },
                         onClick = {

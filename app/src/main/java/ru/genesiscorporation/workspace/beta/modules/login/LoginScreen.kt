@@ -74,24 +74,14 @@ fun LoginScreen(
 ) {
     val loginText by viewModel.loginText.collectAsState()
     val passwordText by viewModel.passwordText.collectAsState()
+    val otpText by viewModel.otpText.collectAsState()
+    val needsOtp by viewModel.needsOtp.collectAsState()
     val scope = rememberCoroutineScope()
     val user = UserState.current
     val webUrl by viewModel.webUrl.collectAsStateWithLifecycle()
     val state by viewModel.queryState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var passwordVisible by remember { mutableStateOf(false) }
-
-    webUrl?.let { url ->
-        FullscreenWebViewDialog(
-            url = url,
-            onDismiss = { cookie ->
-                viewModel.setWebUrl(null)
-                scope.launch {
-                    viewModel.onOidcPathCapture(cookie)
-                }
-            }
-        )
-    }
 
     LaunchedEffect(state) {
         if (state is QueryState.Error) {
@@ -103,7 +93,7 @@ fun LoginScreen(
 
     Box(modifier = Modifier.fillMaxSize()
         .background(LocalWorkspaceColorsPalette.current.background),
-        contentAlignment = if (user.externalAuthenticationMethods.isEmpty()) Alignment.TopCenter else Alignment.Center
+        contentAlignment = Alignment.TopCenter
     ) {
         Column(modifier = Modifier.fillMaxWidth()
             .background(LocalWorkspaceColorsPalette.current.background)
@@ -141,9 +131,96 @@ fun LoginScreen(
             Column(
                 horizontalAlignment = Alignment.Start
             ) {
-                if (user.externalAuthenticationMethods.isEmpty()) {
+
+                Text(
+                    "Логин",
+                    color = LocalWorkspaceColorsPalette.current.textAdditional30,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(horizontal = 20.dp)
+                )
+                Box(
+                    contentAlignment = Alignment.CenterStart,
+                    modifier = Modifier
+                        .padding(horizontal = 20.dp)
+                        .fillMaxWidth()
+                        .height(40.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .padding(vertical = 4.dp)
+                        .background(
+                            LocalWorkspaceColorsPalette.current.searchBackground,
+                            RoundedCornerShape(8.dp)
+                        )
+                ) {
+                    BasicTextField(
+                        value = loginText,
+                        onValueChange = viewModel::onLoginChange,
+                        textStyle = TextStyle(
+                            color = LocalWorkspaceColorsPalette.current.textHeaders,
+                            fontSize = 14.sp
+                        ),
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Email
+                        ),
+                        cursorBrush = SolidColor(LocalWorkspaceColorsPalette.current.textHeaders),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                            .padding(horizontal = 12.dp)
+                    )
+                }
+                Text(
+                    "Пароль",
+                    color = LocalWorkspaceColorsPalette.current.textAdditional30,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(horizontal = 20.dp)
+                )
+                Box(
+                    contentAlignment = Alignment.CenterStart,
+                    modifier = Modifier
+                        .padding(horizontal = 20.dp)
+                        .fillMaxWidth()
+                        .height(40.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .padding(vertical = 4.dp)
+                        .background(
+                            LocalWorkspaceColorsPalette.current.searchBackground,
+                            RoundedCornerShape(8.dp)
+                        )
+                ) {
+                    BasicTextField(
+                        value = passwordText,
+                        onValueChange = viewModel::onPasswordChange,
+                        textStyle = TextStyle(
+                            color = LocalWorkspaceColorsPalette.current.textHeaders,
+                            fontSize = 14.sp
+                        ),
+                        cursorBrush = SolidColor(LocalWorkspaceColorsPalette.current.textHeaders),
+                        singleLine = true,
+                        visualTransformation = if (passwordVisible) {
+                            VisualTransformation.None
+                        } else {
+                            PasswordVisualTransformation()
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                            .padding(start = 12.dp, end = 44.dp)
+                    )
+                    IconButton(
+                        onClick = { passwordVisible = !passwordVisible },
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                    ) {
+                        Image(
+                            painter = if (passwordVisible) painterResource(id = R.drawable.ic_visibility_off) else painterResource(
+                                id = R.drawable.ic_visibility
+                            ),
+                            contentDescription = null
+                        )
+                    }
+                }
+                if (needsOtp) {
                     Text(
-                        "Email",
+                        "Одноразовый код-пароль",
                         color = LocalWorkspaceColorsPalette.current.textAdditional30,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Medium,
@@ -163,8 +240,8 @@ fun LoginScreen(
                             )
                     ) {
                         BasicTextField(
-                            value = loginText,
-                            onValueChange = viewModel::onLoginChange,
+                            value = otpText,
+                            onValueChange = viewModel::onOtpTextChange,
                             textStyle = TextStyle(
                                 color = LocalWorkspaceColorsPalette.current.textHeaders,
                                 fontSize = 14.sp
@@ -178,89 +255,21 @@ fun LoginScreen(
                                 .padding(horizontal = 12.dp)
                         )
                     }
-                    Text(
-                        "Пароль",
-                        color = LocalWorkspaceColorsPalette.current.textAdditional30,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.padding(horizontal = 20.dp)
-                    )
-                    Box(
-                        contentAlignment = Alignment.CenterStart,
-                        modifier = Modifier
-                            .padding(horizontal = 20.dp)
-                            .fillMaxWidth()
-                            .height(40.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .padding(vertical = 4.dp)
-                            .background(
-                                LocalWorkspaceColorsPalette.current.searchBackground,
-                                RoundedCornerShape(8.dp)
-                            )
-                    ) {
-                        BasicTextField(
-                            value = passwordText,
-                            onValueChange = viewModel::onPasswordChange,
-                            textStyle = TextStyle(
-                                color = LocalWorkspaceColorsPalette.current.textHeaders,
-                                fontSize = 14.sp
-                            ),
-                            cursorBrush = SolidColor(LocalWorkspaceColorsPalette.current.textHeaders),
-                            singleLine = true,
-                            visualTransformation = if (passwordVisible) {
-                                VisualTransformation.None
-                            } else {
-                                PasswordVisualTransformation()
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                                .padding(start = 12.dp, end = 44.dp)
-                        )
-                        IconButton(
-                            onClick = { passwordVisible = !passwordVisible },
-                            modifier = Modifier
-                                .align(Alignment.CenterEnd)
-                        ) {
-                            Image(
-                                painter = if (passwordVisible) painterResource(id = R.drawable.ic_visibility_off) else painterResource(
-                                    id = R.drawable.ic_visibility
-                                ),
-                                contentDescription = null
-                            )
-                        }
-                        Button(
-                            onClick = {
-                                scope.launch {
-                                    viewModel.onLoginClick()
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = LocalWorkspaceColorsPalette.current.primary,
-                                contentColor = LocalWorkspaceColorsPalette.current.onPrimary
-                            ),
-                            modifier = Modifier.fillMaxWidth()
-                                .padding(6.dp)
-                        ) {
-                            Text("Войти")
-                        }
-                    }
                 }
-                for (method in user.externalAuthenticationMethods) {
-                    Button(
-                        onClick = {
-//                            webUrl = "${user.baseUrl.value}${method.login_url}?next=%2F"
-                            scope.launch {
-                                viewModel.onOidcLoginClick("${method.login_url}?next=%2F")
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = LocalWorkspaceColorsPalette.current.primary,
-                            contentColor = LocalWorkspaceColorsPalette.current.onPrimary
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                            .padding(6.dp)
-                    ) {
-                        Text("Войти c ${method.display_name}")
-                    }
+                Button(
+                    onClick = {
+                        scope.launch {
+                            viewModel.onLoginClick()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = LocalWorkspaceColorsPalette.current.primary,
+                        contentColor = LocalWorkspaceColorsPalette.current.onPrimary
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                        .padding(6.dp)
+                ) {
+                    Text("Войти")
                 }
                 Button(
                     onClick = {

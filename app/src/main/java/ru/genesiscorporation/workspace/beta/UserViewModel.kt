@@ -13,23 +13,22 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.data.ApiKeyRepository
-import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
-import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalAuthenticationMethod
-import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponse
+import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import kotlin.String
 
 class UserViewModel(
     val repo: ApiKeyRepository
 ):  ViewModel() {
 
-    var userData: UserResponse? = null
+    var userData: UserResponseData? = null
 
-    var externalAuthenticationMethods: List<ExternalAuthenticationMethod> = emptyList()
-
-    val isApiKeyLoaded: StateFlow<Boolean> = repo.apiKeyFlow
+    val isAccessTokenLoaded: StateFlow<Boolean> = repo.accessTokenFlow
         .map { true }
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
-    val apiKey: StateFlow<String?> = repo.apiKeyFlow
+    val accessToken: StateFlow<String?> = repo.accessTokenFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    val refreshToken: StateFlow<String?> = repo.refreshTokenFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     val email: StateFlow<String?> = repo.emailFlow
@@ -39,9 +38,15 @@ class UserViewModel(
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
     val userId: StateFlow<String?> = repo.userIdFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
-    fun setApiKey(newKey: String) {
+    fun setAccessToken(newKey: String) {
         viewModelScope.launch {
-            repo.saveApiKey(newKey)
+            repo.saveAccessToken(newKey)
+        }
+    }
+
+    fun setRefreshToken(newKey: String) {
+        viewModelScope.launch {
+            repo.saveRefreshToken(newKey)
         }
     }
 
@@ -51,9 +56,9 @@ class UserViewModel(
         }
     }
 
-    fun setBaseUrl(newBaseUrl: String) {
+    fun addBaseUrl(newBaseUrl: String) {
         viewModelScope.launch {
-            repo.saveBaseUrl(newBaseUrl)
+            repo.addBaseUrl(newBaseUrl)
         }
     }
     fun setUserId(newUserId: String) {

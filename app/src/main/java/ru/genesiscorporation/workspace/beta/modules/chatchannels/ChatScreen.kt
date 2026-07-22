@@ -75,17 +75,23 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.ChatFlow
+import ru.genesiscorporation.workspace.beta.LoginFlow
 import ru.genesiscorporation.workspace.beta.UsersViewModelFactory
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
+import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.formatHHmm
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
-import ru.genesiscorporation.workspace.beta.modules.topics.TopicHeader
 import ru.genesiscorporation.workspace.beta.modules.users.UsersScreen
 import ru.genesiscorporation.workspace.beta.modules.users.UsersViewModel
 import ru.genesiscorporation.workspace.beta.ui.AddChatToFolder
+import ru.genesiscorporation.workspace.beta.ui.AnimatedGif
 import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.CreateFolder
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+import kotlin.collections.mapNotNull
+import kotlin.collections.sortedByDescending
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -96,13 +102,12 @@ fun ChatScreen(
 ) {
     var showDetail by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    val subscriptions by chatViewModel.subscriptions.collectAsState()
-    val topics by chatViewModel.topics.collectAsState()
-    val folders by chatViewModel.folders.collectAsState()
+    val folders by chatViewModel.folders.collectAsStateWithLifecycle()
+    val queryState by chatViewModel.queryState.collectAsState()
     val currentlySelectedFolder by chatViewModel.currentlySelectedFolder.collectAsState()
     var showUserList by remember { mutableStateOf(false) }
     var showAddFolderView by remember { mutableStateOf(false) }
-    var chatToAdd: ChatHeader? by remember { mutableStateOf(null) }
+    val chatToAdd by chatViewModel.chatToAdd.collectAsState()
     val usersViewModelFactory = remember { UsersViewModelFactory(chatViewModel.client) }
     var usersViewModel: UsersViewModel = viewModel(factory = usersViewModelFactory)
     val userId by chatViewModel.userViewModel.repo.userIdFlow.collectAsStateWithLifecycle(
@@ -112,45 +117,10 @@ fun ChatScreen(
     val cameBack = backStackEntry?.savedStateHandle
         ?.getStateFlow("from_detail_back", false)
         ?.collectAsState()
-    var searchQuery by remember { mutableStateOf("") }
+    val searchQuery by chatViewModel.searchQuery.collectAsState()
 
-    val state by chatViewModel.queryState.collectAsStateWithLifecycle()
+    val createState by chatViewModel.createQueryState.collectAsStateWithLifecycle()
     val context = LocalContext.current
-
-    val filteredSubscriptions = remember(searchQuery, subscriptions, currentlySelectedFolder) {
-        val folderSubscriptions = if (currentlySelectedFolder?.systemType == "all") {
-            subscriptions
-        } else {
-            val folderItems = currentlySelectedFolder?.items
-            if (folderItems != null) {
-                val directSubscriptions = subscriptions.filter { it.isDirectMessages }
-                val streamSubscriptions = subscriptions.filter { !it.isDirectMessages }
-                var folderSubscriptions: List<ChatHeader> = emptyList()
-                for (folderItem in folderItems) {
-                    when (folderItem.chatType) {
-                        "private" -> {
-                            val filteredSubscriptions = directSubscriptions.filter { folderItem.chatId == it.chatId }
-                            folderSubscriptions += filteredSubscriptions
-                        }
-                        "stream" -> {
-                            val filteredSubscriptions = streamSubscriptions.filter { folderItem.chatId == it.chatId }
-                            folderSubscriptions += filteredSubscriptions
-                        }
-                    }
-                }
-                folderSubscriptions
-            } else {
-                subscriptions
-            }
-        }
-        if (searchQuery.isBlank()) {
-            folderSubscriptions
-        } else {
-            folderSubscriptions.filter {
-                it.title.contains(searchQuery, ignoreCase = true)
-            }
-        }
-    }
 
     LaunchedEffect(cameBack?.value) {
         if (cameBack?.value == true) {
@@ -162,11 +132,31 @@ fun ChatScreen(
         }
     }
 
-    LaunchedEffect(state) {
-        if (state is QueryState.Error) {
-            Toast
-                .makeText(context, "Чат добавлен в папку", Toast.LENGTH_SHORT)
-                .show()
+//    LaunchedEffect(queryState) {
+//        if (queryState is QueryState.Error) {
+//            Toast
+//                .makeText(context, "Чат добавлен в папку", Toast.LENGTH_SHORT)
+//                .show()
+//        }
+//    }
+
+    LaunchedEffect(createState) {
+        if (createState is QueryState.Success) {
+            val createdStream = chatViewModel.createdStream
+            if (createdStream != null) {
+                chatViewModel.currentStreamId = createdStream.uuid
+                navController.navigate(
+                    ChatFlow.ChatDialog(
+                        createdStream.name,
+                        createdStream.uuid,
+                        null,
+                        createdStream.defaultTopicUuid ?: "",
+                        true,
+                        null
+                    )
+                )
+                chatViewModel.createdStream = null
+            }
         }
     }
 
@@ -174,18 +164,18 @@ fun ChatScreen(
         chatViewModel.navEvents.collect { event ->
             when (event) {
                 is ChatNavEvent.OpenDialog -> {
-                    navController.navigate(
-                        ChatFlow.ChatDialog(
-                            event.title,
-                            event.chatId,
-                            event.topicId,
-                            event.isDirectMessages,
-                            event.userId
-                        )
-                    ) {
-                        popUpTo<ChatFlow.ChatList> { inclusive = false }
-                        launchSingleTop = true
-                    }
+//                    navController.navigate(
+//                        ChatFlow.ChatDialog(
+//                            event.title,
+//                            event.chatId,
+//                            event.topicId,
+//                            event.isDirectMessages,
+//                            event.userId
+//                        )
+//                    ) {
+//                        popUpTo<ChatFlow.ChatList> { inclusive = false }
+//                        launchSingleTop = true
+//                    }
                 }
             }
         }
@@ -233,16 +223,6 @@ fun ChatScreen(
                     .imePadding()
                     .background(LocalWorkspaceColorsPalette.current.surface)
             ) {
-                if (subscriptions.isEmpty()) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "Loading"
-                        )
-                    }
-                } else {
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
@@ -262,7 +242,10 @@ fun ChatScreen(
                         ) {
                             BasicTextField(
                                 value = searchQuery,
-                                onValueChange = { searchQuery = it },
+                                onValueChange = {
+                                    showDetail = false
+                                    chatViewModel.onSearchQueryChange(it)
+                                },
                                 textStyle = TextStyle(
                                     color = LocalWorkspaceColorsPalette.current.textAdditional30,
                                     fontSize = 14.sp
@@ -290,7 +273,7 @@ fun ChatScreen(
                                     items = folders
                                 ) { folder ->
                                     Row {
-                                        val unreadCount = chatViewModel.unreadCountForFolder(folder)
+                                        val unreadCount = folder.unreadCount
                                         val endPadding = if (unreadCount > 0) 0.dp else 8.dp
                                         Text(
                                             folder.title,
@@ -301,6 +284,10 @@ fun ChatScreen(
                                                 .padding(start = 16.dp, 0.dp, endPadding, 0.dp)
                                                 .clickable(
                                                     onClick = {
+                                                        scope.launch {
+                                                            showDetail = false
+                                                            chatViewModel.updateSelectedChat(null)
+                                                        }
                                                         chatViewModel.updateCurrentlySelectedFolder(
                                                             folder
                                                         )
@@ -339,137 +326,17 @@ fun ChatScreen(
                                 }
                             }
                         }
-                        BoxWithConstraints(Modifier.fillMaxSize()) {
-                            val density = LocalDensity.current
-                            val screenWidthPx = with(density) { maxWidth.toPx() }
-                            val openOffsetPx =
-                                with(density) { 55.dp.toPx() }      // left edge when open
-                            val closedOffsetPx =
-                                screenWidthPx + 20                    // fully off-screen right
-                            val offsetX = remember { Animatable(closedOffsetPx) }
-                            // Animate open / close when showDetail changes
-                            LaunchedEffect(showDetail) {
-                                offsetX.animateTo(
-                                    targetValue = if (showDetail) openOffsetPx else closedOffsetPx,
-                                    animationSpec = spring(dampingRatio = 0.9f, stiffness = 400f)
-                                )
-                            }
-                            LazyColumn(
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier
-                                    .fillMaxSize()
-                            ) {
-                                items(
-                                    items = filteredSubscriptions
-                                ) { item ->
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        if (item.streamId == chatViewModel.currentlySelectedSubscription.collectAsState().value?.streamId) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .width(3.dp)
-                                                    .height(56.dp)
-                                                    .background(LocalWorkspaceColorsPalette.current.primary)
-                                            )
-                                        }
-                                        ChatChannel(
-                                            item,
-                                            chatViewModel,
-                                            showDetail,
-                                            currentlySelectedFolder,
-                                            onChatNumberToAddChange = { chatToAdd = it },
-                                            onClick = {
-                                                if (item.isDirectMessages) {
-                                                    chatViewModel.currentStreamId = item.streamId
-                                                    navController.navigate(
-                                                        ChatFlow.ChatDialog(
-                                                            item.title,
-                                                            item.streamId,
-                                                            null,
-                                                            true,
-                                                            item.user?.userId
-                                                        )
-                                                    )
-                                                } else {
-                                                    scope.launch {
-                                                        chatViewModel.updateSelectedChat(item)
-                                                        showDetail = true
-                                                    }
-                                                }
-                                            }
-                                        )
-                                    }
-                                }
-                            }
-                            val scope = rememberCoroutineScope()
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxHeight()
-                                    .width(maxWidth - 55.dp) // panel width when open
-                                    .offset { IntOffset(offsetX.value.roundToInt(), 0) }
-                                    .background(LocalWorkspaceColorsPalette.current.surface)
-                                    .pointerInput(Unit) {
-                                        detectHorizontalDragGestures(
-                                            onDragEnd = {
-                                                scope.launch {
-                                                    val shouldOpen = offsetX.value < (openOffsetPx + closedOffsetPx) / 2f
-                                                    showDetail = shouldOpen
-                                                    offsetX.animateTo(
-                                                        if (shouldOpen) openOffsetPx else closedOffsetPx
-                                                    )
-                                                }
-                                            },
-                                            onHorizontalDrag = { _, dragAmount ->
-                                                scope.launch {
-                                                    offsetX.snapTo(
-                                                        (offsetX.value + dragAmount)
-                                                            .coerceIn(openOffsetPx, closedOffsetPx)
-                                                    )
-                                                }
-                                            }
-                                        )
-                                    }
-                            ) {
-                                if (topics.isEmpty()) {
-                                    Box(
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = "Loading"
-                                        )
-                                    }
-                                } else {
-                                    LazyColumn(
-                                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                    ) {
-                                        items(items = topics) { item ->
-                                            ChatTopic(chatViewModel, item, navController)
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        ChatWithTopics(chatViewModel, navController, showDetail, { showDetail = it })
                     }
-                }
             }
             if (showUserList) {
                 UsersScreen(
                     usersViewModel,
                     onUserSelected = { userResponse ->
-                        navController.navigate(
-                            ChatFlow.ChatDialog(
-                                userResponse.fullName,
-                                "[${userResponse.userId}, ${userId}]",
-                                null,
-                                true,
-                                userResponse.userId
-                            )
-                        )
                         showUserList = false
+                        scope.launch {
+                            chatViewModel.createPrivateStream(userResponse)
+                        }
                     },
                     onDismiss = {
                         showUserList = false
@@ -508,7 +375,7 @@ fun ChatScreen(
                         .clickable(
                             indication = null,
                             interactionSource = remember { MutableInteractionSource() },
-                            onClick = { chatToAdd = null },
+                            onClick = { chatViewModel.onChatToAddChange(null) },
                         ),
                 )
                 AddChatToFolder(
@@ -516,13 +383,13 @@ fun ChatScreen(
                     chat,
                     onAddButtonTap = { folder, chat ->
                         scope.launch {
-                            chatViewModel.addChatFolder(
-                                chat.chatId,
-                                if (chat.isDirectMessages) "private" else "stream",
-                                folder.uuid
-                            )
+//                            chatViewModel.addChatFolder(
+//                                chat.chatId,
+//                                if (chat.isDirectMessages) "private" else "stream",
+//                                folder.uuid
+//                            )
                         }
-                        chatToAdd = null
+                        chatViewModel.onChatToAddChange(null)
                     }
                 )
             }

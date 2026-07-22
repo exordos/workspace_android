@@ -6,6 +6,7 @@ import androidx.recyclerview.widget.RecyclerView
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.plugins.ClientRequestException
+import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.forms.FormDataContent
 import io.ktor.client.request.forms.MultiPartFormDataContent
 import io.ktor.client.request.forms.formData
@@ -15,6 +16,7 @@ import io.ktor.client.request.parameter
 import io.ktor.client.request.post
 import io.ktor.client.request.request
 import io.ktor.client.request.setBody
+import io.ktor.client.request.url
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.utils.EmptyContent.contentType
 import io.ktor.http.ContentType
@@ -41,34 +43,40 @@ import ru.genesiscorporation.workspace.beta.UserViewModel
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UploadFileResponseData
 import kotlin.io.encoding.Base64
 import ru.genesiscorporation.workspace.beta.BuildConfig
+import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
+import ru.genesiscorporation.workspace.beta.data.remote.dto.LoginRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.TokenRefreshRequest
+import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 
 class WorkspaceAPIClient(
     val client: HttpClient,
     val userViewModel: UserViewModel,
     val sessionCookieStore: SessionCookieStore
 ): APIClient {
-    var baseApiKey: String? = null
+    var baseAccessToken: String? = null
     var baseEmail: String? = null
     @OptIn(ExperimentalSerializationApi::class)
     suspend inline fun <reified RequestData : Any, reified Response : Any, reified ResponseError : Any> performRequest(
         request: ApiRequest<RequestData, Response, ResponseError>
     ): ApiResult<Response, ApiError> {
         val baseUrl = userViewModel.repo.baseUrlFlow.first()
-        val apiKey = if (baseApiKey != null) baseApiKey ?: "" else userViewModel.repo.apiKeyFlow.first() ?: ""
-        val isOidc = apiKey.contains("__Host-sessionid=")
+        val accessToken = if (baseAccessToken != null) baseAccessToken ?: "" else userViewModel.repo.accessTokenFlow.first() ?: ""
+        val isOidc = accessToken.contains("__Host-sessionid=")
         val urlSuffix = if (request.shouldApplySuffix) {
             if (isOidc) "/json" else "/api/v1"
         } else {
             ""
         }
-        val url = if (request.isAbsoluteUrl) request.url else "${baseUrl}${urlSuffix}${request.url}"
+        val urlString = if (request.isAbsoluteUrl) request.url else "${baseUrl}${urlSuffix}${request.url}"
         return try {
-            val httpResponse: HttpResponse = client.request(url) {
+            val requestBuilder: HttpRequestBuilder = HttpRequestBuilder().apply {
+                url(urlString)
                 method = when (request.method) {
                     HTTPMethod.GET -> HttpMethod.Get
                     HTTPMethod.POST -> HttpMethod.Post
                     HTTPMethod.PATCH -> HttpMethod.Patch
                     HTTPMethod.DELETE -> HttpMethod.Delete
+                    HTTPMethod.PUT -> HttpMethod.Put
                 }
                 header("User-Agent", "Workspace/android/${BuildConfig.VERSION_NAME}")
 
@@ -79,7 +87,8 @@ class WorkspaceAPIClient(
                         HTTPMethod.GET -> {
                             url {
                                 for ((key, value) in bodyDict) {
-                                    parameters.append(key, value)
+                                    val paramName = key.replace(Regex("\\.\\d+$"), "")
+                                    parameters.append(paramName, value)
                                 }
                             }
                         }
@@ -100,42 +109,61 @@ class WorkspaceAPIClient(
                         }
 
                         HTTPMethod.PATCH -> {
-                            setBody(FormDataContent(Parameters.build {
-                                for ((key, value) in bodyDict) {
-                                    append(key, value)
-                                }
-                            }))
+                            if (request.isJson) {
+                                contentType(ContentType.Application.Json)
+                                setBody(
+                                    request.data
+                                )
+                            } else {
+                                setBody(FormDataContent(Parameters.build {
+                                    for ((key, value) in bodyDict) {
+                                        append(key, value)
+                                    }
+                                }))
+                            }
                         }
 
                         HTTPMethod.DELETE -> {
-                            setBody(FormDataContent(Parameters.build {
-                                for ((key, value) in bodyDict) {
-                                    append(key, value)
-                                }
-                            }))
+                            if (request.isJson) {
+                                contentType(ContentType.Application.Json)
+                                setBody(
+                                    request.data
+                                )
+                            } else {
+                                setBody(FormDataContent(Parameters.build {
+                                    for ((key, value) in bodyDict) {
+                                        append(key, value)
+                                    }
+                                }))
+                            }
+                        }
+
+                        HTTPMethod.PUT -> {
+                            if (request.isJson) {
+                                contentType(ContentType.Application.Json)
+                                setBody(
+                                    request.data
+                                )
+                            } else {
+                                setBody(FormDataContent(Parameters.build {
+                                    for ((key, value) in bodyDict) {
+                                        append(key, value)
+                                    }
+                                }))
+                            }
                         }
                     }
                 }
                 if (request.requiresApiKey) {
-                    if (isOidc) {
-                        header("cookie", apiKey)
-                        val csrfToken = apiKey.substringAfter(';')
-                            .takeIf { it.startsWith(" __Host-csrftoken=") }
-                            ?.substringAfter('=')
-                            ?.takeIf { it.isNotBlank() }
-                        if (csrfToken != null) {
-                            header("X-CSRFToken", csrfToken)
-                        }
-                    } else {
-                        val email = if (baseEmail != null) baseEmail else userViewModel.repo.emailFlow.first()
-                        val authHeader = Base64.encode("$email:$apiKey".encodeToByteArray())
-                        header("Authorization", "Basic $authHeader")
+                    header("Authorization", "Bearer $accessToken")
+                }
+                if (!request.additionalHeaders.isEmpty()) {
+                    request.additionalHeaders.forEach { additionalHeader ->
+                        header(additionalHeader.key, additionalHeader.value)
                     }
                 }
-                if (request.hasSessionCookie && sessionCookieStore.getSessionId() != null) {
-                    header("cookie", "__Host-sessionid=${sessionCookieStore.getSessionId()}")
-                }
             }
+            val httpResponse: HttpResponse = client.request(requestBuilder)
 
             if (httpResponse.status.isSuccess()) {
                 val json = Json { ignoreUnknownKeys = true }
@@ -148,11 +176,38 @@ class WorkspaceAPIClient(
                     val response = json.decodeFromString<Response>(responseString)
                     ApiResult.Success(response)
                 }
-            } else {
+            } else if (httpResponse.status.value == 401 && request !is LoginRequest && request !is TokenRefreshRequest) {
+                refreshToken()
+                requestBuilder.headers.set("Authorization", "Bearer ${baseAccessToken ?: ""}")
+                val httpResponseAfterRefresh: HttpResponse = client.request(requestBuilder)
+                if (httpResponseAfterRefresh.status.isSuccess()) {
+                    val json = Json { ignoreUnknownKeys = true }
+
+                    val responseString: String = httpResponseAfterRefresh.body()
+                    if (Response::class == String::class) {
+                        val finalResponseString = if (request.shouldReturnUrl) httpResponseAfterRefresh.call.request.url.toString() else if (request.hasSessionCookie) sessionCookieStore.getFullSessionCookie() ?: "" else responseString
+                        ApiResult.Success(finalResponseString as Response)
+                    } else {
+                        val response = json.decodeFromString<Response>(responseString)
+                        ApiResult.Success(response)
+                    }
+                } else if (httpResponseAfterRefresh.status.value == 401) {
+                    userViewModel.clearAll()
+                    val error = ApiError("Request failed", "REQUEST_FAILED")
+
+                    ApiResult.Error(error)
+                } else {
+                    val json = Json { ignoreUnknownKeys = true }
+                    val responseString: String = httpResponseAfterRefresh.body()
+                    val response = json.decodeFromString<ResponseStatusError>(responseString)
+                    val error = ApiError(response.msg, response.code)
+
+                    ApiResult.Error(error)
+                }
+            }  else {
                 val json = Json { ignoreUnknownKeys = true }
                 val responseString: String = httpResponse.body()
-                val response = json.decodeFromString<ResponseStatusError>(responseString)
-                val error = ApiError(response.msg, response.code)
+                val error = ApiError(responseString, "${httpResponse.status.value}")
 
                 ApiResult.Error(error)
             }
@@ -163,20 +218,18 @@ class WorkspaceAPIClient(
         }
     }
 
-    suspend fun uploadImage(context: Context, uri: Uri): ApiResult<UploadFileResponseData, ApiError> {
+    suspend fun uploadImage(context: Context, uri: Uri, streamUuid: String): ApiResult<UploadFileResponseData, ApiError> {
         val bytes = readUriBytes(context, uri)
         val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
         val fileName = "image.jpg"
         val baseUrl = userViewModel.repo.baseUrlFlow.first()
-        val apiKey = if (baseApiKey != null) baseApiKey ?: "" else userViewModel.repo.apiKeyFlow.first() ?: ""
-        val isOidc = apiKey.contains("__Host-sessionid=")
-        val urlSuffix = if (isOidc) "/json" else "/api/v1"
-        val httpResponse: HttpResponse = client.post("${baseUrl}${urlSuffix}/user_uploads") {
+        val accessToken = if (baseAccessToken != null) baseAccessToken ?: "" else userViewModel.repo.accessTokenFlow.first() ?: ""
+        val httpResponse: HttpResponse = client.post("${baseUrl}/api/workspace/v1/messenger/files/") {
             setBody(
                 MultiPartFormDataContent(
                     formData {
                         append(
-                            key = "body",
+                            key = "file",
                             value = bytes,
                             headers = Headers.build {
                                 append(HttpHeaders.ContentType, mime)
@@ -186,24 +239,12 @@ class WorkspaceAPIClient(
                                 )
                             }
                         )
+                        append(key = "stream_uuid", value = streamUuid)
                     }
                 )
             )
             header("User-Agent", "Workspace/android/${BuildConfig.VERSION_NAME}")
-            if (isOidc) {
-                header("cookie", apiKey)
-                val csrfToken = apiKey.substringAfter(';')
-                    .takeIf { it.startsWith(" __Host-csrftoken=") }
-                    ?.substringAfter('=')
-                    ?.takeIf { it.isNotBlank() }
-                if (csrfToken != null) {
-                    header("X-CSRFToken", csrfToken)
-                }
-            } else {
-                val email = if (baseEmail != null) baseEmail else userViewModel.repo.emailFlow.first()
-                val authHeader = Base64.encode("$email:$apiKey".encodeToByteArray())
-                header("Authorization", "Basic $authHeader")
-            }
+            header("Authorization", "Bearer $accessToken")
         }
         if (httpResponse.status.isSuccess()) {
             val json = Json { ignoreUnknownKeys = true }
@@ -218,6 +259,24 @@ class WorkspaceAPIClient(
         }
     }
 
+    suspend fun refreshToken() {
+        val refreshToken = userViewModel.repo.refreshTokenFlow.first()
+        if (refreshToken != null) {
+            val refreshResponse = performRequest(TokenRefreshRequest(refreshToken))
+            when(refreshResponse) {
+                is ApiResult.Success -> {
+                    val userResponse = refreshResponse.value
+                    userViewModel.setAccessToken(userResponse.accessToken)
+                    userViewModel.setRefreshToken(userResponse.refreshToken)
+                    baseAccessToken = userResponse.accessToken
+                }
+                is ApiResult.Error -> {
+                    userViewModel.clearAll()
+                }
+            }
+        }
+    }
+
     suspend fun readUriBytes(context: Context, uri: Uri): ByteArray =
         withContext(Dispatchers.IO) {
             context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
@@ -226,22 +285,9 @@ class WorkspaceAPIClient(
 
     fun authHeaders(backupApiKey: String, backupEmail: String): List<AuthHeader> {
         val authHeadersList: MutableList<AuthHeader> = mutableListOf()
-        val apiKey = if (baseApiKey != null) baseApiKey ?: "" else backupApiKey
-        val isOidc = apiKey.contains("__Host-sessionid=")
-        if (isOidc) {
-            authHeadersList += AuthHeader("cookie", apiKey)
-            val csrfToken = apiKey.substringAfter(';')
-                .takeIf { it.startsWith(" __Host-csrftoken=") }
-                ?.substringAfter('=')
-                ?.takeIf { it.isNotBlank() }
-            if (csrfToken != null) {
-                authHeadersList += AuthHeader("X-CSRFToken", csrfToken)
-            }
-        } else {
-            val email = if (baseEmail != null) baseEmail else backupEmail
-            val authHeader = Base64.encode("$email:$apiKey".encodeToByteArray())
-            authHeadersList += AuthHeader("Authorization", "Basic $authHeader")
-        }
+        val accessToken = if (baseAccessToken != null) baseAccessToken ?: "" else backupApiKey
+        authHeadersList += AuthHeader("Authorization", "Bearer $accessToken")
+
         return  authHeadersList
     }
 }

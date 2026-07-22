@@ -53,6 +53,7 @@ import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.R
+import ru.genesiscorporation.workspace.beta.modules.chatchannels.TopicHeader
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.formatHHmm
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 
@@ -155,7 +156,7 @@ fun ChatOldTopic(
             .clickable(
                 onClick = {
                     topicsViewModel.currentTopicName = item.title
-                    navController.navigate(ChatFlow.ChatDialog(item.channelName, item.channelId, item.title, false, topicsViewModel.channelStreamId.toInt()))
+                    navController.navigate(ChatFlow.ChatDialog(item.channelName, item.channelId, item.title, item.uuid,false, topicsViewModel.channelStreamId.toInt()))
                 }
             )
     ) {
@@ -176,29 +177,12 @@ fun ChatOldTopic(
                     overflow = TextOverflow.Ellipsis
                 )
                 val lastMessage = item.lastMessage
-                if (lastMessage != null) {
-                    Spacer(modifier = Modifier.weight(1f))
-                    Text(
-                        text = lastMessage.timestamp.formatHHmm(),
-                        color = LocalWorkspaceColorsPalette.current.messageTimeColor,
-                        fontSize = 12.sp,
-                    )
-                }
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 val lastMessage = item.lastMessage
-                if (lastMessage != null) {
-                    Text(
-                        text = lastMessage.content,
-                        color = LocalWorkspaceColorsPalette.current.textAdditional50,
-                        fontSize = 12.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
                 Spacer(modifier = Modifier.weight(1f))
                 if (item.unreadCount > 0) {
                     Text(

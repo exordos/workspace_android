@@ -24,12 +24,15 @@ interface ApiRequest<RequestData, Response, ResponseError> {
     val shouldReturnUrl: Boolean
         get() = false
     val shouldApplySuffix: Boolean
-        get() = true
+        get() = false
     val hasSessionCookie: Boolean
         get() = false
     val isJson: Boolean
-        get() = false
+        get() = true
     val data: RequestData
+
+    val additionalHeaders: Map<String, String>
+            get() = emptyMap()
 }
 
 @Serializable
@@ -41,5 +44,6 @@ enum class HTTPMethod(val value: String) {
     GET("GET"),
     POST("POST"),
     PATCH("PATCH"),
-    DELETE("DELETE")
+    DELETE("DELETE"),
+    PUT("PUT")
 }

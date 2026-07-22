@@ -1,9 +1,6 @@
 package ru.genesiscorporation.workspace.beta
 
-import androidx.compose.ui.graphics.vector.ImageVector
 import kotlinx.serialization.Serializable
-import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponse
-import ru.genesiscorporation.workspace.beta.data.remote.dto.UsersResponseData
 
 interface Destinations {
     val route: String
@@ -22,7 +19,7 @@ object ChatFlow {
     object ChatList
 
     @Serializable
-    data class ChatDialog(val title: String, val chatId: String, val topicId: String?, val isDirectMessages: Boolean, val userId: Int?)
+    data class ChatDialog(val title: String, val chatId: String, val topicName: String?, val topicUuid: String, val isDirectMessages: Boolean, val userId: Int?)
     @Serializable
     data class ChatTopic(val channelName: String, val channelId: String)
 
@@ -34,6 +31,14 @@ object ChatFlow {
 object LoginFlow {
     @Serializable
     object ChooseServer
+
+    @Serializable
+    object Login
+}
+
+object ProfileFlow {
+    @Serializable
+    object Main
 
     @Serializable
     object Login

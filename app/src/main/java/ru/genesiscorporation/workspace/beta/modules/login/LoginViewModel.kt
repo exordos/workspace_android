@@ -4,12 +4,11 @@ import androidx.lifecycle.ViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.buffer
 import ru.genesiscorporation.workspace.beta.UserViewModel
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.data.remote.dto.LoginRequest
-import ru.genesiscorporation.workspace.beta.data.remote.dto.OidcCompleteRequest
-import ru.genesiscorporation.workspace.beta.data.remote.dto.OidcLoginRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.OwnUserRequest
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 
@@ -33,6 +32,8 @@ class LoginViewModel(
 
     fun onLoginChange(newText: String) {
         _loginText.value = newText
+        _needsOtp.value = false
+        _otpText.value = ""
     }
 
     private val _passwordText = MutableStateFlow("")
@@ -40,69 +41,38 @@ class LoginViewModel(
 
     fun onPasswordChange(newText: String) {
         _passwordText.value = newText
+        _needsOtp.value = false
+        _otpText.value = ""
     }
 
-    suspend fun onOidcLoginClick(urlSuffix: String) {
-        _queryState.value = QueryState.Loading
-        val response = client.performRequest(OidcLoginRequest(urlSuffix))
-        when(response) {
-            is ApiResult.Success -> {
-                setWebUrl(response.value)
-                _queryState.value = QueryState.Success
-            }
-            is ApiResult.Error -> {
-                _queryState.value = QueryState.Error(response.error.message ?: "Error")
-            }
-        }
-    }
+    private val _needsOtp = MutableStateFlow(false)
+    val needsOtp: StateFlow<Boolean> = _needsOtp
 
-    suspend fun onOidcPathCapture(path: String) {
-        if (!path.isEmpty()) {
-            _queryState.value = QueryState.Loading
-            val response = client.performRequest(OidcCompleteRequest(path))
-            when(response) {
-                is ApiResult.Success -> {
-                    userViewModel.setApiKey(response.value)
-                    client.baseApiKey = response.value
-                    loadUserInfo()
-                }
-                is ApiResult.Error -> {
-                    _queryState.value = QueryState.Error(response.error.message ?: "Error")
-                }
-            }
-        }
+
+    private val _otpText = MutableStateFlow("")
+    val otpText: StateFlow<String> = _otpText
+
+    fun onOtpTextChange(newText: String) {
+        _otpText.value = newText
     }
 
     suspend fun onLoginClick() {
         _queryState.value = QueryState.Loading
-        val response = client.performRequest(LoginRequest(loginText.value, passwordText.value))
+        val response = client.performRequest(LoginRequest(loginText.value, passwordText.value, otpText.value))
         when(response) {
             is ApiResult.Success -> {
                 val userResponse = response.value
-                userViewModel.setApiKey(userResponse.api_key)
-                client.baseApiKey = userResponse.api_key
-                userViewModel.setEmail(userResponse.email)
-                client.baseEmail = userResponse.email
-                loadUserInfo()
+                userViewModel.setAccessToken(userResponse.accessToken)
+                userViewModel.setRefreshToken(userResponse.refreshToken)
+                client.baseAccessToken = userResponse.accessToken
             }
             is ApiResult.Error -> {
-                _queryState.value = QueryState.Error(response.error.message ?: "Error")
-            }
-        }
-    }
-
-    suspend fun loadUserInfo() {
-        val response = client.performRequest(OwnUserRequest())
-        when(response) {
-            is ApiResult.Success -> {
-                userViewModel.userData = response.value
-                userViewModel.setEmail(response.value.delivery_email)
-                userViewModel.setUserId("${response.value.user_id}")
-                _queryState.value = QueryState.Success
-            }
-
-            is ApiResult.Error -> {
-                _queryState.value = QueryState.Error(response.error.message ?: "Error")
+                if (response.error.code == "401") {
+                    _needsOtp.value = true
+                    _queryState.value = QueryState.Idle
+                } else {
+                    _queryState.value = QueryState.Error(response.error.message ?: "Error")
+                }
             }
         }
     }

@@ -7,16 +7,14 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
-import ru.genesiscorporation.workspace.beta.data.remote.dto.OwnUserRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UsersRequest
-import ru.genesiscorporation.workspace.beta.data.remote.dto.UsersResponseData
-import ru.genesiscorporation.workspace.beta.modules.chatchannels.ChatHeader
+import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 
 class UsersViewModel(
     val client: WorkspaceAPIClient
 ): ViewModel() {
-    private val _users = MutableStateFlow<List<UsersResponseData>>(emptyList())
-    val users: StateFlow<List<UsersResponseData>> = _users
+    private val _users = MutableStateFlow<List<UserResponseData>>(emptyList())
+    val users: StateFlow<List<UserResponseData>> = _users
 
     init {
         viewModelScope.launch {
@@ -28,7 +26,7 @@ class UsersViewModel(
         val response = client.performRequest(UsersRequest())
         when(response) {
             is ApiResult.Success -> {
-                _users.value = response.value.members
+                _users.value = response.value
             }
 
             is ApiResult.Error -> {

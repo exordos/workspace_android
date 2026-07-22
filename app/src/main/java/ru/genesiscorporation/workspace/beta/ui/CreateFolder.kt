@@ -29,13 +29,6 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import org.jitsi.meet.sdk.JitsiMeetActivity
-import org.jitsi.meet.sdk.JitsiMeetConferenceOptions
-import ru.genesiscorporation.workspace.beta.MessageDto
-import ru.genesiscorporation.workspace.beta.R
-import ru.genesiscorporation.workspace.beta.WorkspaceViewModel
-import ru.genesiscorporation.workspace.beta.data.remote.dto.UsersResponseData
-import ru.genesiscorporation.workspace.beta.modules.chatchannels.ChatViewModel
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.net.URL
 

@@ -4,10 +4,12 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -27,24 +29,29 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.toColorInt
-import kotlinx.coroutines.launch
+import dev.jeziellago.compose.markdowntext.MarkdownText
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
+import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.formatHHmm
 import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 @Composable
 fun ChatChannel(
-    item: ChatHeader,
+    item: Stream,
     viewModel: ChatViewModel,
     showDetail: Boolean,
     currentlySelectedFolder: FolderResponseData?,
-    onChatNumberToAddChange: (ChatHeader?) -> Unit,
+    onChatNumberToAddChange: (Stream?) -> Unit,
     onClick: () -> Unit
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
@@ -56,12 +63,14 @@ fun ChatChannel(
         label = "chatHeaderBackground"
     )
     val scope = rememberCoroutineScope()
+    val folderCreationFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
+    val HHMMFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .height(70.dp)
+            .height(76.dp)
             .clip(
                 RoundedCornerShape(8.dp)
             )
@@ -74,99 +83,109 @@ fun ChatChannel(
                 }
             )
     ) {
-        if (item.gravatar != null) {
-            Avatar(
-                item.gravatar,
-                viewModel.client.userViewModel.baseUrl.value ?: "",
-                40,
-                false
-            )
-        } else if (item.color != null) {
-            val color = try {
-                Color(item.color.toColorInt())
-            } catch (e: IllegalArgumentException) {
-                Color.Gray
-            }
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .background(color = color, shape = CircleShape)
-            )
+        val avatarUrn = if (item.isPrivate && item.lastMessage?.user?.avatar != null) {
+            item.lastMessage?.user?.avatar
+        } else {
+            null
         }
+        Avatar(
+            avatarUrn,
+            viewModel.client.userViewModel.baseUrl.value ?: "",
+            item.color,
+            item.name,
+            40,
+            false
+        )
         Column(
             modifier = Modifier
-                .padding(10.dp)
+                .padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
+            val lastMessage = item.lastMessage
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = item.title,
+                    text = item.name,
                     color = LocalWorkspaceColorsPalette.current.textHeaders,
                     fontSize = 14.sp,
+                    lineHeight = 20.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                if (!item.isDirectMessages) {
+                if (lastMessage != null) {
                     Spacer(modifier = Modifier.weight(1f))
-                    if (item.unreadCount > 0) {
-                        Text(
-                            text = "${item.unreadCount}",
-                            color = LocalWorkspaceColorsPalette.current.noticeOnBadge,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier
-                                .background(
-                                    color = LocalWorkspaceColorsPalette.current.noticeCounterBadge,
-                                    shape = RoundedCornerShape(100.dp)
-                                )
-                                .padding(horizontal = 8.dp)
-                        )
-                    }
-                } else {
-                    val lastMessage = item.lastMessage
-                    if (lastMessage != null) {
-                        Spacer(modifier = Modifier.weight(1f))
-                        Text(
-                            text = lastMessage.timestamp.formatHHmm(),
-                            color = LocalWorkspaceColorsPalette.current.messageTimeColor,
-                            fontSize = 12.sp,
-                        )
-                    }
+                    val messageDate = LocalDateTime.parse(lastMessage.createdAt, folderCreationFormatter)
+                    Text(
+                        text = messageDate.format(HHMMFormatter),
+                        color = LocalWorkspaceColorsPalette.current.messageTimeColor,
+                        fontSize = 12.sp,
+                    )
                 }
             }
-            if (item.isDirectMessages) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    val lastMessage = item.lastMessage
-                    if (lastMessage != null) {
-                        Text(
-                            text = lastMessage.content,
-                            color = LocalWorkspaceColorsPalette.current.textAdditional50,
-                            fontSize = 12.sp,
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = if (item.isPrivate) Alignment.CenterVertically else Alignment.Bottom
+            ) {
+                if (lastMessage != null) {
+                    if (item.isPrivate) {
+                        MarkdownText(
+                            markdown = lastMessage.payload.content,
+                            modifier = Modifier.weight(1f),
                             maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            style = TextStyle(
+                                color = LocalWorkspaceColorsPalette.current.textAdditional50,
+                                fontSize = 12.sp
+                            )
                         )
-                    }
-                    Spacer(modifier = Modifier.weight(1f))
-                    if (item.unreadCount > 0) {
-                        Text(
-                            text = "${item.unreadCount}",
-                            color = LocalWorkspaceColorsPalette.current.noticeOnBadge,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier
-                                .background(
-                                    color = LocalWorkspaceColorsPalette.current.noticeCounterBadge,
-                                    shape = RoundedCornerShape(100.dp)
+                    } else {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            val lastMessageUser = lastMessage.user
+                            if (lastMessageUser != null) {
+                                Text(
+                                    text = lastMessageUser.displayableName(),
+                                    color = LocalWorkspaceColorsPalette.current.primary,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    lineHeight = 20.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
-                                .padding(horizontal = 8.dp)
-                        )
+                            }
+                            MarkdownText(
+                                markdown = lastMessage.payload.content,
+                                modifier = Modifier.weight(1f)
+                                    .fillMaxHeight(),
+                                maxLines = 1,
+                                style = TextStyle(
+                                    color = LocalWorkspaceColorsPalette.current.textAdditional50,
+                                    fontSize = 12.sp,
+                                    lineHeight = 20.sp
+                                ),
+                            )
+                        }
                     }
+                } else {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+                if (item.unreadCount > 0) {
+                    Text(
+                        text = "${item.unreadCount}",
+                        color = LocalWorkspaceColorsPalette.current.noticeOnBadge,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier
+                            .background(
+                                color = LocalWorkspaceColorsPalette.current.noticeCounterBadge,
+                                shape = RoundedCornerShape(100.dp)
+                            )
+                            .padding(horizontal = 8.dp)
+                    )
                 }
             }
         }
@@ -186,14 +205,14 @@ fun ChatChannel(
                 DropdownMenuItem(
                     text = { Text("Удалить из папки") },
                     onClick = {
-                        if (currentlySelectedFolder != null) {
-                            scope.launch {
-                                viewModel.deleteChatFromFolder(
-                                    item.chatId,
-                                    currentlySelectedFolder
-                                )
-                            }
-                        }
+//                        if (currentlySelectedFolder != null) {
+//                            scope.launch {
+//                                viewModel.deleteChatFromFolder(
+//                                    item.chatId,
+//                                    currentlySelectedFolder
+//                                )
+//                            }
+//                        }
                         menuExpanded = false
                     }
                 )
