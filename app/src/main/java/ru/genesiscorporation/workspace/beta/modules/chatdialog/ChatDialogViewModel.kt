@@ -153,9 +153,8 @@ class ChatDialogViewModel(
 
     suspend fun onSendClicked(context: Context) {
         val text = _messageText.value
-        if (text.isBlank()) return
         val messageId = editingMessage?.uuid
-        if (messageId != null) {
+        if (messageId != null && !text.isBlank()) {
             sendEditMessage(messageId, _messageText.value)
         } else {
             sendMessage(context)
@@ -193,7 +192,7 @@ class ChatDialogViewModel(
     }
 
     suspend fun sendTextMessage(messageText: String) {
-        val userId = userViewModel.repo.userIdFlow.first()
+        val userId = repo.currentUser?.uuid
         var newMessage = MessageResponse(
             "",
             OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
@@ -206,6 +205,7 @@ class ChatDialogViewModel(
             true,
             emptyMap()
         )
+        newMessage.user = repo.currentUser
         repo.updateMessagesPool(listOf(newMessage))
         repo.addMessageToStreamTopic(newMessage)
         possibleMessage = newMessage

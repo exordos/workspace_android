@@ -47,23 +47,26 @@ import coil3.network.NetworkHeaders
 import coil3.network.httpHeaders
 import coil3.request.ImageRequest
 import ru.genesiscorporation.workspace.beta.ChatFlow
+import ru.genesiscorporation.workspace.beta.data.UrnParser
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
+import java.time.Instant
 import java.time.LocalDateTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlin.io.encoding.Base64
 
 @Composable
 fun ImageMessageView(
     text: String,
-    imageUrl: String?,
+    imageUrn: String?,
     viewModel: ChatDialogViewModel,
     item: MessageResponse,
     navController: NavHostController,
     onImageLoad: () -> Unit
 ) {
-    val folderCreationFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
+    val zone = ZoneId.systemDefault()
     val hhmmFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
     var showFullscreen by remember { mutableStateOf(false) }
     val bubbleShape = if (item.isOwn) {
@@ -179,46 +182,50 @@ fun ImageMessageView(
                 val headers = NetworkHeaders.Builder()
                     .set(authHeaders.first().title, authHeaders.first().value)
                     .build()
-                val imageRequest = ImageRequest.Builder(LocalContext.current)
-                    .data("$baseUrl$imageUrl")
-                    .httpHeaders(headers)
-                    .build()
-                AsyncImage(
-                    model = imageRequest,
-                    contentDescription = null,
-                    modifier = Modifier.clickable { showFullscreen = true },
-                    onState = { state ->
-                        when (state) {
-                            is AsyncImagePainter.State.Success -> {
-                                onImageLoad()
+                val imageUrl = UrnParser.parseUrl(imageUrn, baseUrl ?: "")
+                if (imageUrl != null) {
+                    val imageRequest = ImageRequest.Builder(LocalContext.current)
+                        .data(imageUrl)
+                        .httpHeaders(headers)
+                        .build()
+                    AsyncImage(
+                        model = imageRequest,
+                        contentDescription = null,
+                        modifier = Modifier.clickable { showFullscreen = true },
+                        onState = { state ->
+                            when (state) {
+                                is AsyncImagePainter.State.Success -> {
+                                    onImageLoad()
+                                }
+
+                                else -> Unit
                             }
-                            else -> Unit
                         }
+                    )
+                    if (showFullscreen) {
+                        FullscreenZoomableImage(
+                            model = imageRequest,
+                            contentDescription = null,
+                            onDismiss = { showFullscreen = false },
+                        )
                     }
-                )
+                    if (text.isNotEmpty()) {
+                        Text(
+                            text = text,
+                            color = LocalWorkspaceColorsPalette.current.textHeaders,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+            }
 //                TappableAsyncImage(
 //                    model = imageRequest,
 //                    contentDescription = null,
 //                )
-                if (showFullscreen) {
-                    FullscreenZoomableImage(
-                        model = imageRequest,
-                        contentDescription = null,
-                        onDismiss = { showFullscreen = false },
-                    )
-                }
-                if (text.isNotEmpty()) {
-                    Text(
-                        text = text,
-                        color = LocalWorkspaceColorsPalette.current.textHeaders,
-                        fontSize = 14.sp
-                    )
-                }
-            }
             Spacer(modifier = Modifier.widthIn(min = 20.dp))
-            val messageDate = LocalDateTime.parse(item.updatedAt, folderCreationFormatter)
+            val instant = Instant.parse(item.createdAt)
             Text(
-                text = messageDate.format(hhmmFormatter),
+                text = instant.atZone(zone).format(hhmmFormatter),
                 color = LocalWorkspaceColorsPalette.current.messageTimeColor,
                 fontSize = 14.sp,
             )

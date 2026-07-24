@@ -334,7 +334,7 @@ data class UserUploadMarkdownParts(
     val relativePath: String,
 )
 private val captionThenLink = Regex(
-    """^(?:(.*?)\r?\n)?\(([^)]+)\)\s*\[(urn:image:[^\]]+)\]""",
+    """^(?:(.*?)\r?\n)?\[([^\]]+)\]\((urn:image:[^)]+)\)""",
 )
 
 fun String.parseUserUploadMarkdownOrNull(): UserUploadMarkdownParts? {
