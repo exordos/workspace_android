@@ -32,16 +32,20 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.net.URL
+import java.time.Instant
 import java.time.LocalDateTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlin.time.ExperimentalTime
 
+@OptIn(ExperimentalTime::class)
 @Composable
 fun CallMessageView(
     item: MessageResponse,
     viewModel: ChatDialogViewModel,
     navController: NavHostController
 ) {
-    val folderCreationFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
+    val zone = ZoneId.systemDefault()
     val hhmmFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -177,9 +181,9 @@ fun CallMessageView(
                 Row(
                     horizontalArrangement = Arrangement.End
                 ) {
-                    val messageDate = LocalDateTime.parse(item.updatedAt, folderCreationFormatter)
+                    val instant = Instant.parse(item.createdAt)
                     Text(
-                        text = messageDate.format(hhmmFormatter),
+                        text = instant.atZone(zone).format(hhmmFormatter),
                         color = LocalWorkspaceColorsPalette.current.messageTimeColor,
                         fontSize = 14.sp,
                     )

@@ -66,8 +66,11 @@ class EventsRepository() {
         _streamTopicMessages.update { current ->
             if (current[key] != null ) {
                 val existingMessages = current[key].orEmpty()
+                val pendingMessages = existingMessages.filter {
+                    it.uuid == "" && it.authorUuid == message.authorUuid && it.payload.content == message.payload.content
+                }
                 val filteredExistingMessages = existingMessages.filter { it.uuid == message.uuid }
-                if (filteredExistingMessages.isEmpty()) {
+                if (filteredExistingMessages.isEmpty() && pendingMessages.isEmpty()) {
                     current + (key to (existingMessages + message))
                 } else {
                     current
@@ -151,7 +154,9 @@ class EventsRepository() {
     }
 
     fun updateMessagesPool(newList: List<MessageResponse>) {
-        val messagesWithUser = newList.map { message ->
+        val currentPoolIds = _messagesPool.value.map { it.uuid }
+        val filteredMessages = newList.filter { !currentPoolIds.contains(it.uuid) }
+        val messagesWithUser = filteredMessages.map { message ->
             message.user = users.value.firstOrNull { it.uuid == message.authorUuid }
             message
         }

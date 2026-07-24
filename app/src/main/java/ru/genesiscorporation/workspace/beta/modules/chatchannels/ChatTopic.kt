@@ -31,7 +31,9 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.formatHHmm
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
+import java.time.Instant
 import java.time.LocalDateTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 @Composable
@@ -41,7 +43,7 @@ fun ChatTopic(
     stream: Stream,
     navController: NavHostController
 ) {
-    val folderCreationFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
+    val zone = ZoneId.systemDefault()
     val HHMMFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
     Row(
@@ -82,9 +84,9 @@ fun ChatTopic(
                 )
                 if (lastMessage != null) {
                     Spacer(modifier = Modifier.weight(1f))
-                    val messageDate = LocalDateTime.parse(lastMessage.createdAt, folderCreationFormatter)
+                    val instant = Instant.parse(lastMessage.createdAt)
                     Text(
-                        text = messageDate.format(HHMMFormatter),
+                        text = instant.atZone(zone).format(HHMMFormatter),
                         color = LocalWorkspaceColorsPalette.current.messageTimeColor,
                         fontSize = 12.sp,
                     )
