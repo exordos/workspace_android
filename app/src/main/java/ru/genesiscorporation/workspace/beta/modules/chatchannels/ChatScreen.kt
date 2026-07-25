@@ -1,49 +1,28 @@
 package ru.genesiscorporation.workspace.beta.modules.chatchannels
 
-import android.widget.Toast
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Image
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.calculateEndPadding
-import androidx.compose.foundation.layout.calculateStartPadding
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material3.CenterAlignedTopAppBar
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -57,342 +36,345 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.graphics.toColorInt
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
-import androidx.navigation.compose.currentBackStackEntryAsState
 import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.ChatFlow
-import ru.genesiscorporation.workspace.beta.LoginFlow
+import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.UsersViewModelFactory
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
-import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
-import ru.genesiscorporation.workspace.beta.modules.chatdialog.formatHHmm
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 import ru.genesiscorporation.workspace.beta.modules.users.UsersScreen
 import ru.genesiscorporation.workspace.beta.modules.users.UsersViewModel
 import ru.genesiscorporation.workspace.beta.ui.AddChatToFolder
-import ru.genesiscorporation.workspace.beta.ui.AnimatedGif
-import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.CreateFolder
+import ru.genesiscorporation.workspace.beta.ui.UnreadBadge
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
-import kotlin.collections.mapNotNull
-import kotlin.collections.sortedByDescending
-import kotlin.math.roundToInt
+import ru.genesiscorporation.workspace.beta.ui.theme.NavigationFontFamily
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
     chatViewModel: ChatViewModel,
-    navController: NavHostController
+    navController: NavHostController,
 ) {
     var showDetail by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-    val folders by chatViewModel.folders.collectAsStateWithLifecycle()
-    val queryState by chatViewModel.queryState.collectAsState()
-    val currentlySelectedFolder by chatViewModel.currentlySelectedFolder.collectAsState()
     var showUserList by remember { mutableStateOf(false) }
     var showAddFolderView by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val folders by chatViewModel.folders.collectAsStateWithLifecycle()
+    val currentlySelectedFolder by chatViewModel.currentlySelectedFolder.collectAsState()
+    val searchQuery by chatViewModel.searchQuery.collectAsState()
+    val createState by chatViewModel.createQueryState.collectAsStateWithLifecycle()
     val chatToAdd by chatViewModel.chatToAdd.collectAsState()
     val usersViewModelFactory = remember { UsersViewModelFactory(chatViewModel.client) }
-    var usersViewModel: UsersViewModel = viewModel(factory = usersViewModelFactory)
-    val userId by chatViewModel.userViewModel.repo.userIdFlow.collectAsStateWithLifecycle(
-        initialValue = 0
-    )
-    val backStackEntry by navController.currentBackStackEntryAsState()
-    val cameBack = backStackEntry?.savedStateHandle
-        ?.getStateFlow("from_detail_back", false)
-        ?.collectAsState()
-    val searchQuery by chatViewModel.searchQuery.collectAsState()
+    val usersViewModel: UsersViewModel = viewModel(factory = usersViewModelFactory)
+    val colors = LocalWorkspaceColorsPalette.current
 
-    val createState by chatViewModel.createQueryState.collectAsStateWithLifecycle()
-    val context = LocalContext.current
-
-    LaunchedEffect(cameBack?.value) {
-        if (cameBack?.value == true) {
-            chatViewModel.currentStreamId = ""
-            backStackEntry?.savedStateHandle?.set(
-                "from_detail_back",
-                false
-            ) // consume one-shot event
-        }
+    BackHandler(enabled = showDetail) {
+        showDetail = false
+        scope.launch { chatViewModel.updateSelectedChat(null) }
     }
-
-//    LaunchedEffect(queryState) {
-//        if (queryState is QueryState.Error) {
-//            Toast
-//                .makeText(context, "Чат добавлен в папку", Toast.LENGTH_SHORT)
-//                .show()
-//        }
-//    }
 
     LaunchedEffect(createState) {
         if (createState is QueryState.Success) {
-            val createdStream = chatViewModel.createdStream
-            if (createdStream != null) {
+            chatViewModel.createdStream?.let { createdStream ->
                 chatViewModel.currentStreamId = createdStream.uuid
                 navController.navigate(
                     ChatFlow.ChatDialog(
                         createdStream.name,
                         createdStream.uuid,
                         null,
-                        createdStream.defaultTopicUuid ?: "",
+                        createdStream.defaultTopicUuid.orEmpty(),
                         true,
-                        null
-                    )
+                        null,
+                    ),
                 )
                 chatViewModel.createdStream = null
             }
         }
     }
 
-    LaunchedEffect(Unit) {
-        chatViewModel.navEvents.collect { event ->
-            when (event) {
-                is ChatNavEvent.OpenDialog -> {
-//                    navController.navigate(
-//                        ChatFlow.ChatDialog(
-//                            event.title,
-//                            event.chatId,
-//                            event.topicId,
-//                            event.isDirectMessages,
-//                            event.userId
-//                        )
-//                    ) {
-//                        popUpTo<ChatFlow.ChatList> { inclusive = false }
-//                        launchSingleTop = true
-//                    }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(colors.background)
+            .imePadding(),
+    ) {
+        MessengerTopBar(
+            hasNotifications = folders.sumOf { it.unreadCount } > 0,
+            detailOpen = showDetail,
+            onNavigationClick = {
+                if (showDetail) {
+                    showDetail = false
+                    scope.launch { chatViewModel.updateSelectedChat(null) }
                 }
-            }
-        }
+            },
+            onNewChat = { showUserList = true },
+        )
+        SearchField(
+            value = searchQuery,
+            onValueChange = {
+                showDetail = false
+                chatViewModel.onSearchQueryChange(it)
+            },
+        )
+        FolderTabs(
+            folders = folders,
+            selected = currentlySelectedFolder,
+            onSelected = { folder ->
+                showDetail = false
+                scope.launch { chatViewModel.updateSelectedChat(null) }
+                chatViewModel.updateCurrentlySelectedFolder(folder)
+            },
+            onAddFolder = { showAddFolderView = true },
+        )
+        ChatWithTopics(
+            chatViewModel = chatViewModel,
+            navController = navController,
+            showDetail = showDetail,
+            onShowDetailChange = { showDetail = it },
+        )
     }
 
-    Scaffold(
-        topBar = {
-            CenterAlignedTopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = LocalWorkspaceColorsPalette.current.surface,
-                    titleContentColor = LocalWorkspaceColorsPalette.current.textHeaders,
-                ),
-                title = {
-                    Text("Мессенджер")
-                },
-                expandedHeight = 48.dp,
-                windowInsets = WindowInsets(0, 0, 0, 0),
-                actions = {
-                    IconButton(onClick = {
-                        showUserList = true
-                    }) {
-                        Image(
-                            painter = painterResource(id = ru.genesiscorporation.workspace.beta.R.drawable.new_chat),
-                            contentDescription = null,
-                            modifier = Modifier.size(32.dp)
+    if (showUserList) {
+        UsersScreen(
+            usersViewModel,
+            onUserSelected = { userResponse ->
+                showUserList = false
+                scope.launch { chatViewModel.createPrivateStream(userResponse) }
+            },
+            onDismiss = { showUserList = false },
+        )
+    }
+    if (showAddFolderView) {
+        ModalScrim { showAddFolderView = false }
+        CreateFolder(
+            onCreateButtonTap = { folderName ->
+                scope.launch { chatViewModel.addFolder(folderName) }
+                showAddFolderView = false
+            },
+            onDismiss = { showAddFolderView = false },
+        )
+    }
+    chatToAdd?.let { stream ->
+        ModalScrim { chatViewModel.onChatToAddChange(null) }
+        AddChatToFolder(
+            folders,
+            stream,
+            onAddButtonTap = { _, _ ->
+                chatViewModel.onChatToAddChange(null)
+            },
+        )
+    }
+}
+
+@Composable
+private fun MessengerTopBar(
+    hasNotifications: Boolean,
+    detailOpen: Boolean,
+    onNavigationClick: () -> Unit,
+    onNewChat: () -> Unit,
+) {
+    val colors = LocalWorkspaceColorsPalette.current
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(50.dp)
+            .background(colors.background)
+            .padding(horizontal = 12.dp),
+    ) {
+        Icon(
+            painter = painterResource(R.drawable.ic_figma_menu),
+            contentDescription = if (detailOpen) "Назад к чатам" else "Меню",
+            tint = colors.primary,
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .size(32.dp)
+                .clickable(onClick = onNavigationClick),
+        )
+        Text(
+            text = "Мессенджер",
+            color = colors.textHeaders,
+            fontSize = 16.sp,
+            lineHeight = 20.sp,
+            fontFamily = NavigationFontFamily,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.align(Alignment.Center),
+        )
+        Row(
+            modifier = Modifier
+                .align(Alignment.CenterEnd),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier.size(32.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_figma_notifications),
+                    contentDescription = "Уведомления",
+                    tint = colors.iconBase,
+                    modifier = Modifier.size(32.dp),
+                )
+                if (hasNotifications) {
+                    Box(
+                        Modifier
+                            .align(Alignment.TopEnd)
+                            .size(9.dp)
+                            .background(colors.noticeCounterBadge, CircleShape),
+                    )
+                }
+            }
+            Icon(
+                painter = painterResource(R.drawable.ic_figma_new_chat),
+                contentDescription = "Новый чат",
+                tint = colors.textAdditional30,
+                modifier = Modifier
+                    .size(32.dp)
+                    .clickable(onClick = onNewChat),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SearchField(
+    value: String,
+    onValueChange: (String) -> Unit,
+) {
+    val colors = LocalWorkspaceColorsPalette.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .height(36.dp)
+            .background(colors.searchBackground, RoundedCornerShape(8.dp))
+            .padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            painter = painterResource(R.drawable.ic_search),
+            contentDescription = null,
+            tint = colors.iconBase,
+            modifier = Modifier
+                .padding(end = 8.dp)
+                .size(24.dp),
+        )
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            singleLine = true,
+            textStyle = TextStyle(
+                color = colors.textHeaders,
+                fontSize = 14.sp,
+                lineHeight = 20.sp,
+                fontFamily = NavigationFontFamily,
+            ),
+            cursorBrush = SolidColor(colors.primary),
+            modifier = Modifier.weight(1f),
+            decorationBox = { innerTextField ->
+                Box(contentAlignment = Alignment.CenterStart) {
+                    if (value.isEmpty()) {
+                        Text(
+                            text = "Найти",
+                            color = colors.textAdditional30,
+                            fontSize = 14.sp,
+                            lineHeight = 20.sp,
+                            fontFamily = NavigationFontFamily,
                         )
                     }
-                },
-            )
-        },
-    ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(
-                    top = innerPadding.calculateTopPadding(),
-                    start = innerPadding.calculateStartPadding(LocalLayoutDirection.current),
-                    end = innerPadding.calculateEndPadding(LocalLayoutDirection.current),
-                ),
-            contentAlignment = Alignment.Center
-        ) {
+                    innerTextField()
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun FolderTabs(
+    folders: List<FolderResponseData>,
+    selected: FolderResponseData?,
+    onSelected: (FolderResponseData) -> Unit,
+    onAddFolder: () -> Unit,
+) {
+    if (folders.isEmpty()) return
+    val colors = LocalWorkspaceColorsPalette.current
+    LazyRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(44.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        items(folders, key = { it.uuid }) { folder ->
+            val isSelected = folder.uuid == selected?.uuid
             Column(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .imePadding()
-                    .background(LocalWorkspaceColorsPalette.current.surface)
+                    .height(44.dp)
+                    .clickable { onSelected(folder) }
+                    .padding(horizontal = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
             ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 12.dp)
-                    ) {
-                        Box(
-                            contentAlignment = Alignment.CenterStart,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(40.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .padding(vertical = 4.dp)
-                                .background(
-                                    LocalWorkspaceColorsPalette.current.searchBackground,
-                                    RoundedCornerShape(8.dp)
-                                )
-                        ) {
-                            BasicTextField(
-                                value = searchQuery,
-                                onValueChange = {
-                                    showDetail = false
-                                    chatViewModel.onSearchQueryChange(it)
-                                },
-                                textStyle = TextStyle(
-                                    color = LocalWorkspaceColorsPalette.current.textAdditional30,
-                                    fontSize = 14.sp
-                                ),
-                                cursorBrush = SolidColor(LocalWorkspaceColorsPalette.current.textAdditional30),
-                                singleLine = true,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 12.dp),
-                                decorationBox = { innerTextField ->
-                                    if (searchQuery.isEmpty()) {
-                                        Text(
-                                            text = "Поиск...",
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                    innerTextField()
-                                }
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        if (!folders.isEmpty()) {
-                            LazyRow(modifier = Modifier.padding(vertical = 16.dp)) {
-                                items(
-                                    items = folders
-                                ) { folder ->
-                                    Row {
-                                        val unreadCount = folder.unreadCount
-                                        val endPadding = if (unreadCount > 0) 0.dp else 8.dp
-                                        Text(
-                                            folder.title,
-                                            fontSize = 14.sp,
-                                            fontWeight = FontWeight.Medium,
-                                            color = if (folder.uuid == currentlySelectedFolder?.uuid) LocalWorkspaceColorsPalette.current.textHeaders else LocalWorkspaceColorsPalette.current.textAdditional30,
-                                            modifier = Modifier
-                                                .padding(start = 16.dp, 0.dp, endPadding, 0.dp)
-                                                .clickable(
-                                                    onClick = {
-                                                        scope.launch {
-                                                            showDetail = false
-                                                            chatViewModel.updateSelectedChat(null)
-                                                        }
-                                                        chatViewModel.updateCurrentlySelectedFolder(
-                                                            folder
-                                                        )
-                                                    }
-                                                ),
-                                        )
-                                        if (unreadCount > 0) {
-                                            Text(
-                                                text = "${unreadCount}",
-                                                color = LocalWorkspaceColorsPalette.current.noticeOnBadge,
-                                                fontSize = 14.sp,
-                                                fontWeight = FontWeight.Medium,
-                                                modifier = Modifier
-                                                    .padding(4.dp, 0.dp, 8.dp, 0.dp)
-                                                    .background(
-                                                        color = LocalWorkspaceColorsPalette.current.noticeCounterBadge,
-                                                        shape = RoundedCornerShape(100.dp)
-                                                    )
-                                                    .padding(horizontal = 8.dp)
-                                            )
-                                        }
-                                    }
-                                }
-                                item {
-                                    Text(
-                                        text = "+",
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = LocalWorkspaceColorsPalette.current.textAdditional30,
-                                        modifier = Modifier
-                                            .padding(horizontal = 16.dp)
-                                            .clickable {
-                                                showAddFolderView = true
-                                            }
-                                    )
-                                }
-                            }
-                        }
-                        ChatWithTopics(chatViewModel, navController, showDetail, { showDetail = it })
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = folder.title,
+                        color = if (isSelected) colors.textHeaders else colors.textAdditional30,
+                        fontSize = 14.sp,
+                        lineHeight = 20.sp,
+                        fontFamily = NavigationFontFamily,
+                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (folder.unreadCount > 0) {
+                        UnreadBadge(
+                            count = folder.unreadCount,
+                            modifier = Modifier.padding(start = 5.dp),
+                        )
                     }
-            }
-            if (showUserList) {
-                UsersScreen(
-                    usersViewModel,
-                    onUserSelected = { userResponse ->
-                        showUserList = false
-                        scope.launch {
-                            chatViewModel.createPrivateStream(userResponse)
-                        }
-                    },
-                    onDismiss = {
-                        showUserList = false
-                    }
-                )
-            }
-            if (showAddFolderView) {
+                }
+                Spacer(Modifier.height(6.dp))
                 Box(
                     Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.45f))
-                        .clickable(
-                            indication = null,
-                            interactionSource = remember { MutableInteractionSource() },
-                            onClick = { showAddFolderView = false },
-                        ),
-                )
-                CreateFolder(
-                    onCreateButtonTap = { folderName ->
-                        scope.launch {
-                            chatViewModel.addFolder(folderName)
-                        }
-                        showAddFolderView = false
-                    },
-                    onDismiss = {
-                        showAddFolderView = false
-                    }
-                )
-            }
-            val chat = chatToAdd
-            if (chat != null) {
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.45f))
-                        .clickable(
-                            indication = null,
-                            interactionSource = remember { MutableInteractionSource() },
-                            onClick = { chatViewModel.onChatToAddChange(null) },
-                        ),
-                )
-                AddChatToFolder(
-                    folders,
-                    chat,
-                    onAddButtonTap = { folder, chat ->
-                        scope.launch {
-//                            chatViewModel.addChatFolder(
-//                                chat.chatId,
-//                                if (chat.isDirectMessages) "private" else "stream",
-//                                folder.uuid
-//                            )
-                        }
-                        chatViewModel.onChatToAddChange(null)
-                    }
+                        .height(2.dp)
+                        .width(88.dp)
+                        .background(if (isSelected) colors.textHeaders else Color.Transparent),
                 )
             }
         }
+        item {
+            Text(
+                text = "+",
+                color = colors.textAdditional30,
+                fontSize = 22.sp,
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .clickable(onClick = onAddFolder)
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+            )
+        }
     }
+}
+
+@Composable
+private fun ModalScrim(onDismiss: () -> Unit) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.48f))
+            .clickable(
+                indication = null,
+                interactionSource = remember { MutableInteractionSource() },
+                onClick = onDismiss,
+            ),
+    )
 }

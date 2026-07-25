@@ -52,13 +52,15 @@ fun Avatar(
         }
         Box(
             modifier = Modifier
-                .size(40.dp)
+                .padding(end = if (hasPadding) 12.dp else 0.dp)
+                .size(size.dp)
                 .background(color = avatarColor, shape = CircleShape),
             contentAlignment = Alignment.Center
         ) {
             Text(text = name.firstOrNull()?.titlecase() ?: "",
                 color = Color.White,
-                fontSize = 24.sp
+                fontSize = (size * 0.44f).sp,
+                fontWeight = FontWeight.SemiBold,
             )
         }
     }

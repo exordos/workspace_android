@@ -7,25 +7,21 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.defaultMinSize
-import androidx.compose.foundation.layout.exclude
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.NavigationBarDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -38,12 +34,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
@@ -51,194 +44,190 @@ import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun SendMessageView(
-    viewModel: ChatDialogViewModel
-) {
-
+fun SendMessageView(viewModel: ChatDialogViewModel) {
     val messageText by viewModel.messageText.collectAsState()
-    val scope = rememberCoroutineScope()
     val imageUri by viewModel.imageUri.collectAsState()
     val editingMessageBackupText by viewModel.editingMessageBackupText.collectAsState()
     val quotedMessage by viewModel.quotedMessage.collectAsState()
+    val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val colors = LocalWorkspaceColorsPalette.current
+    val canSend = messageText.isNotBlank() || imageUri != null || viewModel.editingMessage != null
     val launcher = rememberLauncherForActivityResult(
-        contract =
-            ActivityResultContracts.GetContent()
+        contract = ActivityResultContracts.GetContent(),
     ) { uri: Uri? ->
         viewModel.onImageUriChange(uri)
     }
+
     Column(
         modifier = Modifier
-            .background(LocalWorkspaceColorsPalette.current.surface)
+            .fillMaxWidth()
+            .background(colors.chatHeaderBackground, RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
+            .navigationBarsPadding()
+            .padding(top = 5.dp),
     ) {
-        if (imageUri != null) {
+        imageUri?.let { uri ->
             Box(
                 modifier = Modifier
-                    .padding(start = 12.dp, top = 12.dp, end = 12.dp, bottom = 0.dp)
-                    .size(100.dp)
-                    .clip(RoundedCornerShape(8.dp))
+                    .padding(horizontal = 14.dp, vertical = 5.dp)
+                    .size(96.dp)
+                    .clip(RoundedCornerShape(9.dp)),
             ) {
                 AsyncImage(
-                    model = imageUri,
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
+                    model = uri,
+                    contentDescription = "Выбранное изображение",
                     contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
                 )
                 Icon(
                     painter = painterResource(R.drawable.ic_close_small),
-                    contentDescription = "Close",
+                    contentDescription = "Удалить изображение",
+                    tint = Color.White,
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .size(24.dp)
-                        .clickable { viewModel.onImageUriChange(null) },
+                        .size(28.dp)
+                        .background(Color.Black.copy(alpha = 0.55f), CircleShape)
+                        .clickable { viewModel.onImageUriChange(null) }
+                        .padding(5.dp),
                 )
             }
         }
-        val message = editingMessageBackupText
-        val currentlyQuotedMessage = quotedMessage
-        if (message != null) {
-            Row(
-                modifier = Modifier.padding(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 0.dp)
-            ) {
-                Column {
-                    Text(
-                        "Сообщение",
-                        color = LocalWorkspaceColorsPalette.current.primary,
-                        fontSize = 12.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        message,
-                        color = LocalWorkspaceColorsPalette.current.textAdditional50,
-                        fontSize = 12.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                Spacer(modifier = Modifier.weight(1f))
-                Icon(
-                    painter = painterResource(R.drawable.ic_close_small),
-                    contentDescription = "Close",
-                    modifier = Modifier
-                        .size(24.dp)
-                        .clickable { viewModel.clearEditingMessage() },
-                )
-            }
-        } else if (currentlyQuotedMessage != null){
-            Row(
-                modifier = Modifier.padding(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 0.dp)
-            ) {
-                Column {
-                    Text(
-                        "Цитируемое сообщение",
-                        color = LocalWorkspaceColorsPalette.current.primary,
-                        fontSize = 12.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        currentlyQuotedMessage.payload.content,
-                        color = LocalWorkspaceColorsPalette.current.textAdditional50,
-                        fontSize = 12.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                Spacer(modifier = Modifier.weight(1f))
-                Icon(
-                    painter = painterResource(R.drawable.ic_close_small),
-                    contentDescription = "Close",
-                    modifier = Modifier
-                        .size(24.dp)
-                        .clickable { viewModel.clearEditingMessage() },
-                )
-            }
+        when {
+            editingMessageBackupText != null -> ComposerContext(
+                title = "Редактирование",
+                text = editingMessageBackupText.orEmpty(),
+                onClose = viewModel::clearEditingMessage,
+            )
+
+            quotedMessage != null -> ComposerContext(
+                title = "Ответ ${quotedMessage?.user?.displayableName().orEmpty()}",
+                text = quotedMessage?.payload?.content.orEmpty(),
+                onClose = viewModel::clearEditingMessage,
+            )
         }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .defaultMinSize(minHeight = 60.dp)
-                .background(LocalWorkspaceColorsPalette.current.surface)
-                .padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.Bottom,
         ) {
-            Box(
-                contentAlignment = Alignment.CenterStart,
+            Row(
                 modifier = Modifier
-                    .padding(end = 12.dp)
                     .weight(1f)
-                    .fillMaxWidth()
-                    .heightIn(min = 40.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(
-                        LocalWorkspaceColorsPalette.current.background,
-                        RoundedCornerShape(8.dp)
-                    )
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .heightIn(min = 46.dp, max = 112.dp)
+                    .background(colors.background, RoundedCornerShape(14.dp))
+                    .padding(horizontal = 7.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
+                Button(
+                    onClick = { launcher.launch("image/*") },
+                    modifier = Modifier.size(36.dp),
+                    shape = CircleShape,
+                    contentPadding = PaddingValues(8.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color.Transparent,
+                        contentColor = colors.iconBase,
+                    ),
                 ) {
-                    Button(
-                        onClick = {
-                            launcher.launch("image/*")
-                        },
-                        modifier = Modifier.size(32.dp),
-                        contentPadding = PaddingValues(0.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color.Transparent,
-                            contentColor = LocalWorkspaceColorsPalette.current.iconBase
-                        )
-                    ) {
-                        Icon(
-                            painter = painterResource(id = R.drawable.attach_file),
-                            contentDescription = "Attach file"
-                        )
-                    }
-                    BasicTextField(
-                        value = messageText,
-                        onValueChange = viewModel::onMessageChange,
-                        textStyle = TextStyle(
-                            color = LocalWorkspaceColorsPalette.current.textHeaders,
-                            fontSize = 16.sp
-                        ),
-                        cursorBrush = SolidColor(LocalWorkspaceColorsPalette.current.textHeaders),
-                        maxLines = 4,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp),
+                    Icon(
+                        painter = painterResource(R.drawable.attach_file),
+                        contentDescription = "Прикрепить изображение",
                     )
                 }
-            }
-            Button(
-                onClick = {
-                    scope.launch {
-                        viewModel.onSendClicked(context)
-                    }
-                },
-                modifier = Modifier.size(46.dp),
-                shape = RoundedCornerShape(12.dp),
-                contentPadding = PaddingValues(0.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = LocalWorkspaceColorsPalette.current.primary,
-                    contentColor = LocalWorkspaceColorsPalette.current.onPrimary
+                BasicTextField(
+                    value = messageText,
+                    onValueChange = viewModel::onMessageChange,
+                    textStyle = TextStyle(
+                        color = colors.textHeaders,
+                        fontSize = 14.sp,
+                        lineHeight = 18.sp,
+                    ),
+                    cursorBrush = SolidColor(colors.primary),
+                    maxLines = 4,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(horizontal = 8.dp, vertical = 7.dp),
+                    decorationBox = { innerTextField ->
+                        Box(contentAlignment = Alignment.CenterStart) {
+                            if (messageText.isEmpty()) {
+                                Text(
+                                    text = "Сообщение…",
+                                    color = colors.textAdditional30,
+                                    fontSize = 14.sp,
+                                )
+                            }
+                            innerTextField()
+                        }
+                    },
                 )
-            ) {
-                if (viewModel.editingMessage == null) {
+                Button(
+                    onClick = {
+                        scope.launch { viewModel.onSendClicked(context) }
+                    },
+                    enabled = canSend,
+                    modifier = Modifier.size(38.dp),
+                    shape = CircleShape,
+                    contentPadding = PaddingValues(9.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (canSend) colors.primary else Color.Transparent,
+                        contentColor = colors.onPrimary,
+                        disabledContainerColor = Color.Transparent,
+                        disabledContentColor = colors.iconBase,
+                    ),
+                ) {
                     Icon(
-                        painter = painterResource(id = R.drawable.send),
-                        contentDescription = "Send"
-                    )
-                } else {
-                    Icon(
-                        painter = painterResource(id = R.drawable.ic_check),
-                        contentDescription = "Send edit"
+                        painter = painterResource(
+                            if (viewModel.editingMessage == null) R.drawable.send else R.drawable.ic_check,
+                        ),
+                        contentDescription = if (viewModel.editingMessage == null) {
+                            "Отправить"
+                        } else {
+                            "Сохранить"
+                        },
                     )
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ComposerContext(
+    title: String,
+    text: String,
+    onClose: () -> Unit,
+) {
+    val colors = LocalWorkspaceColorsPalette.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                color = colors.primary,
+                fontSize = 12.sp,
+                maxLines = 1,
+            )
+            Text(
+                text = text,
+                color = colors.textAdditional50,
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(Modifier.size(8.dp))
+        Icon(
+            painter = painterResource(R.drawable.ic_close_small),
+            contentDescription = "Закрыть",
+            tint = colors.iconBase,
+            modifier = Modifier
+                .size(24.dp)
+                .clickable(onClick = onClose),
+        )
     }
 }

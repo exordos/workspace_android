@@ -12,12 +12,14 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -29,208 +31,269 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
-import dev.jeziellago.compose.markdowntext.MarkdownText
 import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.ChatFlow
+import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
+import ru.genesiscorporation.workspace.beta.modules.chatchannels.formatMessageTime
 import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.EnhancedMarkdown
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
-import java.time.Instant
-import java.time.LocalDateTime
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
 @Composable
 fun TextMessageView(
     item: MessageResponse,
     viewModel: ChatDialogViewModel,
-    navController: NavHostController
+    navController: NavHostController,
 ) {
-    val zone = ZoneId.systemDefault()
-    val hhmmFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
-    val scope = rememberCoroutineScope()
-    val bubbleShape = if (item.isOwn) {
-        RoundedCornerShape(
-            topStart = 8.dp,
-            topEnd = 8.dp,
-            bottomStart = 8.dp,
-            bottomEnd = 0.dp
-        )
-    } else {
-        RoundedCornerShape(
-            topStart = 8.dp,
-            topEnd = 8.dp,
-            bottomStart = 0.dp,
-            bottomEnd = 8.dp
-        )
-    }
     var menuExpanded by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val colors = LocalWorkspaceColorsPalette.current
 
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (item.isOwn) Arrangement.End else Arrangement.Start,
-        verticalAlignment = Alignment.Bottom
+    MessageRow(
+        item = item,
+        viewModel = viewModel,
+        navController = navController,
     ) {
-        val nextMessage = viewModel.nextMessageByUuid(item.uuid)
-        if (!viewModel.isDirectMessages && !item.isOwn) {
-            if (nextMessage != null) {
-                if (nextMessage.authorUuid != item.authorUuid) {
-                    Box(
-                        Modifier
-                            .clickable(
-                                onClick = {
-                                    navController.navigate(
-                                        ChatFlow.ChatUserInfo(
-                                            item.user?.displayableName() ?: "",
-                                            item.authorUuid,
-                                            item.user?.avatar ?: "",
-                                            ""
-                                        )
-                                    )
-                                }
-                            )
-                    ) {
-                        Avatar(
-                            item.user?.avatar,
-                            viewModel.userViewModel.baseUrl.value ?: "",
-                            null,
-                            item.user?.displayableName() ?: "",
-                            30,
-                            true
-                        )
-                    }
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .padding(end = 12.dp)
-                            .size(30.dp)
-                            .background(color = Color.Transparent, shape = CircleShape)
-                    )
-                }
-            } else {
-                Box(
-                    Modifier
-                        .clickable(
-                            onClick = {
-                                navController.navigate(
-                                    ChatFlow.ChatUserInfo(
-                                        item.user?.displayableName() ?: "",
-                                        item.authorUuid,
-                                        item.user?.avatar ?: "",
-                                        item.user?.email ?: ""
-                                    )
-                                )
-                            }
-                        )
-                ) {
-                    Avatar(
-                        item.user?.avatar,
-                        viewModel.userViewModel.baseUrl.value ?: "",
-                        null,
-                        item.user?.displayableName() ?: "",
-                        30,
-                        true
-                    )
-                }
-            }
-        }
         Box {
-            Row(
-                verticalAlignment = Alignment.Bottom,
+            Column(
                 modifier = Modifier
+                    .widthIn(max = 310.dp)
                     .background(
-                        if (item.isOwn)
-                            LocalWorkspaceColorsPalette.current.messageOwnBackground
-                        else LocalWorkspaceColorsPalette.current.messageBackground,
-                        shape = bubbleShape
+                        if (item.isOwn) colors.messageOwnBackground else colors.messageBackground,
+                        messageBubbleShape(item.isOwn),
                     )
                     .combinedClickable(
                         onClick = {},
-                        onLongClick = {
-                            menuExpanded = true
-                        }
+                        onLongClick = { menuExpanded = true },
                     )
-                    .padding(10.dp)
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
             ) {
-                Column(
-                    horizontalAlignment = Alignment.Start,
-                    modifier = Modifier
-                        .weight(2f, fill = false)
-                ) {
-                    val defaultName = if (item.isOwn) "Я" else "Собеседник"
-                    Text(
-                        text = item.user?.displayableName() ?: defaultName,
-                        color = if (item.isOwn) LocalWorkspaceColorsPalette.current.indicatorBlue else LocalWorkspaceColorsPalette.current.indicatorPurple,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                    EnhancedMarkdown(
-                        markdown = item.payload.content,
-                        style = TextStyle(
-                            color = LocalWorkspaceColorsPalette.current.textHeaders,
-                            fontSize = 14.sp
-                        ),
-                        navController = navController,
-                        viewModel = viewModel
-                    )
-                }
-                Spacer(modifier = Modifier.widthIn(min = 20.dp))
-                val instant = Instant.parse(item.createdAt)
-                Text(
-                    text = instant.atZone(zone).format(hhmmFormatter),
-                    color = LocalWorkspaceColorsPalette.current.messageTimeColor,
-                    fontSize = 14.sp,
+                MessageHeader(item, viewModel)
+                EnhancedMarkdown(
+                    markdown = item.payload.content,
+                    style = TextStyle(
+                        color = colors.textHeaders,
+                        fontSize = 13.sp,
+                        lineHeight = 17.sp,
+                    ),
+                    navController = navController,
+                    viewModel = viewModel,
                 )
+                MessageFooter(item)
             }
-            DropdownMenu(
+            MessageActionsMenu(
                 expanded = menuExpanded,
-                onDismissRequest = { menuExpanded = false }
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly
-                ) {
-                    listOf("👍", "❤️", "😂", "😮", "😢").forEach { emoji ->
-                        TextButton(
-                            onClick = {
-                                scope.launch {
-                                    viewModel.onReactionTap(item.uuid, emoji)
-                                }
-                                menuExpanded = false
-                            },
-                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
-                            modifier = Modifier.size(40.dp)
-                        ) {
-                            Text(text = emoji, fontSize = 20.sp)
-                        }
-                    }
-                }
-                HorizontalDivider()
-                if (item.isOwn) {
-                    DropdownMenuItem(
-                        text = { Text("Редактировать") },
-                        onClick = {
-                            viewModel.onEditMessageClicked(item)
-                            menuExpanded = false
-                        }
-                    )
-                }
-                DropdownMenuItem(
-                    text = { Text("Цитировать") },
-                    onClick = {
-                        viewModel.onQuoteMessageClicked(item)
-                        menuExpanded = false
-                    }
-                )
-            }
+                item = item,
+                onDismiss = { menuExpanded = false },
+                onReaction = { emoji ->
+                    scope.launch { viewModel.onReactionTap(item.uuid, emoji) }
+                    menuExpanded = false
+                },
+                onEdit = {
+                    viewModel.onEditMessageClicked(item)
+                    menuExpanded = false
+                },
+                onQuote = {
+                    viewModel.onQuoteMessageClicked(item)
+                    menuExpanded = false
+                },
+            )
         }
     }
+}
+
+@Composable
+internal fun MessageRow(
+    item: MessageResponse,
+    viewModel: ChatDialogViewModel,
+    navController: NavHostController,
+    content: @Composable () -> Unit,
+) {
+    val baseUrl by viewModel.userViewModel.baseUrl.collectAsStateWithLifecycle()
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = if (item.isOwn) Arrangement.End else Arrangement.Start,
+        verticalAlignment = Alignment.Bottom,
+    ) {
+        if (!item.isOwn && !viewModel.isDirectMessages) {
+            if (shouldShowMessageAvatar(item, viewModel)) {
+                Box(
+                    modifier = Modifier.clickable {
+                        navController.navigate(
+                            ChatFlow.ChatUserInfo(
+                                item.user?.displayableName().orEmpty(),
+                                item.authorUuid,
+                                item.user?.avatar.orEmpty(),
+                                item.user?.email.orEmpty(),
+                            ),
+                        )
+                    },
+                ) {
+                    Avatar(
+                        avatarUrn = item.user?.avatar,
+                        baseUrl = baseUrl.orEmpty(),
+                        color = null,
+                        name = item.user?.displayableName().orEmpty(),
+                        size = 34,
+                        hasPadding = true,
+                    )
+                }
+            } else {
+                Spacer(Modifier.width(44.dp))
+            }
+        }
+        content()
+    }
+}
+
+internal fun shouldShowMessageAvatar(
+    item: MessageResponse,
+    viewModel: ChatDialogViewModel,
+): Boolean {
+    val next = viewModel.nextMessageByUuid(item.uuid)
+    return next == null || next.authorUuid != item.authorUuid || next.topicUuid != item.topicUuid
+}
+
+@Composable
+internal fun MessageHeader(
+    item: MessageResponse,
+    viewModel: ChatDialogViewModel,
+) {
+    val colors = LocalWorkspaceColorsPalette.current
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(bottom = 4.dp),
+    ) {
+        Text(
+            text = item.user?.displayableName() ?: if (item.isOwn) "Я" else "Собеседник",
+            color = messageAccent(item.authorUuid, item.isOwn),
+            fontSize = 12.sp,
+            lineHeight = 16.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+        )
+        viewModel.topicName?.takeIf { it.isNotBlank() }?.let { topic ->
+            Box(
+                Modifier
+                    .padding(horizontal = 8.dp)
+                    .width(3.dp)
+                    .size(width = 3.dp, height = 18.dp)
+                    .background(messageAccent(item.topicUuid, false), RoundedCornerShape(4.dp)),
+            )
+            Text(
+                text = "# $topic",
+                color = colors.textAdditional50,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+@Composable
+internal fun MessageFooter(item: MessageResponse) {
+    val colors = LocalWorkspaceColorsPalette.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp),
+        horizontalArrangement = Arrangement.End,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = formatMessageTime(item.updatedAt),
+            color = colors.messageTimeColor,
+            fontSize = 11.sp,
+        )
+        if (item.isOwn) {
+            Spacer(Modifier.width(6.dp))
+            Icon(
+                painter = painterResource(R.drawable.ic_done_all),
+                contentDescription = "Доставлено",
+                tint = colors.messageTimeColor,
+                modifier = Modifier.size(width = 20.dp, height = 16.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun MessageActionsMenu(
+    expanded: Boolean,
+    item: MessageResponse,
+    onDismiss: () -> Unit,
+    onReaction: (String) -> Unit,
+    onEdit: () -> Unit,
+    onQuote: () -> Unit,
+) {
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismiss,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+        ) {
+            listOf("👍", "❤️", "😂", "😮", "😢").forEach { emoji ->
+                TextButton(
+                    onClick = { onReaction(emoji) },
+                    contentPadding = PaddingValues(0.dp),
+                    modifier = Modifier.size(40.dp),
+                ) {
+                    Text(text = emoji, fontSize = 20.sp)
+                }
+            }
+        }
+        HorizontalDivider()
+        if (item.isOwn) {
+            DropdownMenuItem(
+                text = { Text("Редактировать") },
+                onClick = onEdit,
+            )
+        }
+        DropdownMenuItem(
+            text = { Text("Цитировать") },
+            onClick = onQuote,
+        )
+    }
+}
+
+internal fun messageBubbleShape(isOwn: Boolean): RoundedCornerShape =
+    if (isOwn) {
+        RoundedCornerShape(
+            topStart = 11.dp,
+            topEnd = 11.dp,
+            bottomStart = 11.dp,
+            bottomEnd = 2.dp,
+        )
+    } else {
+        RoundedCornerShape(
+            topStart = 11.dp,
+            topEnd = 11.dp,
+            bottomStart = 2.dp,
+            bottomEnd = 11.dp,
+        )
+    }
+
+internal fun messageAccent(seed: String, own: Boolean): Color {
+    if (own) return Color(0xFFFF7A00)
+    val accents = listOf(
+        Color(0xFFFFCC00),
+        Color(0xFFF458D2),
+        Color(0xFF9A7BFF),
+        Color(0xFF26C073),
+        Color(0xFF51ABFF),
+    )
+    return accents[(seed.hashCode() and Int.MAX_VALUE) % accents.size]
 }

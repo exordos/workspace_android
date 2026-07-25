@@ -8,7 +8,10 @@ object UrnParser {
         require(parts.size == 2) { return null }
         val (namespace, id) = parts
         when(namespace) {
-            "image" -> return "$baseUrl/api/workspace/v1/messenger/files/${id}/actions/download"
+            "image" -> {
+                val fileUuid = id.substringBefore('?').substringBefore('#')
+                return "/api/workspace/v1/messenger/files/${fileUuid}/actions/download"
+            }
             "gravatar" -> return "https://gravatar.com/avatar/${id}"
             "url" -> return id
             else -> return null

@@ -1,49 +1,40 @@
 package ru.genesiscorporation.workspace.beta.modules.chatchannels
 
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.graphics.toColorInt
-import dev.jeziellago.compose.markdowntext.MarkdownText
+import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
-import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
-import ru.genesiscorporation.workspace.beta.modules.chatdialog.formatHHmm
 import ru.genesiscorporation.workspace.beta.ui.Avatar
+import ru.genesiscorporation.workspace.beta.ui.UnreadBadge
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
-import java.time.Instant
-import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
@@ -51,174 +42,157 @@ import java.time.format.DateTimeFormatter
 fun ChatChannel(
     item: Stream,
     viewModel: ChatViewModel,
+    baseUrl: String,
     showDetail: Boolean,
     currentlySelectedFolder: FolderResponseData?,
     onChatNumberToAddChange: (Stream?) -> Unit,
-    onClick: () -> Unit
+    onClick: () -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
-    val palette = LocalWorkspaceColorsPalette.current
-    val targetBackground = if (showDetail) palette.chatHeaderBackground.copy(alpha = 0f) else palette.chatHeaderBackground
-    val animatedBackground by animateColorAsState(
-        targetValue = targetBackground,
-        animationSpec = tween(durationMillis = 250),
-        label = "chatHeaderBackground"
-    )
-    val scope = rememberCoroutineScope()
-    val zone = ZoneId.systemDefault()
-    val HHMMFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+    val colors = LocalWorkspaceColorsPalette.current
+    val lastMessage = item.lastMessage
+    val avatarUrn = if (item.isPrivate) {
+        lastMessage?.user?.avatar ?: item.avatar
+    } else {
+        item.avatar
+    }
 
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(76.dp)
-            .clip(
-                RoundedCornerShape(8.dp)
-            )
-            .background(animatedBackground)
-            .padding(start = 8.dp)
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = {
-                    menuExpanded = true
-                }
-            )
-    ) {
-        val avatarUrn = if (item.isPrivate && item.lastMessage?.user?.avatar != null) {
-            item.lastMessage?.user?.avatar
-        } else {
-            null
-        }
-        Avatar(
-            avatarUrn,
-            viewModel.client.userViewModel.baseUrl.value ?: "",
-            item.color,
-            item.name,
-            40,
-            false
-        )
-        Column(
+    Box {
+        Row(
             modifier = Modifier
-                .padding(8.dp),
-            verticalArrangement = Arrangement.spacedBy(0.dp)
-        ) {
-            val lastMessage = item.lastMessage
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = item.name,
-                    color = LocalWorkspaceColorsPalette.current.textHeaders,
-                    fontSize = 14.sp,
-                    lineHeight = 20.sp,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                .fillMaxWidth()
+                .heightIn(min = 65.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(
+                    if (showDetail) colors.cardBackgroundActive else colors.cardBackgroundBase,
                 )
-                if (lastMessage != null) {
-                    Spacer(modifier = Modifier.weight(1f))
-                    val instant = Instant.parse(lastMessage.createdAt)
-                    Text(
-                        text = instant.atZone(zone).format(HHMMFormatter),
-                        color = LocalWorkspaceColorsPalette.current.messageTimeColor,
-                        fontSize = 12.sp,
-                    )
-                }
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = if (item.isPrivate) Alignment.CenterVertically else Alignment.Bottom
+                .combinedClickable(
+                    onClick = onClick,
+                    onLongClick = { menuExpanded = true },
+                )
+                .padding(horizontal = 8.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Avatar(
+                avatarUrn = avatarUrn,
+                baseUrl = baseUrl,
+                color = item.color,
+                name = item.name,
+                size = 40,
+                hasPadding = false,
+            )
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 12.dp),
             ) {
-                if (lastMessage != null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     if (item.isPrivate) {
-                        MarkdownText(
-                            markdown = lastMessage.payload.content,
-                            modifier = Modifier.weight(1f),
-                            maxLines = 1,
-                            style = TextStyle(
-                                color = LocalWorkspaceColorsPalette.current.textAdditional50,
-                                fontSize = 12.sp
-                            )
+                        Box(
+                            modifier = Modifier
+                                .padding(end = 8.dp)
+                                .size(6.dp)
+                                .background(colors.iconBase, CircleShape),
                         )
                     } else {
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            val lastMessageUser = lastMessage.user
-                            if (lastMessageUser != null) {
-                                Text(
-                                    text = lastMessageUser.displayableName(),
-                                    color = LocalWorkspaceColorsPalette.current.primary,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    lineHeight = 20.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                            MarkdownText(
-                                markdown = lastMessage.payload.content,
-                                modifier = Modifier.weight(1f)
-                                    .fillMaxHeight(),
-                                maxLines = 1,
-                                style = TextStyle(
-                                    color = LocalWorkspaceColorsPalette.current.textAdditional50,
-                                    fontSize = 12.sp,
-                                    lineHeight = 20.sp
-                                ),
-                            )
-                        }
+                        Icon(
+                            painter = painterResource(R.drawable.ic_lock),
+                            contentDescription = "Закрытый стрим",
+                            tint = colors.iconBase,
+                            modifier = Modifier
+                                .padding(end = 8.dp)
+                                .size(16.dp),
+                        )
                     }
-                } else {
-                    Spacer(modifier = Modifier.weight(1f))
-                }
-                if (item.unreadCount > 0) {
                     Text(
-                        text = "${item.unreadCount}",
-                        color = LocalWorkspaceColorsPalette.current.noticeOnBadge,
+                        text = item.name,
+                        color = colors.textHeaders,
                         fontSize = 14.sp,
+                        lineHeight = 20.sp,
                         fontWeight = FontWeight.Medium,
-                        modifier = Modifier
-                            .background(
-                                color = LocalWorkspaceColorsPalette.current.noticeCounterBadge,
-                                shape = RoundedCornerShape(100.dp)
-                            )
-                            .padding(horizontal = 8.dp)
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
                     )
+                    if (lastMessage != null) {
+                        Text(
+                            text = formatMessageTime(lastMessage.createdAt),
+                        color = colors.messageTimeColor,
+                        fontSize = 12.sp,
+                        lineHeight = 20.sp,
+                            modifier = Modifier.padding(start = 8.dp),
+                        )
+                    }
+                }
+                if (!item.isPrivate && lastMessage?.user != null) {
+                    Text(
+                        text = lastMessage.user?.displayableName().orEmpty(),
+                        color = colors.primary,
+                        fontSize = 12.sp,
+                        lineHeight = 20.sp,
+                        fontWeight = FontWeight.Normal,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = lastMessage?.payload?.content?.let(::messagePreview)
+                            ?: "Сообщений пока нет",
+                        color = colors.textAdditional50,
+                        fontSize = 12.sp,
+                        lineHeight = 20.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (item.unreadCount > 0) {
+                        UnreadBadge(
+                            count = item.unreadCount,
+                            modifier = Modifier.padding(start = 8.dp),
+                        )
+                    } else {
+                        Spacer(Modifier.size(1.dp))
+                    }
                 }
             }
         }
         DropdownMenu(
             expanded = menuExpanded,
-            onDismissRequest = { menuExpanded = false }
+            onDismissRequest = { menuExpanded = false },
         ) {
             if (currentlySelectedFolder?.systemType == "all") {
                 DropdownMenuItem(
-                    text = { Text("Добавить в папку...") },
+                    text = { Text("Добавить в папку…") },
                     onClick = {
                         onChatNumberToAddChange(item)
                         menuExpanded = false
-                    }
+                    },
                 )
             } else {
                 DropdownMenuItem(
                     text = { Text("Удалить из папки") },
-                    onClick = {
-//                        if (currentlySelectedFolder != null) {
-//                            scope.launch {
-//                                viewModel.deleteChatFromFolder(
-//                                    item.chatId,
-//                                    currentlySelectedFolder
-//                                )
-//                            }
-//                        }
-                        menuExpanded = false
-                    }
+                    onClick = { menuExpanded = false },
                 )
             }
         }
     }
+}
+
+internal fun messagePreview(content: String): String =
+    content
+        .replace(Regex("""!\[[^\]]*]\([^)]+\)"""), "Изображение")
+        .replace(Regex("""\[[^\]]+]\((urn:image:|https?://)[^)]+\)"""), "Вложение")
+        .replace(Regex("""[`*_>#]"""), "")
+        .lineSequence()
+        .firstOrNull { it.isNotBlank() }
+        ?.trim()
+        .orEmpty()
+
+internal fun formatMessageTime(value: String): String {
+    val instant = parseTime(value)
+    if (instant == java.time.Instant.EPOCH) return ""
+    return DateTimeFormatter.ofPattern("HH:mm")
+        .withZone(ZoneId.systemDefault())
+        .format(instant)
 }

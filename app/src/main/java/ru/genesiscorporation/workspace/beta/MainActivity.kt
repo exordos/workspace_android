@@ -16,23 +16,27 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.recalculateWindowInsets
 import androidx.compose.foundation.layout.safeContentPadding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
-import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -46,6 +50,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
@@ -80,6 +86,7 @@ import ru.genesiscorporation.workspace.beta.modules.topics.TopicsScreen
 import ru.genesiscorporation.workspace.beta.modules.topics.TopicsViewModel
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import ru.genesiscorporation.workspace.beta.ui.theme.WokspaceTheme
+import ru.genesiscorporation.workspace.beta.ui.Avatar
 import io.ktor.client.plugins.api.*
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.url
@@ -197,17 +204,14 @@ fun WokspaceApp(
     pendingDeepLink: String?,
     onDeepLinkHandled: () -> Unit
 ) {
+    val colors = LocalWorkspaceColorsPalette.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    var navController = rememberNavController()
-    val destinationList = listOf<Destinations>(
-        Chat,
-        Profile
-    )
+    val navController = rememberNavController()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val user = UserState.current
     val currentCallMessage by viewModel.currentCallMessage.collectAsState()
-    var currentDestination = rememberSaveable { mutableStateOf(0 ) }
+    val currentDestination = rememberSaveable { mutableStateOf(0) }
+    var showBottomNavigation by rememberSaveable { mutableStateOf(true) }
 
 
     LaunchedEffect(lifecycleOwner) {
@@ -226,48 +230,142 @@ fun WokspaceApp(
     }
 
 
-    NavigationSuiteScaffold(
-        layoutType = NavigationSuiteType.ShortNavigationBarCompact,
-        navigationSuiteItems = {
-            destinationList.forEachIndexed { index, destination ->
-                item(
-                    icon = {
-                        Icon(
-                            painter = painterResource( id = destination.icon),
-                            contentDescription = destination.title
-                        )
-                    },
-                    selected = index == currentDestination.value,
-                    onClick = {
-                        currentDestination.value = index
-                        navController.navigate(destinationList[index].route) {
-                            popUpTo(Chat.route)
-                            launchSingleTop = true
-                        }
-                    }
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(colors.background)
+            .windowInsetsPadding(WindowInsets.statusBars),
+    ) {
+        RequestNotificationPermissionIfNeeded()
+        NavHost(
+            navController = navController,
+            startDestination = Chat.route,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(bottom = if (showBottomNavigation) 102.dp else 0.dp),
+        ) {
+            composable(Chat.route) {
+                currentDestination.value = 0
+                ChatNavigation(
+                    workspaceApiClient = workspaceApiClient,
+                    eventsRepository = eventsRepository,
+                    pendingDeepLink = pendingDeepLink,
+                    onDeepLinkHandled = onDeepLinkHandled,
+                    onBottomNavigationVisibilityChange = { showBottomNavigation = it },
                 )
             }
+            composable(Profile.route) {
+                LaunchedEffect(Unit) { showBottomNavigation = true }
+                currentDestination.value = 1
+                ProfileNavigation(workspaceApiClient, eventsRepository)
+            }
         }
+        if (showBottomNavigation) {
+            WorkspaceBottomNavigation(
+                selectedDestination = currentDestination.value,
+                onChatClick = {
+                    currentDestination.value = 0
+                    navController.navigate(Chat.route) {
+                        popUpTo(Chat.route)
+                        launchSingleTop = true
+                    }
+                },
+                onProfileClick = {
+                    currentDestination.value = 1
+                    navController.navigate(Profile.route) {
+                        popUpTo(Chat.route)
+                        launchSingleTop = true
+                    }
+                },
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+        }
+        val callMessage = currentCallMessage
+        if (callMessage != null) {
+            IncomingCall(callMessage, viewModel, context)
+        }
+    }
+}
+
+@Composable
+private fun WorkspaceBottomNavigation(
+    selectedDestination: Int,
+    onChatClick: () -> Unit,
+    onProfileClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalWorkspaceColorsPalette.current
+    val user = UserState.current
+    val baseUrl by user.baseUrl.collectAsState()
+    val profile = user.userData
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(102.dp)
+            .background(colors.background),
     ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(102.dp)
+                .background(
+                    colors.chatHeaderBackground,
+                    RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp),
+                )
+                .navigationBarsPadding()
+                .padding(horizontal = 24.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceAround,
+        ) {
             Box(
-                Modifier
-                    .windowInsetsPadding(WindowInsets.statusBars)
+                modifier = Modifier
+                    .size(54.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(
+                        if (selectedDestination == 0) colors.cardBackgroundActive
+                        else Color.Transparent,
+                    )
+                    .clickable(onClick = onChatClick),
+                contentAlignment = Alignment.Center,
             ) {
-                RequestNotificationPermissionIfNeeded()
-                NavHost(navController = navController, startDestination = Chat.route) {
-                    composable(Chat.route) {
-                        ChatNavigation(workspaceApiClient, eventsRepository, pendingDeepLink, onDeepLinkHandled)
-                    }
-                    composable(Profile.route) {
-                        ProfileNavigation(workspaceApiClient, eventsRepository)
-                    }
-                }
-                val callMessage = currentCallMessage
-                if (callMessage != null) {
-                    IncomingCall(callMessage, viewModel, context)
+                Icon(
+                    painter = painterResource(R.drawable.chat_bubble),
+                    contentDescription = "Чаты",
+                    tint = if (selectedDestination == 0) colors.iconActive else colors.iconBase,
+                    modifier = Modifier.size(36.dp),
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .size(54.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(
+                        if (selectedDestination == 1) colors.cardBackgroundActive
+                        else Color.Transparent,
+                    )
+                    .clickable(onClick = onProfileClick),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (profile != null) {
+                    Avatar(
+                        avatarUrn = profile.avatar,
+                        baseUrl = baseUrl.orEmpty(),
+                        color = null,
+                        name = profile.displayableName(),
+                        size = 36,
+                        hasPadding = false,
+                    )
+                } else {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_profile),
+                        contentDescription = "Профиль",
+                        tint = if (selectedDestination == 1) colors.iconActive else colors.iconBase,
+                        modifier = Modifier.size(36.dp),
+                    )
                 }
             }
-//        }
+        }
     }
 }
 
@@ -276,7 +374,8 @@ fun ChatNavigation(
     workspaceApiClient: WorkspaceAPIClient,
     eventsRepository: EventsRepository,
     pendingDeepLink: String?,
-    onDeepLinkHandled: () -> Unit
+    onDeepLinkHandled: () -> Unit,
+    onBottomNavigationVisibilityChange: (Boolean) -> Unit,
 ) {
     val navController = rememberNavController()
     val user = UserState.current
@@ -284,9 +383,11 @@ fun ChatNavigation(
     val chatViewModel: ChatViewModel = viewModel(factory = chatViewModelFactory)
     NavHost(navController = navController, startDestination = ChatFlow.ChatList) {
         composable<ChatFlow.ChatList> {
+            LaunchedEffect(Unit) { onBottomNavigationVisibilityChange(true) }
             ChatScreen(chatViewModel, navController)
         }
         composable<ChatFlow.ChatDialog> {
+            LaunchedEffect(Unit) { onBottomNavigationVisibilityChange(false) }
             val args = it.toRoute<ChatFlow.ChatDialog>()
             Log.d("RepoCheck", "chatnav repo instance = ${System.identityHashCode(eventsRepository)}")
             val chatDialogViewModelFactory = remember { ChatDialogViewModelFactory(workspaceApiClient, user, args.title, args.chatId, args.topicName, args.topicUuid, args.isDirectMessages, eventsRepository, args.userId) }
@@ -294,6 +395,7 @@ fun ChatNavigation(
             ChatDialogScreen(chatDialogViewModel, navController)
         }
         composable<ChatFlow.ChatTopic> {
+            LaunchedEffect(Unit) { onBottomNavigationVisibilityChange(true) }
             val args = it.toRoute<ChatFlow.ChatTopic>()
 
             val chatTopicsViewModelFactory = remember { ChatTopicsViewModelFactory(workspaceApiClient, user, args.channelName, args.channelId, eventsRepository) }
@@ -301,6 +403,7 @@ fun ChatNavigation(
             TopicsScreen(chatTopicsViewModel, navController)
         }
         composable<ChatFlow.ChatUserInfo> {
+            LaunchedEffect(Unit) { onBottomNavigationVisibilityChange(false) }
             val args = it.toRoute<ChatFlow.ChatUserInfo>()
             Log.d("RepoCheck", "chatnav repo instance = ${System.identityHashCode(eventsRepository)}")
             val chatUserInfoViewModelFactory = remember { ChatUserInfoViewModelFactory(workspaceApiClient, args.userName, args.userId, args.avatarUrl, args.email, eventsRepository) }

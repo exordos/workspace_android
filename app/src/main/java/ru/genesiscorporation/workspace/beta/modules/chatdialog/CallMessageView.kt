@@ -2,148 +2,57 @@ package ru.genesiscorporation.workspace.beta.modules.chatdialog
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
 import org.jitsi.meet.sdk.JitsiMeetActivity
 import org.jitsi.meet.sdk.JitsiMeetConferenceOptions
-import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
-import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.net.URL
-import java.time.Instant
-import java.time.LocalDateTime
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import kotlin.time.ExperimentalTime
 
-@OptIn(ExperimentalTime::class)
 @Composable
 fun CallMessageView(
     item: MessageResponse,
     viewModel: ChatDialogViewModel,
-    navController: NavHostController
+    navController: NavHostController,
 ) {
-    val zone = ZoneId.systemDefault()
-    val hhmmFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
-    val scope = rememberCoroutineScope()
+    val colors = LocalWorkspaceColorsPalette.current
     val context = LocalContext.current
-    val itemUrl = URL(item.payload.content)
-    val bubbleShape = if (item.isOwn) {
-        RoundedCornerShape(
-            topStart = 8.dp,
-            topEnd = 8.dp,
-            bottomStart = 8.dp,
-            bottomEnd = 0.dp
-        )
-    } else {
-        RoundedCornerShape(
-            topStart = 8.dp,
-            topEnd = 8.dp,
-            bottomStart = 0.dp,
-            bottomEnd = 8.dp
-        )
-    }
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (item.isOwn) Arrangement.End else Arrangement.Start,
-        verticalAlignment = Alignment.Bottom
+    val itemUrl = runCatching { URL(item.payload.content) }.getOrNull()
+
+    MessageRow(
+        item = item,
+        viewModel = viewModel,
+        navController = navController,
     ) {
-        val nextMessage = viewModel.nextMessageByUuid(item.uuid)
-        if (!viewModel.isDirectMessages && !item.isOwn) {
-            if (nextMessage != null) {
-                if (nextMessage.authorUuid != item.authorUuid) {
-                    Box(
-                        Modifier
-                            .clickable(
-                                onClick = {
-                                    navController.navigate(
-                                        ChatFlow.ChatUserInfo(
-                                            item.user?.displayableName() ?: "",
-                                            item.authorUuid,
-                                            item.user?.avatar ?: "",
-                                            ""
-                                        )
-                                    )
-                                }
-                            )
-                    ) {
-                        Avatar(
-                            item.user?.avatar,
-                            viewModel.userViewModel.baseUrl.value ?: "",
-                            null,
-                            item.user?.displayableName() ?: "",
-                            30,
-                            true
-                        )
-                    }
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .padding(end = 12.dp)
-                            .size(30.dp)
-                            .background(color = Color.Transparent, shape = CircleShape)
-                    )
-                }
-            } else {
-                Box(
-                    Modifier
-                        .clickable(
-                            onClick = {
-                                navController.navigate(
-                                    ChatFlow.ChatUserInfo(
-                                        item.user?.displayableName() ?: "",
-                                        item.authorUuid,
-                                        item.user?.avatar ?: "",
-                                        item.user?.email ?: ""
-                                    )
-                                )
-                            }
-                        )
-                ) {
-                    Avatar(
-                        item.user?.avatar,
-                        viewModel.userViewModel.baseUrl.value ?: "",
-                        null,
-                        item.user?.displayableName() ?: "",
-                        30,
-                        true
-                    )
-                }
-            }
-        }
-        Row(
-            verticalAlignment = Alignment.Bottom,
+        Column(
             modifier = Modifier
+                .widthIn(max = 310.dp)
                 .background(
-                    LocalWorkspaceColorsPalette.current.messageActiveCallBackground,
-                    shape = bubbleShape
+                    colors.messageActiveCallBackground,
+                    messageBubbleShape(item.isOwn),
                 )
-                .padding(10.dp)
-                .clickable {
+                .clickable(enabled = itemUrl != null) {
                     val serverUrl = viewModel.repo.jitsiServerUrl
-                    if (serverUrl.isNotEmpty()) {
+                    if (serverUrl.isNotBlank() && itemUrl != null) {
                         runCatching {
                             val options = JitsiMeetConferenceOptions.Builder()
                                 .setServerURL(URL(serverUrl))
@@ -153,42 +62,37 @@ fun CallMessageView(
                         }
                     }
                 }
+                .padding(horizontal = 11.dp, vertical = 9.dp),
         ) {
-            Column(
-                horizontalAlignment = Alignment.End
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Row {
-                    Text(
-                        text = "Звонок",
-                        color = LocalWorkspaceColorsPalette.current.indicatorGreen,
-                        fontSize = 14.sp
-                    )
-                    Text(
-                        text = itemUrl.path.drop(1),
-                        color = LocalWorkspaceColorsPalette.current.textHeaders,
-                        fontSize = 14.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier
-                            .padding(horizontal = 12.dp)
-                    )
-                    Icon(
-                        painter = painterResource(R.drawable.call),
-                        "Call",
-                        tint = LocalWorkspaceColorsPalette.current.indicatorGreen
-                    )
-                }
-                Row(
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    val instant = Instant.parse(item.createdAt)
-                    Text(
-                        text = instant.atZone(zone).format(hhmmFormatter),
-                        color = LocalWorkspaceColorsPalette.current.messageTimeColor,
-                        fontSize = 14.sp,
-                    )
-                }
+                Text(
+                    text = "Звонок",
+                    color = colors.indicatorGreen,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = itemUrl?.path?.drop(1).orEmpty().ifBlank { "Workspace" },
+                    color = colors.textHeaders,
+                    fontSize = 13.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(horizontal = 12.dp),
+                )
+                Icon(
+                    painter = painterResource(R.drawable.call),
+                    contentDescription = "Присоединиться к звонку",
+                    tint = colors.indicatorGreen,
+                )
             }
+            Spacer(Modifier.padding(top = 2.dp))
+            MessageHeader(item, viewModel)
+            MessageFooter(item)
         }
     }
 }
