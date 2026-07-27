@@ -9,6 +9,10 @@ import io.ktor.http.path
 import io.ktor.websocket.Frame
 import io.ktor.websocket.readReason
 import io.ktor.websocket.readText
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -29,6 +33,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
+import java.net.URI
 import kotlin.plus
 
 
@@ -37,6 +42,11 @@ class EventsRepository() {
     var client: WorkspaceAPIClient? = null
     var latestEpoch: Int = 0
     var epochGeneration: String = ""
+
+    fun resetRealtimeCursor() {
+        latestEpoch = 0
+        epochGeneration = ""
+    }
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -56,28 +66,16 @@ class EventsRepository() {
         }
         val key = "$streamUuid.$topicUuid"
         _streamTopicMessages.update { current ->
-            current + (key to messagesWithUser)
+            current + (key to mergeMessages(current[key].orEmpty(), messagesWithUser))
         }
     }
+
     fun addMessageToStreamTopic(message: MessageResponse) {
         val key = "${message.streamUuid}.${message.topicUuid}"
         message.user = users.value.firstOrNull { it.uuid == message.authorUuid }
 
         _streamTopicMessages.update { current ->
-            if (current[key] != null ) {
-                val existingMessages = current[key].orEmpty()
-                val pendingMessages = existingMessages.filter {
-                    it.uuid == "" && it.authorUuid == message.authorUuid && it.payload.content == message.payload.content
-                }
-                val filteredExistingMessages = existingMessages.filter { it.uuid == message.uuid }
-                if (filteredExistingMessages.isEmpty() && pendingMessages.isEmpty()) {
-                    current + (key to (existingMessages + message))
-                } else {
-                    current
-                }
-            } else {
-                current
-            }
+            current + (key to mergeMessages(current[key].orEmpty(), listOf(message)))
         }
     }
 
@@ -99,6 +97,63 @@ class EventsRepository() {
             if (updatedMessages == messages) return@update current
             current + (key to updatedMessages)
         }
+    }
+
+    fun updateMessageContent(
+        streamUuid: String,
+        topicUuid: String,
+        messageUuid: String,
+        content: String
+    ) {
+        val key = "$streamUuid.$topicUuid"
+        _streamTopicMessages.update { current ->
+            val messages = current[key] ?: return@update current
+            current + (
+                key to messages.map { message ->
+                    if (message.uuid == messageUuid) {
+                        message.copy(payload = message.payload.copy(content = content))
+                    } else {
+                        message
+                    }
+                }
+            )
+        }
+    }
+
+    fun replaceMessage(messageUuid: String, replacement: MessageResponse) {
+        val key = "${replacement.streamUuid}.${replacement.topicUuid}"
+        var confirmedMessage = replacement
+        _streamTopicMessages.update { current ->
+            val messages = current[key].orEmpty()
+            confirmedMessage = messages.firstOrNull { it.uuid == replacement.uuid } ?: replacement
+            val withoutTemporaryAndDuplicate = messages.filterNot {
+                it.uuid == messageUuid || it.uuid == replacement.uuid
+            }
+            current + (key to (withoutTemporaryAndDuplicate + confirmedMessage))
+        }
+        updateMessagesPool(listOf(confirmedMessage))
+    }
+
+    fun removeMessage(streamUuid: String, topicUuid: String, messageUuid: String) {
+        val key = "$streamUuid.$topicUuid"
+        _streamTopicMessages.update { current ->
+            val messages = current[key] ?: return@update current
+            current + (key to messages.filterNot { it.uuid == messageUuid })
+        }
+        _messagesPool.update { current ->
+            current.filterNot { it.uuid == messageUuid }
+        }
+    }
+
+    private fun mergeMessages(
+        existing: List<MessageResponse>,
+        incoming: List<MessageResponse>
+    ): List<MessageResponse> {
+        val merged = LinkedHashMap<String, MessageResponse>()
+        (existing + incoming).forEach { message ->
+            merged[message.uuid] = message
+        }
+        return merged.values.toList()
     }
 
     private val _streamTopics = MutableStateFlow<Map<String, List<TopicsResponseData>>>(emptyMap())
@@ -154,14 +209,12 @@ class EventsRepository() {
     }
 
     fun updateMessagesPool(newList: List<MessageResponse>) {
-        val currentPoolIds = _messagesPool.value.map { it.uuid }
-        val filteredMessages = newList.filter { !currentPoolIds.contains(it.uuid) }
-        val messagesWithUser = filteredMessages.map { message ->
+        val messagesWithUser = newList.map { message ->
             message.user = users.value.firstOrNull { it.uuid == message.authorUuid }
             message
         }
         _messagesPool.update { current ->
-            current + messagesWithUser
+            mergeMessages(current, messagesWithUser)
         }
     }
 
@@ -178,10 +231,11 @@ class EventsRepository() {
     fun addReaction(reaction: MessageReaction) {
         val user = currentUser
         if (user != null) {
-            if (reaction.userUuid == user.uuid)
+            if (reaction.userUuid == user.uuid) {
                 _userReactions.update { current ->
-                    current + reaction
+                    current.filterNot { it.uuid == reaction.uuid } + reaction
                 }
+            }
         }
     }
 
@@ -238,6 +292,10 @@ class EventsRepository() {
             current.map { stream ->
                 if (stream.uuid == updatedStream.uuid) {
                     stream.copy(
+                        name = updatedStream.name,
+                        description = updatedStream.description,
+                        role = updatedStream.role,
+                        notificationMode = updatedStream.notificationMode,
                         lastMessageUuid = updatedStream.lastMessageUuid,
                         unreadCount = updatedStream.unreadCount,
                         lastMessage = message
@@ -293,82 +351,142 @@ class EventsRepository() {
 
     suspend fun start() {
         val webSocketClient = client
-        if (webSocketClient != null) {
-            val response = webSocketClient.performRequest(EpochRequest())
-            when (response) {
-                is ApiResult.Success -> {
-                    latestEpoch = response.value.epochVersion
-                    epochGeneration = response.value.epochGeneration
-                    startWebsocketConnection(webSocketClient)
-                }
+        if (webSocketClient == null) return
 
-                is ApiResult.Error -> {
-
+        var retryDelayMillis = INITIAL_RETRY_DELAY_MILLIS
+        while (currentCoroutineContext().isActive) {
+            if (epochGeneration.isBlank()) {
+                when (val response = webSocketClient.performRequest(EpochRequest())) {
+                    is ApiResult.Success -> {
+                        latestEpoch = response.value.epochVersion
+                        epochGeneration = response.value.epochGeneration
+                    }
+                    is ApiResult.Error -> {
+                        Log.d("WebSocket", "Failed to load the initial event cursor")
+                        delay(retryDelayMillis)
+                        retryDelayMillis = (retryDelayMillis * 2)
+                            .coerceAtMost(MAX_RETRY_DELAY_MILLIS)
+                        continue
+                    }
                 }
+            }
+
+            try {
+                startWebsocketConnection(webSocketClient)
+                retryDelayMillis = INITIAL_RETRY_DELAY_MILLIS
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (exception: Exception) {
+                Log.d(
+                    "WebSocket",
+                    "Connection failed: ${exception::class.simpleName}: ${exception.message}"
+                )
+            }
+
+            if (currentCoroutineContext().isActive) {
+                delay(retryDelayMillis)
+                retryDelayMillis = (retryDelayMillis * 2)
+                    .coerceAtMost(MAX_RETRY_DELAY_MILLIS)
             }
         }
     }
 
     suspend fun startWebsocketConnection(webSocketClient: WorkspaceAPIClient) {
         val accessToken = webSocketClient.userViewModel.accessToken.value
-        val baseUrl = webSocketClient.userViewModel.baseUrl.value?.removePrefix("https://")
+        val baseUrl = webSocketClient.userViewModel.baseUrl.value
         if (accessToken != null && baseUrl != null) {
-            try {
-                webSocketClient.client.webSocket(
-                    request = {
-                        url {
-                            protocol = URLProtocol.WS
-                            this.host = baseUrl
-                            path("/api/workspace/v1/events/ws")
-                            parameters.append("last_epoch_version", latestEpoch.toString())
-                            parameters.append("epoch_generation", epochGeneration)
+            val baseUri = URI(baseUrl)
+            webSocketClient.client.webSocket(
+                request = {
+                    url {
+                        protocol = if (baseUri.scheme.equals("https", ignoreCase = true)) {
+                            URLProtocol.WSS
+                        } else {
+                            URLProtocol.WS
                         }
-                        headers {
-                            append(HttpHeaders.SecWebSocketProtocol, "workspace.events.v1, bearer.$accessToken")
+                        host = requireNotNull(baseUri.host) {
+                            "Workspace base URL must contain a host"
                         }
+                        if (baseUri.port != -1) port = baseUri.port
+                        path("/api/workspace/v1/events/ws")
+                        parameters.append("last_epoch_version", latestEpoch.toString())
+                        parameters.append("epoch_generation", epochGeneration)
                     }
-                ) {
-                    for (frame in incoming) {
-                        when (frame) {
-                            is Frame.Text -> {
-                                val receivedText = frame.readText()
-                                val jsonObject = json.decodeFromString<JsonObject>(receivedText)
-                                val action = jsonObject["action"]?.jsonPrimitive?.contentOrNull
-                                val payload = jsonObject["payload"]?.toString()
-                                if (action != null && payload != null) {
-                                    when (jsonObject["object_type"]?.toString()?.trim('"')) {
-                                        "message" -> {
-                                            didReceiveMessageEvent(payload, action)
-                                        }
-                                        "user" -> {
-                                            didReceiveUserEvent(payload, action)
-                                        }
-                                        "folder" -> {
-                                            didReceiveFolderEvent(payload, action)
-                                        }
-                                        "stream" -> {
-                                            didReceiveStreamEvent(payload, action)
-                                        }
-                                        "topic" -> {
-                                            didReceiveTopicEvent(payload, action)
-                                        }
-                                        "message_reaction" -> {
-                                            didReceiveReactionEvent(payload, action)
-                                        }
-                                        else -> Log.d("WebSocket", "Received: $receivedText")
-                                    }
-                                }
-                            }
-                            is Frame.Binary -> Log.d("WebSocket", "Received binary data bundle")
-                            is Frame.Close -> Log.d("WebSocket", "Connection closing reason: ${frame.readReason()}")
-                            else -> Log.d("WebSocket", "Received control or ping/pong frame")
-                        }
+                    headers {
+                        append(
+                            HttpHeaders.SecWebSocketProtocol,
+                            "workspace.events.v1, bearer.$accessToken"
+                        )
                     }
                 }
-            } catch (e: Exception) {
-                Log.d("WebSocket", "Failed: ${e::class.simpleName}: ${e.message}")
-                e.printStackTrace()
+            ) {
+                Log.d("WebSocket", "Connected")
+                for (frame in incoming) {
+                    when (frame) {
+                        is Frame.Text -> {
+                            val receivedText = frame.readText()
+                            try {
+                                processTextFrame(receivedText)
+                            } catch (exception: Exception) {
+                                Log.d(
+                                    "WebSocket",
+                                    "Ignored invalid event: " +
+                                        "${exception::class.simpleName}: ${exception.message}"
+                                )
+                            }
+                        }
+                        is Frame.Binary -> Log.d("WebSocket", "Received binary data bundle")
+                        is Frame.Close -> {
+                            Log.d(
+                                "WebSocket",
+                                "Connection closing reason: ${frame.readReason()}"
+                            )
+                        }
+                        else -> Log.d("WebSocket", "Received control or ping/pong frame")
+                    }
+                }
             }
+        }
+    }
+
+    fun processTextFrame(receivedText: String) {
+        val jsonObject = json.decodeFromString<JsonObject>(receivedText)
+        val frameType = jsonObject["type"]?.jsonPrimitive?.contentOrNull
+        if (frameType == "ready") {
+            epochGeneration = jsonObject["epoch_generation"]
+                ?.jsonPrimitive
+                ?.contentOrNull
+                ?: epochGeneration
+            latestEpoch = maxOf(
+                latestEpoch,
+                jsonObject["epoch_version"]
+                    ?.jsonPrimitive
+                    ?.contentOrNull
+                    ?.toIntOrNull()
+                    ?: latestEpoch
+            )
+            return
+        }
+
+        val eventEpoch = jsonObject["epoch_version"]
+            ?.jsonPrimitive
+            ?.contentOrNull
+            ?.toIntOrNull()
+        if (eventEpoch != null && eventEpoch <= latestEpoch) return
+
+        val action = jsonObject["action"]?.jsonPrimitive?.contentOrNull ?: return
+        val payload = jsonObject["payload"]?.toString() ?: return
+        when (jsonObject["object_type"]?.jsonPrimitive?.contentOrNull) {
+            "message" -> didReceiveMessageEvent(payload, action)
+            "user" -> didReceiveUserEvent(payload, action)
+            "folder" -> didReceiveFolderEvent(payload, action)
+            "stream" -> didReceiveStreamEvent(payload, action)
+            "topic" -> didReceiveTopicEvent(payload, action)
+            "message_reaction" -> didReceiveReactionEvent(payload, action)
+            else -> Log.d("WebSocket", "Ignored unsupported event: $receivedText")
+        }
+        if (eventEpoch != null) {
+            latestEpoch = maxOf(latestEpoch, eventEpoch)
         }
     }
 
@@ -424,7 +542,7 @@ class EventsRepository() {
 
     fun didReceiveReactionEvent(payload: String, action: String) {
         when(action) {
-            "created" -> {
+            "created", "updated" -> {
                 val reaction = json.decodeFromString<MessageReaction>(payload)
                 addReaction(reaction)
             }
@@ -467,9 +585,12 @@ class EventsRepository() {
         }
     }
 
-    var pushId: String? = null
-
     var jitsiServerUrl: String = ""
+
+    companion object {
+        private const val INITIAL_RETRY_DELAY_MILLIS = 1_000L
+        private const val MAX_RETRY_DELAY_MILLIS = 30_000L
+    }
 }
 
 @Serializable

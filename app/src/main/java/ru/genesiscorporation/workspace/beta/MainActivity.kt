@@ -45,7 +45,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -65,13 +64,12 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
-import com.google.firebase.messaging.FirebaseMessaging
 import io.ktor.client.HttpClient
-import kotlinx.coroutines.launch
-import ru.genesiscorporation.workspace.beta.data.FCMTokenHolder
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.modules.chatchannels.ChatScreen
 import ru.genesiscorporation.workspace.beta.modules.chatchannels.ChatViewModel
+import ru.genesiscorporation.workspace.beta.modules.channelinfo.ChannelInfoScreen
+import ru.genesiscorporation.workspace.beta.modules.channelinfo.ChannelInfoViewModel
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.ChatDialogScreen
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.ChatDialogViewModel
 import ru.genesiscorporation.workspace.beta.modules.chatuserinfo.ChatUserInfoScreen
@@ -93,6 +91,10 @@ import io.ktor.client.request.url
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
+import ru.genesiscorporation.workspace.beta.data.push.FirebasePushRegistrationTokenProvider
+import ru.genesiscorporation.workspace.beta.data.push.PushDeviceRegistrationManager
+import ru.genesiscorporation.workspace.beta.data.push.TinkPushDeviceIdentityStore
+import ru.genesiscorporation.workspace.beta.data.push.WorkspacePushDeviceRemoteDataSource
 import ru.genesiscorporation.workspace.beta.ui.IncomingCall
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.plugins.websocket.WebSockets
@@ -118,6 +120,13 @@ class MainActivity : ComponentActivity() {
     private val userState by viewModels<UserViewModel>()  {
         UserViewModelFactory(applicationContext)
     }
+    private val pushDeviceRegistrationManager by lazy {
+        PushDeviceRegistrationManager(
+            tokenProvider = FirebasePushRegistrationTokenProvider(),
+            identityProvider = TinkPushDeviceIdentityStore(applicationContext),
+            remoteDataSource = WorkspacePushDeviceRemoteDataSource(workspaceApiClient),
+        )
+    }
     val eventsRepository = EventsRepository()
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -127,7 +136,13 @@ class MainActivity : ComponentActivity() {
         setContent {
             WokspaceTheme {
                 CompositionLocalProvider(UserState provides userState) {
-                    ApplicationSwitcher(workspaceApiClient, eventsRepository, pendingDeepLink, onDeepLinkHandled = { pendingDeepLink = null })
+                    ApplicationSwitcher(
+                        workspaceApiClient = workspaceApiClient,
+                        eventsRepository = eventsRepository,
+                        pushDeviceRegistrationManager = pushDeviceRegistrationManager,
+                        pendingDeepLink = pendingDeepLink,
+                        onDeepLinkHandled = { pendingDeepLink = null },
+                    )
                 }
             }
         }
@@ -170,6 +185,7 @@ fun RequestNotificationPermissionIfNeeded() {
 fun ApplicationSwitcher(
     workspaceApiClient: WorkspaceAPIClient,
     eventsRepository: EventsRepository,
+    pushDeviceRegistrationManager: PushDeviceRegistrationManager,
     pendingDeepLink: String?,
     onDeepLinkHandled: () -> Unit
 ) {
@@ -178,7 +194,13 @@ fun ApplicationSwitcher(
     val isAccessTokenLoaded by user.isAccessTokenLoaded.collectAsState()
 
     Log.d("RepoCheck", "initnav repo instance = ${System.identityHashCode(eventsRepository)}")
-    val workspaceViewModelFactory = remember { WorkspaceViewModelFactory(workspaceApiClient, eventsRepository) }
+    val workspaceViewModelFactory = remember {
+        WorkspaceViewModelFactory(
+            workspaceApiClient,
+            eventsRepository,
+            pushDeviceRegistrationManager,
+        )
+    }
     var workspaceViewModel: WorkspaceViewModel = viewModel(factory = workspaceViewModelFactory)
     if (!isAccessTokenLoaded) {
         Box(
@@ -192,7 +214,14 @@ fun ApplicationSwitcher(
     } else if (accessToken == null) {
         LoginNavigation(workspaceApiClient)
     } else {
-        WokspaceApp( workspaceViewModel, workspaceApiClient, eventsRepository, pendingDeepLink, onDeepLinkHandled)
+        WokspaceApp(
+            workspaceViewModel,
+            workspaceApiClient,
+            eventsRepository,
+            pushDeviceRegistrationManager,
+            pendingDeepLink,
+            onDeepLinkHandled,
+        )
     }
 }
 
@@ -201,6 +230,7 @@ fun WokspaceApp(
     viewModel: WorkspaceViewModel,
     workspaceApiClient: WorkspaceAPIClient,
     eventsRepository: EventsRepository,
+    pushDeviceRegistrationManager: PushDeviceRegistrationManager,
     pendingDeepLink: String?,
     onDeepLinkHandled: () -> Unit
 ) {
@@ -208,27 +238,9 @@ fun WokspaceApp(
     val lifecycleOwner = LocalLifecycleOwner.current
     val navController = rememberNavController()
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val currentCallMessage by viewModel.currentCallMessage.collectAsState()
     val currentDestination = rememberSaveable { mutableStateOf(0) }
     var showBottomNavigation by rememberSaveable { mutableStateOf(true) }
-
-
-    LaunchedEffect(lifecycleOwner) {
-
-        FirebaseMessaging.getInstance().token
-            .addOnSuccessListener { token ->
-                eventsRepository.pushId = token
-                Log.d("FCM", "fetched token $token")
-                scope.launch {
-                    viewModel.sendToken("workspace:android:$token")
-                }
-            }
-            .addOnFailureListener { e ->
-                Log.e("FCM", "Token fetch failed", e)
-            }
-    }
-
 
     Box(
         Modifier
@@ -257,7 +269,10 @@ fun WokspaceApp(
             composable(Profile.route) {
                 LaunchedEffect(Unit) { showBottomNavigation = true }
                 currentDestination.value = 1
-                ProfileNavigation(workspaceApiClient, eventsRepository)
+                ProfileNavigation(
+                    workspaceApiClient,
+                    pushDeviceRegistrationManager,
+                )
             }
         }
         if (showBottomNavigation) {
@@ -403,12 +418,25 @@ fun ChatNavigation(
             TopicsScreen(chatTopicsViewModel, navController)
         }
         composable<ChatFlow.ChatUserInfo> {
-            LaunchedEffect(Unit) { onBottomNavigationVisibilityChange(false) }
+            LaunchedEffect(Unit) { onBottomNavigationVisibilityChange(true) }
             val args = it.toRoute<ChatFlow.ChatUserInfo>()
             Log.d("RepoCheck", "chatnav repo instance = ${System.identityHashCode(eventsRepository)}")
             val chatUserInfoViewModelFactory = remember { ChatUserInfoViewModelFactory(workspaceApiClient, args.userName, args.userId, args.avatarUrl, args.email, eventsRepository) }
             val chatUserInfoViewModel: ChatUserInfoViewModel = viewModel(factory = chatUserInfoViewModelFactory)
             ChatUserInfoScreen(chatUserInfoViewModel, navController)
+        }
+        composable<ChatFlow.ChannelInfo> {
+            LaunchedEffect(Unit) { onBottomNavigationVisibilityChange(false) }
+            val args = it.toRoute<ChatFlow.ChannelInfo>()
+            val factory = remember {
+                ChannelInfoViewModelFactory(
+                    workspaceApiClient,
+                    args.channelId,
+                    eventsRepository,
+                )
+            }
+            val channelInfoViewModel: ChannelInfoViewModel = viewModel(factory = factory)
+            ChannelInfoScreen(channelInfoViewModel, navController)
         }
     }
 }
@@ -433,12 +461,17 @@ fun LoginNavigation(workspaceApiClient: WorkspaceAPIClient) {
 }
 
 @Composable
-fun ProfileNavigation(workspaceApiClient: WorkspaceAPIClient, eventsRepository: EventsRepository,) {
+fun ProfileNavigation(
+    workspaceApiClient: WorkspaceAPIClient,
+    pushDeviceRegistrationManager: PushDeviceRegistrationManager,
+) {
     val navController = rememberNavController()
     val user = UserState.current
     NavHost(navController = navController, startDestination = ProfileFlow.Main) {
         composable<ProfileFlow.Main> {
-            val profileViewModelFactory = remember { ProfileViewModelFactory(workspaceApiClient, user, eventsRepository) }
+            val profileViewModelFactory = remember {
+                ProfileViewModelFactory(user, pushDeviceRegistrationManager)
+            }
             var profileViewModel: ProfileViewModel = viewModel(factory = profileViewModelFactory)
             ProfileScreen(profileViewModel)
         }

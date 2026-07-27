@@ -17,6 +17,8 @@ jitsi = "12.0.0"
 kotlinSerializaton = "1.6.3"
 firebasePlugin = "4.4.4"
 firebase = "34.10.0"
+tink = "1.23.0"
+coroutinesPlayServices = "1.10.2"
 material3 = "1.4.0"
 coil = "3.4.0"
 composeMarkdown = "0.7.1"
@@ -56,6 +58,8 @@ kotlinx-serialization-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 kotlinx-serialization-properties = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-properties", version.ref = "kotlinSerializaton" }
 firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.ref = "firebase" }
 firebase-cloud-messaging = { group = "com.google.firebase", name = "firebase-messaging" }
+tink-android = { group = "com.google.crypto.tink", name = "tink-android", version.ref = "tink" }
+kotlinx-coroutines-play-services = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-play-services", version.ref = "coroutinesPlayServices" }
 androidx-material3 = { group = "androidx.compose.material3", name = "material3", version.ref = "material3" }
 coil-compose = { group = "io.coil-kt.coil3", name = "coil-compose", version.ref = "coil" }
 coil-network = { group = "io.coil-kt.coil3", name = "coil-network-ktor3", version.ref = "coil" }

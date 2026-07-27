@@ -4,30 +4,17 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.UserViewModel
-import ru.genesiscorporation.workspace.beta.data.EventsRepository
-import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
-import ru.genesiscorporation.workspace.beta.data.remote.dto.DeleteFcmTokenRequest
+import ru.genesiscorporation.workspace.beta.data.push.PushDeviceRegistrationManager
 
 class ProfileViewModel(
-    val client: WorkspaceAPIClient,
     val userViewModel: UserViewModel,
-    private val repo: EventsRepository
+    private val pushDeviceRegistrationManager: PushDeviceRegistrationManager,
 ): ViewModel() {
 
-    fun currentPushToken(): String? {
-        return repo.pushId
-    }
     fun logout() {
-        val token = currentPushToken()
-        if (token != null) {
-            viewModelScope.launch {
-                deleteToken("workspace:android:$token")
-            }
+        viewModelScope.launch {
+            pushDeviceRegistrationManager.deleteRegistration()
+            userViewModel.clearAllAndWait()
         }
-        userViewModel.clearAll()
-    }
-
-    suspend fun deleteToken(token: String) {
-        client.performRequest(DeleteFcmTokenRequest(token))
     }
 }

@@ -79,6 +79,8 @@ dependencies {
     implementation(libs.kotlinx.serialization.properties)
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.cloud.messaging)
+    implementation(libs.tink.android)
+    implementation(libs.kotlinx.coroutines.play.services)
     implementation(libs.androidx.material3)
     implementation(libs.coil.compose)
     implementation(libs.coil.gif)

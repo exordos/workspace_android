@@ -14,6 +14,7 @@ import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import ru.genesiscorporation.workspace.beta.MainActivity
 import ru.genesiscorporation.workspace.beta.R
+import ru.genesiscorporation.workspace.beta.data.push.PushTokenUpdates
 
 class MyFirebaseMessagingService: FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
@@ -120,9 +121,8 @@ class MyFirebaseMessagingService: FirebaseMessagingService() {
     }
     override fun onNewToken(token: String) {
         super.onNewToken(token)
-        // handle token refresh
-        FCMTokenHolder.token = token
-        Log.d(TAG, "New token: ${token}")
+        PushTokenUpdates.publish(token)
+        Log.d(TAG, "FCM registration token was refreshed")
     }
 
     fun cancelNotification(notificationId: Int) {
@@ -130,8 +130,4 @@ class MyFirebaseMessagingService: FirebaseMessagingService() {
             getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.cancel(notificationId)
     }
-}
-
-object FCMTokenHolder {
-    var token: String? = null
 }

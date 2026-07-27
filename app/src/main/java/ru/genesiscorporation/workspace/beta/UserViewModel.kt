@@ -72,6 +72,10 @@ class UserViewModel(
             repo.clearAll()
         }
     }
+
+    suspend fun clearAllAndWait() {
+        repo.clearAll()
+    }
 }
 
 val UserState = compositionLocalOf<UserViewModel> { error("User state not found") }

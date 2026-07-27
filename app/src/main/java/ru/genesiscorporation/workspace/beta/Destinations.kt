@@ -25,6 +25,9 @@ object ChatFlow {
 
     @Serializable
     data class ChatUserInfo(val userName: String, val userId: String, val avatarUrl: String, val email: String)
+
+    @Serializable
+    data class ChannelInfo(val channelId: String)
 }
 
 

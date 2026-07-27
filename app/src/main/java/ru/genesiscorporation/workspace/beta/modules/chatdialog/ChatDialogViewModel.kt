@@ -38,6 +38,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
+import java.util.UUID
 import kotlin.collections.filter
 import kotlin.collections.firstOrNull
 import kotlin.io.encoding.Base64
@@ -194,8 +195,9 @@ class ChatDialogViewModel(
 
     suspend fun sendTextMessage(messageText: String) {
         val userId = userViewModel.repo.userIdFlow.first()
-        var newMessage = MessageResponse(
-            "",
+        val temporaryUuid = "local-${UUID.randomUUID()}"
+        val newMessage = MessageResponse(
+            temporaryUuid,
             OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
             OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
             chatId,
@@ -222,24 +224,35 @@ class ChatDialogViewModel(
         val response = client.performRequest(sendMessageRequest)
         when (response) {
             is ApiResult.Success -> {
-                newMessage.uuid = response.value.uuid
-                newMessage.topicUuid = response.value.topicUuid
-                repo.updateMessage(newMessage)
+                val confirmedMessage = newMessage.copy(
+                    uuid = response.value.uuid,
+                    topicUuid = response.value.topicUuid
+                )
+                repo.replaceMessage(temporaryUuid, confirmedMessage)
                 possibleMessage = null
             }
 
             is ApiResult.Error -> {
-
+                repo.removeMessage(chatId, topicUuid, temporaryUuid)
+                _messageText.value = messageText
             }
         }
-        _messageText.value = ""
     }
 
     suspend fun sendEditMessage(messageUuid: String, messageText: String) {
+        val messageBeingEdited = editingMessage
         val editMessageRequest = EditMessageRequest(messageUuid, messageText)
         val response = client.performRequest(editMessageRequest)
         when(response) {
             is ApiResult.Success -> {
+                messageBeingEdited?.let { message ->
+                    repo.updateMessageContent(
+                        message.streamUuid,
+                        message.topicUuid,
+                        message.uuid,
+                        messageText
+                    )
+                }
                 editingMessage = null
                 _editingMessageBackupText.value = null
             }
@@ -255,10 +268,7 @@ class ChatDialogViewModel(
     init {
         _isLoading.value = true
         viewModelScope.launch {
-            val key = "${chatId}.${topicUuid}"
-            if (streamTopicMessages.value[key]?.isEmpty() ?: true) {
-                loadLatestMessages()
-            }
+            loadLatestMessages()
         }
     }
 

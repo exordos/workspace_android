@@ -1,240 +1,462 @@
 package ru.genesiscorporation.workspace.beta.modules.chatuserinfo
 
-import androidx.compose.foundation.Image
+import androidx.annotation.DrawableRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
-import coil3.compose.AsyncImage
-import coil3.request.ImageRequest
-import kotlinx.coroutines.launch
-import org.jitsi.meet.sdk.JitsiMeetActivity
-import org.jitsi.meet.sdk.JitsiMeetConferenceOptions
-import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.R
-import ru.genesiscorporation.workspace.beta.modules.chatdialog.JitsiStyleRoomNameGenerator
-import ru.genesiscorporation.workspace.beta.modules.chatdialog.pastEpochSecondsToRelativeRu
-import ru.genesiscorporation.workspace.beta.modules.profile.ProfileViewModel
+import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
+import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
+import ru.genesiscorporation.workspace.beta.modules.chatchannels.messagePreview
 import ru.genesiscorporation.workspace.beta.ui.Avatar
+import ru.genesiscorporation.workspace.beta.ui.UnreadBadge
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
-import java.net.URL
+import ru.genesiscorporation.workspace.beta.ui.theme.NavigationFontFamily
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatUserInfoScreen(
     viewModel: ChatUserInfoViewModel,
-    navController: NavHostController
+    navController: NavHostController,
 ) {
-    val scope = rememberCoroutineScope()
-    val context = LocalContext.current
-    val currentUserId by viewModel.client.userViewModel.repo.userIdFlow.collectAsStateWithLifecycle(
-        initialValue = 0
-    )
-//    val profile = viewModel.repo.users.collectAsState().value.firstOrNull { it.userId.toString() == viewModel.userId }
+    val colors = LocalWorkspaceColorsPalette.current
+    val profile by viewModel.profile.collectAsStateWithLifecycle()
+    val channels by viewModel.channels.collectAsStateWithLifecycle()
+    val topics by viewModel.repo.streamTopics.collectAsStateWithLifecycle()
+    val baseUrl by viewModel.client.userViewModel.baseUrl.collectAsState()
+    var selectedTab by rememberSaveable { mutableStateOf(ProfileTab.Profile) }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = LocalWorkspaceColorsPalette.current.surface,
-                    titleContentColor = LocalWorkspaceColorsPalette.current.textHeaders,
-                ),
-                expandedHeight = 48.dp,
-                windowInsets = WindowInsets(0, 0, 0, 0),
-                title = {},
-                navigationIcon = {
-                    IconButton(onClick = { navController.popBackStack() }) {
-                        Icon(
-                            painter = painterResource(id = R.drawable.arrow_back),
-                            contentDescription = "Back"
-                        )
-                    }
-                },
-                actions = { }
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(colors.background),
+        contentPadding = PaddingValues(
+            start = 12.dp,
+            top = 12.dp,
+            end = 12.dp,
+            bottom = 24.dp,
+        ),
+    ) {
+        item {
+            ProfileBackRow(
+                showClose = selectedTab == ProfileTab.Channels,
+                onClick = navController::popBackStack,
             )
-        },
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier.fillMaxSize()
-                .background(LocalWorkspaceColorsPalette.current.surface)
-                .padding(16.dp, innerPadding.calculateTopPadding(), 16.dp, innerPadding.calculateBottomPadding()),
-            horizontalAlignment = Alignment.Start,
-            verticalArrangement = Arrangement.Top
+        }
+        item {
+            ProfileHeader(
+                profile = profile,
+                fallbackName = viewModel.userName,
+                fallbackAvatar = viewModel.avatarUrl,
+                baseUrl = baseUrl.orEmpty(),
+                modifier = Modifier.padding(top = 20.dp),
+            )
+        }
+        item {
+            ProfileActions(
+                modifier = Modifier.padding(top = 20.dp),
+            )
+        }
+        item {
+            ProfileTabs(
+                selected = selectedTab,
+                onSelected = { selectedTab = it },
+                modifier = Modifier.padding(top = 20.dp),
+            )
+        }
+        when (selectedTab) {
+            ProfileTab.Profile -> {
+                items(
+                    items = viewModel.profileFields(),
+                    key = ProfileField::title,
+                ) { field ->
+                    ProfileRow(
+                        field = field,
+                        modifier = Modifier.padding(top = 12.dp),
+                    )
+                }
+            }
+
+            ProfileTab.Channels -> {
+                items(
+                    items = channels,
+                    key = Stream::uuid,
+                ) { stream ->
+                    val topic = topics[stream.uuid]
+                        .orEmpty()
+                        .firstOrNull { it.uuid == stream.defaultTopicUuid }
+                        ?: topics[stream.uuid].orEmpty().firstOrNull()
+                    ProfileChannelCard(
+                        stream = stream,
+                        topicName = topic?.name ?: "Общий чат",
+                        baseUrl = baseUrl.orEmpty(),
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+            }
+
+            ProfileTab.Groups -> {
+                item {
+                    Text(
+                        text = "Группы пользователей пока недоступны",
+                        color = colors.textAdditional50,
+                        fontSize = 14.sp,
+                        lineHeight = 20.sp,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 24.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+private enum class ProfileTab(val title: String) {
+    Profile("Профиль"),
+    Channels("Каналы"),
+    Groups("Группы пользователей"),
+}
+
+@Composable
+private fun ProfileBackRow(
+    showClose: Boolean,
+    onClick: () -> Unit,
+) {
+    val colors = LocalWorkspaceColorsPalette.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(20.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .clickable(onClick = onClick),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Avatar(
-                    viewModel.avatarUrl,
-                    viewModel.client.userViewModel.baseUrl.value ?: "",
-                    null,
-                    "",
-                    64,
-                    true
-                )
-                Text(
-                    text = viewModel.userName,
-                    color = LocalWorkspaceColorsPalette.current.textHeaders,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-            Row(
+            Icon(
+                painter = painterResource(R.drawable.arrow_back),
+                contentDescription = null,
+                tint = colors.iconBase,
+                modifier = Modifier.size(20.dp),
+            )
+            Text(
+                text = "Назад",
+                color = colors.textHeaders.copy(alpha = 0.8f),
+                fontFamily = NavigationFontFamily,
+                fontWeight = FontWeight.Medium,
+                fontSize = 14.sp,
+                lineHeight = 16.sp,
+                modifier = Modifier.padding(start = 4.dp),
+            )
+        }
+        if (showClose) {
+            Icon(
+                painter = painterResource(R.drawable.ic_close_small),
+                contentDescription = "Закрыть",
+                tint = colors.iconBase,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    onClick = {
-                        val roomName = JitsiStyleRoomNameGenerator.generate()
-                        scope.launch {
-                            viewModel.callButtonTapped(roomName)
-                        }
-                        val options = JitsiMeetConferenceOptions.Builder()
-                            .setServerURL(URL(viewModel.repo.jitsiServerUrl))
-                            .setRoom(roomName)
-                            .build()
-                        JitsiMeetActivity.launch(context, options)
-                    },
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(52.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = LocalWorkspaceColorsPalette.current.cardBackgroundBase,
-                        contentColor = LocalWorkspaceColorsPalette.current.iconBase
-                    )
-                ) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.call),
-                        contentDescription = "Call"
-                    )
-                }
-                Button(
-                    onClick = {
-//                        if (currentUserId != null) {
-//                            navController.navigate(
-//                                ChatFlow.ChatDialog(
-//                                    viewModel.userName,
-//                                    "[${viewModel.userId}, ${currentUserId}]",
-//                                    null,
-//                                    null,
-//                                    true,
-//                                    viewModel.userId.toInt()
-//                                )
-//                            ) {
-//                                popUpTo<ChatFlow.ChatList> {
-//                                    inclusive = false
-//                                }
-//                                launchSingleTop = true
-//                            }
-//                        }
-                    },
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(52.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = LocalWorkspaceColorsPalette.current.cardBackgroundBase,
-                        contentColor = LocalWorkspaceColorsPalette.current.iconBase
-                    )
-                ) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.chat_bubble),
-                        contentDescription = "Chat"
-                    )
-                }
-            }
-            ProfileRow(
-                "Email",
-                viewModel.email,
-                R.drawable.ic_mail
+                    .size(20.dp)
+                    .clickable(onClick = onClick),
             )
-            ProfileRow(
-                "ID пользователя",
-                "${viewModel.userId}",
-                R.drawable.ic_userid
-            )
-//            for (customProfileField in viewModel.repo.customProfileFields) {
-//                if (profile != null && (profile.profileData?.get(customProfileField.id.toString()) != null)) {
-//                    ProfileRow(
-//                        customProfileField.name,
-//                        profile.profileData[customProfileField.id.toString()]?.value
-//                            ?: "",
-//                        viewModel.imageId(customProfileField.id)
-//                    )
-//                }
-//            }
         }
     }
 }
 
 @Composable
-fun ProfileRow(
-    title: String,
-    text: String,
-    imageId: Int
+private fun ProfileHeader(
+    profile: UserResponseData?,
+    fallbackName: String,
+    fallbackAvatar: String,
+    baseUrl: String,
+    modifier: Modifier = Modifier,
 ) {
+    val colors = LocalWorkspaceColorsPalette.current
+    val name = profile?.displayableName()?.takeIf(String::isNotBlank) ?: fallbackName
     Row(
+        modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .padding(vertical = 8.dp)
     ) {
-        Image(
-            painter = painterResource(id = imageId),
-            contentDescription = null,
-            modifier = Modifier
-                .padding(end = 16.dp)
+        Avatar(
+            avatarUrn = profile?.avatar ?: fallbackAvatar,
+            baseUrl = baseUrl,
+            color = null,
+            name = name,
+            size = 64,
+            hasPadding = false,
         )
         Column(
-            horizontalAlignment = Alignment.Start
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_figma_profile_status),
+                    contentDescription = null,
+                    tint = colors.iconBase,
+                    modifier = Modifier
+                        .padding(end = 4.dp)
+                        .size(16.dp),
+                )
+                Text(
+                    text = name,
+                    color = colors.textHeaders,
+                    fontSize = 20.sp,
+                    lineHeight = 24.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             Text(
-                text = title,
-                color = LocalWorkspaceColorsPalette.current.textAdditional30,
-                fontSize = 12.sp
-            )
-            Text(
-                text = text,
-                color = LocalWorkspaceColorsPalette.current.textHeaders,
-                fontSize = 14.sp
+                text = presenceLabel(profile?.status),
+                color = colors.textAdditional30,
+                fontSize = 14.sp,
+                lineHeight = 16.sp,
             )
         }
     }
+}
+
+@Composable
+private fun ProfileActions(modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        ProfileAction(R.drawable.ic_figma_profile_call, "Позвонить", Modifier.weight(1f))
+        ProfileAction(
+            R.drawable.ic_figma_profile_notifications,
+            "Уведомления",
+            Modifier.weight(1f),
+        )
+        ProfileAction(R.drawable.ic_mail, "Написать", Modifier.weight(1f))
+        ProfileAction(R.drawable.ic_figma_channel_search, "Поиск", Modifier.weight(1f))
+        ProfileAction(R.drawable.ic_figma_profile_more, "Ещё", Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun ProfileAction(
+    @DrawableRes icon: Int,
+    description: String,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalWorkspaceColorsPalette.current
+    Box(
+        modifier = modifier
+            .height(52.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(colors.infoCardBackground)
+            .clickable {},
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            painter = painterResource(icon),
+            contentDescription = description,
+            tint = colors.iconBase,
+            modifier = Modifier.size(36.dp),
+        )
+    }
+}
+
+@Composable
+private fun ProfileTabs(
+    selected: ProfileTab,
+    onSelected: (ProfileTab) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalWorkspaceColorsPalette.current
+    Box(modifier = modifier.fillMaxWidth()) {
+        HorizontalDivider(
+            modifier = Modifier.align(Alignment.BottomCenter),
+            thickness = 1.dp,
+            color = colors.iconDisable,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+            ProfileTab.entries.forEach { tab ->
+                Column(
+                    modifier = Modifier
+                        .height(36.dp)
+                        .width(IntrinsicSize.Min)
+                        .clickable { onSelected(tab) },
+                    verticalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        text = tab.title,
+                        color = if (tab == selected) {
+                            colors.textHeaders
+                        } else {
+                            colors.textAdditional50
+                        },
+                        fontSize = 14.sp,
+                        lineHeight = 20.sp,
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(2.dp)
+                            .background(
+                                if (tab == selected) colors.textHeaders else Color.Transparent,
+                            ),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileRow(
+    field: ProfileField,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalWorkspaceColorsPalette.current
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            painter = painterResource(field.icon),
+            contentDescription = null,
+            tint = colors.iconBase,
+            modifier = Modifier.size(32.dp),
+        )
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 12.dp),
+        ) {
+            Text(
+                text = field.title,
+                color = colors.textAdditional30,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+            )
+            Text(
+                text = field.value,
+                color = colors.textHeaders,
+                fontSize = 14.sp,
+                lineHeight = 16.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProfileChannelCard(
+    stream: Stream,
+    topicName: String,
+    baseUrl: String,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalWorkspaceColorsPalette.current
+    val lastMessage = stream.lastMessage
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 76.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(colors.searchBackground)
+            .padding(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Avatar(
+            avatarUrn = stream.avatar,
+            baseUrl = baseUrl,
+            color = stream.color,
+            name = stream.name,
+            size = 40,
+            hasPadding = false,
+        )
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 12.dp),
+        ) {
+            Text(
+                text = "${stream.name}  # $topicName",
+                color = colors.textHeaders,
+                fontSize = 14.sp,
+                lineHeight = 20.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = lastMessage?.user?.displayableName() ?: "Участник канала",
+                color = colors.primary,
+                fontSize = 12.sp,
+                lineHeight = 20.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = lastMessage?.payload?.content?.let(::messagePreview)
+                        ?.takeIf(String::isNotBlank)
+                        ?: "Последнее сообщение в канале",
+                    color = colors.textAdditional50,
+                    fontSize = 12.sp,
+                    lineHeight = 20.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                if (stream.unreadCount > 0) {
+                    UnreadBadge(
+                        count = stream.unreadCount,
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun presenceLabel(status: String?): String = when (status) {
+    "active" -> "В сети"
+    "idle" -> "Нет на месте"
+    "dnd" -> "Не беспокоить"
+    else -> "Не в сети"
 }

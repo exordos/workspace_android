@@ -50,6 +50,7 @@ import kotlinx.coroutines.launch
 import org.jitsi.meet.sdk.JitsiMeetActivity
 import org.jitsi.meet.sdk.JitsiMeetConferenceOptions
 import ru.genesiscorporation.workspace.beta.R
+import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.ui.AnimatedGif
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
@@ -92,6 +93,11 @@ fun ChatDialogScreen(
             ConversationHeader(
                 viewModel = viewModel,
                 onBack = { navController.popBackStack() },
+                onInfo = {
+                    if (!viewModel.isDirectMessages) {
+                        navController.navigate(ChatFlow.ChannelInfo(viewModel.chatId))
+                    }
+                },
             )
         },
     ) { innerPadding ->
@@ -171,6 +177,7 @@ fun ChatDialogScreen(
 private fun ConversationHeader(
     viewModel: ChatDialogViewModel,
     onBack: () -> Unit,
+    onInfo: () -> Unit,
 ) {
     val colors = LocalWorkspaceColorsPalette.current
     val scope = rememberCoroutineScope()
@@ -194,7 +201,14 @@ private fun ConversationHeader(
                 tint = colors.iconBase,
             )
         }
-        Column(modifier = Modifier.weight(1f)) {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .clickable(
+                    enabled = !viewModel.isDirectMessages,
+                    onClick = onInfo,
+                ),
+        ) {
             Text(
                 text = viewModel.chatTitle,
                 color = colors.textHeaders,

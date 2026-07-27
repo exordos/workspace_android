@@ -237,19 +237,16 @@ class ChatViewModel(
                             }
                             repo.setInitialStreams(streamsWithMessages)
                             _queryState.value = QueryState.Success
-                            repo.start()
                         }
 
                         is ApiResult.Error -> {
                             repo.setInitialStreams(response.value)
                             _queryState.value = QueryState.Success
-                            repo.start()
                         }
                     }
                 } else {
                     repo.setInitialStreams(response.value)
                     _queryState.value = QueryState.Success
-                    repo.start()
                 }
             }
 
