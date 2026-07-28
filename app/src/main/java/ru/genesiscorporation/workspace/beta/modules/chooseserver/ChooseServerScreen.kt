@@ -19,6 +19,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -35,6 +36,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -73,85 +75,59 @@ fun ChooseServerScreen(
 
     Box(modifier = Modifier.fillMaxSize()
         .background(LocalWorkspaceColorsPalette.current.background),
-        contentAlignment = Alignment.CenterStart
+        contentAlignment = Alignment.Center
     ) {
         Column(
-            horizontalAlignment = Alignment.Start,
-            modifier = Modifier.padding(horizontal = 16.dp)
-                .background(LocalWorkspaceColorsPalette.current.surface)
-
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                "Добавить организацию",
+                "Добро пожаловать",
                 color = LocalWorkspaceColorsPalette.current.textHeaders,
                 fontSize = 16.sp,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.padding(20.dp)
+                fontWeight = FontWeight.Medium
             )
             Text(
-                "Укажите ссылку на организацию, чтобы добавить её в список",
-                color = LocalWorkspaceColorsPalette.current.textHeaders,
+                "Введите адрес вашей организации, \nчтобы продолжить",
+                color = LocalWorkspaceColorsPalette.current.textAdditional50,
                 fontSize = 14.sp,
-                modifier = Modifier.padding(start = 20.dp, top = 0.dp, end = 20.dp, bottom = 12.dp )
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp, bottom = 64.dp )
             )
-            Text(
-                "Ссылка на организацию",
-                color = LocalWorkspaceColorsPalette.current.textAdditional30,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.padding(horizontal = 20.dp)
-            )
-            Box(
-                contentAlignment = Alignment.CenterStart,
-                modifier = Modifier
-                    .padding(horizontal = 20.dp)
-                    .fillMaxWidth()
-                    .height(40.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .padding(vertical = 4.dp)
-                    .background(LocalWorkspaceColorsPalette.current.searchBackground,
-                        RoundedCornerShape(8.dp))
+            Column(
+                horizontalAlignment = Alignment.Start
             ) {
-                BasicTextField(
-                    value = serverText,
-                    onValueChange = viewModel::onServerChange,
-                    textStyle = TextStyle(
-                        color = LocalWorkspaceColorsPalette.current.textHeaders,
-                        fontSize = 14.sp
-                    ),
-                    cursorBrush = SolidColor(LocalWorkspaceColorsPalette.current.textHeaders),
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                        .padding(horizontal = 12.dp)
+                Text(
+                    "Адрес организации",
+                    color = LocalWorkspaceColorsPalette.current.textAdditional30,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(horizontal = 20.dp)
                 )
-            }
-            Text(
-                "Или можете подключиться к нашему публичному серверу:",
-                color = LocalWorkspaceColorsPalette.current.textHeaders,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.padding(20.dp)
-            )
-            Button(
-                onClick = {
-                    viewModel.onServerChange("https://workspace.exordos.com")
-                },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color.Transparent,
-                    contentColor = LocalWorkspaceColorsPalette.current.textHeaders     // green text
-                ),
-                modifier = Modifier.padding(horizontal = 20.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Start
+                Box(
+                    contentAlignment = Alignment.CenterStart,
+                    modifier = Modifier
+                        .padding(horizontal = 20.dp)
+                        .fillMaxWidth()
+                        .height(40.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .padding(vertical = 4.dp)
+                        .background(
+                            LocalWorkspaceColorsPalette.current.searchBackground,
+                            RoundedCornerShape(8.dp)
+                        )
                 ) {
-                    Image(
-                        painter = painterResource(id = R.drawable.icon),
-                        contentDescription = null,
-                        modifier = Modifier.size(36.dp)
+                    BasicTextField(
+                        value = serverText,
+                        onValueChange = viewModel::onServerChange,
+                        textStyle = TextStyle(
+                            color = LocalWorkspaceColorsPalette.current.textHeaders,
+                            fontSize = 14.sp
+                        ),
+                        cursorBrush = SolidColor(LocalWorkspaceColorsPalette.current.textHeaders),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                            .padding(horizontal = 12.dp)
                     )
-                    Text("Genesis core public")
                 }
             }
             Button(
@@ -164,10 +140,70 @@ fun ChooseServerScreen(
                     containerColor = LocalWorkspaceColorsPalette.current.primary,
                     contentColor = LocalWorkspaceColorsPalette.current.onPrimary
                 ),
+                shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.fillMaxWidth()
                     .padding(20.dp)
             ) {
-                Text("Добавить")
+                Text("Войти")
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                HorizontalDivider(
+                    modifier = Modifier.weight(1f)
+                        .padding(start = 20.dp),
+                    thickness = 1.dp,
+                    color = LocalWorkspaceColorsPalette.current.textAdditional30,
+                )
+                Text(
+                    text = "или",
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                    color = LocalWorkspaceColorsPalette.current.textAdditional30,
+                )
+                HorizontalDivider(
+                    modifier = Modifier.weight(1f)
+                        .padding(end = 20.dp),
+                    thickness = 1.dp,
+                    color = LocalWorkspaceColorsPalette.current.textAdditional30,
+                )
+            }
+            Column(
+                horizontalAlignment = Alignment.Start
+            ) {
+                Text(
+                    "Вы можете подключиться к нашему публичному серверу:",
+                    color = LocalWorkspaceColorsPalette.current.textHeaders,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(start = 20.dp, top = 20.dp, end = 20.dp, bottom = 8.dp)
+                )
+                Button(
+                    onClick = {
+                        viewModel.onServerChange("https://workspace.exordos.com")
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = LocalWorkspaceColorsPalette.current.searchBackground,
+                        contentColor = LocalWorkspaceColorsPalette.current.textHeaders
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Start,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Image(
+                            painter = painterResource(id = R.drawable.icon),
+                            contentDescription = null,
+                            modifier = Modifier.size(36.dp)
+                                .padding(end = 8.dp)
+                        )
+                        Text("Exordos public")
+                    }
+                }
             }
         }
     }

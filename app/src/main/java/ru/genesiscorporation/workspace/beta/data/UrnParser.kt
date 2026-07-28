@@ -9,7 +9,7 @@ object UrnParser {
         val (namespace, id) = parts
         when(namespace) {
             "image" -> return "$baseUrl/api/workspace/v1/messenger/files/${id}/actions/download"
-            "gravatar" -> return "https://gravatar.com/avatar/${id}"
+            "gravatar" -> return "https://secure.gravatar.com/avatar/${id}"
             "url" -> return id
             else -> return null
         }

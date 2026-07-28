@@ -34,6 +34,8 @@ object LoginFlow {
 
     @Serializable
     object Login
+    @Serializable
+    data class Otp(val login: String, val password: String)
 }
 
 object ProfileFlow {

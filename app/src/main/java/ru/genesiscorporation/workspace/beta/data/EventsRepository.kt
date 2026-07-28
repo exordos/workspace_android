@@ -121,6 +121,7 @@ class EventsRepository() {
     }
 
     fun updateTopic(updatedTopic: TopicsResponseData) {
+        val message = messagesPool.value.firstOrNull { it.uuid == updatedTopic.lastMessageUuid }
         _streamTopics.update { current ->
             val topics = current[updatedTopic.streamUuid] ?: return@update current
             val updatedTopics = topics.map { topic ->
@@ -129,7 +130,8 @@ class EventsRepository() {
                         unreadCount = updatedTopic.unreadCount,
                         name = updatedTopic.name,
                         lastMessageUuid = updatedTopic.lastMessageUuid,
-                        isDone = updatedTopic.isDone
+                        isDone = updatedTopic.isDone,
+                        lastMessage = message
                     )
                 } else {
                     topic

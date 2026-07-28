@@ -90,6 +90,8 @@ import ru.genesiscorporation.workspace.beta.ui.IncomingCall
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.serialization.kotlinx.json.*
+import ru.genesiscorporation.workspace.beta.modules.otp.OtpScreen
+import ru.genesiscorporation.workspace.beta.modules.otp.OtpViewModel
 
 
 class MainActivity : ComponentActivity() {
@@ -325,6 +327,13 @@ fun LoginNavigation(workspaceApiClient: WorkspaceAPIClient) {
             val loginViewModelFactory = remember { LoginViewModelFactory(workspaceApiClient, user) }
             val loginViewModel: LoginViewModel = viewModel(factory = loginViewModelFactory)
             LoginScreen(loginViewModel, navController)
+        }
+
+        composable<LoginFlow.Otp> {
+            val args = it.toRoute<LoginFlow.Otp>()
+            val otpViewModelFactory = remember { OtpViewModelFactory(workspaceApiClient, user, args.login, args.password) }
+            val otpViewModel: OtpViewModel = viewModel(factory = otpViewModelFactory)
+            OtpScreen(otpViewModel, navController)
         }
     }
 }
