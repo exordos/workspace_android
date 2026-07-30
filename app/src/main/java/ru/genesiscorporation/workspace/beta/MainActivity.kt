@@ -89,6 +89,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.data.WorkspaceAccount
 import ru.genesiscorporation.workspace.beta.data.WorkspaceThemeMode
 import ru.genesiscorporation.workspace.beta.data.navigation.WorkspaceDeepLink
+import ru.genesiscorporation.workspace.beta.data.navigation.WorkspaceDeepLinkTarget
 import ru.genesiscorporation.workspace.beta.data.navigation.parseWorkspaceDeepLink
 import ru.genesiscorporation.workspace.beta.modules.chatchannels.ChatScreen
 import ru.genesiscorporation.workspace.beta.modules.chatchannels.ChatViewModel
@@ -134,6 +135,7 @@ import ru.genesiscorporation.workspace.beta.data.push.PushDeviceRegistrationMana
 import ru.genesiscorporation.workspace.beta.data.push.PushNavigationRequest
 import ru.genesiscorporation.workspace.beta.ui.IncomingCall
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -913,19 +915,38 @@ fun ChatNavigation(
         val pushRequest = pendingPushNavigation
         val deepLink = pendingDeepLink
         if (pushRequest == null && deepLink == null) return@LaunchedEffect
-        val catalogState = chatViewModel.queryState.first {
-            it !is QueryState.Idle && it !is QueryState.Loading
-        }
+        val catalogState = combine(
+            chatViewModel.queryState,
+            chatViewModel.streams,
+            chatViewModel.streamTopics,
+        ) { queryState, _, _ -> queryState }
+            .first { queryState ->
+                (
+                    queryState !is QueryState.Idle &&
+                        queryState !is QueryState.Loading
+                ) ||
+                    (
+                        deepLink != null &&
+                            chatViewModel
+                                .resolveCachedDeepLinkNavigation(deepLink) != null
+                    )
+            }
         val destination = when {
-            catalogState is QueryState.Success && deepLink != null ->
-                chatViewModel.resolveDeepLinkNavigation(deepLink)
+            deepLink != null ->
+                chatViewModel.resolveCachedDeepLinkNavigation(deepLink)
+                    ?: chatViewModel.resolveDeepLinkNavigation(deepLink)
+                    ?: if (
+                        deepLink.target is WorkspaceDeepLinkTarget.Topic
+                    ) {
+                        chatViewModel
+                            .resolvePersistedDeepLinkNavigation(deepLink)
+                    } else {
+                        null
+                    }
 
-            catalogState is QueryState.Success && pushRequest != null ->
+            pushRequest != null ->
                 chatViewModel.resolvePushNavigation(pushRequest)
                     ?.let(ResolvedDeepLinkDestination::Dialog)
-
-            deepLink != null ->
-                chatViewModel.resolvePersistedDeepLinkNavigation(deepLink)
 
             else -> null
         }

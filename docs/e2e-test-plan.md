@@ -367,9 +367,16 @@ offline/timeout/5xx Retry and process-death persistence remain automation work.
 - Unit coverage includes request serialization, marker validation, malformed
   and cross-conversation page rejection, stale-page versus realtime merging,
   viewport correction and recreation positioning.
+- A cold, force-stopped exact sandbox topic link with both radios disabled
+  restored its Room-backed title and latest server messages in 1.411 seconds.
+  The global stale banner remained the single network-status surface; redundant
+  initial-history and first-unread errors were absent. Portrait → landscape →
+  portrait kept the exact chat and cached rows, and restoring connectivity
+  removed the banner while retaining the same route.
 - Remaining gates include automated rotation during an intentionally delayed
   page request, controlled timeout/5xx/deleted-marker injection, process death,
-  and durable Room-backed page/cursor restoration.
+  persisted continuation-cursor restoration, storage pressure and corrupt-row
+  device injection.
 
 ### Send and outbox
 
@@ -431,8 +438,10 @@ offline/timeout/5xx Retry and process-death persistence remain automation work.
   metadata without a catalog, retained all outbox controls, and showed no
   catalog-resolution error. Returning online, verification found no false
   server match; warning-gated retry converged to exactly one desktop article.
-- Full offline browsing/history is still not implied by this recovery path:
-  Room-backed catalog/message/cursor persistence remains an M2/M3 target.
+- Full offline browsing of the currently cached stream/topic catalog and the
+  bounded latest server history is now covered by Room. Offline older/newer
+  continuation beyond those retained rows and non-conversation projections
+  still require persisted cursors/entities.
 
 ### Message actions
 
@@ -659,8 +668,40 @@ retries at approximately 2/4/8/16/30-second intervals; restoring connectivity
 produced exactly one new connection after the active backoff. RT-001/002/005
 still require controlled socket/request-count device automation, while
 RT-004/012/013 still require process-kill and injected real
-`410`/`4410`/packet-blackhole cross-client convergence passes. Durable
-catalog/message snapshots are not implied by the cursor store.
+`410`/`4410`/packet-blackhole cross-client convergence passes. The durable
+catalog/message snapshot is independent from the cursor store and cannot make
+an unapplied cursor durable.
+
+## Cold-offline snapshot scenarios
+
+The Room snapshot is a read cache, not a second outbox or mutation queue. It is
+hydrated before realtime startup, merges below newer REST/realtime/local state,
+and is replaced only while the same credential owner remains active.
+
+| ID | Scenario | Main assertions | Current coverage |
+| --- | --- | --- | --- |
+| OFFLINE-001 | Online sync followed by force-stop and radio-off cold launch | Cached stream/topic catalog appears with an explicit stale banner before any network success; no login flash, crash or blank primary screen | Physical Android 14 Pixel passed; 1.243 s cold catalog |
+| OFFLINE-002 | Cold exact cached-topic `ew://` deep link | The exact saved account/stream/topic resolves from Room and opens bounded server history without waiting for catalog REST success | Physical Android 14 Pixel passed; 1.411 s exact sandbox route |
+| OFFLINE-003 | Offline general catalog navigation | Only retained real streams/topics/previews/unread data render; no fabricated destination or enabled inert control appears | Physical cached catalog and exact topic passed; broad row sampling pending |
+| OFFLINE-004 | Restore Wi-Fi/mobile data while cached chat is open | One catch-up/realtime recovery converges in place, hides the stale banner and retains the exact route without duplicate rows | Physical recovery passed; controlled request-count oracle pending |
+| OFFLINE-005 | Newer REST/realtime/local row races cached hydration | Current/newer state wins by UUID and timestamps; local `local-*` outbox rows survive and are never written into Room | Repository/unit coverage; delayed device injection pending |
+| OFFLINE-006 | Switch accounts during read or debounced write | Completion is owner-fenced; old rows never flash or write under the new owner | Source/repository coverage; delayed-I/O two-account instrumentation pending |
+| OFFLINE-007 | Logout one account | Only that owner's stream/topic/message rows are deleted before account removal; sibling account rows remain decryptable | Store instrumentation covers selective clear; two-account UI E2E pending |
+| OFFLINE-008 | Corrupt, moved, replayed, oversized or cross-scope row | AES-GCM associated-data validation and bounds reject only invalid rows; unrelated valid rows remain available | Exact instrumentation covers ciphertext replay, invalid/local exclusion and bounds; raw-DB device injection pending |
+| OFFLINE-009 | Cache bounds under a large account | At most 1,000 streams, 10,000 topics, 100 conversations, 100 messages/conversation and 5,000 messages/account persist; newest conversations/messages are retained deterministically | Source constants and store instrumentation; generated maximum-volume performance run pending |
+| OFFLINE-010 | Rotation/background while fully offline | Route, catalog/history and one global stale surface survive recreation; no request, mutation or duplicate banner is created | Physical portrait/landscape/portrait passed; long background pending |
+| OFFLINE-011 | Cache database/keyset backup or device transfer | Room database and keyset are excluded; undecryptable transplanted data cannot render | Backup-rule source gate; emulator backup/restore acceptance pending |
+| OFFLINE-012 | Keystore/Room read or write failure | App remains usable online, logs no payload/credential, skips persistence for that runtime and never overwrites another owner | Fail-closed source path; injected Keystore/SQLite faults pending |
+
+Current verified coverage: the exact owner-scoped instrumentation class passes
+encrypted round-trip, account separation, ciphertext replay rejection,
+invalid/local-row exclusion, bounds and selective clear. Repository tests prove
+cache-under-current merging. On the physical Pixel, an online sandbox snapshot
+was persisted, both radios were disabled, the process was force-stopped, and
+both the general catalog and exact topic/history reopened cold. No stateful
+mutation was performed. Message text and the yellow stale banner have readable
+dark-theme contrast; the banner's **Retry now** is a real action, while an
+uncached quote source retains its own truthful, functional Retry.
 
 Use Android network controls and a controllable backend proxy for latency,
 disconnect, status-code, body-corruption, and reorder cases. Do not rely on
@@ -814,10 +855,10 @@ update control.
 
 ### Cache-control matrix
 
-Cache control is intentionally narrow until every future persistent store has
-an explicit account partition. The current control deletes only downloaded
-attachment preview files for the active account; it never treats encrypted
-draft/outbox state or credentials as cache.
+Cache control remains deliberately narrow even though Room now has an explicit
+account partition. The current card is labelled for downloaded attachments and
+deletes only those files for the active account; it never silently treats Room
+history, encrypted draft/outbox state or credentials as attachment cache.
 
 | ID | Scenario | Expected result | Current coverage |
 | --- | --- | --- | --- |

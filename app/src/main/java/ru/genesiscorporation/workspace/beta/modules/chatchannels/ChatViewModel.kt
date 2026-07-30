@@ -234,7 +234,7 @@ class ChatViewModel(
         request: PushNavigationRequest,
     ): ChatFlow.ChatDialog? {
         _actionError.value = null
-        val matchingStreams = streams.value.filter { stream ->
+        val matchingStreams = repo.streams.value.filter { stream ->
             providerKeysMatch(
                 requested = request.providerChatKey,
                 actual = stream.provider?.externalId,
@@ -251,15 +251,15 @@ class ChatViewModel(
         }
 
         if (request.providerChatKey.startsWith("channel:")) {
-            if (streamTopics.value[stream.uuid].isNullOrEmpty()) {
+            if (repo.streamTopics.value[stream.uuid].isNullOrEmpty()) {
                 loadTopics(stream)
             }
             val topicName = request.topicName.orEmpty()
-            val exactMatches = streamTopics.value[stream.uuid]
+            val exactMatches = repo.streamTopics.value[stream.uuid]
                 .orEmpty()
                 .filter { it.name == topicName }
             val topic = exactMatches.singleOrNull()
-                ?: streamTopics.value[stream.uuid]
+                ?: repo.streamTopics.value[stream.uuid]
                     .orEmpty()
                     .filter { it.name.equals(topicName, ignoreCase = true) }
                     .singleOrNull()
@@ -281,10 +281,10 @@ class ChatViewModel(
 
         var defaultTopicUuid = stream.defaultTopicUuid
         if (defaultTopicUuid.isNullOrBlank()) {
-            if (streamTopics.value[stream.uuid].isNullOrEmpty()) {
+            if (repo.streamTopics.value[stream.uuid].isNullOrEmpty()) {
                 loadTopics(stream)
             }
-            defaultTopicUuid = streamTopics.value[stream.uuid]
+            defaultTopicUuid = repo.streamTopics.value[stream.uuid]
                 .orEmpty()
                 .singleOrNull { it.isDefault }
                 ?.uuid
@@ -308,6 +308,7 @@ class ChatViewModel(
         deepLink: WorkspaceDeepLink,
     ): ResolvedDeepLinkDestination? {
         _actionError.value = null
+        resolveCachedDeepLinkNavigation(deepLink)?.let { return it }
         val targetStreamUuid = when (val target = deepLink.target) {
             is WorkspaceDeepLinkTarget.Stream -> target.streamUuid
             is WorkspaceDeepLinkTarget.Topic -> target.streamUuid
@@ -339,6 +340,15 @@ class ChatViewModel(
             is WorkspaceDeepLinkTarget.Message -> null
         }
     }
+
+    fun resolveCachedDeepLinkNavigation(
+        deepLink: WorkspaceDeepLink,
+    ): ResolvedDeepLinkDestination? =
+        resolveCachedTopicDeepLink(
+            deepLink = deepLink,
+            streams = repo.streams.value,
+            topicsByStream = repo.streamTopics.value,
+        )
 
     suspend fun resolvePersistedDeepLinkNavigation(
         deepLink: WorkspaceDeepLink,
@@ -380,6 +390,18 @@ class ChatViewModel(
     private suspend fun loadDeepLinkedMessage(
         messageUuid: String,
     ): MessageResponse? {
+        val cachedMatches = repo.streamTopicMessages.value
+            .values
+            .asSequence()
+            .flatten()
+            .filter { it.uuid == messageUuid }
+            .toList()
+        cachedMatches.singleOrNull()?.let { return it }
+        if (cachedMatches.size > 1) {
+            _actionError.value =
+                "Кэш содержит противоречивые данные сообщения"
+            return null
+        }
         return when (
             val response = client.performRequest(
                 MessagesByIdsRequest(listOf(messageUuid)),
@@ -406,7 +428,7 @@ class ChatViewModel(
     }
 
     private fun findDeepLinkedStream(streamUuid: String): Stream? {
-        val matches = streams.value.filter { it.uuid == streamUuid }
+        val matches = repo.streams.value.filter { it.uuid == streamUuid }
         return matches.singleOrNull().also { stream ->
             if (stream == null) {
                 _actionError.value =
@@ -419,10 +441,10 @@ class ChatViewModel(
         stream: Stream,
         topicUuid: String,
     ): ChatFlow.ChatDialog? {
-        if (streamTopics.value[stream.uuid].isNullOrEmpty()) {
+        if (repo.streamTopics.value[stream.uuid].isNullOrEmpty()) {
             loadTopics(stream)
         }
-        val matches = streamTopics.value[stream.uuid]
+        val matches = repo.streamTopics.value[stream.uuid]
             .orEmpty()
             .filter { it.uuid == topicUuid }
         val topic = matches.singleOrNull()
@@ -446,13 +468,13 @@ class ChatViewModel(
     ): ChatFlow.ChatDialog? {
         if (
             stream.defaultTopicUuid.isNullOrBlank() ||
-            streamTopics.value[stream.uuid].isNullOrEmpty()
+            repo.streamTopics.value[stream.uuid].isNullOrEmpty()
         ) {
             loadTopics(stream)
         }
         val defaultTopicUuid = stream.defaultTopicUuid
             ?.takeIf(String::isNotBlank)
-            ?: streamTopics.value[stream.uuid]
+            ?: repo.streamTopics.value[stream.uuid]
                 .orEmpty()
                 .singleOrNull { it.isDefault }
                 ?.uuid
@@ -473,7 +495,7 @@ class ChatViewModel(
     suspend fun updateSelectedChat(newChat: Stream?) {
         _currentlySelectedStream.update { newChat }
         if (newChat != null) {
-            if (streamTopics.value[newChat.uuid]?.isEmpty() ?: true) {
+            if (repo.streamTopics.value[newChat.uuid]?.isEmpty() ?: true) {
                 loadTopics(newChat)
             }
         }
@@ -804,7 +826,7 @@ class ChatViewModel(
         streamUuid: String,
     ): ResolvedDeepLinkDestination? {
         _actionError.value = null
-        val stream = streams.value
+        val stream = repo.streams.value
             .filter { it.uuid == streamUuid && !it.isArchived }
             .singleOrNull()
         if (stream == null) {
@@ -1667,6 +1689,35 @@ class ChatViewModel(
             else -> false
         }
     }
+}
+
+internal fun resolveCachedTopicDeepLink(
+    deepLink: WorkspaceDeepLink,
+    streams: List<Stream>,
+    topicsByStream: Map<String, List<TopicsResponseData>>,
+): ResolvedDeepLinkDestination.Dialog? {
+    val target = deepLink.target as? WorkspaceDeepLinkTarget.Topic
+        ?: return null
+    val stream = streams
+        .filter { it.uuid == target.streamUuid }
+        .singleOrNull()
+        ?: return null
+    val topic = topicsByStream[stream.uuid]
+        .orEmpty()
+        .filter { it.uuid == target.topicUuid }
+        .singleOrNull()
+        ?: return null
+    return ResolvedDeepLinkDestination.Dialog(
+        ChatFlow.ChatDialog(
+            title = stream.name,
+            chatId = stream.uuid,
+            topicName =
+                topic.name.takeUnless { stream.isDirectProviderChat() },
+            topicUuid = topic.uuid,
+            isDirectMessages = stream.isDirectProviderChat(),
+            userId = null,
+        ),
+    )
 }
 
 internal fun resolvePersistedConversationRoute(

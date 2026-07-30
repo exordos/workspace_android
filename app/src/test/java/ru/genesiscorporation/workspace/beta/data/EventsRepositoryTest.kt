@@ -13,6 +13,91 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 
 class EventsRepositoryTest {
     @Test
+    fun `offline hydration preserves newer network state and local outbox rows`() {
+        val repository = EventsRepository()
+        val currentMessage = message(MESSAGE_UUID, "network")
+            .copy(updatedAt = "2026-07-27T00:00:00Z")
+        repository.setInitialStreams(
+            listOf(
+                stream(
+                    defaultTopicUuid = TOPIC_UUID,
+                    notificationMode = "all_messages",
+                ).copy(
+                    name = "Network stream",
+                    updatedAt = "2026-07-27T00:00:00Z",
+                ),
+            ),
+        )
+        repository.addStreamTopics(
+            STREAM_UUID,
+            listOf(
+                topic(
+                    lastMessageUuid = MESSAGE_UUID,
+                    name = "Network topic",
+                    updatedAt = "2026-07-27T00:00:00Z",
+                ),
+            ),
+        )
+        repository.addStreamTopicMessages(
+            STREAM_UUID,
+            TOPIC_UUID,
+            listOf(
+                currentMessage,
+                message("local-pending", "outbox"),
+            ),
+        )
+
+        repository.hydrateCachedSnapshot(
+            WorkspaceSnapshot(
+                streams = listOf(
+                    stream(
+                        defaultTopicUuid = TOPIC_UUID,
+                        notificationMode = "all_messages",
+                    ).copy(name = "Cached stream"),
+                ),
+                topicsByStream = mapOf(
+                    STREAM_UUID to listOf(
+                        topic(
+                            lastMessageUuid = MESSAGE_UUID,
+                            name = "Cached topic",
+                        ),
+                    ),
+                ),
+                messagesByConversation = mapOf(
+                    TOPIC_KEY to listOf(
+                        message(MESSAGE_UUID, "cached"),
+                        message("cached-only", "offline history"),
+                    ),
+                ),
+            ),
+        )
+
+        assertEquals("Network stream", repository.streams.value.single().name)
+        assertEquals(
+            "Network topic",
+            repository.streamTopics.value
+                .getValue(STREAM_UUID)
+                .single()
+                .name,
+        )
+        val messages = repository.streamTopicMessages.value
+            .getValue(TOPIC_KEY)
+        assertEquals(
+            "network",
+            messages.single { it.uuid == MESSAGE_UUID }.payload.content,
+        )
+        assertTrue(messages.any { it.uuid == "cached-only" })
+        assertTrue(messages.any { it.uuid == "local-pending" })
+        assertEquals(
+            messages.map(MessageResponse::uuid),
+            repository.workspaceSnapshot()
+                .messagesByConversation
+                .getValue(TOPIC_KEY)
+                .map(MessageResponse::uuid),
+        )
+    }
+
+    @Test
     fun `realtime retry backs off across flapping connections and resets after stability`() {
         assertEquals(
             2_000L,

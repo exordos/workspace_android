@@ -26,6 +26,8 @@ appCompat = "1.1.0"
 foundationLayout = "1.11.2"
 uiText = "1.11.2"
 aboutLibraries = "14.2.0"
+room = "2.8.4"
+ksp = "2.3.4"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -71,6 +73,10 @@ androidx-app-compat = { group = "androidx.appcompat", name = "appcompat", versio
 androidx-compose-foundation-layout = { group = "androidx.compose.foundation", name = "foundation-layout", version.ref = "foundationLayout" }
 androidx-compose-ui-text = { group = "androidx.compose.ui", name = "ui-text", version.ref = "uiText" }
 aboutlibraries-compose-m3 = { group = "com.mikepenz", name = "aboutlibraries-compose-m3", version.ref = "aboutLibraries" }
+androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
+androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
+androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
+androidx-room-testing = { group = "androidx.room", name = "room-testing", version.ref = "room" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
@@ -78,3 +84,5 @@ kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "ko
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 firebase = { id = "com.google.gms.google-services", version.ref = "firebasePlugin" }
 aboutlibraries-android = { id = "com.mikepenz.aboutlibraries.plugin.android", version.ref = "aboutLibraries" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
+androidx-room = { id = "androidx.room", version.ref = "room" }

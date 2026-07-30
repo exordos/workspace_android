@@ -7,6 +7,7 @@ import ru.genesiscorporation.workspace.beta.data.ApiKeyRepository
 import ru.genesiscorporation.workspace.beta.data.ConversationStateStore
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
 import ru.genesiscorporation.workspace.beta.data.ExternalIntegrationRepository
+import ru.genesiscorporation.workspace.beta.data.RoomWorkspaceSnapshotStore
 import ru.genesiscorporation.workspace.beta.data.TinkConversationStateStore
 import ru.genesiscorporation.workspace.beta.data.TinkRealtimeCursorStore
 import ru.genesiscorporation.workspace.beta.data.WorkspaceNotificationSoundController
@@ -39,6 +40,8 @@ class UserViewModelFactory(
                 TinkConversationStateStore(appContext)
             val realtimeCursorStore =
                 TinkRealtimeCursorStore(appContext)
+            val workspaceSnapshotStore =
+                RoomWorkspaceSnapshotStore.create(appContext)
             @Suppress("UNCHECKED_CAST")
             return UserViewModel(
                 repo = ApiKeyRepository(
@@ -46,12 +49,14 @@ class UserViewModelFactory(
                     clearAccountLocalData = { ownerKey ->
                         conversationStateStore.clearAccount(ownerKey)
                         realtimeCursorStore.clearAccount(ownerKey)
+                        workspaceSnapshotStore.clearAccount(ownerKey)
                     },
                 ),
                 conversationStateStore = conversationStateStore,
                 uiPreferencesRepository =
                     WorkspaceUiPreferencesRepository(appContext),
                 realtimeCursorStore = realtimeCursorStore,
+                workspaceSnapshotStore = workspaceSnapshotStore,
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")

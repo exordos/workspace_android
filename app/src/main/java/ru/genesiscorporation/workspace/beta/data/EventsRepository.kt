@@ -172,6 +172,75 @@ class EventsRepository(
         clearExternalProjections()
     }
 
+    /**
+     * Restores an encrypted owner-scoped offline snapshot without overwriting
+     * newer REST, realtime, or local-outbox state that may already have
+     * arrived while disk IO was in progress.
+     */
+    fun hydrateCachedSnapshot(snapshot: WorkspaceSnapshot) {
+        _streams.update { current ->
+            mergeStreams(
+                cached = snapshot.streams,
+                current = current,
+            )
+        }
+        _streamTopics.update { current ->
+            val streamUuids =
+                (_streams.value.map(Stream::uuid) +
+                    snapshot.topicsByStream.keys)
+                    .toSet()
+            buildMap {
+                streamUuids.forEach { streamUuid ->
+                    val merged = LinkedHashMap<String, TopicsResponseData>()
+                    snapshot.topicsByStream[streamUuid]
+                        .orEmpty()
+                        .forEach { merged[it.uuid] = it }
+                    current[streamUuid].orEmpty().forEach { topic ->
+                        val cached = merged[topic.uuid]
+                        if (
+                            cached == null ||
+                            topicUpdatedAt(topic) >= topicUpdatedAt(cached)
+                        ) {
+                            merged[topic.uuid] = topic
+                        }
+                    }
+                    if (merged.isNotEmpty()) {
+                        put(streamUuid, merged.values.toList())
+                    }
+                }
+            }
+        }
+        _streamTopicMessages.update { current ->
+            buildMap {
+                val keys =
+                    snapshot.messagesByConversation.keys + current.keys
+                keys.forEach { key ->
+                    val merged = mergeMessages(
+                        existing =
+                            snapshot.messagesByConversation[key].orEmpty(),
+                        incoming = current[key].orEmpty(),
+                    )
+                    if (merged.isNotEmpty()) put(key, merged)
+                }
+            }
+        }
+        val cachedMessages = snapshot.messagesByConversation
+            .values
+            .flatten()
+        _messagesPool.update { current ->
+            mergeMessages(
+                existing = cachedMessages,
+                incoming = current,
+            )
+        }
+    }
+
+    fun workspaceSnapshot(): WorkspaceSnapshot = WorkspaceSnapshot(
+        streams = _streams.value,
+        topicsByStream = _streamTopics.value,
+        messagesByConversation = _streamTopicMessages.value,
+    )
+
     private fun invalidateDerivedStateForExpiredCursor() {
         currentUser = null
         jitsiServerUrl = ""
@@ -730,6 +799,28 @@ class EventsRepository(
 
     private fun messageUpdatedAt(message: MessageResponse): Instant =
         runCatching { OffsetDateTime.parse(message.updatedAt).toInstant() }
+            .getOrDefault(Instant.EPOCH)
+
+    private fun mergeStreams(
+        cached: List<Stream>,
+        current: List<Stream>,
+    ): List<Stream> {
+        val merged = LinkedHashMap<String, Stream>()
+        cached.forEach { stream -> merged[stream.uuid] = stream }
+        current.forEach { stream ->
+            val restored = merged[stream.uuid]
+            if (
+                restored == null ||
+                streamUpdatedAt(stream) >= streamUpdatedAt(restored)
+            ) {
+                merged[stream.uuid] = stream
+            }
+        }
+        return merged.values.toList()
+    }
+
+    private fun streamUpdatedAt(stream: Stream): Instant =
+        runCatching { OffsetDateTime.parse(stream.updatedAt).toInstant() }
             .getOrDefault(Instant.EPOCH)
 
     private val _streamTopics = MutableStateFlow<Map<String, List<TopicsResponseData>>>(emptyMap())

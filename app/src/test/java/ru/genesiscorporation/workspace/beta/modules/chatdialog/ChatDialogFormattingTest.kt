@@ -102,6 +102,16 @@ class ChatDialogFormattingTest {
     }
 
     @Test
+    fun `offline history fallback requires at least one server row`() {
+        val server = message()
+        val local = server.copy(uuid = "local-pending")
+
+        assertFalse(hasCachedServerHistory(emptyList()))
+        assertFalse(hasCachedServerHistory(listOf(local)))
+        assertTrue(hasCachedServerHistory(listOf(local, server)))
+    }
+
+    @Test
     fun prunesExpiredAttachmentCacheEntries() {
         val directory = Files.createTempDirectory("workspace-attachments").toFile()
         try {

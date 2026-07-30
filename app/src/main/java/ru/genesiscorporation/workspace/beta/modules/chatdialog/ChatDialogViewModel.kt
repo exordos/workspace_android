@@ -2848,9 +2848,16 @@ class ChatDialogViewModel(
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (exception: Exception) {
-            _actionError.value =
-                "Не удалось определить первое непрочитанное сообщение"
-            return loadLatestMessages()
+            val cachedFallbackAvailable = hasCachedServerHistory()
+            if (!cachedFallbackAvailable) {
+                _actionError.value =
+                    "Не удалось определить первое непрочитанное сообщение"
+            }
+            return loadLatestMessages().also { loaded ->
+                if (loaded && cachedFallbackAvailable) {
+                    _actionError.value = null
+                }
+            }
         }
         return when (unreadResponse) {
             is ApiResult.Success -> {
@@ -2883,13 +2890,24 @@ class ChatDialogViewModel(
             }
 
             is ApiResult.Error -> {
-                _actionError.value = unreadResponse.error.message
-                    ?.takeIf(String::isNotBlank)
-                    ?.let {
-                        "Не удалось определить первое непрочитанное сообщение: $it"
+                val cachedFallbackAvailable =
+                    latestResponse is ApiResult.Error &&
+                        hasCachedServerHistory()
+                if (!cachedFallbackAvailable) {
+                    _actionError.value = unreadResponse.error.message
+                        ?.takeIf(String::isNotBlank)
+                        ?.let {
+                            "Не удалось определить первое непрочитанное сообщение: $it"
+                        }
+                        ?: "Не удалось определить первое непрочитанное сообщение"
+                }
+                loadLatestMessages(
+                    preloadedResponse = latestResponse,
+                ).also { loaded ->
+                    if (loaded && cachedFallbackAvailable) {
+                        _actionError.value = null
                     }
-                    ?: "Не удалось определить первое непрочитанное сообщение"
-                loadLatestMessages(preloadedResponse = latestResponse)
+                }
             }
         }
     }
@@ -3273,13 +3291,61 @@ class ChatDialogViewModel(
                 true
             }
             is ApiResult.Error -> {
-                _isLoading.value = false
-                _loadError.value = messagesResponse.error.message
-                    ?: "Не удалось загрузить сообщения"
-                false
+                if (restoreCachedHistory(resolveMessageFocus)) {
+                    true
+                } else {
+                    _isLoading.value = false
+                    _loadError.value = messagesResponse.error.message
+                        ?: "Не удалось загрузить сообщения"
+                    false
+                }
             }
         }
     }
+
+    private fun restoreCachedHistory(
+        resolveMessageFocus: Boolean,
+    ): Boolean {
+        val cachedMessages = cachedConversationMessages()
+        if (!hasCachedServerHistory(cachedMessages)) return false
+        _loadError.value = null
+        _olderMessagesError.value = null
+        _newerMessagesError.value = null
+        _hasOlderMessages.value = false
+        _hasNewerMessages.value = false
+        nextOlderPageMarker = null
+        nextNewerPageMarker = null
+        restoreComposerReferences(cachedMessages)
+        focusProviderMessageId?.let { providerMessageId ->
+            cachedMessages
+                .filter { it.provider?.externalId == providerMessageId }
+                .singleOrNull()
+                ?.let { requestMessageFocus(it.uuid) }
+        }
+        focusMessageUuid
+            ?.takeIf { resolveMessageFocus }
+            ?.takeIf { requestedUuid ->
+                cachedMessages.any { it.uuid == requestedUuid }
+            }
+            ?.let(::requestMessageFocus)
+        beginForwardMessageUuid
+            ?.takeUnless { initialForwardRequestHandled }
+            ?.let { requestedUuid ->
+                initialForwardRequestHandled = true
+                cachedMessages
+                    .filter { it.uuid == requestedUuid }
+                    .singleOrNull()
+                    ?.let(::beginForward)
+            }
+        _isLoading.value = false
+        return true
+    }
+
+    private fun cachedConversationMessages(): List<MessageResponse> =
+        repo.streamTopicMessages.value["$chatId.$topicUuid"].orEmpty()
+
+    private fun hasCachedServerHistory(): Boolean =
+        hasCachedServerHistory(cachedConversationMessages())
 
     fun retryLoad() {
         if (_isLoading.value) return
@@ -4026,6 +4092,10 @@ private const val MESSAGE_HISTORY_PAGE_SIZE = DEFAULT_MESSAGE_PAGE_SIZE
 internal fun messageSortInstant(createdAt: String): Instant =
     runCatching { OffsetDateTime.parse(createdAt).toInstant() }
         .getOrDefault(Instant.EPOCH)
+
+internal fun hasCachedServerHistory(
+    messages: List<MessageResponse>,
+): Boolean = messages.any { !it.uuid.startsWith("local-") }
 
 internal fun mergeRecoveredDraftTexts(
     originalDraft: String,

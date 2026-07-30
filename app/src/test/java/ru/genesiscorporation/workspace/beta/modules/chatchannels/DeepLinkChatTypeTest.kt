@@ -7,8 +7,67 @@ import org.junit.Test
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ProviderReference
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
+import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
+import ru.genesiscorporation.workspace.beta.data.navigation.WorkspaceDeepLink
+import ru.genesiscorporation.workspace.beta.data.navigation.WorkspaceDeepLinkTarget
 
 class DeepLinkChatTypeTest {
+    @Test
+    fun cachedCatalogResolvesExactTopicWithoutNetworkState() {
+        val stream = stream(
+            isPrivate = false,
+            providerExternalId = "channel:123",
+        )
+        val topic = topic(stream.uuid)
+        val destination = resolveCachedTopicDeepLink(
+            deepLink = WorkspaceDeepLink(
+                baseUrl = null,
+                organizationId = "workspace.example.com",
+                projectId = PROJECT_UUID,
+                target = WorkspaceDeepLinkTarget.Topic(
+                    streamUuid = stream.uuid,
+                    topicUuid = topic.uuid,
+                ),
+            ),
+            streams = listOf(stream),
+            topicsByStream = mapOf(stream.uuid to listOf(topic)),
+        )
+
+        requireNotNull(destination)
+        assertEquals(stream.uuid, destination.route.chatId)
+        assertEquals(topic.uuid, destination.route.topicUuid)
+        assertEquals(topic.name, destination.route.topicName)
+        assertFalse(destination.route.isDirectMessages)
+    }
+
+    @Test
+    fun cachedCatalogFailsClosedForDuplicateTopicIdentity() {
+        val stream = stream(
+            isPrivate = false,
+            providerExternalId = "channel:123",
+        )
+        val topic = topic(stream.uuid)
+
+        assertEquals(
+            null,
+            resolveCachedTopicDeepLink(
+                deepLink = WorkspaceDeepLink(
+                    baseUrl = null,
+                    organizationId = "workspace.example.com",
+                    projectId = PROJECT_UUID,
+                    target = WorkspaceDeepLinkTarget.Topic(
+                        streamUuid = stream.uuid,
+                        topicUuid = topic.uuid,
+                    ),
+                ),
+                streams = listOf(stream),
+                topicsByStream = mapOf(
+                    stream.uuid to listOf(topic, topic.copy(name = "Duplicate")),
+                ),
+            ),
+        )
+    }
+
     @Test
     fun privateChannelIsNotMistakenForDirectChat() {
         val privateChannel = stream(
@@ -107,4 +166,19 @@ class DeepLinkChatTypeTest {
         systemType = systemType,
         creationDate = "2026-01-01T00:00:00Z",
     )
+
+    private fun topic(streamUuid: String) = TopicsResponseData(
+        uuid = "22222222-2222-4222-8222-222222222222",
+        name = "Cached topic",
+        streamUuid = streamUuid,
+        updatedAt = "2026-01-01T00:00:00Z",
+        unreadCount = 0,
+        isDone = false,
+        isDefault = true,
+    )
+
+    private companion object {
+        const val PROJECT_UUID =
+            "33333333-3333-4333-8333-333333333333"
+    }
 }
