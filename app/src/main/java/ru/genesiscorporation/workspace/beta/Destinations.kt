@@ -67,6 +67,9 @@ object ProfileFlow {
     object Main
 
     @Serializable
+    object About
+
+    @Serializable
     object Login
 }
 

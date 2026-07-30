@@ -45,6 +45,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -73,6 +74,7 @@ import java.net.URI
 @Composable
 fun ProfileScreen(
     viewModel: ProfileViewModel,
+    onOpenAbout: () -> Unit,
 ) {
     val accounts by viewModel.accounts.collectAsStateWithLifecycle()
     val activeAccountId by viewModel.activeAccountId.collectAsStateWithLifecycle()
@@ -416,12 +418,36 @@ fun ProfileScreen(
                     }
                 }
                 item(key = "version") {
-                    Text(
-                        text = "Версия ${BuildConfig.VERSION_NAME}",
-                        color = colors.textAdditional50,
-                        fontSize = 11.sp,
-                        modifier = Modifier.padding(vertical = 8.dp),
-                    )
+                    OutlinedButton(
+                        onClick = onOpenAbout,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            horizontalAlignment = Alignment.Start,
+                        ) {
+                            Text(
+                                text = "О приложении",
+                                color = colors.textHeaders,
+                                fontSize = 15.sp,
+                                lineHeight = 20.sp,
+                            )
+                            Text(
+                                text = "Версия ${BuildConfig.VERSION_NAME}",
+                                color = colors.textAdditional50,
+                                fontSize = 12.sp,
+                                lineHeight = 16.sp,
+                            )
+                        }
+                        Icon(
+                            painter = painterResource(R.drawable.arrow_back),
+                            contentDescription = null,
+                            tint = colors.textAdditional30,
+                            modifier = Modifier
+                                .size(20.dp)
+                                .graphicsLayer(rotationZ = 180f),
+                        )
+                    }
                 }
             }
         }

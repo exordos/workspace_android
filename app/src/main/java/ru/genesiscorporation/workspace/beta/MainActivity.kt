@@ -108,6 +108,7 @@ import ru.genesiscorporation.workspace.beta.modules.feed.FeedViewModel
 import ru.genesiscorporation.workspace.beta.modules.feed.MessageTimelineKind
 import ru.genesiscorporation.workspace.beta.modules.drafts.DraftsScreen
 import ru.genesiscorporation.workspace.beta.modules.drafts.DraftsViewModel
+import ru.genesiscorporation.workspace.beta.modules.about.AboutScreen
 import ru.genesiscorporation.workspace.beta.modules.profile.ProfileScreen
 import ru.genesiscorporation.workspace.beta.modules.profile.ProfileViewModel
 import ru.genesiscorporation.workspace.beta.modules.share.IncomingShareDialog
@@ -624,6 +625,9 @@ fun WokspaceApp(
                 ProfileNavigation(
                     workspaceApiClient,
                     pushDeviceRegistrationManager,
+                    onBottomNavigationVisibilityChange = {
+                        showBottomNavigation = it
+                    },
                 )
             }
         }
@@ -1030,12 +1034,16 @@ fun LoginNavigation(workspaceApiClient: WorkspaceAPIClient) {
 fun ProfileNavigation(
     workspaceApiClient: WorkspaceAPIClient,
     pushDeviceRegistrationManager: PushDeviceRegistrationManager,
+    onBottomNavigationVisibilityChange: (Boolean) -> Unit,
 ) {
     val navController = rememberNavController()
     val user = LocalUserState.current
     val appContext = LocalContext.current.applicationContext
     NavHost(navController = navController, startDestination = ProfileFlow.Main) {
         composable<ProfileFlow.Main> {
+            LaunchedEffect(Unit) {
+                onBottomNavigationVisibilityChange(true)
+            }
             val profileViewModelFactory = remember {
                 ProfileViewModelFactory(
                     user,
@@ -1045,9 +1053,21 @@ fun ProfileNavigation(
                 )
             }
             var profileViewModel: ProfileViewModel = viewModel(factory = profileViewModelFactory)
-            ProfileScreen(profileViewModel)
+            ProfileScreen(
+                viewModel = profileViewModel,
+                onOpenAbout = { navController.navigate(ProfileFlow.About) },
+            )
+        }
+        composable<ProfileFlow.About> {
+            LaunchedEffect(Unit) {
+                onBottomNavigationVisibilityChange(false)
+            }
+            AboutScreen(onBack = navController::popBackStack)
         }
         composable<ProfileFlow.Login> {
+            LaunchedEffect(Unit) {
+                onBottomNavigationVisibilityChange(false)
+            }
             val loginViewModelFactory = remember { LoginViewModelFactory(workspaceApiClient, user) }
             val loginViewModel: LoginViewModel = viewModel(factory = loginViewModelFactory)
             LoginScreen(loginViewModel, navController)

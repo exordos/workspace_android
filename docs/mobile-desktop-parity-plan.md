@@ -115,7 +115,7 @@ outcome. A screen is not complete merely because it matches a design.
 | Settings | Theme, language, sound, sorting, folder layout, idle timeout | Partial: account-scoped system/light/dark mode, six real notification-sound modes, standard/compact chat rows, personal-unread priority and unmuted-channel priority are persisted and applied; unknown/corrupt values fail to independent safe defaults | Finish resource-backed language, validated mobile folder presentation and lifecycle-enforced idle timeout; keep every unsupported control hidden |
 | Diagnostics | Logs, memory/runtime overview, export | Partial: offline redacted snapshot and functional Android share sheet cover build/device/network/notification/settings/cache/account-count state | Add bounded redacted logs, runtime/memory health and support correlation identifiers without identity or content leakage |
 | Cache control | Clear cached data without losing credentials | Partial: exact-account attachment cache size and confirmed deletion are wired; credentials, messages, drafts, outbox and sibling-account files are excluded | Add future Room/Coil cache partitions as those stores become explicit; finish physical failure/account-switch acceptance |
-| Version/update | Version/build details, forced update, licenses | Missing / Adapt | Android version/update path and bundled open-source licenses |
+| Version/update | Version/build details, forced update, licenses | Partial / Adapt: exact installed version name/code/build type and a searchable offline license catalog generated from the selected variant's runtime graph are implemented | Add forced/update-required UX only after Android has a verified signed-distribution/version-policy contract; keep speculative update controls hidden |
 | External accounts | Connect, edit, reconnect, disconnect providers | Missing | Permission-aware mobile settings using the same sanitized API contract |
 | External chats | Select, deselect, move projections and show operations | Missing | Mobile operation status and safe retry/discard actions |
 | Provider admin | Provider policy, bridge health and lifecycle | Missing | Admin-only mobile surface where desktop exposes it |
@@ -372,6 +372,16 @@ the returned user UUID must match the active identity. Avatar reset is offered
 only for a resettable uploaded/URL avatar, never for the default Gravatar.
 Refresh, status, upload, and reset are single-flight operations with inline,
 retryable errors; late results from another account are discarded.
+
+Current version/licenses slice: Profile now exposes one functional About route.
+It reports the installed APK's exact version name, version code, and build type.
+The selected variant's resolved runtime dependency graph generates a bundled
+offline license catalog during the Android build; users can search by
+component, coordinate, version, or license and open readable bundled terms.
+The generated resource has an instrumented parse/non-empty/license-text gate.
+No update button is shown because the maintained Android project does not yet
+define a signed distribution endpoint or authoritative version-policy
+contract.
 
 Focused contract/format/MIME tests pass. On the physical Android 14 device,
 authoritative profile load/refresh, status plus away update, explicit empty

@@ -727,6 +727,26 @@ and final server state.
 | SET-032 | Channel creation or preview failure | Saved state remains explicit, saving unlocks, and a dismissible channel-preparation error appears; later push retries channel creation with Default fallback | Source path covered; injected platform failure pending |
 | SET-033 | Rapid sound changes during persistence | Disabled chips prevent overlapping writes; every accepted value owns one preview attempt and the final accepted value survives restart | Source + sequential physical passed; stress/fault injection pending |
 
+### About and licenses matrix
+
+The catalog is generated at build time from the selected Android variant's
+resolved runtime dependencies. It is packaged as an offline resource; the
+screen does not contact a license server and does not expose a speculative
+update control.
+
+| ID | Scenario | Expected result | Current coverage |
+| --- | --- | --- | --- |
+| ABOUT-001 | Open About from Profile | Exact `versionName`, `versionCode` and build type for the installed APK render; Back returns to the same Profile stack | Pure model + physical exact-build/Back/bottom-navigation restore passed |
+| ABOUT-002 | Inspect the generated catalog | Every rendered row comes from the selected variant's resolved runtime graph; the catalog is non-empty and dependency names/versions are not hand-maintained | Gradle generation + instrumented parser covered |
+| ABOUT-003 | Select components with and without bundled license terms | Every row opens details; a scrollable offline dialog shows readable matching terms or explicitly reports absent metadata; Close returns to the same list/search state | Bundled-text instrumented gate + physical licensed/no-license details, scroll and Close passed |
+| ABOUT-004 | Airplane mode, server outage and offline cold start | About, search and license text remain fully usable with zero Workspace/API dependency | Physical Wi-Fi/mobile-data-off cold start and navigation passed; prolonged outage pending |
+| ABOUT-005 | Search by name, coordinate, version and license; clear; no match | Matching is locale-stable and case-insensitive; result count is exact; no-match state is explicit; Clear restores all rows | Pure model + physical `ktor`, exact-count, zero-result and Clear paths passed |
+| ABOUT-006 | Rotate/background while query or license dialog is open | Query survives recreation, no navigation duplicates, Back/Close remain deterministic and no remote mutation occurs | Physical portrait/landscape/portrait query and open-dialog retention plus Back passed; background pending |
+| ABOUT-007 | Generated catalog is absent, blank or unparseable | Build/instrumented acceptance fails before distribution; a shipped variant cannot silently claim an empty license catalog | Exact-resource parser instrumented gate covered |
+| ABOUT-008 | Light/dark theme, font scale 1.0–2.0 and TalkBack traversal | Text and dialogs retain sufficient contrast, rows remain readable, and Back/Search/Clear/Close expose meaningful targets | Physical light/dark/landscape visual and semantic-node checks passed; font scale/spoken TalkBack pending |
+| ABOUT-009 | Release minification/resource shrinking | The generated `aboutlibraries` raw resource survives and the release catalog/text open without reflection/resource-name assumptions | Explicit resource-ID API used; release APK/instrumented run pending |
+| ABOUT-010 | Add/remove/upgrade a runtime dependency | The next APK catalog changes automatically; no stale manual list or dead update button remains | Gradle graph generation covered; dependency-delta CI test pending |
+
 ### Cache-control matrix
 
 Cache control is intentionally narrow until every future persistent store has

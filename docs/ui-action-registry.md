@@ -167,6 +167,7 @@ Compose semantics traversal on every supported role and account.
 | SET-A05 | Notification sound choice | Persists Default/Subtle/Digital/Glass/Pulse/None for the active account, creates the matching stable Android channel and previews audible choices | Android channel failure is dismissible, push retries with Default fallback, None remains visual-only and system channel overrides win | SET-007–009/019–023/025–033 |
 | SET-A06 | Clear attachment cache | Shows the exact active-account byte count, requires confirmation and deletes only that account's temporary attachment directory | Empty state is disabled and explicit; failure is dismissible; credentials, drafts, outbox and sibling accounts are outside the deletion boundary | CACHE-001–010 |
 | SET-A07 | Share diagnostics | Collects a fresh allowlisted local snapshot and opens the real Android `text/plain` chooser | No identity/content fields exist in the report model; missing share handler produces a dismissible error | DIAG-001–010 |
+| SET-A08 | About app and open-source licenses | Opens an offline screen with the exact version name/code/build type plus a searchable catalog generated from the current runtime dependency graph; every component opens details, bundled terms are readable, and Close/Back return safely | Empty search is explicit and clearable; missing license metadata is stated instead of leaving an inert row; generated-resource parsing is an instrumented build gate; no update action is exposed until Android has a verified distribution contract | ABOUT-001–010 |
 
 ## Platform interactions
 
