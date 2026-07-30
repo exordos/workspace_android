@@ -142,8 +142,8 @@ Compose semantics traversal on every supported role and account.
 | INFO-A01 | Channel back | Pops route | No external failure | Navigation suite |
 | INFO-A02 | Channel mute/unmute | PUTs real notification mode and updates stream projection | Single in-flight action; inline error | CAT-009 |
 | INFO-A03 | User-profile back/close | Pops route | No external failure | Navigation suite |
-| INFO-A04 | Profile/Channels tabs | Switches between real API profile fields and actual bindings | Empty real data stays empty | Profile suite |
-| INFO-A05 | Shared-channel card | Opens exact channel/default-topic route | No fabricated preview, sender, or topic | Profile suite |
+| INFO-A04 | Profile/Channels tabs | Switches between exact user fields and successfully loaded non-DM channel bindings | Loading, unavailable and truly empty states are distinct; stale real rows survive a failed refresh | UPROF-001–006 |
+| INFO-A05 | Shared-channel card | Opens the exact bound channel's real topic list | Direct/provider chats and unclassified legacy external private rows are excluded; no guessed default topic or fabricated destination is used | UPROF-004–006 |
 | INFO-A06 | Signed-in profile logout | Shows destructive confirmation, disables further actions, attempts push cleanup, then enters the same serialized removal path as auth rejection | Encrypted drafts/outbox are cleared before credentials/account removal; a cleanup failure keeps the account intact, and another saved account becomes active only after success | AUTH-009/011 + instrumented + physical-device confirm/cancel |
 | INFO-A07 | Saved-account row | Atomically switches the active organization/project identity and rebuilds navigation/realtime state | In-flight results are discarded with `ACCOUNT_CHANGED`; token refresh and 401 cleanup are owner-bound and cannot clear another account's local state | AUTH-008, AUTH-010 |
 | INFO-A08 | Add organization/account | Suspends the current UI session and opens server discovery without deleting saved accounts | Back or explicit return restores the previous account without reauthentication | AUTH-001, AUTH-010 + physical-device add/return |
@@ -155,6 +155,8 @@ Compose semantics traversal on every supported role and account.
 | INFO-A14 | Change profile photo | Opens Android's document/photo picker, previews the exact selection and uploads only after explicit confirmation | MIME metadata plus signature and 25 MiB bound fail closed; cancel has no remote side effect; upload failure remains retryable | PROF-009–013/015 |
 | INFO-A15 | Remove profile photo | Appears only for a resettable uploaded/URL avatar and invokes the maintained reset action after confirmation | Default Gravatar never exposes a misleading reset; single-flight failure preserves the current avatar | PROF-012/014/016 |
 | INFO-A16 | Name/timezone editing | Intentionally absent until desktop/backend exposes a real mutation contract | The maintained desktop handler currently resolves a local success without a server write, so mobile exposes no dead controls | PROF-018 |
+| INFO-A17 | Refresh another user's profile | Loads user, stream catalog and bindings in parallel for the active owner; requires exactly one canonical target user | A failed refresh keeps the last real content, exposes an actionable error/Retry and never invents offline status or membership | UPROF-001–006/012/013 |
+| INFO-A18 | Open personal chat from an internal user profile | Reuses one exact native DM or performs a preflight refresh, one validated create and exact default-topic resolution; external identities expose no misleading native-DM action | Duplicate streams fail closed; failed/ambiguous create is reconciled once from the authoritative catalog; rapid taps and account switches cannot duplicate or misroute | UPROF-007–017 |
 | SET-A01 | Theme System/Light/Dark choice | Atomically persists the active account's mode and rebuilds app palette plus system-bar appearance | Failed write preserves the previous mode, clears saving state and shows a dismissible error | SET-001–009 |
 | SET-A02 | Standard/Compact density choice | Persists the active account's choice; compact chat rows reduce height/avatar and omit sender/preview while preserving title/time/unread/actions | Failed write preserves the previous layout and restores controls | SET-007–012/019/020 |
 | SET-A03 | Personal unread priority switch | Persists the owner-scoped flag and promotes only unread one-to-one DMs among other unread, non-pinned rows | Read rows/group DMs remain on normal order; failed write is visible | SET-007/009/013/014/017–020 |
@@ -189,7 +191,8 @@ end-to-end behavior exists:
 - Demonstration call rooms and fabricated call history.
 - Legacy standalone add-member icon outside the permission-aware channel-member
   flow.
-- User-profile call, notification, message, search, and more shortcuts.
+- User-profile call, notification, search, and more shortcuts without a verified
+  maintained mobile contract.
 - User-group tab with an unavailable placeholder page.
 - Mentions/activity shortcut without a real destination.
 - Activity mentions/reactions and star/unstar controls while the maintained

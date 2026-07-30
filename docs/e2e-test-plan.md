@@ -641,6 +641,28 @@ and final server state.
 - Clear cache does not remove credentials and rebuilds state.
 - Diagnostics export is redacted; version/licenses are available offline.
 
+### Other-user profile matrix
+
+| ID | Scenario | Expected result | Current coverage |
+| --- | --- | --- | --- |
+| UPROF-001 | Open a user from a message/mention | One canonical target UUID resolves to authoritative name, avatar, presence, status and contacts; no unrelated user can render | Canonical matcher unit + physical exact user passed |
+| UPROF-002 | Profile data is not loaded yet or presence is missing/unknown | Loading is explicit; fallback route fields are bounded; no fabricated `Не в сети`, phone, manager, birthday or local time appears | Presence unit + physical loading path passed |
+| UPROF-003 | Refresh online, then refresh offline with existing content | Requests are single-flight and owner-bound; offline error is visible while the last real profile remains usable; Retry converges after recovery | Physical offline/stale/Retry passed |
+| UPROF-004 | Binding list contains channels, another user's channels, native/provider DMs or a legacy private provider row without classification metadata | Only exact selected-user, positively classified non-DM channel bindings render in stable catalog order; ambiguous legacy private rows fail closed | Unit + physical native/legacy DM exclusion with real channels retained passed |
+| UPROF-005 | Initial bindings load, successful empty list and recoverable failure | Spinner, `Общих каналов нет`, unavailable+Retry and real content are distinct; failure never masquerades as empty | Source/unit + physical content/failure passed; empty fixture pending |
+| UPROF-006 | Open a shared-channel card with missing/cached/default topic metadata | Exact channel UUID opens its real topic list; no guessed default topic or fabricated destination is used | Navigation source contract + physical sandbox channel/topic-list route passed |
+| UPROF-007 | Target already has one native personal stream | Button opens that exact stream/topic without creating another chat | Candidate unit + physical existing-DM reuse passed |
+| UPROF-008 | No local stream, but authoritative catalog already contains the DM or catalog preflight fails | One successful preflight refresh finds and opens it; a failed preflight aborts visibly and sends no create request | Resolver/source covered; request-count/fault integration pending |
+| UPROF-009 | No DM exists and create succeeds | Exactly one POST is sent; private stream, target UUID and stream UUID are validated; exact default topic opens | Contract/source covered; real create intentionally not run |
+| UPROF-010 | Create times out/returns 5xx/malformed after server commit | One authoritative catalog reconciliation opens exactly one committed DM; retry never blindly creates before preflight | Source + injected backend pending |
+| UPROF-011 | Duplicate matching DMs, foreign target, invalid stream UUID or ambiguous default topics | Navigation and creation fail closed with a readable recovery path | Candidate/topic unit covered |
+| UPROF-012 | Existing DM while fully offline versus missing DM while offline | Existing local exact route opens; missing route produces a network error and no fake success | Architecture/source; physical matrix pending |
+| UPROF-013 | Account switches/removes while profile or DM request is in flight | Old-owner response cannot replace profile/catalog, emit navigation or create state in the new owner | Owner fence/source; two-account fault test pending |
+| UPROF-014 | Rapid refresh/open-chat taps | At most one refresh and one DM operation are active; controls disable synchronously and never leave a stuck spinner | Source + stress pending |
+| UPROF-015 | Rotate/background/process death on Profile and Channels tabs or while opening DM | Selected tab, last real data and route remain safe; no implicit retry/create or duplicate navigation occurs | Physical portrait/landscape/portrait with selected Channels tab passed; background/process-death pending |
+| UPROF-016 | TalkBack and large fonts traverse back, refresh, tabs, Retry, DM and channel rows | Every action has a readable state and at least a 48 dp target; light/dark contrast and long labels remain usable | Physical semantic tree confirms bounded Back plus 48 dp refresh/close/tab/action targets; spoken/font matrix pending |
+| UPROF-017 | Own/external profile and unsupported call/search/notification shortcuts | Self-DM and external-identity DM are hidden/rejected to match desktop; only the maintained internal-user DM action is exposed; unsupported shortcuts remain absent | Internal/external/self availability unit + physical internal profile passed |
+
 ### Personal-profile matrix
 
 | ID | Scenario | Expected result | Current coverage |

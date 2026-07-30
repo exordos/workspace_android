@@ -110,7 +110,7 @@ outcome. A screen is not complete merely because it matches a design.
 | Push | Encrypted device identity, register/rotate/delete token | Partial | Notification permission, channels, deep links, token rotation, logout cleanup, delivery tests |
 | Realtime | REST catch-up, websocket, epoch cursor reset | Partial | Lifecycle-aware single connection, idempotent dispatcher, gap recovery, bounded backoff |
 | Offline | Cache-first desktop state and outbox | Partial: encrypted drafts and failed/ambiguous outgoing rows survive restart; exact-topic links with retained local work recover from bounded encrypted route metadata even on a fully cold offline start, while general catalog/history still requires network | Add Room-backed catalogs/messages/cursors with explicit stale/offline UX and a backend idempotency contract |
-| User profile | View profile, shared channels, status and contact fields | Partial | Remove placeholders, support message/call/share and permission-aware editing |
+| User profile | View profile, shared channels, status and contact fields | Partial: authoritative refresh/error/retry, exact status/contact fields, binding-backed non-DM shared channels, and safe reuse/create of a personal chat are wired | Add avatar preview/copyable contacts where useful and expose calls only after the maintained mobile call bridge has a real profile contract |
 | Personal profile | Avatar, name, timezone, status | Partial: authoritative self-profile refresh, status/away update and clear, bounded gallery preview/upload, and conditional avatar reset are wired; name/timezone controls stay hidden because the maintained desktop mutation is currently a no-op | Add a verified name/timezone backend contract, camera capture/crop, and complete upload/reset/account-switch fault acceptance |
 | Settings | Theme, language, sound, sorting, folder layout, idle timeout | Partial: account-scoped system/light/dark mode, six real notification-sound modes, standard/compact chat rows, personal-unread priority and unmuted-channel priority are persisted and applied; unknown/corrupt values fail to independent safe defaults | Finish resource-backed language, validated mobile folder presentation and lifecycle-enforced idle timeout; keep every unsupported control hidden |
 | Diagnostics | Logs, memory/runtime overview, export | Partial: offline redacted snapshot and functional Android share sheet cover build/device/network/notification/settings/cache/account-count state | Add bounded redacted logs, runtime/memory health and support correlation identifiers without identity or content leakage |
@@ -384,6 +384,34 @@ large-font/TalkBack remain open and are not claimed. Name and timezone remain
 hidden because the maintained desktop `updateOwnProfile` path currently
 resolves success without sending a backend mutation; exposing those controls
 would create prohibited dead UI.
+
+Current other-user profile slice: the target UUID is canonicalized and must
+resolve to exactly one authoritative user. Profile, catalog and binding
+requests are owner-bound and run in parallel; an unavailable refresh preserves
+the last real profile and shared-channel projection while showing a visible
+Retry. Unknown presence is omitted instead of being rendered as a fabricated
+offline state. The Channels tab includes only real binding-backed channel
+streams and excludes native/provider DMs. A legacy external private row whose
+server payload has no channel/direct classifier is treated as ambiguous and
+omitted; positively classified channels remain visible, so a legacy DM cannot
+masquerade as a shared channel.
+
+The maintained desktop `Open direct messages` action is now present for
+internal users and remains hidden for external identities, matching desktop.
+Mobile first reuses one exact native direct stream, refreshes the server catalog
+before creating anything, aborts rather than creating when that preflight
+cannot establish the catalog state, validates a newly returned stream against
+the target user, resolves only an exact/default topic, and reconciles a failed or
+malformed create response through one authoritative catalog refresh. Duplicate
+matches fail closed, rapid taps are single-flight and account-switched results
+cannot navigate. On the physical device, authoritative profile load, visible
+offline refresh with stale-content retention and recovered Retry, shared
+channels with both native and legacy-provider DMs excluded, bounded 48 dp+
+navigation/refresh targets, an exact shared-channel-to-topic-list route,
+portrait/landscape restoration, and reuse of an existing DM pass. Creating a
+new DM was intentionally not run against the
+working account; injected create/post-request faults, account switching,
+process death and large-font/TalkBack remain open.
 
 Current settings slice: the signed-in profile exposes five settings whose
 effects are wired end to end. Theme selection rebuilds the application color

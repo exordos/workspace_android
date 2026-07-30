@@ -2,6 +2,7 @@ package ru.genesiscorporation.workspace.beta.modules.chatuserinfo
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,9 +21,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,6 +39,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -60,7 +69,37 @@ fun ChatUserInfoScreen(
     val channels by viewModel.channels.collectAsStateWithLifecycle()
     val topics by viewModel.repo.streamTopics.collectAsStateWithLifecycle()
     val baseUrl by viewModel.client.userViewModel.baseUrl.collectAsState()
+    val currentUserUuid by
+        viewModel.client.userViewModel.userId.collectAsStateWithLifecycle()
+    val profileLoading by viewModel.profileLoading.collectAsStateWithLifecycle()
+    val profileLoaded by viewModel.profileLoaded.collectAsStateWithLifecycle()
+    val sharedChannelsLoaded by
+        viewModel.sharedChannelsLoaded.collectAsStateWithLifecycle()
+    val profileError by viewModel.profileError.collectAsStateWithLifecycle()
+    val directChatOpening by
+        viewModel.directChatOpening.collectAsStateWithLifecycle()
+    val directChatError by
+        viewModel.directChatError.collectAsStateWithLifecycle()
     var selectedTab by rememberSaveable { mutableStateOf(ProfileTab.Profile) }
+    val canOpenDirectChat = canOpenDirectChatWith(
+        profile = profile,
+        currentUserUuid = currentUserUuid,
+    )
+
+    LaunchedEffect(viewModel, navController) {
+        viewModel.openDirectChatEvents.collect { destination ->
+            navController.navigate(
+                ChatFlow.ChatDialog(
+                    title = destination.title,
+                    chatId = destination.streamUuid,
+                    topicName = null,
+                    topicUuid = destination.topicUuid,
+                    isDirectMessages = true,
+                    userId = null,
+                ),
+            )
+        }
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -76,8 +115,21 @@ fun ChatUserInfoScreen(
         item {
             ProfileBackRow(
                 showClose = selectedTab == ProfileTab.Channels,
+                refreshing = profileLoading,
+                onRefresh = { viewModel.refreshProfile() },
                 onClick = navController::popBackStack,
             )
+        }
+        profileError?.let { error ->
+            item(key = "profile-error") {
+                ProfileErrorCard(
+                    message = error,
+                    retryEnabled = !profileLoading,
+                    onRetry = { viewModel.refreshProfile() },
+                    onDismiss = viewModel::clearProfileError,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
         }
         item {
             ProfileHeader(
@@ -88,6 +140,50 @@ fun ChatUserInfoScreen(
                 modifier = Modifier.padding(top = 20.dp),
             )
         }
+        if (canOpenDirectChat) {
+            item(key = "open-direct-chat") {
+                Button(
+                    onClick = { viewModel.openDirectChat() },
+                    enabled = !directChatOpening && profileLoaded,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .padding(top = 12.dp),
+                ) {
+                    if (directChatOpening) {
+                        CircularProgressIndicator(
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Icon(
+                        painter = painterResource(R.drawable.ic_figma_new_chat),
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Text(
+                        text = if (directChatOpening) {
+                            "Открываем чат…"
+                        } else {
+                            "Открыть личный чат"
+                        },
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
+                }
+            }
+        }
+        directChatError?.let { error ->
+            item(key = "direct-chat-error") {
+                ProfileErrorCard(
+                    message = error,
+                    retryEnabled = !directChatOpening && canOpenDirectChat,
+                    onRetry = { viewModel.openDirectChat() },
+                    onDismiss = viewModel::clearDirectChatError,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+        }
         item {
             ProfileTabs(
                 selected = selectedTab,
@@ -97,45 +193,80 @@ fun ChatUserInfoScreen(
         }
         when (selectedTab) {
             ProfileTab.Profile -> {
-                items(
-                    items = viewModel.profileFields(),
-                    key = ProfileField::title,
-                ) { field ->
-                    ProfileRow(
-                        field = field,
-                        modifier = Modifier.padding(top = 12.dp),
-                    )
+                if (profileLoading && profile == null) {
+                    item(key = "profile-loading") {
+                        ProfileLoadingState(
+                            label = "Загружаем профиль…",
+                            modifier = Modifier.padding(top = 24.dp),
+                        )
+                    }
+                } else {
+                    items(
+                        items = viewModel.profileFields(),
+                        key = ProfileField::title,
+                    ) { field ->
+                        ProfileRow(
+                            field = field,
+                            modifier = Modifier.padding(top = 12.dp),
+                        )
+                    }
                 }
             }
 
             ProfileTab.Channels -> {
-                items(
-                    items = channels,
-                    key = Stream::uuid,
-                ) { stream ->
-                    val topic = topics[stream.uuid]
-                        .orEmpty()
-                        .firstOrNull { it.uuid == stream.defaultTopicUuid }
-                        ?: topics[stream.uuid].orEmpty().firstOrNull()
-                    ProfileChannelCard(
-                        stream = stream,
-                        topicName = topic?.name,
-                        baseUrl = baseUrl.orEmpty(),
-                        onClick = {
-                            navController.navigate(
-                                ChatFlow.ChatDialog(
-                                    title = stream.name,
-                                    chatId = stream.uuid,
-                                    topicName = topic?.name,
-                                    topicUuid = topic?.uuid
-                                        ?: stream.defaultTopicUuid.orEmpty(),
-                                    isDirectMessages = stream.isDirectProviderChat(),
-                                    userId = null,
-                                ),
+                when {
+                    profileLoading && !sharedChannelsLoaded -> {
+                        item(key = "channels-loading") {
+                            ProfileLoadingState(
+                                label = "Загружаем общие каналы…",
+                                modifier = Modifier.padding(top = 24.dp),
                             )
-                        },
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
+                        }
+                    }
+                    sharedChannelsLoaded && channels.isEmpty() -> {
+                        item(key = "channels-empty") {
+                            ProfileEmptyState(
+                                text = "Общих каналов нет",
+                                modifier = Modifier.padding(top = 24.dp),
+                            )
+                        }
+                    }
+                    !sharedChannelsLoaded -> {
+                        item(key = "channels-unavailable") {
+                            ProfileErrorCard(
+                                message = "Не удалось загрузить общие каналы",
+                                retryEnabled = !profileLoading,
+                                onRetry = { viewModel.refreshProfile() },
+                                modifier = Modifier.padding(top = 24.dp),
+                            )
+                        }
+                    }
+                    else -> {
+                        items(
+                            items = channels,
+                            key = Stream::uuid,
+                        ) { stream ->
+                            val topic = topics[stream.uuid]
+                                .orEmpty()
+                                .singleOrNull {
+                                    it.uuid == stream.defaultTopicUuid
+                                }
+                            ProfileChannelCard(
+                                stream = stream,
+                                topicName = topic?.name,
+                                baseUrl = baseUrl.orEmpty(),
+                                onClick = {
+                                    navController.navigate(
+                                        ChatFlow.ChatTopic(
+                                            channelName = stream.name,
+                                            channelId = stream.uuid,
+                                        ),
+                                    )
+                                },
+                                modifier = Modifier.padding(top = 8.dp),
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -148,28 +279,124 @@ private enum class ProfileTab(val title: String) {
 }
 
 @Composable
+private fun ProfileErrorCard(
+    message: String,
+    retryEnabled: Boolean,
+    onRetry: () -> Unit,
+    onDismiss: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalWorkspaceColorsPalette.current
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(
+                colors.infoCardBackground,
+                RoundedCornerShape(10.dp),
+            )
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    ) {
+        Text(
+            text = message,
+            color = colors.indicatorRed,
+            fontSize = 13.sp,
+            lineHeight = 18.sp,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+        ) {
+            if (onDismiss != null) {
+                TextButton(onClick = onDismiss) {
+                    Text("Закрыть")
+                }
+            }
+            TextButton(
+                enabled = retryEnabled,
+                onClick = onRetry,
+            ) {
+                Text("Повторить")
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileLoadingState(
+    label: String,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalWorkspaceColorsPalette.current
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 64.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CircularProgressIndicator(
+            color = colors.primary,
+            strokeWidth = 2.dp,
+            modifier = Modifier.size(20.dp),
+        )
+        Text(
+            text = label,
+            color = colors.textAdditional50,
+            fontSize = 13.sp,
+            modifier = Modifier.padding(start = 10.dp),
+        )
+    }
+}
+
+@Composable
+private fun ProfileEmptyState(
+    text: String,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalWorkspaceColorsPalette.current
+    Text(
+        text = text,
+        color = colors.textAdditional50,
+        fontSize = 13.sp,
+        lineHeight = 18.sp,
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 64.dp)
+            .padding(horizontal = 16.dp, vertical = 20.dp),
+    )
+}
+
+@Composable
 private fun ProfileBackRow(
     showClose: Boolean,
+    refreshing: Boolean,
+    onRefresh: () -> Unit,
     onClick: () -> Unit,
 ) {
     val colors = LocalWorkspaceColorsPalette.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(20.dp),
+            .heightIn(min = 48.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(
             modifier = Modifier
-                .weight(1f)
-                .clickable(onClick = onClick),
+                .heightIn(min = 48.dp)
+                .semantics(mergeDescendants = true) {
+                    contentDescription = "Назад"
+                }
+                .clickable(
+                    role = Role.Button,
+                    onClick = onClick,
+                ),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
                 painter = painterResource(R.drawable.arrow_back),
                 contentDescription = null,
                 tint = colors.iconBase,
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(24.dp),
             )
             Text(
                 text = "Назад",
@@ -181,14 +408,43 @@ private fun ProfileBackRow(
                 modifier = Modifier.padding(start = 4.dp),
             )
         }
+        Spacer(modifier = Modifier.weight(1f))
+        IconButton(
+            onClick = onRefresh,
+            enabled = !refreshing,
+            modifier = Modifier
+                .size(48.dp)
+                .semantics(mergeDescendants = true) {
+                    contentDescription = if (refreshing) {
+                        "Профиль обновляется"
+                    } else {
+                        "Обновить профиль"
+                    }
+                },
+        ) {
+            if (refreshing) {
+                CircularProgressIndicator(
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.size(20.dp),
+                )
+            } else {
+                Icon(
+                    painter = painterResource(R.drawable.ic_refresh),
+                    contentDescription = null,
+                    tint = colors.iconBase,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+        }
         if (showClose) {
             Icon(
                 painter = painterResource(R.drawable.ic_close_small),
                 contentDescription = "Закрыть",
                 tint = colors.iconBase,
                 modifier = Modifier
-                    .size(20.dp)
-                    .clickable(onClick = onClick),
+                    .size(48.dp)
+                    .clickable(onClick = onClick)
+                    .padding(12.dp),
             )
         }
     }
@@ -241,12 +497,14 @@ private fun ProfileHeader(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Text(
-                text = presenceLabel(profile?.status),
-                color = colors.textAdditional30,
-                fontSize = 14.sp,
-                lineHeight = 16.sp,
-            )
+            presenceLabel(profile?.status)?.let { statusLabel ->
+                Text(
+                    text = statusLabel,
+                    color = colors.textAdditional30,
+                    fontSize = 14.sp,
+                    lineHeight = 16.sp,
+                )
+            }
         }
     }
 }
@@ -268,9 +526,13 @@ private fun ProfileTabs(
             ProfileTab.entries.forEach { tab ->
                 Column(
                     modifier = Modifier
-                        .height(36.dp)
+                        .heightIn(min = 48.dp)
                         .width(IntrinsicSize.Min)
-                        .clickable { onSelected(tab) },
+                        .selectable(
+                            selected = tab == selected,
+                            role = Role.Tab,
+                            onClick = { onSelected(tab) },
+                        ),
                     verticalArrangement = Arrangement.SpaceBetween,
                 ) {
                     Text(
@@ -425,9 +687,9 @@ private fun ProfileChannelCard(
     }
 }
 
-private fun presenceLabel(status: String?): String = when (status) {
+internal fun presenceLabel(status: String?): String? = when (status) {
     "active" -> "В сети"
     "idle" -> "Нет на месте"
-    "dnd" -> "Не беспокоить"
-    else -> "Не в сети"
+    "dnd", "do_not_disturb" -> "Не беспокоить"
+    else -> null
 }

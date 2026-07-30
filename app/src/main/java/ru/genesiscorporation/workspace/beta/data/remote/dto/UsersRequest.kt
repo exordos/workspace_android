@@ -58,7 +58,8 @@ data class UserResponseData(
     @SerialName("status_emoji") var statusEmoji: String? = null,
     @SerialName("status_text") var statusText: String? = null,
     var status: String,
-    var avatar: String
+    var avatar: String,
+    @SerialName("identity_kind") val identityKind: String? = null,
 ) {
     fun displayableName(): String {
         var displayName = ""
