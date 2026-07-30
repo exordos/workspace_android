@@ -21,6 +21,9 @@ class UserViewModel(
 ):  ViewModel() {
 
     var userData: UserResponseData? = null
+    var organizationName: String? = null
+    var organizationUrl: String? = null
+    var organizationImageUrl: String? = null
 
     val isAccessTokenLoaded: StateFlow<Boolean> = repo.accessTokenFlow
         .map { true }

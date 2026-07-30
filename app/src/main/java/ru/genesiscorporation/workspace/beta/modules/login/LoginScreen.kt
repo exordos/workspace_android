@@ -29,6 +29,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -47,6 +48,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
@@ -61,9 +63,12 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
+import coil3.compose.AsyncImage
 import kotlinx.coroutines.launch
+import ru.genesiscorporation.workspace.beta.LoginFlow
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.UserState
+import ru.genesiscorporation.workspace.beta.data.UrnParser
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 
@@ -74,10 +79,7 @@ fun LoginScreen(
 ) {
     val loginText by viewModel.loginText.collectAsState()
     val passwordText by viewModel.passwordText.collectAsState()
-    val otpText by viewModel.otpText.collectAsState()
-    val needsOtp by viewModel.needsOtp.collectAsState()
     val scope = rememberCoroutineScope()
-    val user = UserState.current
     val webUrl by viewModel.webUrl.collectAsStateWithLifecycle()
     val state by viewModel.queryState.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -85,9 +87,15 @@ fun LoginScreen(
 
     LaunchedEffect(state) {
         if (state is QueryState.Error) {
-            Toast
-                .makeText(context, (state as QueryState.Error).message, Toast.LENGTH_SHORT)
-                .show()
+            val message = (state as QueryState.Error).message
+            if (message == "needs_otp") {
+                viewModel.idleQueryState()
+                navController.navigate(LoginFlow.Otp(loginText, passwordText))
+            } else {
+                Toast
+                    .makeText(context, message, Toast.LENGTH_SHORT)
+                    .show()
+            }
         }
     }
 
@@ -106,28 +114,44 @@ fun LoginScreen(
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Image(
-                        painter = painterResource(id = R.drawable.icon),
-                        contentDescription = null,
-                        modifier = Modifier.size(116.dp)
-                            .padding(top = 48.dp)
-                    )
+                    val organizationImageUrl = UrnParser.parseUrl(viewModel.userViewModel.organizationImageUrl, "")
+                    if (organizationImageUrl != null) {
+                        AsyncImage(
+                            model = organizationImageUrl,
+                            contentDescription = null,
+                            modifier = Modifier.size(116.dp)
+                                .padding(top = 48.dp)
+                        )
+                    } else {
+                        Image(
+                            painter = painterResource(id = R.drawable.icon),
+                            contentDescription = null,
+                            modifier = Modifier.size(116.dp)
+                                .padding(top = 48.dp)
+                        )
+                    }
                     Text(
-                        "Название организации",
+                        viewModel.userViewModel.organizationName ?: "Название организации",
                         color = LocalWorkspaceColorsPalette.current.textHeaders,
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Medium,
-                        modifier = Modifier.padding(20.dp)
+                        modifier = Modifier.padding(20.dp, 12.dp, 4.dp, 20.dp)
                     )
                     Text(
-                        user.baseUrl.value ?: "",
+                        viewModel.userViewModel.organizationUrl ?: "",
                         color = LocalWorkspaceColorsPalette.current.textAdditional50,
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Medium,
-                        modifier = Modifier.padding(20.dp)
+                        modifier = Modifier.padding(horizontal = 20.dp)
                     )
                 }
             }
+            HorizontalDivider(
+                modifier = Modifier
+                    .padding(20.dp),
+                thickness = 1.dp,
+                color = LocalWorkspaceColorsPalette.current.textAdditional30,
+            )
             Column(
                 horizontalAlignment = Alignment.Start
             ) {
@@ -218,44 +242,6 @@ fun LoginScreen(
                         )
                     }
                 }
-                if (needsOtp) {
-                    Text(
-                        "Одноразовый код-пароль",
-                        color = LocalWorkspaceColorsPalette.current.textAdditional30,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.padding(horizontal = 20.dp)
-                    )
-                    Box(
-                        contentAlignment = Alignment.CenterStart,
-                        modifier = Modifier
-                            .padding(horizontal = 20.dp)
-                            .fillMaxWidth()
-                            .height(40.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .padding(vertical = 4.dp)
-                            .background(
-                                LocalWorkspaceColorsPalette.current.searchBackground,
-                                RoundedCornerShape(8.dp)
-                            )
-                    ) {
-                        BasicTextField(
-                            value = otpText,
-                            onValueChange = viewModel::onOtpTextChange,
-                            textStyle = TextStyle(
-                                color = LocalWorkspaceColorsPalette.current.textHeaders,
-                                fontSize = 14.sp
-                            ),
-                            keyboardOptions = KeyboardOptions(
-                                keyboardType = KeyboardType.Email
-                            ),
-                            cursorBrush = SolidColor(LocalWorkspaceColorsPalette.current.textHeaders),
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                                .padding(horizontal = 12.dp)
-                        )
-                    }
-                }
                 Button(
                     onClick = {
                         scope.launch {
@@ -266,15 +252,16 @@ fun LoginScreen(
                         containerColor = LocalWorkspaceColorsPalette.current.primary,
                         contentColor = LocalWorkspaceColorsPalette.current.onPrimary
                     ),
+                    shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.fillMaxWidth()
-                        .padding(6.dp)
+                        .padding(20.dp, 6.dp, 20.dp, 6.dp)
                 ) {
                     Text("Войти")
                 }
                 Button(
                     onClick = {
                         scope.launch {
-                            user.clearAll()
+                            viewModel.userViewModel.clearAll()
                             navController.popBackStack()
                         }
                     },
@@ -286,8 +273,9 @@ fun LoginScreen(
                         width = 1.dp,
                         color = LocalWorkspaceColorsPalette.current.indicatorRed
                     ),
+                    shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.fillMaxWidth()
-                        .padding(6.dp)
+                        .padding(20.dp, 6.dp, 20.dp, 6.dp)
                 ) {
                     Text("Выйти из организации")
                 }
@@ -307,181 +295,5 @@ fun LoginScreen(
         ) {
             CircularProgressIndicator()
         }
-    }
-}
-
-@Composable
-@OptIn(ExperimentalMaterial3Api::class)
-fun FullscreenWebViewDialog(
-    url: String,
-    onDismiss: (cookie: String) -> Unit
-) {
-    var webViewRef by remember { mutableStateOf<WebView?>(null) }
-    var capturedCookie by remember { mutableStateOf<String?>(null) }
-    Dialog(
-        onDismissRequest = { onDismiss(capturedCookie ?: "") },
-        properties = DialogProperties(
-            usePlatformDefaultWidth = false, // key for fullscreen
-            decorFitsSystemWindows = false   // optional edge-to-edge
-        )
-    ) {
-        Surface(modifier = Modifier.fillMaxSize()) {
-            Scaffold(
-                topBar = {
-                    TopAppBar(
-                        title = { Text("Web page") },
-                        navigationIcon = {
-                            IconButton(onClick = { onDismiss("") }) {
-                                Image(
-                                    painter = painterResource(R.drawable.ic_close_small),
-                                    contentDescription = "Close"
-                                )
-                            }
-                        }
-                    )
-                }
-            ) { padding ->
-                AndroidView(
-                    modifier = Modifier.fillMaxSize()
-                        .padding(padding),
-                    factory = { context ->
-                        WebView(context).apply {
-                            webViewRef = this
-                            webViewClient = LoggingWebViewClient { cookie ->
-
-                                if (capturedCookie == null) {
-                                    capturedCookie = cookie
-                                    post { destroy() }
-                                    onDismiss(cookie)
-                                }
-                            }
-                            settings.javaScriptEnabled = true
-                            settings.domStorageEnabled = true
-                            loadUrl(url)
-                        }
-                    },
-                    update = { wv ->
-                        if (wv.url != url) wv.loadUrl(url)
-                    }
-                )
-            }
-        }
-    }
-}
-
-class LoggingWebViewClient(
-    private val onSessionPathCaptured: (cookie: String) -> Unit
-) : WebViewClient() {
-    override fun shouldInterceptRequest(
-        view: WebView?,
-        request: WebResourceRequest?,
-    ): WebResourceResponse? {
-//        val url = request?.url?.toString().orEmpty()
-//        val cookie = CookieManager.getInstance().getCookie(url).orEmpty()
-//        if (cookie.contains("__Host-sessionid=") && cookie.contains("__Host-csrftoken=")) {
-//            // Pass full cookie string to caller (or parse if you want specific values)
-////            onSessionCookieCaptured(cookie)
-//            Log.d(TAG, "cookie: $cookie")
-//        }
-
-        val fullUrl = request?.url?.toString().orEmpty()
-        if (fullUrl.contains("/complete/oidc/")) {
-            onSessionPathCaptured(fullUrl)
-        }
-        return super.shouldInterceptRequest(view, request)
-    }
-    override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-        Log.d(TAG, "onPageStarted: $url")
-    }
-    override fun onPageFinished(view: WebView?, url: String?) {
-        Log.d(TAG, "onPageFinished: $url")
-    }
-    // Primary path (API 23+): request + error object
-    override fun onReceivedError(
-        view: WebView?,
-        request: WebResourceRequest?,
-        error: WebResourceError?,
-    ) {
-        // Ignore subresource failures; focus on the main document
-        if (request?.isForMainFrame != true) return
-        val code = error?.errorCode ?: -1
-        val desc = error?.description?.toString() ?: "unknown"
-        val failingUrl = request.url?.toString() ?: view?.url
-        val msg = "WebView error (main frame): code=$code desc=$desc url=$failingUrl"
-        Log.e(TAG, msg)
-    }
-    // Legacy overload — still called on some paths / older behavior
-    @Deprecated("Deprecated in Java")
-    override fun onReceivedError(
-        view: WebView?,
-        errorCode: Int,
-        description: String?,
-        failingUrl: String?,
-    ) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            // On API 23+, prefer the non-deprecated overload above
-            return
-        }
-        val msg = "WebView error (legacy): code=$errorCode desc=$description url=$failingUrl"
-        Log.e(TAG, msg)
-    }
-    override fun onReceivedHttpError(
-        view: WebView?,
-        request: WebResourceRequest?,
-        errorResponse: WebResourceResponse?,
-    ) {
-        val status = errorResponse?.statusCode ?: -1
-        val reason = errorResponse?.reasonPhrase ?: ""
-        val mime = errorResponse?.mimeType ?: ""
-        val url = request?.url?.toString()
-        val msg =
-            "HTTP error: status=$status reason=$reason mime=$mime isMain=${request?.isForMainFrame} url=$url"
-        Log.w(TAG, msg)
-    }
-    companion object {
-        private const val TAG = "WebViewClient"
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun WebViewScreen(
-    url: String,
-    onClose: () -> Unit
-) {
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Web page") },
-                navigationIcon = {
-                    IconButton(onClick = onClose) {
-//                        Icon(
-//                            imageVector = R.drawable.ic_close_small,
-//                            contentDescription = "Close"
-//                        )
-                        Image(
-                            painter = painterResource(R.drawable.ic_close_small),
-                            contentDescription = "Close"
-                        )
-                    }
-                }
-            )
-        }
-    ) { padding ->
-        AndroidView(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
-            factory = { context ->
-                WebView(context).apply {
-                    webViewClient = WebViewClient()
-                    settings.javaScriptEnabled = true // if your page needs JS
-                    loadUrl(url)
-                }
-            },
-            update = { webView ->
-                if (webView.url != url) webView.loadUrl(url)
-            }
-        )
     }
 }

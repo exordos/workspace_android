@@ -32,8 +32,6 @@ class LoginViewModel(
 
     fun onLoginChange(newText: String) {
         _loginText.value = newText
-        _needsOtp.value = false
-        _otpText.value = ""
     }
 
     private val _passwordText = MutableStateFlow("")
@@ -41,24 +39,15 @@ class LoginViewModel(
 
     fun onPasswordChange(newText: String) {
         _passwordText.value = newText
-        _needsOtp.value = false
-        _otpText.value = ""
     }
 
-    private val _needsOtp = MutableStateFlow(false)
-    val needsOtp: StateFlow<Boolean> = _needsOtp
-
-
-    private val _otpText = MutableStateFlow("")
-    val otpText: StateFlow<String> = _otpText
-
-    fun onOtpTextChange(newText: String) {
-        _otpText.value = newText
+    fun idleQueryState() {
+        _queryState.value = QueryState.Idle
     }
 
     suspend fun onLoginClick() {
         _queryState.value = QueryState.Loading
-        val response = client.performRequest(LoginRequest(loginText.value, passwordText.value, otpText.value))
+        val response = client.performRequest(LoginRequest(loginText.value, passwordText.value, null))
         when(response) {
             is ApiResult.Success -> {
                 val userResponse = response.value
@@ -68,8 +57,7 @@ class LoginViewModel(
             }
             is ApiResult.Error -> {
                 if (response.error.code == "401") {
-                    _needsOtp.value = true
-                    _queryState.value = QueryState.Idle
+                    _queryState.value = QueryState.Error("needs_otp")
                 } else {
                     _queryState.value = QueryState.Error(response.error.message ?: "Error")
                 }

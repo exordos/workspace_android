@@ -11,6 +11,7 @@ import ru.genesiscorporation.workspace.beta.modules.chatdialog.ChatDialogViewMod
 import ru.genesiscorporation.workspace.beta.modules.chatuserinfo.ChatUserInfoViewModel
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.ChooseServerViewModel
 import ru.genesiscorporation.workspace.beta.modules.login.LoginViewModel
+import ru.genesiscorporation.workspace.beta.modules.otp.OtpViewModel
 import ru.genesiscorporation.workspace.beta.modules.profile.ProfileViewModel
 import ru.genesiscorporation.workspace.beta.modules.topics.TopicsViewModel
 import ru.genesiscorporation.workspace.beta.modules.users.UsersViewModel
@@ -50,6 +51,16 @@ class LoginViewModelFactory(private val client: WorkspaceAPIClient, private val 
         if (modelClass.isAssignableFrom(LoginViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
             return LoginViewModel(client, userViewModel) as T
+        }
+        throw IllegalArgumentException("Unknown ViewModel class")
+    }
+}
+
+class OtpViewModelFactory(private val client: WorkspaceAPIClient, private val userViewModel: UserViewModel, val login: String, val password: String) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        if (modelClass.isAssignableFrom(OtpViewModel::class.java)) {
+            @Suppress("UNCHECKED_CAST")
+            return OtpViewModel(client, userViewModel, login, password) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }

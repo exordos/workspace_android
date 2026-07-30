@@ -39,6 +39,9 @@ class ChooseServerViewModel(
         when(response) {
             is ApiResult.Success -> {
                 userViewModel.addBaseUrl(serverText.value)
+                userViewModel.organizationName = response.value.realmName
+                userViewModel.organizationUrl = response.value.realmUrl
+                userViewModel.organizationImageUrl = response.value.realmIcon
                 _queryState.value = QueryState.Success
             }
             is ApiResult.Error -> {
