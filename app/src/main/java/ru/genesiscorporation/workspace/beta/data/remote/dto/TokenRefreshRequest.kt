@@ -8,19 +8,21 @@ import ru.genesiscorporation.workspace.beta.data.remote.HTTPMethod
 
 @Serializable
 data class TokenRefreshRequest(
-    val refreshToken: String
+    val refreshToken: String,
+    val scope: String? = null,
 ): ApiRequest<TokenRefreshRequestData, LoginResponse, ApiError> {
     override val method: HTTPMethod = HTTPMethod.POST
     override val requiresApiKey: Boolean = false
     override val shouldApplySuffix: Boolean = false
     override val url: String = "/api/core/v1/iam/clients/default/actions/get_token/invoke"
-    override val data = TokenRefreshRequestData("refresh_token", refreshToken)
+    override val data = TokenRefreshRequestData("refresh_token", refreshToken, scope)
 }
 
 @Serializable
 data class TokenRefreshRequestData(
     val grant_type: String,
-    val refresh_token: String
+    val refresh_token: String,
+    val scope: String? = null,
 )
 
 @Serializable

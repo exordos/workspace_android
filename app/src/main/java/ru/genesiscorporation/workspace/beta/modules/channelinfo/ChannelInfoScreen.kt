@@ -2,7 +2,6 @@ package ru.genesiscorporation.workspace.beta.modules.channelinfo
 
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,17 +12,27 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -39,6 +48,7 @@ import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import ru.genesiscorporation.workspace.beta.ui.theme.NavigationFontFamily
+import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 
 @Composable
 fun ChannelInfoScreen(
@@ -48,8 +58,45 @@ fun ChannelInfoScreen(
     val colors = LocalWorkspaceColorsPalette.current
     val stream by viewModel.stream.collectAsStateWithLifecycle()
     val members by viewModel.members.collectAsStateWithLifecycle()
+    val muteInProgress by viewModel.muteInProgress.collectAsStateWithLifecycle()
+    val actionError by viewModel.actionError.collectAsStateWithLifecycle()
+    val memberActionInProgress by viewModel.memberActionInProgress.collectAsStateWithLifecycle()
+    val memberLoadError by viewModel.memberLoadError.collectAsStateWithLifecycle()
+    val availableUsers by viewModel.availableUsers.collectAsStateWithLifecycle()
+    val leftStream by viewModel.leftStream.collectAsStateWithLifecycle()
+    val lastMemberActionResult by
+        viewModel.lastMemberActionResult.collectAsStateWithLifecycle()
     val baseUrl by viewModel.client.userViewModel.baseUrl.collectAsState()
-    val onlineCount = members.count { it.user.status != "offline" }
+    val currentUserUuid by
+        viewModel.client.userViewModel.userId.collectAsStateWithLifecycle()
+    val onlineCount = members.count {
+        it.user.status == "active" || it.user.status == "online"
+    }
+    var showAddMembers by rememberSaveable { mutableStateOf(false) }
+    var memberToRemoveUuid by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingMemberActionRequestId by rememberSaveable {
+        mutableStateOf<Long?>(null)
+    }
+    val memberToRemove = memberToRemoveUuid?.let { targetUuid ->
+        members.firstOrNull { it.user.uuid == targetUuid }
+    }
+
+    LaunchedEffect(leftStream) {
+        if (leftStream) navController.popBackStack()
+    }
+    LaunchedEffect(lastMemberActionResult, pendingMemberActionRequestId) {
+        val result = lastMemberActionResult ?: return@LaunchedEffect
+        if (result.requestId != pendingMemberActionRequestId) {
+            return@LaunchedEffect
+        }
+        pendingMemberActionRequestId = null
+        if (!result.success) return@LaunchedEffect
+        when (result.kind) {
+            MemberActionKind.ADD -> showAddMembers = false
+            MemberActionKind.REMOVE -> memberToRemoveUuid = null
+            else -> Unit
+        }
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -116,78 +163,141 @@ fun ChannelInfoScreen(
                         "Отключить уведомления"
                     },
                     onClick = viewModel::toggleMuted,
-                    modifier = Modifier.weight(1f),
-                )
-                InfoActionButton(
-                    icon = R.drawable.ic_figma_channel_settings,
-                    description = "Настройки канала",
-                    modifier = Modifier.weight(1f),
-                )
-                InfoActionButton(
-                    icon = R.drawable.ic_figma_channel_search,
-                    description = "Поиск по каналу",
+                    enabled = !muteInProgress && stream != null,
                     modifier = Modifier.weight(1f),
                 )
             }
-        }
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                ChannelInfoLink(R.drawable.ic_figma_channel_photo, "Фотографии")
-                ChannelInfoLink(R.drawable.ic_figma_channel_video, "Видео")
-                ChannelInfoLink(R.drawable.ic_figma_channel_file, "Файлы")
-                ChannelInfoLink(R.drawable.ic_figma_channel_link, "Ссылки")
-            }
-        }
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                SectionTitle("Комнаты со звонками")
-                DemoCallRoomCard(
-                    title = "Еженедельный созвон",
-                    topic = "Общий чат",
-                    duration = "24:59",
-                    members = members.take(4),
-                    baseUrl = baseUrl.orEmpty(),
-                )
-                DemoCallRoomCard(
-                    title = "Дизайн-ревью",
-                    topic = "Интерфейс",
-                    duration = "12:08",
-                    members = members.drop(1).take(4),
-                    baseUrl = baseUrl.orEmpty(),
-                )
+            if (actionError != null) {
                 Text(
-                    text = "и ещё 8 звонков",
-                    color = colors.textHeaders,
-                    fontSize = 14.sp,
+                    text = actionError.orEmpty(),
+                    color = colors.indicatorRed,
+                    fontSize = 12.sp,
                     lineHeight = 16.sp,
-                    modifier = Modifier.padding(horizontal = 8.dp),
+                    modifier = Modifier.padding(top = 8.dp, start = 8.dp, end = 8.dp),
                 )
             }
         }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp),
+                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     SectionTitle(
                         text = "Участники",
                         modifier = Modifier.weight(1f),
                     )
-                    Icon(
-                        painter = painterResource(R.drawable.ic_figma_channel_add),
-                        contentDescription = "Добавить участника",
-                        tint = colors.iconBase,
-                        modifier = Modifier.size(32.dp),
-                    )
+                    TextButton(
+                        enabled =
+                            !memberActionInProgress && memberLoadError == null,
+                        onClick = { showAddMembers = true },
+                    ) {
+                        Text("Добавить")
+                    }
+                }
+                memberLoadError?.let { error ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = error,
+                            color = colors.indicatorRed,
+                            fontSize = 12.sp,
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 8.dp),
+                        )
+                        TextButton(
+                            enabled = !memberActionInProgress,
+                            onClick = viewModel::retryMembers,
+                        ) {
+                            Text("Повторить")
+                        }
+                    }
                 }
                 members.forEach { member ->
-                    ChannelMemberCard(member, baseUrl.orEmpty())
+                    ChannelMemberCard(
+                        member = member,
+                        baseUrl = baseUrl.orEmpty(),
+                        canRemove = canRemoveChannelMember(
+                            memberUserUuid = member.user.uuid,
+                            currentUserUuid = currentUserUuid,
+                            ownerUuid = stream?.owner,
+                        ),
+                        isCurrentUser =
+                            member.user.uuid == currentUserUuid,
+                        removalInProgress = memberActionInProgress,
+                        onRemove = { memberToRemoveUuid = member.user.uuid },
+                    )
                 }
             }
         }
+    }
+
+    if (showAddMembers) {
+        AddChannelMembersDialog(
+            streamName = stream?.name.orEmpty(),
+            users = availableUsers,
+            baseUrl = baseUrl.orEmpty(),
+            busy = memberActionInProgress,
+            onDismiss = { showAddMembers = false },
+            onSubmit = { selected ->
+                if (
+                    !memberActionInProgress &&
+                    pendingMemberActionRequestId == null
+                ) {
+                    pendingMemberActionRequestId = viewModel.addMembers(selected)
+                }
+            },
+        )
+    }
+    memberToRemove?.let { member ->
+        val isCurrentUser =
+            member.user.uuid == currentUserUuid
+        AlertDialog(
+            onDismissRequest = {
+                if (!memberActionInProgress) memberToRemoveUuid = null
+            },
+            title = {
+                Text(if (isCurrentUser) "Покинуть канал?" else "Удалить участника?")
+            },
+            text = {
+                Text(
+                    if (isCurrentUser) {
+                        "Канал исчезнет из вашего списка чатов."
+                    } else {
+                        "${member.user.displayableName()} будет удалён из канала."
+                    },
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !memberActionInProgress,
+                    onClick = {
+                        if (pendingMemberActionRequestId == null) {
+                            pendingMemberActionRequestId =
+                                viewModel.removeMember(member)
+                        }
+                    },
+                ) {
+                    Text(
+                        text = if (memberActionInProgress) "Удаление…" else {
+                            if (isCurrentUser) "Покинуть" else "Удалить"
+                        },
+                        color = colors.indicatorRed,
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !memberActionInProgress,
+                    onClick = { memberToRemoveUuid = null },
+                ) {
+                    Text("Отмена")
+                }
+            },
+        )
     }
 }
 
@@ -222,8 +332,9 @@ private fun BackRow(onClick: () -> Unit) {
 private fun InfoActionButton(
     @DrawableRes icon: Int,
     description: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    onClick: () -> Unit = {},
 ) {
     val colors = LocalWorkspaceColorsPalette.current
     Box(
@@ -231,43 +342,14 @@ private fun InfoActionButton(
             .height(52.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(colors.infoCardBackground)
-            .clickable(onClick = onClick),
+            .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
             painter = painterResource(icon),
             contentDescription = description,
-            tint = colors.iconBase,
+            tint = if (enabled) colors.iconBase else colors.iconDisable,
             modifier = Modifier.size(36.dp),
-        )
-    }
-}
-
-@Composable
-private fun ChannelInfoLink(
-    @DrawableRes icon: Int,
-    title: String,
-) {
-    val colors = LocalWorkspaceColorsPalette.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(28.dp)
-            .padding(horizontal = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            painter = painterResource(icon),
-            contentDescription = null,
-            tint = colors.iconBase,
-            modifier = Modifier.size(28.dp),
-        )
-        Text(
-            text = title,
-            color = colors.textHeaders,
-            fontSize = 14.sp,
-            lineHeight = 16.sp,
-            modifier = Modifier.padding(start = 12.dp),
         )
     }
 }
@@ -288,102 +370,13 @@ private fun SectionTitle(
 }
 
 @Composable
-private fun DemoCallRoomCard(
-    title: String,
-    topic: String,
-    duration: String,
-    members: List<ChannelMember>,
-    baseUrl: String,
-) {
-    val colors = LocalWorkspaceColorsPalette.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(72.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(colors.infoCardBackground)
-            .padding(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = title,
-                    color = colors.textHeaders,
-                    fontSize = 14.sp,
-                    lineHeight = 20.sp,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Box(
-                    Modifier
-                        .padding(horizontal = 6.dp)
-                        .width(3.dp)
-                        .height(16.dp)
-                        .background(colors.indicatorYellow, RoundedCornerShape(3.dp)),
-                )
-                Text(
-                    text = "# $topic",
-                    color = colors.textAdditional50,
-                    fontSize = 14.sp,
-                    lineHeight = 20.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            OverlappingAvatars(members, baseUrl)
-        }
-        Text(
-            text = duration,
-            color = colors.textAdditional50,
-            fontSize = 12.sp,
-            lineHeight = 20.sp,
-            modifier = Modifier.padding(horizontal = 8.dp),
-        )
-        Icon(
-            painter = painterResource(R.drawable.ic_figma_channel_call),
-            contentDescription = "Звонок",
-            tint = colors.indicatorGreen,
-            modifier = Modifier.size(28.dp),
-        )
-    }
-}
-
-@Composable
-private fun OverlappingAvatars(
-    members: List<ChannelMember>,
-    baseUrl: String,
-) {
-    val colors = LocalWorkspaceColorsPalette.current
-    Row(horizontalArrangement = Arrangement.spacedBy((-7).dp)) {
-        members.forEach { member ->
-            Box(
-                modifier = Modifier
-                    .size(30.dp)
-                    .border(1.dp, colors.infoCardBackground, CircleShape)
-                    .padding(1.dp),
-            ) {
-                Avatar(
-                    avatarUrn = member.user.avatar,
-                    baseUrl = baseUrl,
-                    color = null,
-                    name = member.user.displayableName(),
-                    size = 28,
-                    hasPadding = false,
-                )
-            }
-        }
-    }
-}
-
-@Composable
 private fun ChannelMemberCard(
     member: ChannelMember,
     baseUrl: String,
+    canRemove: Boolean,
+    isCurrentUser: Boolean,
+    removalInProgress: Boolean,
+    onRemove: () -> Unit,
 ) {
     val colors = LocalWorkspaceColorsPalette.current
     Row(
@@ -435,7 +428,155 @@ private fun ChannelMemberCard(
         } else {
             Spacer(Modifier.size(1.dp))
         }
+        if (canRemove) {
+            TextButton(
+                enabled = !removalInProgress,
+                onClick = onRemove,
+            ) {
+                Text(
+                    text = if (isCurrentUser) {
+                        "Выйти"
+                    } else {
+                        "Удалить"
+                    },
+                    color = colors.indicatorRed,
+                    fontSize = 12.sp,
+                )
+            }
+        }
     }
+}
+
+@Composable
+private fun AddChannelMembersDialog(
+    streamName: String,
+    users: List<UserResponseData>,
+    baseUrl: String,
+    busy: Boolean,
+    onDismiss: () -> Unit,
+    onSubmit: (Set<String>) -> Unit,
+) {
+    var query by rememberSaveable { mutableStateOf("") }
+    var selectedUserUuids by rememberSaveable {
+        mutableStateOf(emptyList<String>())
+    }
+    val colors = LocalWorkspaceColorsPalette.current
+    val visibleUsers = remember(users, query) {
+        val normalizedQuery = query.trim()
+        if (normalizedQuery.isEmpty()) {
+            users
+        } else {
+            users.filter { user ->
+                user.displayableName().contains(normalizedQuery, ignoreCase = true) ||
+                    user.email?.contains(normalizedQuery, ignoreCase = true) == true ||
+                    user.username.contains(normalizedQuery, ignoreCase = true)
+            }
+        }
+    }
+    AlertDialog(
+        onDismissRequest = {
+            if (!busy) onDismiss()
+        },
+        title = {
+            Text(
+                text = "Добавить в «$streamName»",
+                color = colors.textHeaders,
+            )
+        },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    enabled = !busy,
+                    singleLine = true,
+                    label = { Text("Поиск") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (visibleUsers.isEmpty()) {
+                    Text(
+                        text = if (users.isEmpty()) {
+                            "Все доступные пользователи уже в канале"
+                        } else {
+                            "Ничего не найдено"
+                        },
+                        color = colors.textAdditional50,
+                        modifier = Modifier.padding(top = 16.dp),
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.heightIn(max = 320.dp),
+                    ) {
+                        items(
+                            items = visibleUsers,
+                            key = { it.uuid },
+                        ) { user ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable(enabled = !busy) {
+                                        selectedUserUuids = if (
+                                            user.uuid in selectedUserUuids
+                                        ) {
+                                            selectedUserUuids - user.uuid
+                                        } else {
+                                            selectedUserUuids + user.uuid
+                                        }
+                                    }
+                                    .padding(vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Checkbox(
+                                    checked = user.uuid in selectedUserUuids,
+                                    onCheckedChange = null,
+                                    enabled = !busy,
+                                )
+                                Avatar(
+                                    avatarUrn = user.avatar,
+                                    baseUrl = baseUrl,
+                                    color = null,
+                                    name = user.displayableName(),
+                                    size = 32,
+                                    hasPadding = false,
+                                )
+                                Text(
+                                    text = user.displayableName(),
+                                    color = colors.textHeaders,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(start = 10.dp),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = selectedUserUuids.isNotEmpty() && !busy,
+                onClick = { onSubmit(selectedUserUuids.toSet()) },
+            ) {
+                Text(
+                    if (busy) {
+                        "Добавление…"
+                    } else {
+                        "Добавить (${selectedUserUuids.size})"
+                    },
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(
+                enabled = !busy,
+                onClick = onDismiss,
+            ) {
+                Text("Отмена")
+            }
+        },
+    )
 }
 
 private fun roleLabel(role: String): String = when (role) {
@@ -447,8 +588,8 @@ private fun roleLabel(role: String): String = when (role) {
 }
 
 private fun presenceLabel(status: String): String = when (status) {
-    "active" -> "В сети"
+    "active", "online" -> "В сети"
     "idle" -> "Нет на месте"
-    "dnd" -> "Не беспокоить"
+    "dnd", "do_not_disturb" -> "Не беспокоить"
     else -> "Не в сети"
 }

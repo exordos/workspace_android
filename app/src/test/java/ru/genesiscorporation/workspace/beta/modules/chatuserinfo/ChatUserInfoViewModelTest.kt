@@ -24,7 +24,7 @@ class ChatUserInfoViewModelTest {
     }
 
     @Test
-    fun `public channels provide the design mock when membership data is absent`() {
+    fun `channels are not fabricated when membership data is absent`() {
         val streams = listOf(
             stream("public", private = false),
             stream("direct", private = true),
@@ -32,7 +32,7 @@ class ChatUserInfoViewModelTest {
 
         val result = resolveSharedChannels("selected", streams, emptyList())
 
-        assertEquals(listOf("public"), result.map(Stream::uuid))
+        assertTrue(result.isEmpty())
     }
 
     @Test

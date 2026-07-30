@@ -3,40 +3,41 @@ package ru.genesiscorporation.workspace.beta.modules.login
 internal object LoginErrorClassifier {
     private val otpChallengePattern =
         Regex("""\b(?:otp|totp|one[-\s]?time|2fa|mfa)\b""", RegexOption.IGNORE_CASE)
-    private val invalidClientPattern =
-        Regex(
-            """"(?:message|detail|description|error_description|error|msg)"\s*:\s*"invalid_client"""",
-            RegexOption.IGNORE_CASE,
-        )
 
     fun isOtpChallenge(
-        statusCode: String,
-        responseBody: String,
+        httpStatus: Int?,
+        errorCode: String,
+        safeMessage: String,
         otpProvided: Boolean,
     ): Boolean {
-        if (statusCode != "401" || otpProvided) {
+        if (otpProvided || httpStatus !in setOf(400, 401, 403)) {
             return false
         }
-        return otpChallengePattern.containsMatchIn(responseBody) ||
-            invalidClientPattern.containsMatchIn(responseBody)
+        return otpChallengePattern.containsMatchIn(errorCode) ||
+            otpChallengePattern.containsMatchIn(safeMessage) ||
+            (httpStatus == 401 && errorCode.equals("invalid_client", ignoreCase = true))
     }
 
     fun publicMessage(
-        statusCode: String,
-        responseBody: String,
+        httpStatus: Int?,
+        errorCode: String,
+        safeMessage: String,
         otpProvided: Boolean,
     ): String =
         when {
-            statusCode == "REQUEST_FAILED" ->
+            errorCode == "REQUEST_FAILED" ->
                 "Не удалось подключиться к серверу. Проверьте соединение"
 
-            statusCode == "401" && otpProvided ->
+            otpProvided && (
+                otpChallengePattern.containsMatchIn(errorCode) ||
+                    otpChallengePattern.containsMatchIn(safeMessage)
+                ) ->
                 "Неверный код OTP. Проверьте код в приложении-аутентификаторе"
 
-            statusCode == "401" ->
+            httpStatus == 401 ->
                 "Неверное имя пользователя или пароль"
 
-            responseBody.contains("timeout", ignoreCase = true) ->
+            safeMessage.contains("timeout", ignoreCase = true) ->
                 "Сервер не ответил вовремя. Попробуйте ещё раз"
 
             else ->

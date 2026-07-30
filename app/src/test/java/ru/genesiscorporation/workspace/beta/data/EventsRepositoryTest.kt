@@ -5,6 +5,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponsePayload
+import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
+import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 
 class EventsRepositoryTest {
@@ -31,6 +33,39 @@ class EventsRepositoryTest {
             repository.streamTopicMessages.value[TOPIC_KEY]
                 ?.map { it.payload.content }
                 ?.toSet(),
+        )
+    }
+
+    @Test
+    fun `an older history page cannot roll back a newer realtime edit`() {
+        val repository = EventsRepository()
+        val realtimeMessage = message(
+            uuid = MESSAGE_UUID,
+            content = "new realtime content",
+        ).copy(updatedAt = "2026-07-30T10:00:02Z")
+        val stalePageMessage = message(
+            uuid = MESSAGE_UUID,
+            content = "old page content",
+        ).copy(updatedAt = "2026-07-30T10:00:01Z")
+
+        repository.addStreamTopicMessages(
+            STREAM_UUID,
+            TOPIC_UUID,
+            listOf(realtimeMessage),
+        )
+        repository.addStreamTopicMessages(
+            STREAM_UUID,
+            TOPIC_UUID,
+            listOf(stalePageMessage),
+        )
+
+        assertEquals(
+            "new realtime content",
+            repository.streamTopicMessages.value
+                .getValue(TOPIC_KEY)
+                .single()
+                .payload
+                .content,
         )
     }
 
@@ -85,6 +120,212 @@ class EventsRepositoryTest {
 
         repository.processTextFrame(reactionEvent(epoch = 3, action = "deleted"))
         assertTrue(repository.userReactions.value.isEmpty())
+    }
+
+    @Test
+    fun `deleted message event removes the message from all projections`() {
+        val repository = EventsRepository()
+        val deletedMessage = message(uuid = MESSAGE_UUID, content = "gone")
+        repository.setInitialStreams(
+            listOf(
+                stream(
+                    defaultTopicUuid = TOPIC_UUID,
+                    notificationMode = "all_messages",
+                ).copy(
+                    lastMessageUuid = MESSAGE_UUID,
+                    lastMessage = deletedMessage,
+                ),
+            ),
+        )
+        repository.addStreamTopics(
+            STREAM_UUID,
+            listOf(
+                topic(
+                    lastMessageUuid = MESSAGE_UUID,
+                    lastMessage = deletedMessage,
+                ),
+            ),
+        )
+        repository.processTextFrame(
+            messageEvent(epoch = 1, action = "created", content = "gone"),
+        )
+
+        repository.processTextFrame(
+            deletedEvent(epoch = 2, objectType = "message", uuid = MESSAGE_UUID),
+        )
+
+        assertTrue(repository.messagesPool.value.isEmpty())
+        assertTrue(repository.streamTopicMessages.value[TOPIC_KEY].orEmpty().isEmpty())
+        assertEquals(null, repository.streams.value.single().lastMessageUuid)
+        assertEquals(
+            null,
+            repository.streamTopics.value
+                .getValue(STREAM_UUID)
+                .single()
+                .lastMessageUuid,
+        )
+    }
+
+    @Test
+    fun `deleted stream event removes its topics messages and folder items`() {
+        val repository = EventsRepository()
+        repository.addStreamTopics(
+            STREAM_UUID,
+            listOf(
+                TopicsResponseData(
+                    uuid = TOPIC_UUID,
+                    name = "Topic",
+                    color = 0,
+                    streamUuid = STREAM_UUID,
+                    updatedAt = "2026-07-26T00:00:00Z",
+                    unreadCount = 0,
+                    isDone = false,
+                    isDefault = true,
+                ),
+            ),
+        )
+        repository.addStreamTopicMessages(
+            STREAM_UUID,
+            TOPIC_UUID,
+            listOf(message(uuid = MESSAGE_UUID, content = "gone")),
+        )
+
+        repository.processTextFrame(
+            deletedEvent(epoch = 2, objectType = "stream", uuid = STREAM_UUID),
+        )
+
+        assertTrue(repository.streamTopics.value[STREAM_UUID].isNullOrEmpty())
+        assertTrue(repository.streamTopicMessages.value[TOPIC_KEY].isNullOrEmpty())
+    }
+
+    @Test
+    fun `topic update uses the matching realtime message as its preview`() {
+        val repository = EventsRepository()
+        val oldMessage = message(uuid = "old-message", content = "old")
+        val newMessage = message(uuid = "new-message", content = "new")
+        repository.addStreamTopics(
+            STREAM_UUID,
+            listOf(topic(lastMessageUuid = oldMessage.uuid, lastMessage = oldMessage)),
+        )
+        repository.updateMessagesPool(listOf(newMessage))
+
+        repository.updateTopic(
+            topic(lastMessageUuid = newMessage.uuid),
+        )
+
+        val updated = repository.streamTopics.value.getValue(STREAM_UUID).single()
+        assertEquals(newMessage.uuid, updated.lastMessageUuid)
+        assertEquals(newMessage.uuid, updated.lastMessage?.uuid)
+        assertEquals("new", updated.lastMessage?.payload?.content)
+    }
+
+    @Test
+    fun `topic update clears a stale preview when the new message is not loaded`() {
+        val repository = EventsRepository()
+        val oldMessage = message(uuid = "old-message", content = "old")
+        repository.addStreamTopics(
+            STREAM_UUID,
+            listOf(topic(lastMessageUuid = oldMessage.uuid, lastMessage = oldMessage)),
+        )
+
+        repository.updateTopic(
+            topic(lastMessageUuid = "not-loaded"),
+        )
+
+        val updated = repository.streamTopics.value.getValue(STREAM_UUID).single()
+        assertEquals("not-loaded", updated.lastMessageUuid)
+        assertEquals(null, updated.lastMessage)
+    }
+
+    @Test
+    fun `older topic snapshots do not roll back a newer realtime projection`() {
+        val repository = EventsRepository()
+        repository.addStreamTopics(
+            STREAM_UUID,
+            listOf(
+                topic(
+                    lastMessageUuid = null,
+                    name = "Realtime",
+                    updatedAt = "2026-07-26T00:00:02Z",
+                ),
+            ),
+        )
+
+        repository.addStreamTopics(
+            STREAM_UUID,
+            listOf(
+                topic(
+                    lastMessageUuid = null,
+                    name = "Stale snapshot",
+                    updatedAt = "2026-07-26T00:00:01Z",
+                ),
+            ),
+        )
+
+        assertEquals(
+            "Realtime",
+            repository.streamTopics.value.getValue(STREAM_UUID).single().name,
+        )
+    }
+
+    @Test
+    fun `api and realtime stream creation upsert instead of duplicating rows`() {
+        val repository = EventsRepository()
+        val original = stream(defaultTopicUuid = "default-topic", notificationMode = "all_messages")
+        repository.addStream(original)
+        repository.addStream(original.copy(name = "Updated"))
+
+        assertEquals(1, repository.streams.value.size)
+        assertEquals("Updated", repository.streams.value.single().name)
+
+        repository.updateStream(
+            original.copy(
+                notificationMode = "muted",
+                defaultTopicUuid = null,
+            ),
+        )
+        assertEquals("muted", repository.streams.value.single().notificationMode)
+        assertEquals(
+            "default-topic",
+            repository.streams.value.single().defaultTopicUuid,
+        )
+    }
+
+    @Test
+    fun `authoritative all-topic snapshot removes stale rows and records empty streams`() {
+        val repository = EventsRepository()
+        repository.addStreamTopics(
+            STREAM_UUID,
+            listOf(topic(lastMessageUuid = null, name = "Stale")),
+        )
+        val anotherStreamUuid = "stream-2"
+        val currentTopic = TopicsResponseData(
+            uuid = "topic-2",
+            name = "Current",
+            streamUuid = anotherStreamUuid,
+            updatedAt = "2026-07-30T10:00:00Z",
+            unreadCount = 2,
+            isDone = false,
+            isDefault = true,
+        )
+
+        repository.replaceAllStreamTopics(
+            streamUuids = setOf(STREAM_UUID, anotherStreamUuid),
+            topics = listOf(
+                currentTopic,
+                currentTopic.copy(
+                    uuid = "foreign-topic",
+                    streamUuid = "not-visible",
+                ),
+            ),
+        )
+
+        assertEquals(emptyList<TopicsResponseData>(), repository.streamTopics.value[STREAM_UUID])
+        assertEquals(
+            listOf("topic-2"),
+            repository.streamTopics.value[anotherStreamUuid]?.map { it.uuid },
+        )
+        assertTrue("not-visible" !in repository.streamTopics.value)
     }
 
     private fun messageEvent(
@@ -145,6 +386,19 @@ class EventsRepositoryTest {
         """.trimIndent()
     }
 
+    private fun deletedEvent(epoch: Int, objectType: String, uuid: String): String = """
+        {
+          "schema_version": 1,
+          "epoch_version": $epoch,
+          "object_type": "$objectType",
+          "action": "deleted",
+          "payload": {
+            "kind": "$objectType.deleted",
+            "uuid": "$uuid"
+          }
+        }
+    """.trimIndent()
+
     private fun message(uuid: String, content: String) = MessageResponse(
         uuid = uuid,
         updatedAt = "2026-07-26T00:00:00Z",
@@ -156,6 +410,37 @@ class EventsRepositoryTest {
         payload = MessageResponsePayload(kind = "markdown", content = content),
         isOwn = false,
         reactions = emptyMap(),
+    )
+
+    private fun topic(
+        lastMessageUuid: String?,
+        lastMessage: MessageResponse? = null,
+        name: String = "Topic",
+        updatedAt: String = "2026-07-26T00:00:00Z",
+    ) = TopicsResponseData(
+        uuid = TOPIC_UUID,
+        name = name,
+        color = 0,
+        streamUuid = STREAM_UUID,
+        updatedAt = updatedAt,
+        unreadCount = 0,
+        isDone = false,
+        isDefault = true,
+        lastMessageUuid = lastMessageUuid,
+        lastMessage = lastMessage,
+    )
+
+    private fun stream(
+        defaultTopicUuid: String?,
+        notificationMode: String,
+    ) = Stream(
+        uuid = STREAM_UUID,
+        unreadCount = 0,
+        updatedAt = "2026-07-26T00:00:00Z",
+        name = "Stream",
+        isPrivate = false,
+        notificationMode = notificationMode,
+        defaultTopicUuid = defaultTopicUuid,
     )
 
     companion object {

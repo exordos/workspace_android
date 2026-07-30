@@ -17,7 +17,12 @@ data class LoginRequest(
     override val shouldApplySuffix: Boolean = false
     override val url: String = "/api/core/v1/iam/clients/default/actions/get_token/invoke"
     override val data = LoginRequestData(
-        username, password, "login+password", "openid email profile project:fe02e55d-4548-4b3e-a175-fcae928f41b2", "3600", "172800"
+        username,
+        password,
+        "login+password",
+        "openid email profile",
+        "3600",
+        "172800",
     )
 
     override val additionalHeaders: Map<String, String> =
@@ -38,8 +43,11 @@ data class LoginRequestData(
     val refresh_ttl: String
 )
 
+fun workspaceProjectScope(projectId: String): String =
+    "openid email profile project:${projectId.trim()}"
+
 @Serializable
 data class LoginResponse(
     @SerialName("access_token") val accessToken: String,
-    @SerialName("refresh_token") val refreshToken: String
+    @SerialName("refresh_token") val refreshToken: String? = null,
 )

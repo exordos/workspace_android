@@ -29,6 +29,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,6 +45,7 @@ import androidx.compose.ui.window.DialogProperties
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import ru.genesiscorporation.workspace.beta.ui.Avatar
+import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 
 @Composable
 fun UsersScreen(
@@ -52,8 +54,9 @@ fun UsersScreen(
     onDismiss: () -> Unit
 ) {
     val users by viewModel.users.collectAsState()
+    val state by viewModel.state.collectAsState()
 
-    var searchQuery by remember { mutableStateOf("") }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
 
     val filteredUsers = remember(searchQuery, users) {
         if (searchQuery.isBlank()) {
@@ -79,24 +82,39 @@ fun UsersScreen(
                         .align(Alignment.TopEnd)
                         .padding(8.dp)
                 ) {
-                    Text("Close")
+                    Text("Закрыть")
                 }
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(top = 56.dp)
                 ) {
-                    if (users.isEmpty()) {
-                        Box(
+                    when (val currentState = state) {
+                        QueryState.Idle, QueryState.Loading -> Box(
                             modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            CircularProgressIndicator()
+                        }
+
+                        is QueryState.Error -> Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
                         ) {
                             Text(
-                                text = "Loading"
+                                text = currentState.message,
+                                color = LocalWorkspaceColorsPalette.current.indicatorRed,
                             )
+                            TextButton(onClick = viewModel::retry) {
+                                Text("Повторить")
+                            }
                         }
-                    } else {
-                        Box(
+
+                        QueryState.Success -> {
+                            Box(
                             contentAlignment = Alignment.CenterStart,
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -131,14 +149,31 @@ fun UsersScreen(
                             )
                         }
                         Spacer(modifier = Modifier.height(8.dp))
-                        LazyColumn(
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(16.dp)
-                        ) {
-                            items(items = filteredUsers) { item ->
-                                UserCell(item, onUserSelected, viewModel)
+                            if (filteredUsers.isEmpty()) {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        text = if (searchQuery.isBlank()) {
+                                            "Нет доступных пользователей"
+                                        } else {
+                                            "Ничего не найдено"
+                                        },
+                                        color = LocalWorkspaceColorsPalette.current.textAdditional50,
+                                    )
+                                }
+                            } else {
+                                LazyColumn(
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(16.dp),
+                                ) {
+                                    items(items = filteredUsers) { item ->
+                                        UserCell(item, onUserSelected, viewModel)
+                                    }
+                                }
                             }
                         }
                     }

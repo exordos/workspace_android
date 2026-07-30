@@ -2,7 +2,7 @@ package ru.genesiscorporation.workspace.beta.modules.chatdialog
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -26,10 +27,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
@@ -38,10 +41,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
-import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
+import ru.genesiscorporation.workspace.beta.data.remote.dto.parseCanonicalMessageUuid
 import ru.genesiscorporation.workspace.beta.modules.chatchannels.formatMessageTime
 import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.EnhancedMarkdown
@@ -54,7 +57,8 @@ fun TextMessageView(
     navController: NavHostController,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
+    val deletingMessages by
+        viewModel.deletingMessageUuids.collectAsStateWithLifecycle()
     val colors = LocalWorkspaceColorsPalette.current
 
     MessageRow(
@@ -70,10 +74,17 @@ fun TextMessageView(
                         if (item.isOwn) colors.messageOwnBackground else colors.messageBackground,
                         messageBubbleShape(item.isOwn),
                     )
-                    .combinedClickable(
-                        onClick = {},
-                        onLongClick = { menuExpanded = true },
-                    )
+                    .pointerInput(item.uuid) {
+                        detectTapGestures(
+                            onLongPress = { menuExpanded = true },
+                        )
+                    }
+                    .semantics {
+                        onLongClick(label = "Действия с сообщением") {
+                            menuExpanded = true
+                            true
+                        }
+                    }
                     .padding(horizontal = 10.dp, vertical = 8.dp),
             ) {
                 MessageHeader(item, viewModel)
@@ -94,15 +105,24 @@ fun TextMessageView(
                 item = item,
                 onDismiss = { menuExpanded = false },
                 onReaction = { emoji ->
-                    scope.launch { viewModel.onReactionTap(item.uuid, emoji) }
+                    viewModel.onMessageReactionTap(item.uuid, emoji)
                     menuExpanded = false
                 },
                 onEdit = {
                     viewModel.onEditMessageClicked(item)
                     menuExpanded = false
                 },
+                isDeleting = item.uuid in deletingMessages,
+                onDelete = {
+                    viewModel.deleteMessage(item)
+                    menuExpanded = false
+                },
                 onQuote = {
                     viewModel.onQuoteMessageClicked(item)
+                    menuExpanded = false
+                },
+                onForward = {
+                    viewModel.beginForward(item)
                     menuExpanded = false
                 },
             )
@@ -174,7 +194,7 @@ internal fun MessageHeader(
     ) {
         Text(
             text = item.user?.displayableName() ?: if (item.isOwn) "Я" else "Собеседник",
-            color = messageAccent(item.authorUuid, item.isOwn),
+            color = messageAccent(item.authorUuid, item.isOwn, colors),
             fontSize = 12.sp,
             lineHeight = 16.sp,
             fontWeight = FontWeight.SemiBold,
@@ -186,11 +206,14 @@ internal fun MessageHeader(
                     .padding(horizontal = 8.dp)
                     .width(3.dp)
                     .size(width = 3.dp, height = 18.dp)
-                    .background(messageAccent(item.topicUuid, false), RoundedCornerShape(4.dp)),
+                    .background(
+                        messageAccent(item.topicUuid, false, colors),
+                        RoundedCornerShape(4.dp),
+                    ),
             )
             Text(
                 text = "# $topic",
-                color = colors.textAdditional50,
+                color = colors.messageSecondaryText,
                 fontSize = 12.sp,
                 lineHeight = 16.sp,
                 maxLines = 1,
@@ -227,14 +250,18 @@ internal fun MessageFooter(item: MessageResponse) {
 }
 
 @Composable
-private fun MessageActionsMenu(
+internal fun MessageActionsMenu(
     expanded: Boolean,
     item: MessageResponse,
     onDismiss: () -> Unit,
     onReaction: (String) -> Unit,
     onEdit: () -> Unit,
+    isDeleting: Boolean,
+    onDelete: () -> Unit,
     onQuote: () -> Unit,
+    onForward: () -> Unit,
 ) {
+    var confirmDelete by remember(item.uuid) { mutableStateOf(false) }
     DropdownMenu(
         expanded = expanded,
         onDismissRequest = onDismiss,
@@ -248,26 +275,82 @@ private fun MessageActionsMenu(
             listOf("👍", "❤️", "😂", "😮", "😢").forEach { emoji ->
                 TextButton(
                     onClick = { onReaction(emoji) },
+                    enabled = !isDeleting,
                     contentPadding = PaddingValues(0.dp),
-                    modifier = Modifier.size(40.dp),
+                    modifier = Modifier.size(44.dp),
                 ) {
                     Text(text = emoji, fontSize = 20.sp)
                 }
             }
         }
         HorizontalDivider()
-        if (item.isOwn) {
+        if (canMutateNativeMessage(item)) {
             DropdownMenuItem(
                 text = { Text("Редактировать") },
                 onClick = onEdit,
+                enabled = !isDeleting,
+            )
+            DropdownMenuItem(
+                text = {
+                    Text(if (isDeleting) "Удаляется…" else "Удалить")
+                },
+                onClick = {
+                    onDismiss()
+                    confirmDelete = true
+                },
+                enabled = !isDeleting,
             )
         }
         DropdownMenuItem(
             text = { Text("Цитировать") },
             onClick = onQuote,
+            enabled = !isDeleting,
+        )
+        if (canForwardMessage(item)) {
+            DropdownMenuItem(
+                text = { Text("Переслать") },
+                onClick = onForward,
+                enabled = !isDeleting,
+            )
+        }
+    }
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Удалить сообщение?") },
+            text = {
+                Text(
+                    "Сообщение исчезнет у всех участников. " +
+                        "Это действие нельзя отменить.",
+                )
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = false }) {
+                    Text("Отмена")
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmDelete = false
+                        onDelete()
+                    },
+                    enabled = !isDeleting,
+                ) {
+                    Text("Удалить")
+                }
+            },
         )
     }
 }
+
+internal fun canMutateNativeMessage(item: MessageResponse): Boolean =
+        item.isOwn &&
+        item.provider == null &&
+        parseCanonicalMessageUuid(item.uuid) != null
+
+internal fun canDeleteMessage(item: MessageResponse): Boolean =
+    canMutateNativeMessage(item)
 
 internal fun messageBubbleShape(isOwn: Boolean): RoundedCornerShape =
     if (isOwn) {
@@ -286,14 +369,18 @@ internal fun messageBubbleShape(isOwn: Boolean): RoundedCornerShape =
         )
     }
 
-internal fun messageAccent(seed: String, own: Boolean): Color {
-    if (own) return Color(0xFFFF7A00)
+internal fun messageAccent(
+    seed: String,
+    own: Boolean,
+    colors: ru.genesiscorporation.workspace.beta.ui.theme.WorkspaceColorsPalette,
+): Color {
+    if (own) return colors.messageOwnAccent
     val accents = listOf(
-        Color(0xFFFFCC00),
-        Color(0xFFF458D2),
-        Color(0xFF9A7BFF),
-        Color(0xFF26C073),
-        Color(0xFF51ABFF),
+        colors.messageAccentYellow,
+        colors.messageAccentPink,
+        colors.messageAccentPurple,
+        colors.messageAccentGreen,
+        colors.messageAccentBlue,
     )
     return accents[(seed.hashCode() and Int.MAX_VALUE) % accents.size]
 }

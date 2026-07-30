@@ -1,7 +1,6 @@
 package ru.genesiscorporation.workspace.beta.modules.channelinfo
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamBindingResponseData
@@ -25,20 +24,18 @@ class ChannelInfoViewModelTest {
 
         assertEquals(listOf("owner", "member"), result.map { it.user.uuid })
         assertEquals("owner", result.first().role)
-        assertTrue(result.none(ChannelMember::isMockMembership))
+        assertEquals("stream-owner", result.first().bindingUuid)
     }
 
     @Test
-    fun `users become explicitly mock memberships when bindings are unavailable`() {
+    fun `users are not fabricated as members when bindings are absent`() {
         val result = resolveChannelMembers(
             streamUuid = "stream",
             bindings = emptyList(),
             users = listOf(user("first", "Анна"), user("second", "Борис")),
         )
 
-        assertEquals(2, result.size)
-        assertEquals("owner", result.first().role)
-        assertTrue(result.all(ChannelMember::isMockMembership))
+        assertTrue(result.isEmpty())
     }
 
     @Test
@@ -50,6 +47,32 @@ class ChannelInfoViewModelTest {
         )
 
         assertTrue(result.isEmpty())
+    }
+
+    @Test
+    fun `members can leave while only the stream owner can remove others`() {
+        assertTrue(
+            canRemoveChannelMember(
+                memberUserUuid = "current",
+                currentUserUuid = "current",
+                ownerUuid = "owner",
+            ),
+        )
+        assertTrue(
+            canRemoveChannelMember(
+                memberUserUuid = "member",
+                currentUserUuid = "owner",
+                ownerUuid = "owner",
+            ),
+        )
+        assertEquals(
+            false,
+            canRemoveChannelMember(
+                memberUserUuid = "other",
+                currentUserUuid = "member",
+                ownerUuid = "owner",
+            ),
+        )
     }
 
     private fun user(uuid: String, name: String) = UserResponseData(

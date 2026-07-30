@@ -20,8 +20,10 @@ data class FolderResponseData(
     val uuid: String,
     var title: String,
     @SerialName("unread_count") var unreadCount: Int,
-    @SerialName("system_type") val systemType: String,
+    @SerialName("system_type") val systemType: String? = null,
     @SerialName("created_at") val creationDate: String,
+    @SerialName("background_color_value")
+    val backgroundColorValue: Long? = null,
     @SerialName("folder_items") var items: List<FolderItem> = emptyList()
 
 )
@@ -29,7 +31,11 @@ data class FolderResponseData(
 @Serializable
 data class FolderItem(
     val uuid: String,
+    @SerialName("folder_uuid") val folderUuid: String? = null,
+    val folder: String? = null,
     @SerialName("stream_uuid") val streamUuid: String,
     @SerialName("chat_type") val chatType: String,
     @SerialName("unread_count") var unreadCount: Int,
+    @SerialName("order_index") val orderIndex: Int? = null,
+    @SerialName("pinned_at") val pinnedAt: String? = null,
 )

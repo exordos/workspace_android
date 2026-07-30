@@ -12,7 +12,7 @@ data class SendMessageRequest(
     val streamUuid: String,
     val topicUuid: String?,
     val content: String
-): ApiRequest<SendMessageRequestData, SendMessageResponse, ApiError> {
+): ApiRequest<SendMessageRequestData, MessageResponse, ApiError> {
     override val method: HTTPMethod = HTTPMethod.POST
     override val requiresApiKey: Boolean = true
     override val url: String = "/api/workspace/v1/messenger/messages/"
@@ -27,7 +27,7 @@ data class SendMessageRequest(
 data class SendDirectMessageRequest(
     val streamUuid: String,
     val content: String
-): ApiRequest<SendDirectMessageRequestData, SendMessageResponse, ApiError> {
+): ApiRequest<SendDirectMessageRequestData, MessageResponse, ApiError> {
     override val method: HTTPMethod = HTTPMethod.POST
     override val requiresApiKey: Boolean = true
     override val url: String = "/api/workspace/v1/messenger/messages/"
@@ -49,9 +49,4 @@ data class SendMessageRequestData(
     @SerialName("stream_uuid") val streamUuid: String,
     @SerialName("topic_uuid") val topicUuid: String?,
     val payload: MessageResponsePayload
-)
-@Serializable
-data class SendMessageResponse(
-    val uuid: String,
-    @SerialName("topic_uuid") val topicUuid: String
 )

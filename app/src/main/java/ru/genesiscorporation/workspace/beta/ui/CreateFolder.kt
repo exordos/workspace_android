@@ -18,7 +18,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,9 +35,12 @@ import java.net.URL
 @Composable
 fun CreateFolder(
     onCreateButtonTap: (String) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    initialName: String = "",
+    title: String = "Создать папку",
+    submitLabel: String = "Создать",
 ) {
-    var folderName by remember { mutableStateOf("") }
+    var folderName by rememberSaveable { mutableStateOf(initialName) }
     Column(
         modifier = Modifier
             .padding(16.dp)
@@ -51,7 +54,7 @@ fun CreateFolder(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                "Создать папку",
+                title,
                 color = LocalWorkspaceColorsPalette.current.textHeaders,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(horizontal = 5.dp, vertical = 12.dp)
@@ -87,10 +90,9 @@ fun CreateFolder(
             }
             Button(
                 onClick = {
-                    if (!folderName.isEmpty()) {
-                        onCreateButtonTap(folderName)
-                    }
+                    onCreateButtonTap(folderName.trim())
                 },
+                enabled = folderName.isNotBlank(),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Color.Transparent,
                     contentColor = LocalWorkspaceColorsPalette.current.indicatorGreen
@@ -98,7 +100,7 @@ fun CreateFolder(
                 modifier = Modifier
                     .padding(6.dp)
             ) {
-                Text("Создать")
+                Text(submitLabel)
             }
         }
     }

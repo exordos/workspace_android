@@ -7,6 +7,8 @@ import ru.genesiscorporation.workspace.beta.UserViewModel
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ServerSettingsRequest
+import java.net.URI
+import kotlinx.coroutines.CancellationException
 
 sealed interface QueryState {
     object Idle : QueryState
@@ -39,9 +41,11 @@ class ChooseServerViewModel(
     }
 
     suspend fun getServerSettings() {
-        val normalizedServer = ensureHttpsPrefix(_serverText.value)
-        if (normalizedServer.isBlank()) {
-            _queryState.value = QueryState.Error("Введите адрес организации")
+        val normalizedServer = normalizeWorkspaceServerUrl(_serverText.value)
+        if (normalizedServer == null) {
+            _queryState.value = QueryState.Error(
+                "Введите корректный HTTPS-адрес организации",
+            )
             return
         }
         _serverText.value = normalizedServer
@@ -49,8 +53,16 @@ class ChooseServerViewModel(
         val response = client.performRequest(ServerSettingsRequest(baseUrl = normalizedServer))
         when(response) {
             is ApiResult.Success -> {
-                userViewModel.addBaseUrl(normalizedServer)
-                _queryState.value = QueryState.Success
+                try {
+                    userViewModel.addBaseUrlAndWait(normalizedServer)
+                    _queryState.value = QueryState.Success
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (exception: Exception) {
+                    _queryState.value = QueryState.Error(
+                        "Не удалось сохранить организацию на устройстве",
+                    )
+                }
             }
             is ApiResult.Error -> {
                 _queryState.value = QueryState.Error("Не удалось подключиться. Проверьте адрес сервера")
@@ -58,13 +70,30 @@ class ChooseServerViewModel(
         }
     }
 
-    private fun ensureHttpsPrefix(input: String): String {
-        val trimmed = input.trim()
+}
 
-        return when {
-            trimmed.isBlank() -> ""
-            trimmed.startsWith("https://", ignoreCase = true) -> trimmed
-            else -> "https://$trimmed"
-        }
+internal fun normalizeWorkspaceServerUrl(input: String): String? {
+    val trimmed = input.trim().trimEnd('/')
+    if (trimmed.isBlank()) return null
+    val candidate = if ("://" in trimmed) trimmed else "https://$trimmed"
+    val uri = runCatching { URI(candidate) }.getOrNull() ?: return null
+    if (
+        !uri.scheme.equals("https", ignoreCase = true) ||
+        uri.host.isNullOrBlank() ||
+        uri.userInfo != null ||
+        uri.rawQuery != null ||
+        uri.rawFragment != null ||
+        !uri.path.isNullOrBlank()
+    ) {
+        return null
     }
+    return URI(
+        "https",
+        null,
+        uri.host.lowercase(),
+        uri.port,
+        null,
+        null,
+        null,
+    ).toString()
 }

@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -30,6 +29,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ru.genesiscorporation.workspace.beta.R
+import ru.genesiscorporation.workspace.beta.data.ChatListDensity
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.ui.Avatar
@@ -45,13 +45,21 @@ fun ChatChannel(
     baseUrl: String,
     showDetail: Boolean,
     currentlySelectedFolder: FolderResponseData?,
+    density: ChatListDensity,
     onChatNumberToAddChange: (Stream?) -> Unit,
     onClick: () -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val colors = LocalWorkspaceColorsPalette.current
+    val compact = density == ChatListDensity.COMPACT
     val lastMessage = item.lastMessage
-    val avatarUrn = if (item.isPrivate) {
+    val isDirect = item.isDirectProviderChat()
+    val folderMenuAction = folderChatMenuAction(currentlySelectedFolder)
+    val folderItem = currentlySelectedFolder?.items
+        ?.firstOrNull { it.streamUuid == item.uuid }
+    val hasMenuActions =
+        folderMenuAction != null || folderItem != null || item.unreadCount > 0
+    val avatarUrn = if (isDirect) {
         lastMessage?.user?.avatar ?: item.avatar
     } else {
         item.avatar
@@ -61,16 +69,21 @@ fun ChatChannel(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 65.dp)
+                .heightIn(min = if (compact) 52.dp else 65.dp)
                 .clip(RoundedCornerShape(8.dp))
                 .background(
                     if (showDetail) colors.cardBackgroundActive else colors.cardBackgroundBase,
                 )
                 .combinedClickable(
                     onClick = onClick,
-                    onLongClick = { menuExpanded = true },
+                    onLongClick = if (hasMenuActions) {
+                        { menuExpanded = true }
+                    } else null,
                 )
-                .padding(horizontal = 8.dp, vertical = 8.dp),
+                .padding(
+                    horizontal = 8.dp,
+                    vertical = if (compact) 5.dp else 8.dp,
+                ),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Avatar(
@@ -78,23 +91,16 @@ fun ChatChannel(
                 baseUrl = baseUrl,
                 color = item.color,
                 name = item.name,
-                size = 40,
+                size = if (compact) 34 else 40,
                 hasPadding = false,
             )
             Column(
                 modifier = Modifier
                     .weight(1f)
-                    .padding(start = 12.dp),
+                    .padding(start = if (compact) 10.dp else 12.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (item.isPrivate) {
-                        Box(
-                            modifier = Modifier
-                                .padding(end = 8.dp)
-                                .size(6.dp)
-                                .background(colors.iconBase, CircleShape),
-                        )
-                    } else {
+                    if (!isDirect && item.isPrivate) {
                         Icon(
                             painter = painterResource(R.drawable.ic_lock),
                             contentDescription = "Закрытый стрим",
@@ -102,6 +108,14 @@ fun ChatChannel(
                             modifier = Modifier
                                 .padding(end = 8.dp)
                                 .size(16.dp),
+                        )
+                    } else if (!isDirect) {
+                        Text(
+                            text = "#",
+                            color = colors.iconBase,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(end = 8.dp),
                         )
                     }
                     Text(
@@ -124,7 +138,7 @@ fun ChatChannel(
                         )
                     }
                 }
-                if (!item.isPrivate && lastMessage?.user != null) {
+                if (!compact && !isDirect && lastMessage?.user != null) {
                     Text(
                         text = lastMessage.user?.displayableName().orEmpty(),
                         color = colors.primary,
@@ -135,24 +149,33 @@ fun ChatChannel(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = lastMessage?.payload?.content?.let(::messagePreview)
-                            ?: "Сообщений пока нет",
-                        color = colors.textAdditional50,
-                        fontSize = 12.sp,
-                        lineHeight = 20.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
+                if (compact) {
                     if (item.unreadCount > 0) {
                         UnreadBadge(
                             count = item.unreadCount,
-                            modifier = Modifier.padding(start = 8.dp),
+                            modifier = Modifier.align(Alignment.End),
                         )
-                    } else {
-                        Spacer(Modifier.size(1.dp))
+                    }
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = lastMessage?.payload?.content?.let(::messagePreview)
+                                ?: "Сообщений пока нет",
+                            color = colors.textAdditional50,
+                            fontSize = 12.sp,
+                            lineHeight = 20.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (item.unreadCount > 0) {
+                            UnreadBadge(
+                                count = item.unreadCount,
+                                modifier = Modifier.padding(start = 8.dp),
+                            )
+                        } else {
+                            Spacer(Modifier.size(1.dp))
+                        }
                     }
                 }
             }
@@ -161,7 +184,16 @@ fun ChatChannel(
             expanded = menuExpanded,
             onDismissRequest = { menuExpanded = false },
         ) {
-            if (currentlySelectedFolder?.systemType == "all") {
+            if (item.unreadCount > 0) {
+                DropdownMenuItem(
+                    text = { Text("Отметить чат прочитанным") },
+                    onClick = {
+                        menuExpanded = false
+                        viewModel.markStreamRead(item)
+                    },
+                )
+            }
+            if (folderMenuAction == FolderChatMenuAction.ADD) {
                 DropdownMenuItem(
                     text = { Text("Добавить в папку…") },
                     onClick = {
@@ -169,14 +201,58 @@ fun ChatChannel(
                         menuExpanded = false
                     },
                 )
-            } else {
+            } else if (
+                folderMenuAction == FolderChatMenuAction.REMOVE &&
+                currentlySelectedFolder != null
+            ) {
                 DropdownMenuItem(
                     text = { Text("Удалить из папки") },
-                    onClick = { menuExpanded = false },
+                    onClick = {
+                        menuExpanded = false
+                        viewModel.deleteChatFromFolder(
+                            chatId = item.uuid,
+                            folder = currentlySelectedFolder,
+                        )
+                    },
+                )
+            }
+            if (currentlySelectedFolder != null && folderItem != null) {
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            if (folderItem.pinnedAt == null) {
+                                "Закрепить в папке"
+                            } else {
+                                "Открепить от начала"
+                            },
+                        )
+                    },
+                    onClick = {
+                        menuExpanded = false
+                        viewModel.setFolderItemPinned(
+                            folder = currentlySelectedFolder,
+                            streamUuid = item.uuid,
+                            pinned = folderItem.pinnedAt == null,
+                        )
+                    },
                 )
             }
         }
     }
+}
+
+internal enum class FolderChatMenuAction {
+    ADD,
+    REMOVE,
+}
+
+internal fun folderChatMenuAction(
+    folder: FolderResponseData?,
+): FolderChatMenuAction? = when (folder?.systemType) {
+    null -> if (folder == null) null else FolderChatMenuAction.REMOVE
+    "all" -> FolderChatMenuAction.ADD
+    "created" -> FolderChatMenuAction.REMOVE
+    else -> null
 }
 
 internal fun messagePreview(content: String): String =

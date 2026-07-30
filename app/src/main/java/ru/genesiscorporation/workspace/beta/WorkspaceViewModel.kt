@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
@@ -22,8 +24,20 @@ class WorkspaceViewModel(
 
     init {
         viewModelScope.launch {
-            client.userViewModel.accessToken.collectLatest { accessToken ->
-                if (accessToken != null) {
+            combine(
+                client.userViewModel.activeAccountId,
+                client.userViewModel.baseUrl,
+                client.userViewModel.accessToken,
+            ) { accountId, baseUrl, accessToken ->
+                AccountRuntime(
+                    ownerKey = accountId ?: baseUrl,
+                    authenticated = accessToken != null,
+                )
+            }
+                .distinctUntilChanged()
+                .collectLatest { runtime ->
+                repo.resetAccountState()
+                if (runtime.authenticated) {
                     repo.start()
                 } else {
                     repo.resetRealtimeCursor()
@@ -31,8 +45,19 @@ class WorkspaceViewModel(
             }
         }
         viewModelScope.launch {
-            client.userViewModel.accessToken.collectLatest { accessToken ->
-                if (accessToken != null) {
+            combine(
+                client.userViewModel.activeAccountId,
+                client.userViewModel.baseUrl,
+                client.userViewModel.accessToken,
+            ) { accountId, baseUrl, accessToken ->
+                AccountRuntime(
+                    ownerKey = accountId ?: baseUrl,
+                    authenticated = accessToken != null,
+                )
+            }
+                .distinctUntilChanged()
+                .collectLatest { runtime ->
+                if (runtime.authenticated) {
                     pushDeviceRegistrationManager.registerCurrentTokenWithRetry()
                 }
             }
@@ -50,3 +75,8 @@ class WorkspaceViewModel(
         _currentCallMessage.value = callMessage
     }
 }
+
+private data class AccountRuntime(
+    val ownerKey: String?,
+    val authenticated: Boolean,
+)

@@ -2,7 +2,7 @@ package ru.genesiscorporation.workspace.beta.modules.topics
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,18 +22,23 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -55,7 +60,10 @@ import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.modules.chatchannels.TopicHeader
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.formatHHmm
+import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
+import ru.genesiscorporation.workspace.beta.ui.TopicActionsDialog
+import ru.genesiscorporation.workspace.beta.ui.TopicNameDialog
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -64,6 +72,14 @@ fun TopicsScreen(
     navController: NavHostController
 ) {
     val subscriptions by topicsViewModel.subscriptions.collectAsState()
+    val state by topicsViewModel.state.collectAsState()
+    val actionError by topicsViewModel.actionError.collectAsState()
+    val actionInProgress by topicsViewModel.actionInProgress.collectAsState()
+    val lastActionResult by topicsViewModel.lastActionResult.collectAsState()
+    var createDialogOpen by rememberSaveable { mutableStateOf(false) }
+    var managedTopicUuid by rememberSaveable { mutableStateOf<String?>(null) }
+    var renamedTopicUuid by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingActionRequestId by rememberSaveable { mutableStateOf<Long?>(null) }
     val backStackEntry by navController.currentBackStackEntryAsState()
     val cameBack = backStackEntry?.savedStateHandle
         ?.getStateFlow("from_detail_back", false)
@@ -75,6 +91,20 @@ fun TopicsScreen(
             backStackEntry?.savedStateHandle?.set("from_detail_back", false) // consume one-shot event
         }
     }
+    LaunchedEffect(lastActionResult, pendingActionRequestId) {
+        val result = lastActionResult ?: return@LaunchedEffect
+        if (result.requestId != pendingActionRequestId) return@LaunchedEffect
+        pendingActionRequestId = null
+        if (!result.success) return@LaunchedEffect
+        when (result.kind) {
+            TopicActionKind.CREATE -> createDialogOpen = false
+            TopicActionKind.RENAME -> renamedTopicUuid = null
+            TopicActionKind.MARK_READ,
+            TopicActionKind.TOGGLE_DONE,
+            TopicActionKind.NOTIFICATIONS -> managedTopicUuid = null
+            else -> Unit
+        }
+    }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -84,6 +114,11 @@ fun TopicsScreen(
                 ),
                 title = {
                     Text(topicsViewModel.channelName)
+                },
+                actions = {
+                    TextButton(onClick = { createDialogOpen = true }) {
+                        Text("Новый топик")
+                    }
                 },
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
@@ -111,16 +146,61 @@ fun TopicsScreen(
                     .imePadding()
                     .background(LocalWorkspaceColorsPalette.current.surface)
             ) {
-                if (subscriptions.isEmpty()) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
+                actionError?.let { error ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp)
+                            .background(
+                                LocalWorkspaceColorsPalette.current.infoCardBackground,
+                                RoundedCornerShape(8.dp),
+                            )
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            text = "Loading"
+                            text = error,
+                            color = LocalWorkspaceColorsPalette.current.indicatorRed,
+                            modifier = Modifier.weight(1f),
                         )
+                        TextButton(onClick = topicsViewModel::clearActionError) {
+                            Text("Закрыть")
+                        }
                     }
-                } else {
+                }
+                when (val currentState = state) {
+                    QueryState.Idle, QueryState.Loading -> Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator()
+                    }
+
+                    is QueryState.Error -> Column(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        Text(
+                            text = currentState.message,
+                            color = LocalWorkspaceColorsPalette.current.indicatorRed,
+                        )
+                        TextButton(onClick = topicsViewModel::retry) {
+                            Text("Повторить")
+                        }
+                    }
+
+                    QueryState.Success -> if (subscriptions.isEmpty()) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = "В этом канале пока нет топиков",
+                                color = LocalWorkspaceColorsPalette.current.textAdditional50,
+                            )
+                        }
+                    } else {
                     LazyColumn(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier
@@ -128,20 +208,90 @@ fun TopicsScreen(
                             .padding(16.dp)
                     ) {
                         items(items = subscriptions) { item ->
-                            ChatOldTopic(topicsViewModel,item, navController)
+                            ChatOldTopic(
+                                topicsViewModel = topicsViewModel,
+                                item = item,
+                                navController = navController,
+                                onLongClick = { managedTopicUuid = item.uuid },
+                            )
                         }
+                    }
                     }
                 }
             }
         }
     }
+    if (createDialogOpen) {
+        TopicNameDialog(
+            title = "Новый топик в «${topicsViewModel.channelName}»",
+            initialName = "",
+            busy = actionInProgress,
+            submitLabel = "Создать",
+            onSubmit = { name ->
+                if (!actionInProgress && pendingActionRequestId == null) {
+                    pendingActionRequestId = topicsViewModel.createTopic(name)
+                }
+            },
+            onDismiss = {
+                if (!actionInProgress) createDialogOpen = false
+            },
+        )
+    }
+    managedTopicUuid
+        ?.let(topicsViewModel::topic)
+        ?.let { topic ->
+            TopicActionsDialog(
+                topic = topic,
+                busy = actionInProgress,
+                onDismiss = { managedTopicUuid = null },
+                onRename = {
+                    managedTopicUuid = null
+                    renamedTopicUuid = topic.uuid
+                },
+                onMarkRead = {
+                    if (!actionInProgress && pendingActionRequestId == null) {
+                        pendingActionRequestId = topicsViewModel.markTopicRead(topic)
+                    }
+                },
+                onToggleDone = {
+                    if (!actionInProgress && pendingActionRequestId == null) {
+                        pendingActionRequestId = topicsViewModel.toggleTopicDone(topic)
+                    }
+                },
+                onSetNotificationMode = { mode ->
+                    if (!actionInProgress && pendingActionRequestId == null) {
+                        pendingActionRequestId =
+                            topicsViewModel.setTopicNotificationMode(topic, mode)
+                    }
+                },
+            )
+        }
+    renamedTopicUuid
+        ?.let(topicsViewModel::topic)
+        ?.let { topic ->
+            TopicNameDialog(
+                title = "Переименовать топик",
+                initialName = topic.name,
+                busy = actionInProgress,
+                onSubmit = { name ->
+                    if (!actionInProgress && pendingActionRequestId == null) {
+                        pendingActionRequestId =
+                            topicsViewModel.renameTopic(topic, name)
+                    }
+                },
+                onDismiss = {
+                    if (!actionInProgress) renamedTopicUuid = null
+                },
+            )
+        }
 }
 
 @Composable
 fun ChatOldTopic(
     topicsViewModel: TopicsViewModel,
     item: TopicHeader,
-    navController: NavHostController
+    navController: NavHostController,
+    onLongClick: () -> Unit,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -153,11 +303,21 @@ fun ChatOldTopic(
             )
             .background(LocalWorkspaceColorsPalette.current.chatHeaderBackground)
             .padding(start = 16.dp)
-            .clickable(
+            .combinedClickable(
                 onClick = {
                     topicsViewModel.currentTopicName = item.title
-                    navController.navigate(ChatFlow.ChatDialog(item.channelName, item.channelId, item.title, item.uuid,false, topicsViewModel.channelStreamId.toInt()))
-                }
+                    navController.navigate(
+                        ChatFlow.ChatDialog(
+                            item.channelName,
+                            item.channelId,
+                            item.title,
+                            item.uuid,
+                            false,
+                            null,
+                        ),
+                    )
+                },
+                onLongClick = onLongClick,
             )
     ) {
         Column(
@@ -169,7 +329,7 @@ fun ChatOldTopic(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = item.title,
+                    text = item.displayTitle,
                     color = LocalWorkspaceColorsPalette.current.textHeaders,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium,

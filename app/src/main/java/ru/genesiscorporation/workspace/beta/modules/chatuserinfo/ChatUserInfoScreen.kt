@@ -1,6 +1,5 @@
 package ru.genesiscorporation.workspace.beta.modules.chatuserinfo
 
-import androidx.annotation.DrawableRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -9,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -40,7 +40,9 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import ru.genesiscorporation.workspace.beta.R
+import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
+import ru.genesiscorporation.workspace.beta.modules.chatchannels.isDirectProviderChat
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import ru.genesiscorporation.workspace.beta.modules.chatchannels.messagePreview
 import ru.genesiscorporation.workspace.beta.ui.Avatar
@@ -87,11 +89,6 @@ fun ChatUserInfoScreen(
             )
         }
         item {
-            ProfileActions(
-                modifier = Modifier.padding(top = 20.dp),
-            )
-        }
-        item {
             ProfileTabs(
                 selected = selectedTab,
                 onSelected = { selectedTab = it },
@@ -122,21 +119,22 @@ fun ChatUserInfoScreen(
                         ?: topics[stream.uuid].orEmpty().firstOrNull()
                     ProfileChannelCard(
                         stream = stream,
-                        topicName = topic?.name ?: "Общий чат",
+                        topicName = topic?.name,
                         baseUrl = baseUrl.orEmpty(),
+                        onClick = {
+                            navController.navigate(
+                                ChatFlow.ChatDialog(
+                                    title = stream.name,
+                                    chatId = stream.uuid,
+                                    topicName = topic?.name,
+                                    topicUuid = topic?.uuid
+                                        ?: stream.defaultTopicUuid.orEmpty(),
+                                    isDirectMessages = stream.isDirectProviderChat(),
+                                    userId = null,
+                                ),
+                            )
+                        },
                         modifier = Modifier.padding(top = 8.dp),
-                    )
-                }
-            }
-
-            ProfileTab.Groups -> {
-                item {
-                    Text(
-                        text = "Группы пользователей пока недоступны",
-                        color = colors.textAdditional50,
-                        fontSize = 14.sp,
-                        lineHeight = 20.sp,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 24.dp),
                     )
                 }
             }
@@ -147,7 +145,6 @@ fun ChatUserInfoScreen(
 private enum class ProfileTab(val title: String) {
     Profile("Профиль"),
     Channels("Каналы"),
-    Groups("Группы пользователей"),
 }
 
 @Composable
@@ -255,48 +252,6 @@ private fun ProfileHeader(
 }
 
 @Composable
-private fun ProfileActions(modifier: Modifier = Modifier) {
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        ProfileAction(R.drawable.ic_figma_profile_call, "Позвонить", Modifier.weight(1f))
-        ProfileAction(
-            R.drawable.ic_figma_profile_notifications,
-            "Уведомления",
-            Modifier.weight(1f),
-        )
-        ProfileAction(R.drawable.ic_mail, "Написать", Modifier.weight(1f))
-        ProfileAction(R.drawable.ic_figma_channel_search, "Поиск", Modifier.weight(1f))
-        ProfileAction(R.drawable.ic_figma_profile_more, "Ещё", Modifier.weight(1f))
-    }
-}
-
-@Composable
-private fun ProfileAction(
-    @DrawableRes icon: Int,
-    description: String,
-    modifier: Modifier = Modifier,
-) {
-    val colors = LocalWorkspaceColorsPalette.current
-    Box(
-        modifier = modifier
-            .height(52.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(colors.infoCardBackground)
-            .clickable {},
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            painter = painterResource(icon),
-            contentDescription = description,
-            tint = colors.iconBase,
-            modifier = Modifier.size(36.dp),
-        )
-    }
-}
-
-@Composable
 private fun ProfileTabs(
     selected: ProfileTab,
     onSelected: (ProfileTab) -> Unit,
@@ -386,18 +341,23 @@ private fun ProfileRow(
 @Composable
 private fun ProfileChannelCard(
     stream: Stream,
-    topicName: String,
+    topicName: String?,
     baseUrl: String,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalWorkspaceColorsPalette.current
     val lastMessage = stream.lastMessage
+    val messagePreview = lastMessage?.payload?.content
+        ?.let(::messagePreview)
+        ?.takeIf(String::isNotBlank)
     Row(
         modifier = modifier
             .fillMaxWidth()
             .heightIn(min = 76.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(colors.searchBackground)
+            .clickable(onClick = onClick)
             .padding(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -415,7 +375,11 @@ private fun ProfileChannelCard(
                 .padding(start = 12.dp),
         ) {
             Text(
-                text = "${stream.name}  # $topicName",
+                text = if (topicName.isNullOrBlank()) {
+                    stream.name
+                } else {
+                    "${stream.name}  # $topicName"
+                },
                 color = colors.textHeaders,
                 fontSize = 14.sp,
                 lineHeight = 20.sp,
@@ -423,26 +387,33 @@ private fun ProfileChannelCard(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(
-                text = lastMessage?.user?.displayableName() ?: "Участник канала",
-                color = colors.primary,
-                fontSize = 12.sp,
-                lineHeight = 20.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            lastMessage?.user?.displayableName()
+                ?.takeIf(String::isNotBlank)
+                ?.let { senderName ->
+                    Text(
+                        text = senderName,
+                        color = colors.primary,
+                        fontSize = 12.sp,
+                        lineHeight = 20.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = lastMessage?.payload?.content?.let(::messagePreview)
-                        ?.takeIf(String::isNotBlank)
-                        ?: "Последнее сообщение в канале",
-                    color = colors.textAdditional50,
-                    fontSize = 12.sp,
-                    lineHeight = 20.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
+                messagePreview?.let { preview ->
+                    Text(
+                        text = preview,
+                        color = colors.textAdditional50,
+                        fontSize = 12.sp,
+                        lineHeight = 20.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                if (messagePreview == null) {
+                    Spacer(Modifier.weight(1f))
+                }
                 if (stream.unreadCount > 0) {
                     UnreadBadge(
                         count = stream.unreadCount,

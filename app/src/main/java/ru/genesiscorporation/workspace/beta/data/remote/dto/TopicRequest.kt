@@ -9,7 +9,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.HTTPMethod
 
 @Serializable
 data class TopicsRequest(
-    val streamUuid: String
+    val streamUuid: String? = null,
 ): ApiRequest<TopicsRequestData, List<TopicsResponseData>, ApiError> {
     override val method: HTTPMethod = HTTPMethod.GET
     override val requiresApiKey: Boolean = true
@@ -19,19 +19,21 @@ data class TopicsRequest(
 
 @Serializable
 data class TopicsRequestData(
-    val stream_uuid: String
+    val stream_uuid: String?,
 )
 
 @Serializable
 data class TopicsResponseData(
     val uuid: String,
     var name: String,
-    val color: Int,
+    val color: Int? = null,
     @SerialName("stream_uuid") val streamUuid: String,
     @SerialName("updated_at") var updatedAt: String,
     @SerialName("unread_count") var unreadCount: Int,
     @SerialName("is_done") var isDone: Boolean,
     @SerialName("is_default") val isDefault: Boolean,
+    @SerialName("notification_mode")
+    var notificationMode: String = "default",
     @SerialName("last_message_uuid") var lastMessageUuid: String? = null,
     var lastMessage: MessageResponse? = null
 )

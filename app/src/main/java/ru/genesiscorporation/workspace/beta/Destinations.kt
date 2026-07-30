@@ -19,7 +19,30 @@ object ChatFlow {
     object ChatList
 
     @Serializable
-    data class ChatDialog(val title: String, val chatId: String, val topicName: String?, val topicUuid: String, val isDirectMessages: Boolean, val userId: Int?)
+    object Inbox
+
+    @Serializable
+    object Feed
+
+    @Serializable
+    object Starred
+
+    @Serializable
+    object Drafts
+
+    @Serializable
+    data class ChatDialog(
+        val title: String,
+        val chatId: String,
+        val topicName: String?,
+        val topicUuid: String,
+        val isDirectMessages: Boolean,
+        val userId: Int?,
+        val focusProviderMessageId: String? = null,
+        val focusMessageUuid: String? = null,
+        val beginForwardMessageUuid: String? = null,
+        val draftStorageSlot: String? = null,
+    )
     @Serializable
     data class ChatTopic(val channelName: String, val channelId: String)
 

@@ -17,12 +17,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -31,6 +33,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,6 +42,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
@@ -48,6 +52,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -55,7 +60,7 @@ import androidx.navigation.NavHostController
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.R
-import ru.genesiscorporation.workspace.beta.UserState
+import ru.genesiscorporation.workspace.beta.LocalUserState
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 import ru.genesiscorporation.workspace.beta.ui.AuthLogo
 import ru.genesiscorporation.workspace.beta.ui.AuthLogoutButton
@@ -64,6 +69,7 @@ import ru.genesiscorporation.workspace.beta.ui.AuthScreen
 import ru.genesiscorporation.workspace.beta.ui.AuthTextField
 import ru.genesiscorporation.workspace.beta.ui.AuthColors
 import ru.genesiscorporation.workspace.beta.ui.authColors
+import ru.genesiscorporation.workspace.beta.data.remote.dto.WorkspaceProject
 
 @Composable
 fun LoginScreen(
@@ -74,25 +80,45 @@ fun LoginScreen(
     val passwordText by viewModel.passwordText.collectAsState()
     val otpText by viewModel.otpText.collectAsState()
     val needsOtp by viewModel.needsOtp.collectAsState()
+    val needsProject by viewModel.needsProject.collectAsState()
+    val projects by viewModel.projects.collectAsState()
+    val selectedProjectId by viewModel.selectedProjectId.collectAsState()
     val loginFieldError by viewModel.loginFieldError.collectAsState()
     val passwordFieldError by viewModel.passwordFieldError.collectAsState()
     val state by viewModel.queryState.collectAsStateWithLifecycle()
     val colors = authColors()
     val scope = rememberCoroutineScope()
-    val user = UserState.current
+    val user = LocalUserState.current
     val baseUrl by user.baseUrl.collectAsStateWithLifecycle()
+    val savedAccounts by user.accounts.collectAsStateWithLifecycle()
     val loading = state is QueryState.Loading
     val errorMessage = (state as? QueryState.Error)?.message
 
-    BackHandler(enabled = needsOtp) {
-        viewModel.onBackFromOtp()
+    BackHandler(enabled = needsOtp || needsProject) {
+        if (needsProject) {
+            viewModel.onBackFromProject()
+        } else {
+            viewModel.onBackFromOtp()
+        }
     }
 
     AuthScreen(
         colors = colors,
         errorMessage = errorMessage,
     ) {
-        if (needsOtp) {
+        if (needsProject) {
+            ProjectContent(
+                projects = projects,
+                selectedProjectId = selectedProjectId,
+                enabled = !loading,
+                colors = colors,
+                onProjectSelected = viewModel::onProjectSelected,
+                onConfirm = {
+                    scope.launch { viewModel.onProjectConfirm() }
+                },
+                onBackToLogin = viewModel::onBackFromProject,
+            )
+        } else if (needsOtp) {
             OtpContent(
                 otp = otpText,
                 enabled = !loading,
@@ -120,9 +146,14 @@ fun LoginScreen(
                 canSubmit = viewModel.canSubmitCredentials,
                 onLogoutOrganization = {
                     scope.launch {
-                        user.clearAll()
+                        user.cancelPendingLoginAndWait()
                         navController.popBackStack()
                     }
+                },
+                logoutLabel = if (savedAccounts.isEmpty()) {
+                    "Выйти из организации"
+                } else {
+                    "Вернуться к сохранённым аккаунтам"
                 },
             )
         }
@@ -133,11 +164,13 @@ fun LoginScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color.Black.copy(alpha = 0.30f))
-                .clickable(
-                    indication = null,
-                    interactionSource = remember { MutableInteractionSource() },
-                    onClick = {},
-                ),
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            awaitPointerEvent().changes.forEach { it.consume() }
+                        }
+                    }
+                },
             contentAlignment = Alignment.Center,
         ) {
             CircularProgressIndicator(
@@ -162,8 +195,9 @@ private fun CredentialsContent(
     onLogin: () -> Unit,
     canSubmit: Boolean,
     onLogoutOrganization: () -> Unit,
+    logoutLabel: String,
 ) {
-    var passwordVisible by remember { mutableStateOf(false) }
+    var passwordVisible by rememberSaveable { mutableStateOf(false) }
 
     Spacer(Modifier.height(54.dp))
     AuthLogo(colors)
@@ -238,16 +272,6 @@ private fun CredentialsContent(
             }
         },
     )
-    Text(
-        text = "Не помню пароль",
-        color = colors.accent,
-        fontSize = 15.sp,
-        textAlign = TextAlign.End,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 8.dp),
-    )
-
     Spacer(Modifier.height(26.dp))
     AuthPrimaryButton(
         text = "Войти",
@@ -259,6 +283,125 @@ private fun CredentialsContent(
     AuthLogoutButton(
         colors = colors,
         onClick = onLogoutOrganization,
+        text = logoutLabel,
+    )
+}
+
+@Composable
+private fun ProjectContent(
+    projects: List<WorkspaceProject>,
+    selectedProjectId: String,
+    enabled: Boolean,
+    colors: AuthColors,
+    onProjectSelected: (String) -> Unit,
+    onConfirm: () -> Unit,
+    onBackToLogin: () -> Unit,
+) {
+    Spacer(Modifier.height(48.dp))
+    Text(
+        text = "Выберите проект",
+        color = colors.text,
+        fontSize = 26.sp,
+        lineHeight = 32.sp,
+        fontWeight = FontWeight.SemiBold,
+    )
+    Text(
+        text = "Сообщения и настройки каждого проекта изолированы",
+        color = colors.mutedText,
+        fontSize = 16.sp,
+        lineHeight = 22.sp,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.padding(top = 10.dp, bottom = 28.dp),
+    )
+
+    projects.forEach { project ->
+        val selected = project.uuid == selectedProjectId
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 10.dp)
+                .background(
+                    if (selected) colors.logoBackground else colors.field,
+                    RoundedCornerShape(10.dp),
+                )
+                .border(
+                    width = 1.dp,
+                    color = if (selected) colors.accent else Color.Transparent,
+                    shape = RoundedCornerShape(10.dp),
+                )
+                .selectable(
+                    selected = selected,
+                    enabled = enabled,
+                    role = Role.RadioButton,
+                    onClick = { onProjectSelected(project.uuid) },
+                )
+                .padding(horizontal = 12.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            RadioButton(
+                selected = selected,
+                enabled = enabled,
+                onClick = null,
+            )
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 8.dp),
+            ) {
+                Text(
+                    text = project.name,
+                    color = colors.text,
+                    fontSize = 17.sp,
+                    lineHeight = 21.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+                Text(
+                    text = "ID …${project.uuid.takeLast(8)}",
+                    color = colors.mutedText,
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+                project.organizationName?.let { organization ->
+                    Text(
+                        text = organization,
+                        color = colors.mutedText,
+                        fontSize = 14.sp,
+                        lineHeight = 18.sp,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+                project.description
+                    ?.takeIf(String::isNotBlank)
+                    ?.let { description ->
+                        Text(
+                            text = description,
+                            color = colors.mutedText,
+                            fontSize = 13.sp,
+                            lineHeight = 17.sp,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+            }
+        }
+    }
+
+    Spacer(Modifier.height(16.dp))
+    AuthPrimaryButton(
+        text = "Открыть проект",
+        enabled = enabled && selectedProjectId.isNotBlank(),
+        colors = colors,
+        onClick = onConfirm,
+    )
+    Text(
+        text = "Вернуться к логину",
+        color = colors.accent,
+        fontSize = 16.sp,
+        fontWeight = FontWeight.Medium,
+        modifier = Modifier
+            .padding(top = 14.dp)
+            .clickable(enabled = enabled, onClick = onBackToLogin)
+            .padding(vertical = 8.dp),
     )
 }
 

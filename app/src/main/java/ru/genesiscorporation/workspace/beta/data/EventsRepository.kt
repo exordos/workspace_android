@@ -34,6 +34,8 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import java.net.URI
+import java.time.Instant
+import java.time.OffsetDateTime
 import kotlin.plus
 
 
@@ -54,6 +56,19 @@ class EventsRepository() {
     }
 
     var currentUser: UserResponseData? = null
+
+    fun resetAccountState() {
+        currentUser = null
+        jitsiServerUrl = ""
+        resetRealtimeCursor()
+        _streamTopicMessages.value = emptyMap()
+        _streamTopics.value = emptyMap()
+        _messagesPool.value = emptyList()
+        _userReactions.value = emptyList()
+        _users.value = emptyList()
+        _streams.value = emptyList()
+        _folders.value = emptyList()
+    }
 
 
     private val _streamTopicMessages = MutableStateFlow<Map<String, List<MessageResponse>>>(emptyMap())
@@ -143,6 +158,48 @@ class EventsRepository() {
         _messagesPool.update { current ->
             current.filterNot { it.uuid == messageUuid }
         }
+        clearDeletedMessagePreviews(messageUuid)
+    }
+
+    fun removeMessageEverywhere(messageUuid: String) {
+        _streamTopicMessages.update { current ->
+            current.mapValues { (_, messages) ->
+                messages.filterNot { it.uuid == messageUuid }
+            }
+        }
+        _messagesPool.update { current ->
+            current.filterNot { it.uuid == messageUuid }
+        }
+        clearDeletedMessagePreviews(messageUuid)
+    }
+
+    private fun clearDeletedMessagePreviews(messageUuid: String) {
+        _streamTopics.update { current ->
+            current.mapValues { (_, topics) ->
+                topics.map { topic ->
+                    if (topic.lastMessageUuid == messageUuid) {
+                        topic.copy(
+                            lastMessageUuid = null,
+                            lastMessage = null,
+                        )
+                    } else {
+                        topic
+                    }
+                }
+            }
+        }
+        _streams.update { current ->
+            current.map { stream ->
+                if (stream.lastMessageUuid == messageUuid) {
+                    stream.copy(
+                        lastMessageUuid = null,
+                        lastMessage = null,
+                    )
+                } else {
+                    stream
+                }
+            }
+        }
     }
 
     private fun mergeMessages(
@@ -150,25 +207,77 @@ class EventsRepository() {
         incoming: List<MessageResponse>
     ): List<MessageResponse> {
         val merged = LinkedHashMap<String, MessageResponse>()
-        (existing + incoming).forEach { message ->
+        existing.forEach { message ->
             merged[message.uuid] = message
+        }
+        incoming.forEach { message ->
+            val current = merged[message.uuid]
+            if (
+                current == null ||
+                messageUpdatedAt(message) >= messageUpdatedAt(current)
+            ) {
+                merged[message.uuid] = message
+            }
         }
         return merged.values.toList()
     }
+
+    private fun messageUpdatedAt(message: MessageResponse): Instant =
+        runCatching { OffsetDateTime.parse(message.updatedAt).toInstant() }
+            .getOrDefault(Instant.EPOCH)
 
     private val _streamTopics = MutableStateFlow<Map<String, List<TopicsResponseData>>>(emptyMap())
     val streamTopics: StateFlow<Map<String, List<TopicsResponseData>>> = _streamTopics.asStateFlow()
 
     fun addStreamTopics(streamUuid: String, topics: List<TopicsResponseData>) {
         _streamTopics.update { current ->
-            current + (streamUuid to topics)
+            val merged = LinkedHashMap<String, TopicsResponseData>()
+            current[streamUuid].orEmpty().forEach { merged[it.uuid] = it }
+            topics.forEach { incoming ->
+                val existing = merged[incoming.uuid]
+                if (
+                    existing == null ||
+                    topicUpdatedAt(incoming) >= topicUpdatedAt(existing)
+                ) {
+                    merged[incoming.uuid] = incoming
+                }
+            }
+            current + (streamUuid to merged.values.toList())
         }
     }
+
+    /**
+     * Applies the authoritative all-topics catalog used by Inbox.
+     * The endpoint returns every visible topic, so retaining absent rows here
+     * would keep stale unread badges forever.
+     */
+    fun replaceAllStreamTopics(
+        streamUuids: Set<String>,
+        topics: List<TopicsResponseData>,
+    ) {
+        _streamTopics.value = buildMap {
+            streamUuids.forEach { put(it, emptyList()) }
+            topics
+                .filter { it.streamUuid in streamUuids }
+                .groupBy(TopicsResponseData::streamUuid)
+                .forEach { (streamUuid, streamTopics) ->
+                    put(streamUuid, streamTopics)
+                }
+        }
+    }
+
+    private fun topicUpdatedAt(topic: TopicsResponseData): Instant =
+        runCatching { OffsetDateTime.parse(topic.updatedAt).toInstant() }
+            .getOrDefault(Instant.EPOCH)
     fun addTopicToStream(topic: TopicsResponseData) {
         _streamTopics.update { current ->
             if (current[topic.streamUuid] != null) {
                 val existingTopics = current[topic.streamUuid].orEmpty()
-                current + (topic.streamUuid to (existingTopics + topic))
+                current + (
+                    topic.streamUuid to (
+                        existingTopics.filterNot { it.uuid == topic.uuid } + topic
+                    )
+                )
             } else {
                 current
             }
@@ -176,15 +285,27 @@ class EventsRepository() {
     }
 
     fun updateTopic(updatedTopic: TopicsResponseData) {
+        val updatedLastMessage = messagesPool.value
+            .firstOrNull { it.uuid == updatedTopic.lastMessageUuid }
+        var unreadDelta = 0
         _streamTopics.update { current ->
             val topics = current[updatedTopic.streamUuid] ?: return@update current
             val updatedTopics = topics.map { topic ->
                 if (topic.uuid == updatedTopic.uuid) {
+                    unreadDelta = updatedTopic.unreadCount - topic.unreadCount
                     topic.copy(
                         unreadCount = updatedTopic.unreadCount,
                         name = updatedTopic.name,
+                        updatedAt = updatedTopic.updatedAt,
                         lastMessageUuid = updatedTopic.lastMessageUuid,
-                        isDone = updatedTopic.isDone
+                        isDone = updatedTopic.isDone,
+                        notificationMode = updatedTopic.notificationMode,
+                        lastMessage = when {
+                            updatedLastMessage != null -> updatedLastMessage
+                            topic.lastMessageUuid == updatedTopic.lastMessageUuid ->
+                                topic.lastMessage
+                            else -> null
+                        },
                     )
                 } else {
                     topic
@@ -193,6 +314,47 @@ class EventsRepository() {
 
             if (updatedTopics == topics) return@update current
             current + (updatedTopic.streamUuid to updatedTopics)
+        }
+        if (unreadDelta != 0) {
+            updateStreamUnreadProjection(updatedTopic.streamUuid, unreadDelta)
+        }
+    }
+
+    private fun updateStreamUnreadProjection(
+        streamUuid: String,
+        delta: Int,
+    ) {
+        var projectedUnreadCount: Int? = null
+        _streams.update { current ->
+            current.map { stream ->
+                if (stream.uuid == streamUuid) {
+                    val updatedCount = (stream.unreadCount + delta).coerceAtLeast(0)
+                    projectedUnreadCount = updatedCount
+                    stream.copy(unreadCount = updatedCount)
+                } else {
+                    stream
+                }
+            }
+        }
+        val streamUnreadCount = projectedUnreadCount ?: return
+        _folders.update { current ->
+            current.map { folder ->
+                if (folder.items.none { it.streamUuid == streamUuid }) {
+                    folder
+                } else {
+                    val updatedItems = folder.items.map { item ->
+                        if (item.streamUuid == streamUuid) {
+                            item.copy(unreadCount = streamUnreadCount)
+                        } else {
+                            item
+                        }
+                    }
+                    folder.copy(
+                        items = updatedItems,
+                        unreadCount = updatedItems.sumOf { it.unreadCount },
+                    )
+                }
+            }
         }
     }
 
@@ -283,6 +445,12 @@ class EventsRepository() {
         }
     }
 
+    fun removeUser(userUuid: String) {
+        _users.update { current ->
+            current.filterNot { it.uuid == userUuid }
+        }
+    }
+
     private val _streams = MutableStateFlow<List<Stream>>(emptyList())
     val streams: StateFlow<List<Stream>> = _streams.asStateFlow()
 
@@ -294,8 +462,20 @@ class EventsRepository() {
                     stream.copy(
                         name = updatedStream.name,
                         description = updatedStream.description,
+                        isPrivate = updatedStream.isPrivate,
+                        color = updatedStream.color ?: stream.color,
+                        owner = updatedStream.owner ?: stream.owner,
+                        userUuid = updatedStream.userUuid ?: stream.userUuid,
                         role = updatedStream.role,
                         notificationMode = updatedStream.notificationMode,
+                        isArchived = updatedStream.isArchived,
+                        inviteOnly = updatedStream.inviteOnly,
+                        announce = updatedStream.announce,
+                        defaultTopicUuid =
+                            updatedStream.defaultTopicUuid ?: stream.defaultTopicUuid,
+                        directUserUuid =
+                            updatedStream.directUserUuid ?: stream.directUserUuid,
+                        sourceName = updatedStream.sourceName,
                         lastMessageUuid = updatedStream.lastMessageUuid,
                         unreadCount = updatedStream.unreadCount,
                         lastMessage = message
@@ -305,17 +485,55 @@ class EventsRepository() {
                 }
             }
         }
+        _folders.update { current ->
+            current.map { folder ->
+                if (folder.items.none { it.streamUuid == updatedStream.uuid }) {
+                    folder
+                } else {
+                    val updatedItems = folder.items.map { item ->
+                        if (item.streamUuid == updatedStream.uuid) {
+                            item.copy(unreadCount = updatedStream.unreadCount)
+                        } else {
+                            item
+                        }
+                    }
+                    folder.copy(
+                        items = updatedItems,
+                        unreadCount = updatedItems.sumOf { it.unreadCount },
+                    )
+                }
+            }
+        }
     }
 
     fun addStream(newStream: Stream) {
         _streams.update { current ->
-            current + newStream
+            current.filterNot { it.uuid == newStream.uuid } + newStream
         }
     }
 
     fun setInitialStreams(newList: List<Stream>) {
         _streams.update {
             newList
+        }
+    }
+
+    fun removeStream(streamUuid: String) {
+        _streams.update { current ->
+            current.filterNot { it.uuid == streamUuid }
+        }
+        _streamTopics.update { current -> current - streamUuid }
+        _streamTopicMessages.update { current ->
+            current.filterKeys { key -> !key.startsWith("$streamUuid.") }
+        }
+        _folders.update { current ->
+            current.map { folder ->
+                val remainingItems = folder.items.filterNot { it.streamUuid == streamUuid }
+                folder.copy(
+                    items = remainingItems,
+                    unreadCount = remainingItems.sumOf { it.unreadCount },
+                )
+            }
         }
     }
 
@@ -339,13 +557,42 @@ class EventsRepository() {
 
     fun addFolder(newFolder: FolderResponseData) {
         _folders.update { current ->
-            current + newFolder
+            current.filterNot { it.uuid == newFolder.uuid } + newFolder
         }
     }
 
     fun setInitialFolders(newList: List<FolderResponseData>) {
         _folders.update {
             newList
+        }
+    }
+
+    fun removeFolder(folderUuid: String) {
+        _folders.update { current ->
+            current.filterNot { it.uuid == folderUuid }
+        }
+    }
+
+    fun removeFolderItem(folderItemUuid: String) {
+        _folders.update { current ->
+            current.map { folder ->
+                val remainingItems = folder.items.filterNot { it.uuid == folderItemUuid }
+                folder.copy(
+                    items = remainingItems,
+                    unreadCount = remainingItems.sumOf { it.unreadCount },
+                )
+            }
+        }
+    }
+
+    fun removeTopic(topicUuid: String) {
+        _streamTopics.update { current ->
+            current.mapValues { (_, topics) ->
+                topics.filterNot { it.uuid == topicUuid }
+            }
+        }
+        _streamTopicMessages.update { current ->
+            current.filterKeys { key -> !key.endsWith(".$topicUuid") }
         }
     }
 
@@ -379,7 +626,7 @@ class EventsRepository() {
             } catch (exception: Exception) {
                 Log.d(
                     "WebSocket",
-                    "Connection failed: ${exception::class.simpleName}: ${exception.message}"
+                    "Connection failed: ${exception::class.simpleName}"
                 )
             }
 
@@ -431,7 +678,7 @@ class EventsRepository() {
                                 Log.d(
                                     "WebSocket",
                                     "Ignored invalid event: " +
-                                        "${exception::class.simpleName}: ${exception.message}"
+                                        exception::class.simpleName
                                 )
                             }
                         }
@@ -480,10 +727,15 @@ class EventsRepository() {
             "message" -> didReceiveMessageEvent(payload, action)
             "user" -> didReceiveUserEvent(payload, action)
             "folder" -> didReceiveFolderEvent(payload, action)
+            "folder_item" -> didReceiveFolderItemEvent(payload, action)
             "stream" -> didReceiveStreamEvent(payload, action)
             "topic" -> didReceiveTopicEvent(payload, action)
             "message_reaction" -> didReceiveReactionEvent(payload, action)
-            else -> Log.d("WebSocket", "Ignored unsupported event: $receivedText")
+            else -> Log.d(
+                "WebSocket",
+                "Ignored unsupported event type: " +
+                    jsonObject["object_type"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+            )
         }
         if (eventEpoch != null) {
             latestEpoch = maxOf(latestEpoch, eventEpoch)
@@ -501,7 +753,7 @@ class EventsRepository() {
                 updateUser(user)
             }
             "deleted" -> {
-
+                removeUser(json.decodeFromString<DeletedObjectPayload>(payload).uuid)
             }
         }
     }
@@ -519,7 +771,9 @@ class EventsRepository() {
                 updateMessage(message)
             }
             "deleted" -> {
-
+                removeMessageEverywhere(
+                    json.decodeFromString<DeletedObjectPayload>(payload).uuid,
+                )
             }
         }
     }
@@ -535,8 +789,14 @@ class EventsRepository() {
                 updateFolder(folder)
             }
             "deleted" -> {
-
+                removeFolder(json.decodeFromString<DeletedObjectPayload>(payload).uuid)
             }
+        }
+    }
+
+    fun didReceiveFolderItemEvent(payload: String, action: String) {
+        if (action == "deleted") {
+            removeFolderItem(json.decodeFromString<DeletedObjectPayload>(payload).uuid)
         }
     }
 
@@ -564,7 +824,7 @@ class EventsRepository() {
                 updateStream(stream)
             }
             "deleted" -> {
-
+                removeStream(json.decodeFromString<DeletedObjectPayload>(payload).uuid)
             }
         }
     }
@@ -580,7 +840,7 @@ class EventsRepository() {
                 updateTopic(topic)
             }
             "deleted" -> {
-
+                removeTopic(json.decodeFromString<DeletedObjectPayload>(payload).uuid)
             }
         }
     }
@@ -611,4 +871,9 @@ data class StreamEvent(
     val type: String,
     val stream: Stream,
     @SerialName("epoch_version") val epoch_version: Int
+)
+
+@Serializable
+data class DeletedObjectPayload(
+    val uuid: String,
 )

@@ -8,17 +8,13 @@ import ru.genesiscorporation.workspace.beta.data.remote.EmptyRequestData
 import ru.genesiscorporation.workspace.beta.data.remote.HTTPMethod
 
 class DeleteChatFromFolderRequest(
-    folderUuid: String,
-    folderChatUuid: String
-): ApiRequest<EmptyRequestData, DeleteChatFromFolderResponseData, ApiError> {
+    folderItemUuid: String
+): ApiRequest<EmptyRequestData, String, ApiError> {
     override val method: HTTPMethod = HTTPMethod.DELETE
     override val requiresApiKey: Boolean = true
     override val shouldApplySuffix: Boolean = false
     override val isJson: Boolean = true
-    override val url: String = "/workspace/v1/folders/${folderUuid}/items/${folderChatUuid}"
+    override val url: String =
+        "/api/workspace/v1/messenger/folder_items/${folderItemUuid}"
     override val data = EmptyRequestData()
 }
-@Serializable
-data class DeleteChatFromFolderResponseData(
-    val uuid: String
-)

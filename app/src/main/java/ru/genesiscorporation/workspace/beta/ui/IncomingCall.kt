@@ -14,6 +14,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -35,7 +36,24 @@ fun IncomingCall(
     viewModel: WorkspaceViewModel,
     context: Context
 ) {
-    val itemUrl = URL(callMessage.payload.content)
+    val itemUrl = runCatching { URL(callMessage.payload.content) }.getOrNull()
+    val serverUrl = viewModel.repo.jitsiServerUrl
+        .takeIf(String::isNotBlank)
+        ?.let { runCatching { URL(it) }.getOrNull() }
+    val roomName = itemUrl?.path?.trim('/')
+    val isTrustedCall = itemUrl != null &&
+        serverUrl != null &&
+        itemUrl.protocol == "https" &&
+        itemUrl.host == serverUrl.host &&
+        !roomName.isNullOrBlank()
+    if (!isTrustedCall) {
+        LaunchedEffect(callMessage.uuid) {
+            viewModel.setCurrentCallMessage(null)
+        }
+        return
+    }
+    val trustedServerUrl = requireNotNull(serverUrl)
+    val trustedRoomName = requireNotNull(roomName)
     Column(
         modifier = Modifier
             .padding(16.dp)
@@ -63,7 +81,7 @@ fun IncomingCall(
         Row {
             Column {
                 Text(
-                    itemUrl.path.drop(1),
+                    trustedRoomName,
                     color = LocalWorkspaceColorsPalette.current.textHeaders,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium
@@ -97,8 +115,8 @@ fun IncomingCall(
             Button(
                 onClick = {
                     val options = JitsiMeetConferenceOptions.Builder()
-                        .setServerURL(URL(viewModel.repo.jitsiServerUrl))
-                        .setRoom(itemUrl.path.drop(1))
+                        .setServerURL(trustedServerUrl)
+                        .setRoom(trustedRoomName)
                         .build()
                     viewModel.setCurrentCallMessage(null)
                     JitsiMeetActivity.launch(context, options)

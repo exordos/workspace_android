@@ -1,9 +1,9 @@
 package ru.genesiscorporation.workspace.beta.modules.chooseserver
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -23,6 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -35,7 +37,6 @@ import androidx.navigation.NavHostController
 import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.LoginFlow
 import ru.genesiscorporation.workspace.beta.R
-import ru.genesiscorporation.workspace.beta.UserState
 import ru.genesiscorporation.workspace.beta.ui.AuthPrimaryButton
 import ru.genesiscorporation.workspace.beta.ui.AuthScreen
 import ru.genesiscorporation.workspace.beta.ui.AuthTextField
@@ -50,13 +51,14 @@ fun ChooseServerScreen(
 ) {
     val serverText by viewModel.serverText.collectAsState()
     val state by viewModel.queryState.collectAsStateWithLifecycle()
+    val savedAccounts by viewModel.userViewModel.accounts.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
-    val user = UserState.current
     val colors = authColors()
 
-    LaunchedEffect(Unit) {
-        user.clearAll()
+    BackHandler(enabled = savedAccounts.isNotEmpty()) {
+        scope.launch { viewModel.userViewModel.cancelPendingLoginAndWait() }
     }
+
     LaunchedEffect(state) {
         if (state is QueryState.Success) {
             navController.navigate(LoginFlow.Login)
@@ -175,6 +177,22 @@ fun ChooseServerScreen(
                 modifier = Modifier.padding(start = 14.dp),
             )
         }
+        if (savedAccounts.isNotEmpty()) {
+            TextButton(
+                onClick = {
+                    scope.launch {
+                        viewModel.userViewModel.cancelPendingLoginAndWait()
+                    }
+                },
+                enabled = state !is QueryState.Loading,
+                modifier = Modifier.padding(top = 18.dp),
+            ) {
+                Text(
+                    text = "Вернуться к сохранённым аккаунтам",
+                    color = colors.accent,
+                )
+            }
+        }
     }
 
     if (state is QueryState.Loading) {
@@ -182,11 +200,13 @@ fun ChooseServerScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color.Black.copy(alpha = 0.30f))
-                .clickable(
-                    indication = null,
-                    interactionSource = remember { MutableInteractionSource() },
-                    onClick = {},
-                ),
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            awaitPointerEvent().changes.forEach { it.consume() }
+                        }
+                    }
+                },
             contentAlignment = Alignment.Center,
         ) {
             CircularProgressIndicator(

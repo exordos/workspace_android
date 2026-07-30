@@ -42,12 +42,6 @@ class ChatUserInfoViewModel(
         resolveSharedChannels(userId, streams, loadedBindings)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    val isUsingMockChannels: StateFlow<Boolean> = bindings
-        .map { loadedBindings ->
-            loadedBindings != null && loadedBindings.none { it.userUuid == userId }
-        }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
-
     init {
         if (repo.streams.value.isEmpty()) {
             viewModelScope.launch {
@@ -75,57 +69,34 @@ class ChatUserInfoViewModel(
 
     fun profileFields(): List<ProfileField> {
         val user = profile.value
-        return listOf(
-            ProfileField(
-                title = "Статус",
-                value = user?.statusText?.takeIf(String::isNotBlank) ?: "Работаю",
-                icon = R.drawable.ic_figma_profile_status,
-                isMock = user?.statusText.isNullOrBlank(),
-            ),
-            ProfileField(
-                title = "Телефон",
-                value = "+7 999 123-45-67",
-                icon = R.drawable.ic_figma_profile_phone,
-                isMock = true,
-            ),
-            ProfileField(
-                title = "Email",
-                value = user?.email?.takeIf(String::isNotBlank)
-                    ?: email.takeIf(String::isNotBlank)
-                    ?: "user@example.com",
-                icon = R.drawable.ic_figma_profile_email,
-                isMock = user?.email.isNullOrBlank() && email.isBlank(),
-            ),
-            ProfileField(
-                title = "ID пользователя",
-                value = userId,
-                icon = R.drawable.ic_userid,
-            ),
-            ProfileField(
-                title = "Местное время",
-                value = "12:49",
-                icon = R.drawable.ic_figma_profile_schedule,
-                isMock = true,
-            ),
-            ProfileField(
-                title = "Команда > Должность",
-                value = "Platform > Ui/Ux designer",
-                icon = R.drawable.ic_figma_profile_business,
-                isMock = true,
-            ),
-            ProfileField(
-                title = "Руководитель",
-                value = "agent",
-                icon = R.drawable.ic_figma_profile_manager,
-                isMock = true,
-            ),
-            ProfileField(
-                title = "День рождения",
-                value = "25.10.2000",
-                icon = R.drawable.ic_figma_profile_birthday,
-                isMock = true,
-            ),
-        )
+        return buildList {
+            user?.statusText?.takeIf(String::isNotBlank)?.let { status ->
+                add(
+                    ProfileField(
+                        title = "Статус",
+                        value = status,
+                        icon = R.drawable.ic_figma_profile_status,
+                    ),
+                )
+            }
+            (user?.email?.takeIf(String::isNotBlank)
+                ?: email.takeIf(String::isNotBlank))?.let { resolvedEmail ->
+                add(
+                    ProfileField(
+                        title = "Email",
+                        value = resolvedEmail,
+                        icon = R.drawable.ic_figma_profile_email,
+                    ),
+                )
+            }
+            add(
+                ProfileField(
+                    title = "ID пользователя",
+                    value = userId,
+                    icon = R.drawable.ic_userid,
+                ),
+            )
+        }
     }
 }
 
@@ -133,7 +104,6 @@ data class ProfileField(
     val title: String,
     val value: String,
     @param:DrawableRes val icon: Int,
-    val isMock: Boolean = false,
 )
 
 internal fun resolveSharedChannels(
@@ -148,9 +118,5 @@ internal fun resolveSharedChannels(
         .filter { it.userUuid == userUuid }
         .map { it.streamUuid }
         .toSet()
-    return if (streamUuids.isEmpty()) {
-        streams.filterNot(Stream::isPrivate).take(5)
-    } else {
-        streams.filter { it.uuid in streamUuids }
-    }
+    return streams.filter { it.uuid in streamUuids }
 }

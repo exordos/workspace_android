@@ -22,5 +22,7 @@ class ServerSettingsRequest(
 data class ServerSettingsResponseData(
     val email_auth_enabled: Boolean,
     @SerialName("realm_name") val realmName: String,
-    @SerialName("meet_url") val meetUrl: String
+    @SerialName("meet_url") val meetUrl: String,
+    @SerialName("realm_url") val realmUrl: String? = null,
+    @SerialName("realm_icon") val realmIcon: String? = null,
 )

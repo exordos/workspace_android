@@ -7,16 +7,23 @@ import ru.genesiscorporation.workspace.beta.data.remote.ApiRequest
 import ru.genesiscorporation.workspace.beta.data.remote.EmptyRequestData
 import ru.genesiscorporation.workspace.beta.data.remote.HTTPMethod
 
-class StreamBindingsRequest :
-    ApiRequest<EmptyRequestData, List<StreamBindingResponseData>, ApiError> {
+class StreamBindingsRequest(
+    streamUuid: String? = null,
+) : ApiRequest<StreamBindingsRequestData, List<StreamBindingResponseData>, ApiError> {
     override val method = HTTPMethod.GET
     override val url = "/api/workspace/v1/messenger/stream_bindings/"
-    override val data = EmptyRequestData()
+    override val data = StreamBindingsRequestData(streamUuid)
 }
+
+@Serializable
+data class StreamBindingsRequestData(
+    @SerialName("stream_uuid") val streamUuid: String? = null,
+)
 
 @Serializable
 data class StreamBindingResponseData(
     val uuid: String,
+    @SerialName("project_id") val projectId: String? = null,
     @SerialName("stream_uuid") val streamUuid: String,
     @SerialName("user_uuid") val userUuid: String,
     @SerialName("who_uuid") val whoUuid: String,

@@ -41,6 +41,9 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.error
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -69,39 +72,39 @@ data class AuthColors(
 
 @Composable
 fun authColors(): AuthColors =
-    if (isSystemInDarkTheme()) {
-        AuthColors(
-            background = Color(0xFF1B1B1D),
-            field = Color(0xFF28282B),
-            logoBackground = Color(0xFF2D2D30),
-            text = Color(0xFFF8F8F9),
-            mutedText = Color(0xFF9A9A9F),
-            labelText = Color(0xFF737378),
-            divider = Color(0xFF343438),
-            accent = Color(0xFFFF8138),
-            disabled = Color(0xFF555558),
-            onDisabled = Color(0xFF8A8A8E),
-            error = Color(0xFFFF4248),
-            errorContainer = Color(0xFFFFE7E8),
-            onErrorContainer = Color(0xFFDE2B32),
-        )
-    } else {
-        AuthColors(
-            background = Color(0xFFF8F8FA),
-            field = Color(0xFFFFFFFF),
-            logoBackground = Color(0xFFEFEFF2),
-            text = Color(0xFF1B1B1D),
-            mutedText = Color(0xFF68686E),
-            labelText = Color(0xFF606066),
-            divider = Color(0xFFDEDEE3),
-            accent = Color(0xFFE96520),
-            disabled = Color(0xFFE1E1E5),
-            onDisabled = Color(0xFFA0A0A6),
-            error = Color(0xFFD92D35),
-            errorContainer = Color(0xFFFFECEE),
-            onErrorContainer = Color(0xFFB4232A),
-        )
-    }
+    if (isSystemInDarkTheme()) DarkAuthColors else LightAuthColors
+
+internal val DarkAuthColors = AuthColors(
+    background = Color(0xFF1B1B1D),
+    field = Color(0xFF28282B),
+    logoBackground = Color(0xFF2D2D30),
+    text = Color(0xFFF8F8F9),
+    mutedText = Color(0xFF9A9A9F),
+    labelText = Color(0xFFA4A4A9),
+    divider = Color(0xFF343438),
+    accent = Color(0xFFFF8138),
+    disabled = Color(0xFF555558),
+    onDisabled = Color(0xFFC2C2C7),
+    error = Color(0xFFFF4248),
+    errorContainer = Color(0xFFFFE7E8),
+    onErrorContainer = Color(0xFFB4232A),
+)
+
+internal val LightAuthColors = AuthColors(
+    background = Color(0xFFF8F8FA),
+    field = Color(0xFFFFFFFF),
+    logoBackground = Color(0xFFEFEFF2),
+    text = Color(0xFF1B1B1D),
+    mutedText = Color(0xFF68686E),
+    labelText = Color(0xFF606066),
+    divider = Color(0xFFDEDEE3),
+    accent = Color(0xFFE96520),
+    disabled = Color(0xFFE1E1E5),
+    onDisabled = Color(0xFF717178),
+    error = Color(0xFFD92D35),
+    errorContainer = Color(0xFFFFECEE),
+    onErrorContainer = Color(0xFFB4232A),
+)
 
 @Composable
 fun AuthScreen(
@@ -256,6 +259,10 @@ fun AuthTextField(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 52.dp)
+                .semantics(mergeDescendants = true) {
+                    contentDescription = label
+                    error?.let { message -> this.error(message) }
+                }
                 .background(colors.field, RoundedCornerShape(10.dp))
                 .border(1.dp, borderColor, RoundedCornerShape(10.dp))
                 .padding(horizontal = 12.dp, vertical = 14.dp),
@@ -329,6 +336,7 @@ fun AuthLogoutButton(
     colors: AuthColors,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    text: String = "Выйти из организации",
 ) {
     Button(
         onClick = onClick,
@@ -349,7 +357,7 @@ fun AuthLogoutButton(
             modifier = Modifier.size(25.dp),
         )
         Text(
-            text = "Выйти из организации",
+            text = text,
             fontSize = 16.sp,
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(start = 10.dp),

@@ -2,6 +2,7 @@ package ru.genesiscorporation.workspace.beta.modules.chatdialog
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
@@ -22,6 +23,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -32,18 +34,22 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
+import coil3.request.CachePolicy
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import coil3.network.NetworkHeaders
 import coil3.network.httpHeaders
 import coil3.request.ImageRequest
 import ru.genesiscorporation.workspace.beta.data.UrnParser
+import ru.genesiscorporation.workspace.beta.data.workspaceStorageKey
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 
@@ -56,32 +62,53 @@ fun ImageMessageView(
     navController: NavHostController,
     onImageLoad: () -> Unit,
 ) {
-    var fullscreenModel by remember { mutableStateOf<ImageRequest?>(null) }
+    var fullscreenImageIndex by rememberSaveable { mutableStateOf<Int?>(null) }
+    var menuExpanded by remember { mutableStateOf(false) }
+    val deletingMessages by
+        viewModel.deletingMessageUuids.collectAsStateWithLifecycle()
     val colors = LocalWorkspaceColorsPalette.current
     val accessToken by viewModel.userViewModel.repo.accessTokenFlow.collectAsStateWithLifecycle(
-        initialValue = "",
-    )
-    val email by viewModel.userViewModel.repo.emailFlow.collectAsStateWithLifecycle(
         initialValue = "",
     )
     val baseUrl by viewModel.userViewModel.repo.baseUrlFlow.collectAsStateWithLifecycle(
         initialValue = "",
     )
-    val authHeaders = viewModel.client.authHeaders(accessToken.orEmpty(), email.orEmpty())
-    val headers = NetworkHeaders.Builder()
-        .set(authHeaders.first().title, authHeaders.first().value)
-        .build()
-    val imageRequests = imageUrls.map { imageUrl ->
-        val parsedUrl = UrnParser.parseUrl(imageUrl, baseUrl.orEmpty()).orEmpty()
-        val resolvedUrl = if (parsedUrl.startsWith("/")) {
-            "${baseUrl.orEmpty()}$parsedUrl"
-        } else {
-            parsedUrl
-        }
-        ImageRequest.Builder(LocalContext.current)
-            .data(resolvedUrl)
-            .httpHeaders(headers)
+    val accountId by viewModel.userViewModel.activeAccountId.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val headers = remember(accessToken) {
+        NetworkHeaders.Builder()
+            .apply {
+                accessToken
+                    ?.takeIf(String::isNotBlank)
+                    ?.let { set("Authorization", "Bearer $it") }
+            }
             .build()
+    }
+    val imageRequests = remember(imageUrls, baseUrl, accountId, headers, context) {
+        imageUrls.map { imageUrl ->
+            val parsedUrl = UrnParser.parseUrl(imageUrl, baseUrl.orEmpty()).orEmpty()
+            val resolvedUrl = if (parsedUrl.startsWith("/")) {
+                "${baseUrl.orEmpty()}$parsedUrl"
+            } else {
+                parsedUrl
+            }
+            ImageRequest.Builder(context)
+                .data(resolvedUrl)
+                .httpHeaders(headers)
+                .apply {
+                    if (accountId.isNullOrBlank()) {
+                        memoryCachePolicy(CachePolicy.DISABLED)
+                        diskCachePolicy(CachePolicy.DISABLED)
+                    } else {
+                        val cacheKey = workspaceStorageKey(
+                            "${accountId.orEmpty()}\u0000$resolvedUrl",
+                        )
+                        memoryCacheKey(cacheKey)
+                        diskCacheKey(cacheKey)
+                    }
+                }
+                .build()
+        }
     }
 
     MessageRow(
@@ -89,60 +116,102 @@ fun ImageMessageView(
         viewModel = viewModel,
         navController = navController,
     ) {
-        Column(
-            modifier = Modifier
-                .widthIn(max = 300.dp)
-                .background(
-                    if (item.isOwn) colors.messageOwnBackground else colors.messageBackground,
-                    messageBubbleShape(item.isOwn),
-                )
-                .padding(10.dp),
-        ) {
-            MessageHeader(item, viewModel)
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                imageRequests.forEach { imageRequest ->
-                    AsyncImage(
-                        model = imageRequest,
-                        contentDescription = "Изображение в сообщении",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .width(230.dp)
-                            .then(
-                                if (imageRequests.size == 1) {
-                                    Modifier.heightIn(min = 120.dp, max = 280.dp)
-                                } else {
-                                    Modifier.height(150.dp)
-                                },
-                            )
-                            .clip(RoundedCornerShape(9.dp))
-                            .background(colors.background, RoundedCornerShape(9.dp))
-                            .clickable { fullscreenModel = imageRequest },
-                        onState = { state ->
-                            if (state is AsyncImagePainter.State.Success) onImageLoad()
-                        },
+        Box {
+            Column(
+                modifier = Modifier
+                    .widthIn(max = 300.dp)
+                    .background(
+                        if (item.isOwn) colors.messageOwnBackground else colors.messageBackground,
+                        messageBubbleShape(item.isOwn),
+                    )
+                    .pointerInput(item.uuid) {
+                        detectTapGestures(onLongPress = { menuExpanded = true })
+                    }
+                    .semantics {
+                        onLongClick(label = "Действия с сообщением") {
+                            menuExpanded = true
+                            true
+                        }
+                    }
+                    .padding(10.dp),
+            ) {
+                MessageHeader(item, viewModel)
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    imageRequests.forEachIndexed { index, imageRequest ->
+                        AsyncImage(
+                            model = imageRequest,
+                            contentDescription = "Изображение в сообщении",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .width(230.dp)
+                                .then(
+                                    if (imageRequests.size == 1) {
+                                        Modifier.heightIn(min = 120.dp, max = 280.dp)
+                                    } else {
+                                        Modifier.height(150.dp)
+                                    },
+                                )
+                                .clip(RoundedCornerShape(9.dp))
+                                .background(colors.background, RoundedCornerShape(9.dp))
+                                .combinedClickable(
+                                    onClick = { fullscreenImageIndex = index },
+                                    onLongClick = { menuExpanded = true },
+                                ),
+                            onState = { state ->
+                                if (state is AsyncImagePainter.State.Success) onImageLoad()
+                            },
+                        )
+                    }
+                }
+                if (text.isNotBlank()) {
+                    Text(
+                        text = text,
+                        color = colors.textHeaders,
+                        fontSize = 13.sp,
+                        lineHeight = 17.sp,
+                        modifier = Modifier.padding(top = 8.dp),
                     )
                 }
+                MessageFooter(item)
             }
-            if (text.isNotBlank()) {
-                Text(
-                    text = text,
-                    color = colors.textHeaders,
-                    fontSize = 13.sp,
-                    lineHeight = 17.sp,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
-            }
-            MessageFooter(item)
+            MessageActionsMenu(
+                expanded = menuExpanded,
+                item = item,
+                onDismiss = { menuExpanded = false },
+                onReaction = { emoji ->
+                    viewModel.onMessageReactionTap(item.uuid, emoji)
+                    menuExpanded = false
+                },
+                onEdit = {
+                    viewModel.onEditMessageClicked(item)
+                    menuExpanded = false
+                },
+                isDeleting = item.uuid in deletingMessages,
+                onDelete = {
+                    viewModel.deleteMessage(item)
+                    menuExpanded = false
+                },
+                onQuote = {
+                    viewModel.onQuoteMessageClicked(item)
+                    menuExpanded = false
+                },
+                onForward = {
+                    viewModel.beginForward(item)
+                    menuExpanded = false
+                },
+            )
         }
     }
 
-    fullscreenModel?.let { imageRequest ->
-        FullscreenZoomableImage(
-            model = imageRequest,
-            contentDescription = "Изображение в сообщении",
-            onDismiss = { fullscreenModel = null },
-        )
-    }
+    fullscreenImageIndex
+        ?.let(imageRequests::getOrNull)
+        ?.let { imageRequest ->
+            FullscreenZoomableImage(
+                model = imageRequest,
+                contentDescription = "Изображение в сообщении",
+                onDismiss = { fullscreenImageIndex = null },
+            )
+        }
 }
 
 @Composable
@@ -223,7 +292,7 @@ fun TappableAsyncImage(
     contentDescription: String? = null,
     contentScale: ContentScale = ContentScale.Crop,
 ) {
-    var showFullscreen by remember { mutableStateOf(false) }
+    var showFullscreen by rememberSaveable { mutableStateOf(false) }
     AsyncImage(
         model = model,
         contentDescription = contentDescription,

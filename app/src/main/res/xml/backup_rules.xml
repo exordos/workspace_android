@@ -7,4 +7,7 @@
 -->
 <full-backup-content>
     <exclude domain="sharedpref" path="workspace_push_device.xml"/>
+    <exclude domain="sharedpref" path="workspace_credentials.xml"/>
+    <exclude domain="sharedpref" path="workspace_message_state.xml"/>
+    <exclude domain="file" path="datastore/settings.preferences_pb"/>
 </full-backup-content>

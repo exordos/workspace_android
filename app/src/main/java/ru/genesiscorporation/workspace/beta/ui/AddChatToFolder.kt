@@ -1,6 +1,5 @@
 package ru.genesiscorporation.workspace.beta.ui
 
-import android.R.attr.onClick
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -40,7 +39,6 @@ fun AddChatToFolder(
     chat: Stream,
     onAddButtonTap: (FolderResponseData, Stream) -> Unit
 ) {
-    var folderName by remember { mutableStateOf("") }
     Column(
         modifier = Modifier
             .padding(16.dp)

@@ -15,6 +15,39 @@ class UsersRequest(): ApiRequest<EmptyRequestData, List<UserResponseData>, ApiEr
     override val data = EmptyRequestData()
 }
 
+class UpdateOwnPresenceRequest(
+    userUuid: String,
+    status: String,
+    emoji: String?,
+    text: String?,
+) : ApiRequest<UpdateOwnPresenceRequestData, UserResponseData, ApiError> {
+    override val method = HTTPMethod.POST
+    override val encodeExplicitNulls = true
+    override val url =
+        "/api/workspace/v1/messenger/users/$userUuid/actions/presence/invoke"
+    override val data = UpdateOwnPresenceRequestData(
+        status = status,
+        emoji = emoji,
+        text = text,
+    )
+}
+
+@Serializable
+data class UpdateOwnPresenceRequestData(
+    val status: String,
+    val emoji: String?,
+    val text: String?,
+)
+
+class ResetOwnAvatarRequest(
+    userUuid: String,
+) : ApiRequest<EmptyRequestData, UserResponseData, ApiError> {
+    override val method = HTTPMethod.POST
+    override val url =
+        "/api/workspace/v1/messenger/users/$userUuid/actions/avatar_reset/invoke"
+    override val data = EmptyRequestData()
+}
+
 @Serializable
 data class UserResponseData(
     var email: String? = null,

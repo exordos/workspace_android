@@ -1,25 +1,50 @@
 package ru.genesiscorporation.workspace.beta.ui
 
 import android.content.Intent
+import android.content.Context
 import android.net.Uri
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import dev.jeziellago.compose.markdowntext.MarkdownText
 import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.ChatDialogViewModel
+import ru.genesiscorporation.workspace.beta.modules.chatdialog.ForwardMarkdownSegment
+import ru.genesiscorporation.workspace.beta.modules.chatdialog.ForwardQuoteResolution
+import ru.genesiscorporation.workspace.beta.modules.chatdialog.WorkspaceQuoteReference
+import ru.genesiscorporation.workspace.beta.modules.chatdialog.parseForwardMarkdown
+import ru.genesiscorporation.workspace.beta.modules.chatdialog.parseWorkspaceQuoteUrn
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
+import java.net.URI
 
 @Composable
 fun EnhancedMarkdown(
@@ -28,6 +53,46 @@ fun EnhancedMarkdown(
     style: TextStyle,
     navController: NavHostController?,
     viewModel: ChatDialogViewModel?
+) {
+    val forwardSegments = remember(markdown) { parseForwardMarkdown(markdown) }
+    if (forwardSegments.any { it is ForwardMarkdownSegment.Quote }) {
+        Column(modifier = modifier.fillMaxWidth()) {
+            forwardSegments.forEach { segment ->
+                when (segment) {
+                    is ForwardMarkdownSegment.Text -> LegacyEnhancedMarkdown(
+                        markdown = segment.markdown,
+                        style = style,
+                        navController = navController,
+                        viewModel = viewModel,
+                    )
+
+                    is ForwardMarkdownSegment.Quote -> WorkspaceForwardQuoteBlock(
+                        reference = segment.reference,
+                        style = style,
+                        navController = navController,
+                        viewModel = viewModel,
+                    )
+                }
+            }
+        }
+    } else {
+        LegacyEnhancedMarkdown(
+            markdown = markdown,
+            modifier = modifier,
+            style = style,
+            navController = navController,
+            viewModel = viewModel,
+        )
+    }
+}
+
+@Composable
+private fun LegacyEnhancedMarkdown(
+    markdown: String,
+    modifier: Modifier = Modifier,
+    style: TextStyle,
+    navController: NavHostController?,
+    viewModel: ChatDialogViewModel?,
 ) {
     val context = LocalContext.current
     if (MarkdownParser.hasQuotes(markdown)) {
@@ -41,32 +106,147 @@ fun EnhancedMarkdown(
             viewModel
         )
     } else {
-        MarkdownText(
+        WorkspaceMarkdownText(
             markdown = markdown,
             style = style,
             onLinkClicked = { url ->
-                when {
-                    url.startsWith("urn:user:") -> {
-                        val userId = url.removePrefix("urn:user:")
-                        val user = viewModel?.getUser(userId)
-                        if (user != null) {
-                            navController?.navigate(
-                                ChatFlow.ChatUserInfo(
-                                    user.displayableName(),
-                                    user.uuid,
-                                    user.avatar,
-                                    user.email ?: ""
-                                )
-                            )
+                handleWorkspaceLink(url, context, navController, viewModel)
+            }
+        )
+    }
+}
+
+@Composable
+private fun WorkspaceForwardQuoteBlock(
+    reference: WorkspaceQuoteReference,
+    style: TextStyle,
+    navController: NavHostController?,
+    viewModel: ChatDialogViewModel?,
+) {
+    val colors = LocalWorkspaceColorsPalette.current
+    val resolutions by viewModel
+        ?.forwardQuoteResolutions
+        ?.collectAsStateWithLifecycle()
+        ?: remember {
+            kotlinx.coroutines.flow.MutableStateFlow<
+                Map<String, ForwardQuoteResolution>
+                >(emptyMap())
+        }.collectAsStateWithLifecycle()
+    val resolution = resolutions[reference.messageUuid]
+        ?: ForwardQuoteResolution.Loading
+    LaunchedEffect(viewModel, reference.messageUuid) {
+        viewModel?.requestForwardQuote(reference.messageUuid)
+    }
+    val ready = resolution as? ForwardQuoteResolution.Ready
+    val authorLabel = ready
+        ?.message
+        ?.let { message ->
+            message.user?.displayableName()
+                ?: viewModel?.getUser(message.authorUuid)?.displayableName()
+        }
+        ?.takeIf(String::isNotBlank)
+        ?: reference.authorLabel
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 44.dp)
+            .padding(vertical = 4.dp)
+            .background(
+                colors.infoCardBackground,
+                RoundedCornerShape(7.dp),
+            )
+            .then(
+                if (ready != null && viewModel != null) {
+                    Modifier
+                        .clickable {
+                            viewModel.openForwardQuoteSource(reference.messageUuid)
                         }
-                    }
-                    else -> {
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                        runCatching { context.startActivity(intent) }
+                        .semantics {
+                            role = Role.Button
+                            contentDescription = "Открыть исходное сообщение"
+                        }
+                } else {
+                    Modifier
+                },
+            )
+            .drawBehind {
+                val width = 3.dp.toPx()
+                drawLine(
+                    color = colors.messageOwnAccent,
+                    start = Offset(width / 2f, 0f),
+                    end = Offset(width / 2f, size.height),
+                    strokeWidth = width,
+                )
+            }
+            .padding(start = 11.dp, end = 9.dp, top = 7.dp, bottom = 7.dp),
+    ) {
+        Text(
+            text = when (resolution) {
+                ForwardQuoteResolution.Loading -> reference.authorLabel
+                ForwardQuoteResolution.Unavailable -> "Исходное сообщение недоступно"
+                is ForwardQuoteResolution.Ready -> authorLabel
+            },
+            color = if (resolution is ForwardQuoteResolution.Unavailable) {
+                colors.textAdditional50
+            } else {
+                colors.messageOwnAccent
+            },
+            fontSize = 12.sp,
+            lineHeight = 16.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        when (resolution) {
+            ForwardQuoteResolution.Loading -> {
+                CircularProgressIndicator(
+                    modifier = Modifier
+                        .padding(top = 7.dp)
+                        .size(20.dp),
+                    color = colors.primary,
+                    strokeWidth = 2.dp,
+                )
+            }
+
+            ForwardQuoteResolution.Unavailable -> {
+                if (viewModel != null) {
+                    TextButton(
+                        onClick = {
+                            viewModel.retryForwardQuote(reference.messageUuid)
+                        },
+                    ) {
+                        Text("Повторить")
                     }
                 }
             }
-        )
+
+            is ForwardQuoteResolution.Ready -> {
+                val selectedText = reference.selectedText
+                if (selectedText != null) {
+                    Text(
+                        text = selectedText,
+                        color = style.color,
+                        fontSize = style.fontSize,
+                        lineHeight = style.lineHeight,
+                        modifier = Modifier.padding(top = 3.dp),
+                    )
+                } else {
+                    WorkspaceMarkdownText(
+                        markdown = resolution.message.payload.content,
+                        style = style,
+                        onLinkClicked = { url ->
+                            val context = navController?.context ?: return@WorkspaceMarkdownText
+                            handleWorkspaceLink(
+                                url,
+                                context,
+                                navController,
+                                viewModel,
+                            )
+                        },
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -189,30 +369,11 @@ private fun MessageNodes(
     Column(modifier = modifier.fillMaxWidth()) {
         nodes.forEach { node ->
             when (node) {
-                is QouteNode.Text -> MarkdownText(
+                is QouteNode.Text -> WorkspaceMarkdownText(
                     markdown = node.content,
                     style = style,
                     onLinkClicked = { url ->
-                        when {
-                            url.startsWith("urn:user:") -> {
-                                val userId = url.removePrefix("urn:user:")
-                                val user = viewModel?.getUser(userId)
-                                if (user != null) {
-                                    navController?.navigate(
-                                        ChatFlow.ChatUserInfo(
-                                            user.displayableName(),
-                                            user.uuid,
-                                            user.avatar,
-                                            user.email ?: ""
-                                        )
-                                    )
-                                }
-                            }
-                            else -> {
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                                runCatching { context.startActivity(intent) }
-                            }
-                        }
+                        handleWorkspaceLink(url, context, navController, viewModel)
                     }
                 )
                 is QouteNode.Quote -> ZulipQuoteBlock(
@@ -242,7 +403,7 @@ private fun ZulipQuoteBlock(
     val borderColor = colors.textAdditional30.copy(alpha = 0.7f)
     val headerStyle = style.copy(
         fontSize = (style.fontSize.value * 0.85f).sp,
-        color = colors.textAdditional30,
+        color = colors.messageSecondaryText,
     )
     Column(
         modifier = Modifier
@@ -260,30 +421,11 @@ private fun ZulipQuoteBlock(
             .padding(start = 8.dp),
     ) {
         quote.header?.let { header ->
-            MarkdownText(
+            WorkspaceMarkdownText(
                 markdown = header.toMarkdownLine(),
                 style = headerStyle,
                 onLinkClicked = { url ->
-                    when {
-                        url.startsWith("urn:user:") -> {
-                            val userId = url.removePrefix("urn:user:")
-                            val user = viewModel?.getUser(userId)
-                            if (user != null) {
-                                navController?.navigate(
-                                    ChatFlow.ChatUserInfo(
-                                        user.displayableName(),
-                                        user.uuid,
-                                        user.avatar,
-                                        user.email ?: ""
-                                    )
-                                )
-                            }
-                        }
-                        else -> {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                            runCatching { context.startActivity(intent) }
-                        }
-                    }
+                    handleWorkspaceLink(url, context, navController, viewModel)
                 }
             )
         }
@@ -296,5 +438,96 @@ private fun ZulipQuoteBlock(
                 viewModel = viewModel
             )
         }
+    }
+}
+
+@Composable
+private fun WorkspaceMarkdownText(
+    markdown: String,
+    style: TextStyle,
+    onLinkClicked: (String) -> Unit,
+) {
+    val colors = LocalWorkspaceColorsPalette.current
+    key(
+        colors.markdownCodeBackground,
+        colors.markdownCodeText,
+        style.color,
+        style.fontSize,
+        style.lineHeight,
+    ) {
+        MarkdownText(
+            markdown = markdown,
+            style = style,
+            syntaxHighlightColor = colors.markdownCodeBackground,
+            syntaxHighlightTextColor = colors.markdownCodeText,
+            onLinkClicked = onLinkClicked,
+        )
+    }
+}
+
+private fun handleWorkspaceLink(
+    url: String,
+    context: Context,
+    navController: NavHostController?,
+    viewModel: ChatDialogViewModel?,
+) {
+    when {
+        url.startsWith("urn:user:") -> {
+            val userId = url.removePrefix("urn:user:")
+            val user = viewModel?.getUser(userId)
+            if (user != null && navController != null) {
+                navController.navigate(
+                    ChatFlow.ChatUserInfo(
+                        user.displayableName(),
+                        user.uuid,
+                        user.avatar,
+                        user.email.orEmpty(),
+                    ),
+                )
+            } else {
+                viewModel?.reportActionError("Профиль пользователя недоступен")
+            }
+        }
+
+        url.startsWith("urn:message:") -> {
+            viewModel?.requestMessageFocus(url.removePrefix("urn:message:"))
+        }
+
+        url.startsWith("urn:quote:", ignoreCase = true) -> {
+            val quote = parseWorkspaceQuoteUrn(url)
+            if (quote == null) {
+                viewModel?.reportActionError("Повреждённая ссылка на сообщение")
+            } else {
+                viewModel?.openForwardQuoteSource(quote.first)
+            }
+        }
+
+        else -> {
+            val uri = safeExternalUri(url)
+            if (uri == null) {
+                viewModel?.reportActionError("Небезопасная ссылка заблокирована")
+                return
+            }
+            val intent = Intent(Intent.ACTION_VIEW, uri)
+                .addCategory(Intent.CATEGORY_BROWSABLE)
+            runCatching { context.startActivity(intent) }
+                .onFailure {
+                    viewModel?.reportActionError("Не удалось открыть ссылку")
+                }
+        }
+    }
+}
+
+internal fun safeExternalUri(value: String): Uri? {
+    if (!isSafeExternalLink(value)) return null
+    return runCatching { Uri.parse(value.trim()) }.getOrNull()
+}
+
+internal fun isSafeExternalLink(value: String): Boolean {
+    val uri = runCatching { URI(value.trim()) }.getOrNull() ?: return false
+    return when (uri.scheme?.lowercase()) {
+        "http", "https" -> !uri.host.isNullOrBlank() && uri.userInfo == null
+        "mailto" -> !uri.rawSchemeSpecificPart.isNullOrBlank()
+        else -> false
     }
 }

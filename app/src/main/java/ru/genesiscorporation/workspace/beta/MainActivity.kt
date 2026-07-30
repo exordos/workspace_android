@@ -8,7 +8,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.util.Log
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -16,9 +16,13 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
@@ -36,15 +40,22 @@ import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -54,7 +65,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -64,10 +83,14 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
-import io.ktor.client.HttpClient
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
+import ru.genesiscorporation.workspace.beta.data.WorkspaceAccount
+import ru.genesiscorporation.workspace.beta.data.WorkspaceThemeMode
+import ru.genesiscorporation.workspace.beta.data.navigation.WorkspaceDeepLink
+import ru.genesiscorporation.workspace.beta.data.navigation.parseWorkspaceDeepLink
 import ru.genesiscorporation.workspace.beta.modules.chatchannels.ChatScreen
 import ru.genesiscorporation.workspace.beta.modules.chatchannels.ChatViewModel
+import ru.genesiscorporation.workspace.beta.modules.chatchannels.ResolvedDeepLinkDestination
 import ru.genesiscorporation.workspace.beta.modules.channelinfo.ChannelInfoScreen
 import ru.genesiscorporation.workspace.beta.modules.channelinfo.ChannelInfoViewModel
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.ChatDialogScreen
@@ -76,10 +99,20 @@ import ru.genesiscorporation.workspace.beta.modules.chatuserinfo.ChatUserInfoScr
 import ru.genesiscorporation.workspace.beta.modules.chatuserinfo.ChatUserInfoViewModel
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.ChooseServerScreen
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.ChooseServerViewModel
+import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 import ru.genesiscorporation.workspace.beta.modules.login.LoginScreen
 import ru.genesiscorporation.workspace.beta.modules.login.LoginViewModel
+import ru.genesiscorporation.workspace.beta.modules.inbox.InboxScreen
+import ru.genesiscorporation.workspace.beta.modules.feed.FeedScreen
+import ru.genesiscorporation.workspace.beta.modules.feed.FeedViewModel
+import ru.genesiscorporation.workspace.beta.modules.feed.MessageTimelineKind
+import ru.genesiscorporation.workspace.beta.modules.drafts.DraftsScreen
+import ru.genesiscorporation.workspace.beta.modules.drafts.DraftsViewModel
 import ru.genesiscorporation.workspace.beta.modules.profile.ProfileScreen
 import ru.genesiscorporation.workspace.beta.modules.profile.ProfileViewModel
+import ru.genesiscorporation.workspace.beta.modules.share.IncomingShareDialog
+import ru.genesiscorporation.workspace.beta.modules.share.IncomingShareRequest
+import ru.genesiscorporation.workspace.beta.modules.share.toIncomingShareRequestOrNull
 import ru.genesiscorporation.workspace.beta.modules.topics.TopicsScreen
 import ru.genesiscorporation.workspace.beta.modules.topics.TopicsViewModel
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
@@ -91,57 +124,77 @@ import io.ktor.client.request.url
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
-import ru.genesiscorporation.workspace.beta.data.push.FirebasePushRegistrationTokenProvider
+import ru.genesiscorporation.workspace.beta.data.ConversationStateStore
 import ru.genesiscorporation.workspace.beta.data.push.PushDeviceRegistrationManager
-import ru.genesiscorporation.workspace.beta.data.push.TinkPushDeviceIdentityStore
-import ru.genesiscorporation.workspace.beta.data.push.WorkspacePushDeviceRemoteDataSource
+import ru.genesiscorporation.workspace.beta.data.push.PushNavigationRequest
 import ru.genesiscorporation.workspace.beta.ui.IncomingCall
-import io.ktor.client.plugins.contentnegotiation.*
-import io.ktor.client.plugins.websocket.WebSockets
-import io.ktor.serialization.kotlinx.json.*
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 
 class MainActivity : ComponentActivity() {
 
-    private var pendingDeepLink by mutableStateOf<String?>(null)
-    val sessionCookieStore = SessionCookieStore()
-
-    private val workspaceApiClient: WorkspaceAPIClient by lazy {
-        val client = HttpClient() {
-            install(WebSockets)
-            install(createSessionCapturePlugin(sessionCookieStore))
-            install(ContentNegotiation) {
-                json()
-            }
-        }
-
-        WorkspaceAPIClient(client, userState, sessionCookieStore)
-    }
+    private var pendingPushNavigation by mutableStateOf<PushNavigationRequest?>(null)
+    private var pendingDeepLink by mutableStateOf<WorkspaceDeepLink?>(null)
+    private var pendingIncomingShare by
+        mutableStateOf<IncomingShareRequest?>(null)
     private val userState by viewModels<UserViewModel>()  {
         UserViewModelFactory(applicationContext)
     }
-    private val pushDeviceRegistrationManager by lazy {
-        PushDeviceRegistrationManager(
-            tokenProvider = FirebasePushRegistrationTokenProvider(),
-            identityProvider = TinkPushDeviceIdentityStore(applicationContext),
-            remoteDataSource = WorkspacePushDeviceRemoteDataSource(workspaceApiClient),
-        )
+    private val networkState by viewModels<WorkspaceNetworkViewModel> {
+        WorkspaceNetworkViewModelFactory(userState, applicationContext)
     }
-    val eventsRepository = EventsRepository()
+    private val workspaceApiClient: WorkspaceAPIClient
+        get() = networkState.apiClient
+    private val eventsRepository: EventsRepository
+        get() = networkState.eventsRepository
+    private val pushDeviceRegistrationManager: PushDeviceRegistrationManager
+        get() = networkState.pushDeviceRegistrationManager
+    private val conversationStateStore: ConversationStateStore
+        get() = networkState.conversationStateStore
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        eventsRepository.client = workspaceApiClient
-        pendingDeepLink = intent.getStringExtra("deeplink")
+        val incomingShare = intent.toIncomingShareRequestOrNull(
+            savedRequestId = savedInstanceState
+                ?.getString(SAVED_INCOMING_SHARE_REQUEST_ID),
+        )
+        if (incomingShare != null) {
+            pendingIncomingShare = incomingShare
+            pendingPushNavigation = null
+            pendingDeepLink = null
+        } else if (savedInstanceState == null) {
+            pendingPushNavigation = intent.pushNavigationRequest()
+            pendingDeepLink = intent.workspaceDeepLink()
+        }
         enableEdgeToEdge()
         setContent {
-            WokspaceTheme {
-                CompositionLocalProvider(UserState provides userState) {
+            val uiPreferences by userState.uiPreferences.collectAsState()
+            val systemDarkTheme = isSystemInDarkTheme()
+            val darkTheme = when (uiPreferences.themeMode) {
+                WorkspaceThemeMode.SYSTEM -> systemDarkTheme
+                WorkspaceThemeMode.LIGHT -> false
+                WorkspaceThemeMode.DARK -> true
+            }
+            WokspaceTheme(darkTheme = darkTheme) {
+                CompositionLocalProvider(LocalUserState provides userState) {
                     ApplicationSwitcher(
                         workspaceApiClient = workspaceApiClient,
                         eventsRepository = eventsRepository,
                         pushDeviceRegistrationManager = pushDeviceRegistrationManager,
+                        conversationStateStore = conversationStateStore,
+                        pendingPushNavigation = pendingPushNavigation,
+                        onPushNavigationHandled = { pendingPushNavigation = null },
                         pendingDeepLink = pendingDeepLink,
                         onDeepLinkHandled = { pendingDeepLink = null },
+                        pendingIncomingShare = pendingIncomingShare,
+                        onIncomingShareHandled = {
+                            pendingIncomingShare = null
+                            setIntent(
+                                Intent(this, MainActivity::class.java)
+                                    .setAction(Intent.ACTION_MAIN),
+                            )
+                        },
                     )
                 }
             }
@@ -151,22 +204,59 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        pendingDeepLink = intent.getStringExtra("deeplink")
+        val incomingShare = intent.toIncomingShareRequestOrNull()
+        if (incomingShare != null) {
+            pendingPushNavigation = null
+            pendingDeepLink = null
+            pendingIncomingShare = incomingShare
+        } else if (intent.action == Intent.ACTION_VIEW) {
+            pendingPushNavigation = null
+            pendingDeepLink = intent.workspaceDeepLink()
+            pendingIncomingShare = null
+        } else {
+            pendingDeepLink = null
+            pendingPushNavigation = intent.pushNavigationRequest()
+            pendingIncomingShare = null
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        pendingIncomingShare?.requestId?.let { requestId ->
+            outState.putString(SAVED_INCOMING_SHARE_REQUEST_ID, requestId)
+        }
+        super.onSaveInstanceState(outState)
     }
 }
+
+private const val SAVED_INCOMING_SHARE_REQUEST_ID =
+    "workspace.saved_incoming_share_request_id"
+
+private fun Intent.pushNavigationRequest(): PushNavigationRequest? =
+    PushNavigationRequest.fromIntentFields(
+        providerChatKey = getStringExtra(
+            PushNavigationRequest.EXTRA_PROVIDER_CHAT_KEY,
+        ),
+        topicName = getStringExtra(PushNavigationRequest.EXTRA_TOPIC_NAME),
+        workspaceMessageId = getIntExtra(
+            PushNavigationRequest.EXTRA_WORKSPACE_MESSAGE_ID,
+            -1,
+        ),
+    )
+
+private fun Intent.workspaceDeepLink(): WorkspaceDeepLink? =
+    takeIf { action == Intent.ACTION_VIEW }
+        ?.dataString
+        ?.let(::parseWorkspaceDeepLink)
 
 @Composable
 fun RequestNotificationPermissionIfNeeded() {
     val context = LocalContext.current
     val activity = context as? Activity ?: return
+    var permissionDenied by rememberSaveable { mutableStateOf(false) }
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (granted) {
-            // Notifications allowed (FCM notifications can be shown)
-        } else {
-            // User denied; handle gracefully
-        }
+        permissionDenied = !granted
     }
     LaunchedEffect(Unit) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -179,6 +269,36 @@ fun RequestNotificationPermissionIfNeeded() {
             }
         }
     }
+    if (permissionDenied) {
+        AlertDialog(
+            onDismissRequest = { permissionDenied = false },
+            title = { Text("Уведомления отключены") },
+            text = {
+                Text(
+                    "Без разрешения Android не покажет новые сообщения. " +
+                        "Разрешение можно включить в настройках приложения.",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        permissionDenied = false
+                        activity.startActivity(
+                            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                .putExtra(Settings.EXTRA_APP_PACKAGE, activity.packageName),
+                        )
+                    },
+                ) {
+                    Text("Открыть настройки")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { permissionDenied = false }) {
+                    Text("Не сейчас")
+                }
+            },
+        )
+    }
 }
 
 @Composable
@@ -186,14 +306,28 @@ fun ApplicationSwitcher(
     workspaceApiClient: WorkspaceAPIClient,
     eventsRepository: EventsRepository,
     pushDeviceRegistrationManager: PushDeviceRegistrationManager,
-    pendingDeepLink: String?,
-    onDeepLinkHandled: () -> Unit
+    conversationStateStore: ConversationStateStore,
+    pendingPushNavigation: PushNavigationRequest?,
+    onPushNavigationHandled: () -> Unit,
+    pendingDeepLink: WorkspaceDeepLink?,
+    onDeepLinkHandled: () -> Unit,
+    pendingIncomingShare: IncomingShareRequest?,
+    onIncomingShareHandled: () -> Unit,
 ) {
-    val user = UserState.current
+    val user = LocalUserState.current
     val accessToken by user.accessToken.collectAsState()
+    val activeAccountId by user.activeAccountId.collectAsState()
+    val uiPreferencesOwnerKey by user.uiPreferencesOwnerKey.collectAsState()
+    val activeAccount by user.activeAccount.collectAsState()
+    val accounts by user.accounts.collectAsState()
+    val baseUrl by user.baseUrl.collectAsState()
     val isAccessTokenLoaded by user.isAccessTokenLoaded.collectAsState()
+    val initializationError by user.initializationError.collectAsState()
+    val deepLink = pendingDeepLink
+    val uiPreferencesReady =
+        accessToken == null ||
+            (activeAccountId != null && uiPreferencesOwnerKey == activeAccountId)
 
-    Log.d("RepoCheck", "initnav repo instance = ${System.identityHashCode(eventsRepository)}")
     val workspaceViewModelFactory = remember {
         WorkspaceViewModelFactory(
             workspaceApiClient,
@@ -201,7 +335,26 @@ fun ApplicationSwitcher(
             pushDeviceRegistrationManager,
         )
     }
-    var workspaceViewModel: WorkspaceViewModel = viewModel(factory = workspaceViewModelFactory)
+    val workspaceViewModel: WorkspaceViewModel = viewModel(factory = workspaceViewModelFactory)
+    val matchingAccounts = deepLink
+        ?.let { link -> accounts.filter(link::matches) }
+        .orEmpty()
+    val automaticTarget = matchingAccounts.singleOrNull()
+    var automaticSwitchFailed by remember(deepLink) {
+        mutableStateOf(false)
+    }
+    val isSwitchingForDeepLink =
+        deepLink != null &&
+            automaticTarget != null &&
+            !automaticSwitchFailed &&
+            activeAccountId != automaticTarget.accountId
+
+    LaunchedEffect(deepLink, automaticTarget?.accountId, activeAccountId) {
+        if (isSwitchingForDeepLink) {
+            automaticSwitchFailed =
+                !user.switchAccountAndWait(automaticTarget.accountId)
+        }
+    }
     if (!isAccessTokenLoaded) {
         Box(
             modifier = Modifier
@@ -211,17 +364,189 @@ fun ApplicationSwitcher(
         ) {
             CircularProgressIndicator()
         }
+    } else if (initializationError) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(LocalWorkspaceColorsPalette.current.background)
+                .padding(32.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = "Безопасное хранилище недоступно. Перезапустите приложение.",
+                color = LocalWorkspaceColorsPalette.current.indicatorRed,
+            )
+        }
+    } else if (!uiPreferencesReady) {
+        FullScreenProgress()
     } else if (accessToken == null) {
         LoginNavigation(workspaceApiClient)
+    } else if (
+        deepLink != null &&
+        activeAccount?.let(deepLink::matches) != true
+    ) {
+        if (isSwitchingForDeepLink) {
+            FullScreenProgress()
+        } else {
+            DeepLinkAccountScreen(
+                deepLink = deepLink,
+                matchingAccounts = matchingAccounts,
+                onAccountSelected = user::switchAccountAndWait,
+                onConnectAccount = {
+                    user.beginAddAccountAndWait()
+                    deepLink.baseUrl?.let {
+                        user.addBaseUrlAndWait(it)
+                    }
+                },
+                onOpenCurrentAccount = onDeepLinkHandled,
+            )
+        }
     } else {
-        WokspaceApp(
-            workspaceViewModel,
-            workspaceApiClient,
-            eventsRepository,
-            pushDeviceRegistrationManager,
-            pendingDeepLink,
-            onDeepLinkHandled,
-        )
+        key(activeAccountId ?: baseUrl) {
+            WokspaceApp(
+                workspaceViewModel,
+                workspaceApiClient,
+                eventsRepository,
+                pushDeviceRegistrationManager,
+                conversationStateStore,
+                pendingPushNavigation,
+                onPushNavigationHandled,
+                deepLink,
+                onDeepLinkHandled,
+                pendingIncomingShare,
+                onIncomingShareHandled,
+            )
+        }
+    }
+}
+
+@Composable
+private fun FullScreenProgress() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(LocalWorkspaceColorsPalette.current.background),
+        contentAlignment = Alignment.Center,
+    ) {
+        CircularProgressIndicator()
+    }
+}
+
+@Composable
+private fun DeepLinkAccountScreen(
+    deepLink: WorkspaceDeepLink,
+    matchingAccounts: List<WorkspaceAccount>,
+    onAccountSelected: suspend (String) -> Boolean,
+    onConnectAccount: suspend () -> Unit,
+    onOpenCurrentAccount: () -> Unit,
+) {
+    val colors = LocalWorkspaceColorsPalette.current
+    val scope = rememberCoroutineScope()
+    var operationInProgress by remember(deepLink) { mutableStateOf(false) }
+    var actionError by remember(deepLink) { mutableStateOf<String?>(null) }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(colors.background)
+            .safeContentPadding()
+            .padding(24.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                text = if (matchingAccounts.isEmpty()) {
+                    "Нужна другая организация"
+                } else {
+                    "Выберите аккаунт"
+                },
+                color = colors.textHeaders,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = if (matchingAccounts.isEmpty()) {
+                    "Ссылка ведёт в ${deepLink.organizationId}. Подключите эту организацию, чтобы открыть нужный чат."
+                } else {
+                    "Ссылка доступна в нескольких сохранённых аккаунтах."
+                },
+                color = colors.textAdditional50,
+                fontSize = 15.sp,
+            )
+            actionError?.let { error ->
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = error,
+                    color = colors.indicatorRed,
+                    fontSize = 14.sp,
+                )
+            }
+            Spacer(Modifier.height(20.dp))
+            matchingAccounts.forEach { account ->
+                Button(
+                    onClick = {
+                        scope.launch {
+                            operationInProgress = true
+                            actionError = null
+                            val switched = runCatching {
+                                onAccountSelected(account.accountId)
+                            }.getOrElse { false }
+                            if (!switched) {
+                                actionError =
+                                    "Сохранённый аккаунт больше недоступен"
+                            }
+                            operationInProgress = false
+                        }
+                    },
+                    enabled = !operationInProgress,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        account.displayName
+                            ?: account.login.ifBlank { account.projectName },
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+            if (matchingAccounts.isEmpty()) {
+                Button(
+                    onClick = {
+                        scope.launch {
+                            operationInProgress = true
+                            actionError = null
+                            runCatching { onConnectAccount() }
+                                .onFailure {
+                                    actionError =
+                                        "Не удалось подготовить вход. Повторите попытку."
+                                }
+                            operationInProgress = false
+                        }
+                    },
+                    enabled = !operationInProgress,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Подключить организацию")
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+            OutlinedButton(
+                onClick = onOpenCurrentAccount,
+                enabled = !operationInProgress,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Открыть текущий аккаунт")
+            }
+        }
+        if (operationInProgress) {
+            CircularProgressIndicator(
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+        }
     }
 }
 
@@ -231,16 +556,38 @@ fun WokspaceApp(
     workspaceApiClient: WorkspaceAPIClient,
     eventsRepository: EventsRepository,
     pushDeviceRegistrationManager: PushDeviceRegistrationManager,
-    pendingDeepLink: String?,
-    onDeepLinkHandled: () -> Unit
+    conversationStateStore: ConversationStateStore,
+    pendingPushNavigation: PushNavigationRequest?,
+    onPushNavigationHandled: () -> Unit,
+    pendingDeepLink: WorkspaceDeepLink?,
+    onDeepLinkHandled: () -> Unit,
+    pendingIncomingShare: IncomingShareRequest?,
+    onIncomingShareHandled: () -> Unit,
 ) {
     val colors = LocalWorkspaceColorsPalette.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val navController = rememberNavController()
     val context = LocalContext.current
     val currentCallMessage by viewModel.currentCallMessage.collectAsState()
-    val currentDestination = rememberSaveable { mutableStateOf(0) }
+    var currentDestination by rememberSaveable { mutableIntStateOf(0) }
     var showBottomNavigation by rememberSaveable { mutableStateOf(true) }
+
+    LaunchedEffect(
+        pendingPushNavigation,
+        pendingDeepLink,
+        pendingIncomingShare?.requestId,
+    ) {
+        if (
+            pendingPushNavigation != null ||
+            pendingDeepLink != null ||
+            pendingIncomingShare != null
+        ) {
+            navController.navigate(Chat.route) {
+                popUpTo(Chat.route)
+                launchSingleTop = true
+            }
+        }
+    }
 
     Box(
         Modifier
@@ -257,18 +604,23 @@ fun WokspaceApp(
                 .padding(bottom = if (showBottomNavigation) 102.dp else 0.dp),
         ) {
             composable(Chat.route) {
-                currentDestination.value = 0
+                currentDestination = 0
                 ChatNavigation(
                     workspaceApiClient = workspaceApiClient,
                     eventsRepository = eventsRepository,
+                    conversationStateStore = conversationStateStore,
+                    pendingPushNavigation = pendingPushNavigation,
+                    onPushNavigationHandled = onPushNavigationHandled,
                     pendingDeepLink = pendingDeepLink,
                     onDeepLinkHandled = onDeepLinkHandled,
+                    pendingIncomingShare = pendingIncomingShare,
+                    onIncomingShareHandled = onIncomingShareHandled,
                     onBottomNavigationVisibilityChange = { showBottomNavigation = it },
                 )
             }
             composable(Profile.route) {
                 LaunchedEffect(Unit) { showBottomNavigation = true }
-                currentDestination.value = 1
+                currentDestination = 1
                 ProfileNavigation(
                     workspaceApiClient,
                     pushDeviceRegistrationManager,
@@ -277,16 +629,16 @@ fun WokspaceApp(
         }
         if (showBottomNavigation) {
             WorkspaceBottomNavigation(
-                selectedDestination = currentDestination.value,
+                selectedDestination = currentDestination,
                 onChatClick = {
-                    currentDestination.value = 0
+                    currentDestination = 0
                     navController.navigate(Chat.route) {
                         popUpTo(Chat.route)
                         launchSingleTop = true
                     }
                 },
                 onProfileClick = {
-                    currentDestination.value = 1
+                    currentDestination = 1
                     navController.navigate(Profile.route) {
                         popUpTo(Chat.route)
                         launchSingleTop = true
@@ -310,7 +662,7 @@ private fun WorkspaceBottomNavigation(
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalWorkspaceColorsPalette.current
-    val user = UserState.current
+    val user = LocalUserState.current
     val baseUrl by user.baseUrl.collectAsState()
     val profile = user.userData
 
@@ -341,12 +693,25 @@ private fun WorkspaceBottomNavigation(
                         if (selectedDestination == 0) colors.cardBackgroundActive
                         else Color.Transparent,
                     )
-                    .clickable(onClick = onChatClick),
+                    .selectable(
+                        selected = selectedDestination == 0,
+                        role = Role.Tab,
+                        onClick = onChatClick,
+                    )
+                    .clearAndSetSemantics {
+                        contentDescription = "Чаты"
+                        selected = selectedDestination == 0
+                        role = Role.Tab
+                        onClick(label = "Открыть чаты") {
+                            onChatClick()
+                            true
+                        }
+                    },
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     painter = painterResource(R.drawable.chat_bubble),
-                    contentDescription = "Чаты",
+                    contentDescription = null,
                     tint = if (selectedDestination == 0) colors.iconActive else colors.iconBase,
                     modifier = Modifier.size(36.dp),
                 )
@@ -359,7 +724,20 @@ private fun WorkspaceBottomNavigation(
                         if (selectedDestination == 1) colors.cardBackgroundActive
                         else Color.Transparent,
                     )
-                    .clickable(onClick = onProfileClick),
+                    .selectable(
+                        selected = selectedDestination == 1,
+                        role = Role.Tab,
+                        onClick = onProfileClick,
+                    )
+                    .clearAndSetSemantics {
+                        contentDescription = "Профиль"
+                        selected = selectedDestination == 1
+                        role = Role.Tab
+                        onClick(label = "Открыть профиль") {
+                            onProfileClick()
+                            true
+                        }
+                    },
                 contentAlignment = Alignment.Center,
             ) {
                 if (profile != null) {
@@ -374,7 +752,7 @@ private fun WorkspaceBottomNavigation(
                 } else {
                     Icon(
                         painter = painterResource(R.drawable.ic_profile),
-                        contentDescription = "Профиль",
+                        contentDescription = null,
                         tint = if (selectedDestination == 1) colors.iconActive else colors.iconBase,
                         modifier = Modifier.size(36.dp),
                     )
@@ -388,24 +766,184 @@ private fun WorkspaceBottomNavigation(
 fun ChatNavigation(
     workspaceApiClient: WorkspaceAPIClient,
     eventsRepository: EventsRepository,
-    pendingDeepLink: String?,
+    conversationStateStore: ConversationStateStore,
+    pendingPushNavigation: PushNavigationRequest?,
+    onPushNavigationHandled: () -> Unit,
+    pendingDeepLink: WorkspaceDeepLink?,
     onDeepLinkHandled: () -> Unit,
+    pendingIncomingShare: IncomingShareRequest?,
+    onIncomingShareHandled: () -> Unit,
     onBottomNavigationVisibilityChange: (Boolean) -> Unit,
 ) {
     val navController = rememberNavController()
-    val user = UserState.current
-    val chatViewModelFactory = remember { ChatViewModelFactory(workspaceApiClient, user, eventsRepository, pendingDeepLink, onDeepLinkHandled) }
+    val user = LocalUserState.current
+    val chatViewModelFactory = remember {
+        ChatViewModelFactory(
+            workspaceApiClient,
+            user,
+            eventsRepository,
+            conversationStateStore,
+        )
+    }
     val chatViewModel: ChatViewModel = viewModel(factory = chatViewModelFactory)
+    LaunchedEffect(pendingIncomingShare?.requestId) {
+        if (pendingIncomingShare != null) {
+            navController.popBackStack(
+                navController.graph.startDestinationId,
+                false,
+            )
+        }
+    }
+    LaunchedEffect(pendingPushNavigation, pendingDeepLink) {
+        val pushRequest = pendingPushNavigation
+        val deepLink = pendingDeepLink
+        if (pushRequest == null && deepLink == null) return@LaunchedEffect
+        val catalogState = chatViewModel.queryState.first {
+            it !is QueryState.Idle && it !is QueryState.Loading
+        }
+        val destination = when {
+            catalogState is QueryState.Success && deepLink != null ->
+                chatViewModel.resolveDeepLinkNavigation(deepLink)
+
+            catalogState is QueryState.Success && pushRequest != null ->
+                chatViewModel.resolvePushNavigation(pushRequest)
+                    ?.let(ResolvedDeepLinkDestination::Dialog)
+
+            deepLink != null ->
+                chatViewModel.resolvePersistedDeepLinkNavigation(deepLink)
+
+            else -> null
+        }
+        when (destination) {
+            is ResolvedDeepLinkDestination.Dialog -> {
+                navController.popBackStack(
+                    navController.graph.startDestinationId,
+                    false,
+                )
+                navController.navigate(destination.route) {
+                    launchSingleTop = false
+                }
+            }
+
+            is ResolvedDeepLinkDestination.TopicList -> {
+                navController.popBackStack(
+                    navController.graph.startDestinationId,
+                    false,
+                )
+                navController.navigate(destination.route) {
+                    launchSingleTop = false
+                }
+            }
+
+            null -> Unit
+        }
+        if (
+            catalogState !is QueryState.Success &&
+            destination == null &&
+            chatViewModel.actionError.value == null
+        ) {
+            chatViewModel.reportActionError(
+                if (deepLink != null) {
+                    "Не удалось открыть ссылку: список чатов недоступен"
+                } else {
+                    "Не удалось открыть уведомление: список чатов недоступен"
+                }
+            )
+        }
+        if (deepLink != null) {
+            onDeepLinkHandled()
+        } else {
+            onPushNavigationHandled()
+        }
+    }
     NavHost(navController = navController, startDestination = ChatFlow.ChatList) {
         composable<ChatFlow.ChatList> {
             LaunchedEffect(Unit) { onBottomNavigationVisibilityChange(true) }
             ChatScreen(chatViewModel, navController)
         }
+        composable<ChatFlow.Inbox> {
+            LaunchedEffect(Unit) { onBottomNavigationVisibilityChange(true) }
+            InboxScreen(chatViewModel, navController)
+        }
+        composable<ChatFlow.Feed> {
+            LaunchedEffect(Unit) { onBottomNavigationVisibilityChange(true) }
+            val feedViewModelFactory = remember {
+                FeedViewModelFactory(
+                    workspaceApiClient,
+                    user,
+                    MessageTimelineKind.FEED,
+                )
+            }
+            val feedViewModel: FeedViewModel = viewModel(
+                factory = feedViewModelFactory,
+            )
+            FeedScreen(
+                feedViewModel,
+                chatViewModel,
+                navController,
+                MessageTimelineKind.FEED,
+            )
+        }
+        composable<ChatFlow.Starred> {
+            LaunchedEffect(Unit) { onBottomNavigationVisibilityChange(true) }
+            val starredViewModelFactory = remember {
+                FeedViewModelFactory(
+                    workspaceApiClient,
+                    user,
+                    MessageTimelineKind.STARRED,
+                )
+            }
+            val starredViewModel: FeedViewModel = viewModel(
+                factory = starredViewModelFactory,
+            )
+            FeedScreen(
+                starredViewModel,
+                chatViewModel,
+                navController,
+                MessageTimelineKind.STARRED,
+            )
+        }
+        composable<ChatFlow.Drafts> {
+            LaunchedEffect(Unit) { onBottomNavigationVisibilityChange(true) }
+            val appContext = LocalContext.current.applicationContext
+            val draftsViewModelFactory = remember(appContext) {
+                DraftsViewModelFactory(
+                    workspaceApiClient,
+                    user,
+                    conversationStateStore,
+                    appContext,
+                )
+            }
+            val draftsViewModel: DraftsViewModel = viewModel(
+                factory = draftsViewModelFactory,
+            )
+            DraftsScreen(
+                draftsViewModel,
+                chatViewModel,
+                navController,
+            )
+        }
         composable<ChatFlow.ChatDialog> {
             LaunchedEffect(Unit) { onBottomNavigationVisibilityChange(false) }
             val args = it.toRoute<ChatFlow.ChatDialog>()
-            Log.d("RepoCheck", "chatnav repo instance = ${System.identityHashCode(eventsRepository)}")
-            val chatDialogViewModelFactory = remember { ChatDialogViewModelFactory(workspaceApiClient, user, args.title, args.chatId, args.topicName, args.topicUuid, args.isDirectMessages, eventsRepository, args.userId) }
+            val chatDialogViewModelFactory = remember {
+                ChatDialogViewModelFactory(
+                    workspaceApiClient,
+                    user,
+                    args.title,
+                    args.chatId,
+                    args.topicName,
+                    args.topicUuid,
+                    args.isDirectMessages,
+                    eventsRepository,
+                    args.userId,
+                    args.focusProviderMessageId,
+                    args.focusMessageUuid,
+                    args.beginForwardMessageUuid,
+                    args.draftStorageSlot,
+                    conversationStateStore,
+                )
+            }
             val chatDialogViewModel: ChatDialogViewModel = viewModel(factory = chatDialogViewModelFactory)
             ChatDialogScreen(chatDialogViewModel, navController)
         }
@@ -420,7 +958,6 @@ fun ChatNavigation(
         composable<ChatFlow.ChatUserInfo> {
             LaunchedEffect(Unit) { onBottomNavigationVisibilityChange(true) }
             val args = it.toRoute<ChatFlow.ChatUserInfo>()
-            Log.d("RepoCheck", "chatnav repo instance = ${System.identityHashCode(eventsRepository)}")
             val chatUserInfoViewModelFactory = remember { ChatUserInfoViewModelFactory(workspaceApiClient, args.userName, args.userId, args.avatarUrl, args.email, eventsRepository) }
             val chatUserInfoViewModel: ChatUserInfoViewModel = viewModel(factory = chatUserInfoViewModelFactory)
             ChatUserInfoScreen(chatUserInfoViewModel, navController)
@@ -439,13 +976,42 @@ fun ChatNavigation(
             ChannelInfoScreen(channelInfoViewModel, navController)
         }
     }
+    pendingIncomingShare?.let { request ->
+        IncomingShareDialog(
+            request = request,
+            viewModel = chatViewModel,
+            conversationStateStore = conversationStateStore,
+            onDismiss = onIncomingShareHandled,
+            onCommitted = { target ->
+                onIncomingShareHandled()
+                navController.popBackStack(
+                    navController.graph.startDestinationId,
+                    false,
+                )
+                navController.navigate(
+                    ChatFlow.ChatDialog(
+                        title = target.chatTitle,
+                        chatId = target.streamUuid,
+                        topicName = target.topicName,
+                        topicUuid = target.topicUuid,
+                        isDirectMessages = target.isDirectMessages,
+                        userId = null,
+                    ),
+                )
+            },
+        )
+    }
 }
 
 @Composable
 fun LoginNavigation(workspaceApiClient: WorkspaceAPIClient) {
+    val user = LocalUserState.current
+    val baseUrl by user.baseUrl.collectAsState()
     val navController = rememberNavController()
-    val user = UserState.current
-    NavHost(navController = navController, startDestination = LoginFlow.ChooseServer) {
+    val startDestination = remember(baseUrl) {
+        if (baseUrl.isNullOrBlank()) LoginFlow.ChooseServer else LoginFlow.Login
+    }
+    NavHost(navController = navController, startDestination = startDestination) {
         composable<LoginFlow.ChooseServer> {
             val chooseServerViewModelFactory = remember { ChooseServerViewModelFactory(workspaceApiClient, user) }
             val chooseServerViewModel: ChooseServerViewModel = viewModel(factory = chooseServerViewModelFactory)
@@ -466,11 +1032,17 @@ fun ProfileNavigation(
     pushDeviceRegistrationManager: PushDeviceRegistrationManager,
 ) {
     val navController = rememberNavController()
-    val user = UserState.current
+    val user = LocalUserState.current
+    val appContext = LocalContext.current.applicationContext
     NavHost(navController = navController, startDestination = ProfileFlow.Main) {
         composable<ProfileFlow.Main> {
             val profileViewModelFactory = remember {
-                ProfileViewModelFactory(user, pushDeviceRegistrationManager)
+                ProfileViewModelFactory(
+                    user,
+                    workspaceApiClient,
+                    pushDeviceRegistrationManager,
+                    appContext,
+                )
             }
             var profileViewModel: ProfileViewModel = viewModel(factory = profileViewModelFactory)
             ProfileScreen(profileViewModel)

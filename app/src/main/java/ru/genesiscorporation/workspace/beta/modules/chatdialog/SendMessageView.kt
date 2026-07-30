@@ -1,6 +1,5 @@
 package ru.genesiscorporation.workspace.beta.modules.chatdialog
 
-import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -16,17 +15,19 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,24 +41,35 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
-import kotlinx.coroutines.launch
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 
 @Composable
 fun SendMessageView(viewModel: ChatDialogViewModel) {
-    val messageText by viewModel.messageText.collectAsState()
-    val imageUri by viewModel.imageUri.collectAsState()
-    val editingMessageBackupText by viewModel.editingMessageBackupText.collectAsState()
-    val quotedMessage by viewModel.quotedMessage.collectAsState()
-    val scope = rememberCoroutineScope()
+    val messageText by viewModel.messageText.collectAsStateWithLifecycle()
+    val attachments by viewModel.attachments.collectAsStateWithLifecycle()
+    val uploadStatus by viewModel.uploadStatus.collectAsStateWithLifecycle()
+    val editingMessageBackupText by
+        viewModel.editingMessageBackupText.collectAsStateWithLifecycle()
+    val quotedMessage by viewModel.quotedMessage.collectAsStateWithLifecycle()
+    val sending by viewModel.sending.collectAsStateWithLifecycle()
+    val conversationStateReady by
+        viewModel.conversationStateReady.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val colors = LocalWorkspaceColorsPalette.current
-    val canSend = messageText.isNotBlank() || imageUri != null || viewModel.editingMessage != null
+    val hasSendableContent = if (viewModel.editingMessage != null) {
+        messageText.isNotBlank()
+    } else {
+        messageText.isNotBlank() ||
+            attachments.isNotEmpty() ||
+            quotedMessage != null
+    }
+    val canSend = conversationStateReady && !sending && hasSendableContent
     val launcher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent(),
-    ) { uri: Uri? ->
-        viewModel.onImageUriChange(uri)
+        contract = ActivityResultContracts.OpenMultipleDocuments(),
+    ) { uris ->
+        viewModel.addAttachments(context, uris)
     }
 
     Column(
@@ -67,31 +79,30 @@ fun SendMessageView(viewModel: ChatDialogViewModel) {
             .navigationBarsPadding()
             .padding(top = 5.dp),
     ) {
-        imageUri?.let { uri ->
-            Box(
+        if (attachments.isNotEmpty()) {
+            LazyRow(
                 modifier = Modifier
-                    .padding(horizontal = 14.dp, vertical = 5.dp)
-                    .size(96.dp)
-                    .clip(RoundedCornerShape(9.dp)),
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 5.dp),
             ) {
-                AsyncImage(
-                    model = uri,
-                    contentDescription = "Выбранное изображение",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                )
-                Icon(
-                    painter = painterResource(R.drawable.ic_close_small),
-                    contentDescription = "Удалить изображение",
-                    tint = Color.White,
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .size(28.dp)
-                        .background(Color.Black.copy(alpha = 0.55f), CircleShape)
-                        .clickable { viewModel.onImageUriChange(null) }
-                        .padding(5.dp),
-                )
+                items(attachments, key = { it.uri.toString() }) { attachment ->
+                    SelectedAttachmentPreview(
+                        attachment = attachment,
+                        enabled = !sending,
+                        onRemove = {
+                            viewModel.removeAttachment(context, attachment.uri)
+                        },
+                    )
+                }
             }
+        }
+        uploadStatus?.let { status ->
+            Text(
+                text = status,
+                color = colors.textAdditional50,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
         }
         when {
             editingMessageBackupText != null -> ComposerContext(
@@ -103,7 +114,7 @@ fun SendMessageView(viewModel: ChatDialogViewModel) {
             quotedMessage != null -> ComposerContext(
                 title = "Ответ ${quotedMessage?.user?.displayableName().orEmpty()}",
                 text = quotedMessage?.payload?.content.orEmpty(),
-                onClose = viewModel::clearEditingMessage,
+                onClose = viewModel::clearQuotedMessage,
             )
         }
         Row(
@@ -121,8 +132,11 @@ fun SendMessageView(viewModel: ChatDialogViewModel) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Button(
-                    onClick = { launcher.launch("image/*") },
-                    modifier = Modifier.size(36.dp),
+                    onClick = { launcher.launch(arrayOf("*/*")) },
+                    enabled = conversationStateReady &&
+                        !sending &&
+                        viewModel.editingMessage == null,
+                    modifier = Modifier.size(44.dp),
                     shape = CircleShape,
                     contentPadding = PaddingValues(8.dp),
                     colors = ButtonDefaults.buttonColors(
@@ -132,12 +146,13 @@ fun SendMessageView(viewModel: ChatDialogViewModel) {
                 ) {
                     Icon(
                         painter = painterResource(R.drawable.attach_file),
-                        contentDescription = "Прикрепить изображение",
+                        contentDescription = "Прикрепить файлы",
                     )
                 }
                 BasicTextField(
                     value = messageText,
                     onValueChange = viewModel::onMessageChange,
+                    enabled = conversationStateReady,
                     textStyle = TextStyle(
                         color = colors.textHeaders,
                         fontSize = 14.sp,
@@ -162,11 +177,9 @@ fun SendMessageView(viewModel: ChatDialogViewModel) {
                     },
                 )
                 Button(
-                    onClick = {
-                        scope.launch { viewModel.onSendClicked(context) }
-                    },
+                    onClick = { viewModel.onSendClicked(context) },
                     enabled = canSend,
-                    modifier = Modifier.size(38.dp),
+                    modifier = Modifier.size(44.dp),
                     shape = CircleShape,
                     contentPadding = PaddingValues(9.dp),
                     colors = ButtonDefaults.buttonColors(
@@ -188,6 +201,73 @@ fun SendMessageView(viewModel: ChatDialogViewModel) {
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SelectedAttachmentPreview(
+    attachment: SelectedLocalAttachment,
+    enabled: Boolean,
+    onRemove: () -> Unit,
+) {
+    val colors = LocalWorkspaceColorsPalette.current
+    Box(
+        modifier = Modifier
+            .padding(end = 8.dp)
+            .size(96.dp)
+            .clip(RoundedCornerShape(9.dp))
+            .background(colors.background),
+    ) {
+        if (attachment.contentType.startsWith("image/")) {
+            AsyncImage(
+                model = attachment.uri,
+                contentDescription = attachment.fileName,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.attach_file),
+                    contentDescription = null,
+                    tint = colors.iconBase,
+                    modifier = Modifier.size(32.dp),
+                )
+                Text(
+                    text = attachment.fileName,
+                    color = colors.textHeaders,
+                    fontSize = 11.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 5.dp),
+                )
+            }
+        }
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .size(44.dp)
+                .clickable(
+                    enabled = enabled,
+                    onClick = onRemove,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_close_small),
+                contentDescription = "Удалить ${attachment.fileName}",
+                tint = Color.White,
+                modifier = Modifier
+                    .size(28.dp)
+                    .background(Color.Black.copy(alpha = 0.55f), CircleShape)
+                    .padding(5.dp),
+            )
         }
     }
 }
@@ -221,13 +301,16 @@ private fun ComposerContext(
             )
         }
         Spacer(Modifier.size(8.dp))
-        Icon(
-            painter = painterResource(R.drawable.ic_close_small),
-            contentDescription = "Закрыть",
-            tint = colors.iconBase,
-            modifier = Modifier
-                .size(24.dp)
-                .clickable(onClick = onClose),
-        )
+        IconButton(
+            onClick = onClose,
+            modifier = Modifier.size(44.dp),
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_close_small),
+                contentDescription = "Закрыть",
+                tint = colors.iconBase,
+                modifier = Modifier.size(24.dp),
+            )
+        }
     }
 }

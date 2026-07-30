@@ -1,5 +1,6 @@
 package ru.genesiscorporation.workspace.beta.data.remote.dto
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import ru.genesiscorporation.workspace.beta.data.remote.ApiError
 import ru.genesiscorporation.workspace.beta.data.remote.ApiRequest
@@ -29,5 +30,9 @@ class UploadFileRequestData()
 @Serializable
 data class UploadFileResponseData(
     val uuid: String,
-    val name: String
+    val name: String,
+    @SerialName("content_type")
+    val contentType: String = "",
+    @SerialName("size_bytes")
+    val sizeBytes: Long? = null,
 )

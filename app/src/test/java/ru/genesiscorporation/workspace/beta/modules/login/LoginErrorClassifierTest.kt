@@ -11,8 +11,9 @@ class LoginErrorClassifierTest {
     fun `recognizes explicit otp challenge`() {
         assertTrue(
             LoginErrorClassifier.isOtpChallenge(
-                statusCode = "401",
-                responseBody = """{"error_description":"OTP code is required"}""",
+                httpStatus = 401,
+                errorCode = "OTPInvalidCodeError",
+                safeMessage = "The provided otp code is invalid",
                 otpProvided = false,
             ),
         )
@@ -22,8 +23,9 @@ class LoginErrorClassifierTest {
     fun `recognizes legacy invalid client challenge before otp`() {
         assertTrue(
             LoginErrorClassifier.isOtpChallenge(
-                statusCode = "401",
-                responseBody = """{"error":"invalid_client"}""",
+                httpStatus = 401,
+                errorCode = "invalid_client",
+                safeMessage = "Client authentication failed",
                 otpProvided = false,
             ),
         )
@@ -33,8 +35,9 @@ class LoginErrorClassifierTest {
     fun `does not reopen challenge after an otp attempt`() {
         assertFalse(
             LoginErrorClassifier.isOtpChallenge(
-                statusCode = "401",
-                responseBody = """{"detail":"Invalid OTP"}""",
+                httpStatus = 401,
+                errorCode = "OTPInvalidCodeError",
+                safeMessage = "Invalid OTP",
                 otpProvided = true,
             ),
         )
@@ -44,8 +47,9 @@ class LoginErrorClassifierTest {
     fun `does not classify ordinary invalid credentials as otp`() {
         assertFalse(
             LoginErrorClassifier.isOtpChallenge(
-                statusCode = "401",
-                responseBody = """{"error":"invalid_credentials"}""",
+                httpStatus = 401,
+                errorCode = "invalid_credentials",
+                safeMessage = "Invalid credentials",
                 otpProvided = false,
             ),
         )
@@ -56,8 +60,9 @@ class LoginErrorClassifierTest {
         assertEquals(
             "Неверный код OTP. Проверьте код в приложении-аутентификаторе",
             LoginErrorClassifier.publicMessage(
-                statusCode = "401",
-                responseBody = """{"detail":"Invalid OTP"}""",
+                httpStatus = 401,
+                errorCode = "OTPInvalidCodeError",
+                safeMessage = "Invalid OTP",
                 otpProvided = true,
             ),
         )

@@ -1,7 +1,7 @@
 package ru.genesiscorporation.workspace.beta.modules.chatchannels
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -33,8 +33,10 @@ import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 fun ChatTopic(
     viewModel: ChatViewModel,
     item: TopicsResponseData,
+    displayName: String,
     stream: Stream,
     navController: NavHostController,
+    onLongClick: () -> Unit,
 ) {
     val colors = LocalWorkspaceColorsPalette.current
     val lastMessage = item.lastMessage
@@ -45,19 +47,22 @@ fun ChatTopic(
             .heightIn(min = 65.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(colors.messageBackground)
-            .clickable {
-                viewModel.currentTopicName = item.name
-                navController.navigate(
-                    ChatFlow.ChatDialog(
-                        stream.name,
-                        stream.uuid,
-                        item.name,
-                        item.uuid,
-                        stream.isPrivate,
-                        null,
-                    ),
-                )
-            },
+            .combinedClickable(
+                onClick = {
+                    viewModel.currentTopicName = item.name
+                    navController.navigate(
+                        ChatFlow.ChatDialog(
+                            stream.name,
+                            stream.uuid,
+                            item.name,
+                            item.uuid,
+                            stream.isDirectProviderChat(),
+                            null,
+                        ),
+                    )
+                },
+                onLongClick = onLongClick,
+            ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
@@ -74,7 +79,7 @@ fun ChatTopic(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "# ${item.name}",
+                    text = "# $displayName",
                     color = colors.textHeaders,
                     fontSize = 14.sp,
                     lineHeight = 20.sp,
@@ -123,6 +128,7 @@ fun ChatTopic(
     }
 }
 
-internal fun topicIndicatorColor(value: Int): Color =
-    runCatching { Color(0xFF000000 or value.toLong()) }
-        .getOrDefault(Color(0xFFFFCC00))
+internal fun topicIndicatorColor(value: Int?): Color =
+    value
+        ?.let { runCatching { Color(0xFF000000 or it.toLong()) }.getOrNull() }
+        ?: Color(0xFFFFCC00)

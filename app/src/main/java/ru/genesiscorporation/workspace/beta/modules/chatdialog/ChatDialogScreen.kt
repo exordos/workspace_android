@@ -4,6 +4,7 @@ import android.util.Patterns
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,9 +14,11 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -23,16 +26,25 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -41,26 +53,33 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.distinctUntilChanged
 import org.jitsi.meet.sdk.JitsiMeetActivity
 import org.jitsi.meet.sdk.JitsiMeetConferenceOptions
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.ChatFlow
+import ru.genesiscorporation.workspace.beta.data.PersistedDraftSyncStatus
+import ru.genesiscorporation.workspace.beta.data.PersistedOutboxEntry
+import ru.genesiscorporation.workspace.beta.data.PersistedOutboxStatus
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.ui.AnimatedGif
+import ru.genesiscorporation.workspace.beta.ui.EnhancedMarkdown
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.net.URL
 import java.time.Duration
 import java.time.Instant
-import java.time.LocalDateTime
+import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlin.math.abs
 
 @Composable
 fun ChatDialogScreen(
@@ -69,21 +88,144 @@ fun ChatDialogScreen(
 ) {
     val streamTopicMessages by viewModel.streamTopicMessages.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsState()
+    val loadError by viewModel.loadError.collectAsState()
+    val actionError by viewModel.actionError.collectAsState()
+    val focusedMessageUuid by viewModel.focusedMessageUuid.collectAsState()
+    val outboxEntries by viewModel.outboxEntries.collectAsStateWithLifecycle()
+    val draftSyncState by viewModel.draftSyncState.collectAsStateWithLifecycle()
+    val verifyingOutbox by viewModel.verifyingOutbox.collectAsStateWithLifecycle()
+    val loadingOlderMessages by
+        viewModel.loadingOlderMessages.collectAsStateWithLifecycle()
+    val hasOlderMessages by viewModel.hasOlderMessages.collectAsStateWithLifecycle()
+    val olderMessagesError by viewModel.olderMessagesError.collectAsStateWithLifecycle()
+    val forwardDialogState by
+        viewModel.forwardDialogState.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val uiMode = LocalConfiguration.current.uiMode
     val key = "${viewModel.chatId}.${viewModel.topicUuid}"
+    var hasPositionedConversation by rememberSaveable(key) {
+        mutableStateOf(false)
+    }
+    var pendingHistoryViewportAnchor by remember(key) {
+        mutableStateOf<HistoryViewportAnchor?>(null)
+    }
     val messages = remember(streamTopicMessages[key]) {
-        streamTopicMessages[key].orEmpty().sortedBy {
-            runCatching { LocalDateTime.parse(it.createdAt, viewModel.messageFormatter) }
-                .getOrNull()
+        streamTopicMessages[key].orEmpty()
+            .sortedBy { messageSortInstant(it.createdAt) }
+    }
+    val currentOldestMessageUuid by rememberUpdatedState(
+        messages.firstOrNull()?.uuid,
+    )
+    val showHistoryStatus =
+        loadingOlderMessages || olderMessagesError != null || hasOlderMessages
+    val historyItemOffset = if (showHistoryStatus) 1 else 0
+    val lastListIndex = messages.lastIndex + historyItemOffset
+
+    LaunchedEffect(viewModel, navController) {
+        viewModel.openSourceMessageEvents.collect { event ->
+            navController.navigate(
+                ChatFlow.ChatDialog(
+                    title = event.title,
+                    chatId = event.streamUuid,
+                    topicName = event.topicName,
+                    topicUuid = event.topicUuid,
+                    isDirectMessages = event.isDirectMessages,
+                    userId = null,
+                    focusMessageUuid = event.messageUuid,
+                ),
+            )
         }
     }
 
-    LaunchedEffect(messages.size, uiMode) {
-        if (messages.isNotEmpty()) {
-            listState.scrollToItem(messages.lastIndex)
+    fun captureAndStoreHistoryViewportAnchor(unstableBoundaryUuid: String?) {
+        pendingHistoryViewportAnchor = listState.captureHistoryViewportAnchor(
+            unstableBoundaryUuid = unstableBoundaryUuid,
+        )
+    }
+
+    LaunchedEffect(messages.size, uiMode, historyItemOffset) {
+        if (messages.isNotEmpty() && focusedMessageUuid == null) {
+            val lastVisibleIndex = listState.layoutInfo.visibleItemsInfo
+                .lastOrNull()
+                ?.index
+            if (shouldPositionConversationAtLatest(
+                    hasPositionedConversation = hasPositionedConversation,
+                    lastVisibleIndex = lastVisibleIndex,
+                    lastListIndex = lastListIndex,
+                )
+            ) {
+                listState.scrollToItem(lastListIndex)
+            }
+            hasPositionedConversation = true
         }
+    }
+
+    LaunchedEffect(focusedMessageUuid, messages) {
+        val messageUuid = focusedMessageUuid ?: return@LaunchedEffect
+        val index = messages.indexOfFirst { it.uuid == messageUuid }
+        if (index >= 0) {
+            // External routes must land deterministically even when a cached
+            // conversation and the first network page change layout together.
+            // An animation can be cancelled by that relayout and leave the
+            // user at an unrelated older row.
+            withFrameNanos { }
+            listState.scrollToItem(index + historyItemOffset)
+            viewModel.clearMessageFocus()
+        }
+    }
+
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.firstVisibleItemIndex }
+            .distinctUntilChanged()
+            .collect { firstVisibleItemIndex ->
+                if (firstVisibleItemIndex <= HISTORY_LOAD_TRIGGER_INDEX) {
+                    if (viewModel.loadOlderMessages()) {
+                        captureAndStoreHistoryViewportAnchor(
+                            unstableBoundaryUuid = currentOldestMessageUuid,
+                        )
+                    }
+                }
+            }
+    }
+
+    LaunchedEffect(
+        messages.size,
+        loadingOlderMessages,
+        historyItemOffset,
+    ) {
+        val anchor = pendingHistoryViewportAnchor ?: return@LaunchedEffect
+        if (loadingOlderMessages) return@LaunchedEffect
+        val messageIndex = messages.indexOfFirst {
+            it.uuid == anchor.messageUuid
+        }
+        if (messageIndex >= 0) {
+            // Wait until both the new page and the history status row have
+            // reached LazyColumn's layout. Otherwise removing a retry/error
+            // row can shift the viewport again immediately after restoration.
+            withFrameNanos { }
+            listState.scrollToItem(
+                index = messageIndex + historyItemOffset,
+                scrollOffset = -anchor.offsetFromViewportStart,
+            )
+            repeat(HISTORY_ANCHOR_CORRECTION_FRAMES) {
+                withFrameNanos { }
+                val layout = listState.layoutInfo
+                val anchoredItem = layout.visibleItemsInfo.firstOrNull {
+                    it.key == anchor.messageUuid
+                } ?: return@repeat
+                val currentOffset =
+                    anchoredItem.offset - layout.viewportStartOffset
+                val correction = historyViewportCorrection(
+                    currentOffset = currentOffset,
+                    targetOffset = anchor.offsetFromViewportStart,
+                )
+                if (correction != 0) {
+                    listState.scrollBy(correction.toFloat())
+                }
+            }
+        }
+        pendingHistoryViewportAnchor = null
     }
 
     Scaffold(
@@ -109,7 +251,7 @@ fun ChatDialogScreen(
                 .imePadding(),
         ) {
             when {
-                isLoading -> {
+                isLoading && messages.isEmpty() -> {
                     Box(
                         modifier = Modifier
                             .weight(1f)
@@ -117,6 +259,25 @@ fun ChatDialogScreen(
                         contentAlignment = Alignment.Center,
                     ) {
                         AnimatedGif(Modifier.size(72.dp))
+                    }
+                }
+
+                loadError != null && messages.isEmpty() -> {
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        Text(
+                            text = loadError.orEmpty(),
+                            color = LocalWorkspaceColorsPalette.current.indicatorRed,
+                            fontSize = 15.sp,
+                        )
+                        TextButton(onClick = viewModel::retryLoad) {
+                            Text("Повторить")
+                        }
                     }
                 }
 
@@ -147,19 +308,54 @@ fun ChatDialogScreen(
                             alignment = Alignment.Bottom,
                         ),
                     ) {
+                        if (showHistoryStatus) {
+                            item(key = HISTORY_STATUS_KEY) {
+                                MessageHistoryStatus(
+                                    loading = loadingOlderMessages,
+                                    error = olderMessagesError,
+                                    hasMore = hasOlderMessages,
+                                    onLoad = {
+                                        if (viewModel.loadOlderMessages()) {
+                                            captureAndStoreHistoryViewportAnchor(
+                                                unstableBoundaryUuid =
+                                                    messages.firstOrNull()?.uuid,
+                                            )
+                                        }
+                                    },
+                                    onRetry = {
+                                        if (viewModel.retryOlderMessages()) {
+                                            captureAndStoreHistoryViewportAnchor(
+                                                unstableBoundaryUuid =
+                                                    messages.firstOrNull()?.uuid,
+                                            )
+                                        }
+                                    },
+                                )
+                            }
+                        }
                         items(
                             items = messages,
-                            key = { "${it.uuid}:${it.payload.content}" },
+                            key = { it.uuid },
                         ) { message ->
                             ChatMessage(
                                 item = message,
                                 viewModel = viewModel,
                                 navController = navController,
+                                outboxEntry = outboxEntries.firstOrNull {
+                                    it.localMessageUuid == message.uuid
+                                },
+                                isVerifyingOutbox = message.uuid in verifyingOutbox,
                                 onImageLoad = {
-                                    if (viewModel.shouldScrollToBottom && messages.isNotEmpty()) {
-                                        val lastIndex = messages.lastIndex
+                                    val lastVisibleIndex =
+                                        listState.layoutInfo.visibleItemsInfo
+                                            .lastOrNull()
+                                            ?.index
+                                    if (
+                                        lastVisibleIndex == null ||
+                                        lastVisibleIndex >= lastListIndex - 1
+                                    ) {
                                         scope.launch {
-                                            listState.scrollToItem(lastIndex)
+                                            listState.scrollToItem(lastListIndex)
                                         }
                                     }
                                 },
@@ -168,10 +364,234 @@ fun ChatDialogScreen(
                     }
                 }
             }
+            if (loadError != null && messages.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                        .background(
+                            LocalWorkspaceColorsPalette.current.infoCardBackground,
+                            RoundedCornerShape(8.dp),
+                        )
+                        .padding(start = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = loadError.orEmpty(),
+                        color = LocalWorkspaceColorsPalette.current.indicatorRed,
+                        fontSize = 12.sp,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = viewModel::retryLoad) {
+                        Text("Повторить")
+                    }
+                }
+            }
+            actionError?.let { error ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                        .background(
+                            LocalWorkspaceColorsPalette.current.infoCardBackground,
+                            RoundedCornerShape(8.dp),
+                        )
+                        .padding(start = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = error,
+                        color = LocalWorkspaceColorsPalette.current.indicatorRed,
+                        fontSize = 12.sp,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = viewModel::clearActionError) {
+                        Text("Закрыть")
+                    }
+                }
+            }
+            val visibleDraftSync = draftSyncState?.takeIf {
+                it.status == PersistedDraftSyncStatus.FAILED ||
+                    it.status == PersistedDraftSyncStatus.CONFLICT
+            }
+            if (visibleDraftSync != null) {
+                DraftSyncBanner(
+                    status = visibleDraftSync.status,
+                    error = visibleDraftSync.errorMessage,
+                    onRetry = viewModel::retryDraftSync,
+                    onAcceptServer = viewModel::acceptServerDraft,
+                    onKeepLocal = viewModel::keepLocalDraft,
+                    onDelete = viewModel::deleteConflictedDraft,
+                )
+            }
             SendMessageView(viewModel)
         }
     }
+    forwardDialogState?.let { state ->
+        ForwardMessageDialog(
+            viewModel = viewModel,
+            state = state,
+        )
+    }
 }
+
+@Composable
+private fun DraftSyncBanner(
+    status: PersistedDraftSyncStatus,
+    error: String?,
+    onRetry: () -> Unit,
+    onAcceptServer: () -> Unit,
+    onKeepLocal: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val colors = LocalWorkspaceColorsPalette.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .background(colors.infoCardBackground, RoundedCornerShape(8.dp))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    ) {
+        Text(
+            text = if (status == PersistedDraftSyncStatus.CONFLICT) {
+                "Черновик изменён на другом устройстве"
+            } else {
+                error ?: "Не удалось синхронизировать черновик"
+            },
+            color = colors.indicatorRed,
+            fontSize = 12.sp,
+            lineHeight = 16.sp,
+        )
+        if (status == PersistedDraftSyncStatus.CONFLICT) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                TextButton(onClick = onAcceptServer) {
+                    Text("Версия сервера")
+                }
+                TextButton(onClick = onKeepLocal) {
+                    Text("Оставить мою")
+                }
+                TextButton(onClick = onDelete) {
+                    Text(
+                        text = "Удалить",
+                        color = colors.indicatorRed,
+                    )
+                }
+            }
+        } else {
+            TextButton(
+                onClick = onRetry,
+                modifier = Modifier.align(Alignment.End),
+            ) {
+                Text("Повторить")
+            }
+        }
+    }
+}
+
+@Composable
+private fun MessageHistoryStatus(
+    loading: Boolean,
+    error: String?,
+    hasMore: Boolean,
+    onLoad: () -> Unit,
+    onRetry: () -> Unit,
+) {
+    val colors = LocalWorkspaceColorsPalette.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        when {
+            loading -> {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    color = colors.primary,
+                    strokeWidth = 2.dp,
+                )
+                Text(
+                    text = "Загрузка истории…",
+                    color = colors.textAdditional50,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            }
+
+            error != null -> {
+                Text(
+                    text = error,
+                    color = colors.indicatorRed,
+                    fontSize = 12.sp,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                TextButton(onClick = onRetry) {
+                    Text("Повторить")
+                }
+            }
+
+            hasMore -> {
+                TextButton(onClick = onLoad) {
+                    Text("Загрузить предыдущие")
+                }
+            }
+        }
+    }
+}
+
+private const val HISTORY_LOAD_TRIGGER_INDEX = 2
+private const val HISTORY_ANCHOR_CORRECTION_FRAMES = 2
+
+internal fun shouldPositionConversationAtLatest(
+    hasPositionedConversation: Boolean,
+    lastVisibleIndex: Int?,
+    lastListIndex: Int,
+): Boolean =
+    !hasPositionedConversation ||
+        (
+            lastVisibleIndex != null &&
+                lastVisibleIndex >= lastListIndex - 1
+            )
+
+internal fun historyViewportCorrection(
+    currentOffset: Int,
+    targetOffset: Int,
+): Int {
+    val correction = currentOffset - targetOffset
+    return correction.takeIf { abs(it) > 1 } ?: 0
+}
+
+private data class HistoryViewportAnchor(
+    val messageUuid: String,
+    val offsetFromViewportStart: Int,
+)
+
+private fun androidx.compose.foundation.lazy.LazyListState
+    .captureHistoryViewportAnchor(
+        unstableBoundaryUuid: String?,
+    ): HistoryViewportAnchor? {
+    val layout = layoutInfo
+    val visibleMessages = layout.visibleItemsInfo.filter {
+        it.key != HISTORY_STATUS_KEY
+    }
+    // Prepending a page can add/remove the date separator inside the previous
+    // oldest message. Prefer the next visible message, whose internal layout
+    // is stable because its predecessor already existed before pagination.
+    val message = visibleMessages.firstOrNull {
+        it.key != unstableBoundaryUuid
+    } ?: visibleMessages.firstOrNull() ?: return null
+    val messageUuid = message.key as? String ?: return null
+    return HistoryViewportAnchor(
+        messageUuid = messageUuid,
+        offsetFromViewportStart = message.offset - layout.viewportStartOffset,
+    )
+}
+
+private const val HISTORY_STATUS_KEY = "message-history-status"
 
 @Composable
 private fun ConversationHeader(
@@ -180,8 +600,10 @@ private fun ConversationHeader(
     onInfo: () -> Unit,
 ) {
     val colors = LocalWorkspaceColorsPalette.current
-    val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val sending by viewModel.sending.collectAsStateWithLifecycle()
+    val conversationStateReady by
+        viewModel.conversationStateReady.collectAsStateWithLifecycle()
 
     Row(
         modifier = Modifier
@@ -237,72 +659,44 @@ private fun ConversationHeader(
                 }
             }
         }
-        Button(
-            onClick = {
-                val roomName = JitsiStyleRoomNameGenerator.generate()
-                val messageText = "${viewModel.repo.jitsiServerUrl}/$roomName"
-                scope.launch { viewModel.sendTextMessage(messageText) }
-                runCatching {
+        val callServerUrl = viewModel.repo.jitsiServerUrl
+            .takeIf(String::isNotBlank)
+            ?.let { runCatching { URL(it) }.getOrNull() }
+            ?.takeIf { it.protocol == "https" && it.host.isNotBlank() }
+        if (callServerUrl != null) {
+            LaunchedEffect(viewModel, callServerUrl) {
+                viewModel.callLaunchEvents.collect { event ->
                     val options = JitsiMeetConferenceOptions.Builder()
-                        .setServerURL(URL(viewModel.repo.jitsiServerUrl))
-                        .setRoom(roomName)
+                        .setServerURL(callServerUrl)
+                        .setRoom(event.roomName)
                         .build()
                     JitsiMeetActivity.launch(context, options)
                 }
-            },
-            modifier = Modifier.size(42.dp),
-            shape = CircleShape,
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(10.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Color.Transparent,
-                contentColor = colors.indicatorGreen,
-            ),
-        ) {
-            Icon(
-                painter = painterResource(R.drawable.call),
-                contentDescription = "Начать звонок",
-            )
+            }
+            Button(
+                onClick = {
+                    val roomName = JitsiStyleRoomNameGenerator.generate()
+                    viewModel.startCall(
+                        callUrl = "$callServerUrl/$roomName",
+                        roomName = roomName,
+                    )
+                },
+                enabled = conversationStateReady && !sending,
+                modifier = Modifier.size(44.dp),
+                shape = CircleShape,
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(10.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color.Transparent,
+                    contentColor = colors.indicatorGreen,
+                ),
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.call),
+                    contentDescription = "Начать звонок",
+                )
+            }
         }
     }
-}
-
-data class UserUploadMarkdownParts(
-    val caption: String,
-    val attachments: List<UserUploadAttachment>,
-) {
-    val fileName: String
-        get() = attachments.first().fileName
-
-    val relativePath: String
-        get() = attachments.first().relativePath
-}
-
-data class UserUploadAttachment(
-    val fileName: String,
-    val relativePath: String,
-)
-
-private val markdownUpload = Regex("""!?\[([^\]]*)]\((urn:image:[^)]+)\)""")
-private val legacyUpload = Regex("""\(([^)]+)\)\s*\[(urn:image:[^\]]+)]""")
-
-fun String.parseUserUploadMarkdownOrNull(): UserUploadMarkdownParts? {
-    val markdownMatches = markdownUpload.findAll(this).toList()
-    val matches = markdownMatches.ifEmpty { legacyUpload.findAll(this).toList() }
-    if (matches.isEmpty()) return null
-
-    val attachmentPattern = if (markdownMatches.isNotEmpty()) markdownUpload else legacyUpload
-    return UserUploadMarkdownParts(
-        caption = replace(attachmentPattern, "")
-            .lineSequence()
-            .joinToString("\n") { it.trimEnd() }
-            .trim(),
-        attachments = matches.map { match ->
-            UserUploadAttachment(
-                fileName = match.groupValues[1],
-                relativePath = match.groupValues[2],
-            )
-        },
-    )
 }
 
 @Composable
@@ -310,20 +704,17 @@ fun ChatMessage(
     item: MessageResponse,
     viewModel: ChatDialogViewModel,
     navController: NavHostController,
+    outboxEntry: PersistedOutboxEntry? = null,
+    isVerifyingOutbox: Boolean = false,
     onImageLoad: () -> Unit,
 ) {
     val colors = LocalWorkspaceColorsPalette.current
     val previous = viewModel.previousMessageByUuid(item.uuid)
-    val currentDate = runCatching {
-        LocalDateTime.parse(item.createdAt, viewModel.messageFormatter).toLocalDate()
-    }.getOrNull()
+    val currentDate = messageLocalDate(item.createdAt)
     val previousDate = previous?.let {
-        runCatching {
-            LocalDateTime.parse(it.createdAt, viewModel.messageFormatter).toLocalDate()
-        }.getOrNull()
+        messageLocalDate(it.createdAt)
     }
     val locale = LocalLocale.current.platformLocale
-    val scope = rememberCoroutineScope()
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -342,29 +733,48 @@ fun ChatMessage(
             )
         }
 
-        val upload = item.payload.content.parseUserUploadMarkdownOrNull()
+        val upload = item.payload.content.parseWorkspaceAttachmentsOrNull()
         val jitsiBaseUrl = viewModel.repo.jitsiServerUrl
         when {
+            outboxEntry != null ->
+                OutboxMessageView(
+                    item = item,
+                    outboxEntry = outboxEntry,
+                    isVerifying = isVerifyingOutbox,
+                    viewModel = viewModel,
+                    navController = navController,
+                )
+
             jitsiBaseUrl.isNotBlank() &&
                 Patterns.WEB_URL.matcher(item.payload.content).matches() &&
                 item.payload.content.startsWith(jitsiBaseUrl) ->
                 CallMessageView(item, viewModel, navController)
 
-            upload != null ->
+            upload != null &&
+                upload.attachments.all { it.kind == WorkspaceAttachmentKind.IMAGE } ->
                 ImageMessageView(
                     text = upload.caption,
-                    imageUrls = upload.attachments.map { it.relativePath },
+                    imageUrls = upload.attachments.map { it.urn },
                     viewModel = viewModel,
                     item = item,
                     navController = navController,
                     onImageLoad = onImageLoad,
                 )
 
+            upload != null ->
+                AttachmentMessageView(
+                    text = upload.caption,
+                    attachments = upload.attachments,
+                    viewModel = viewModel,
+                    item = item,
+                    navController = navController,
+                )
+
             else ->
                 TextMessageView(item, viewModel, navController)
         }
 
-        if (item.reactions.isNotEmpty()) {
+        if (outboxEntry == null && item.reactions.isNotEmpty()) {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
                 modifier = Modifier.padding(
@@ -386,10 +796,9 @@ fun ChatMessage(
                                 CircleShape,
                             )
                             .clickable {
-                                scope.launch {
-                                    viewModel.onMessageReactionTap(item.uuid, emoji)
-                                }
+                                viewModel.onMessageReactionTap(item.uuid, emoji)
                             }
+                            .heightIn(min = 44.dp)
                             .padding(horizontal = 7.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -408,6 +817,218 @@ fun ChatMessage(
         }
     }
 }
+
+@Composable
+private fun OutboxMessageView(
+    item: MessageResponse,
+    outboxEntry: PersistedOutboxEntry,
+    isVerifying: Boolean,
+    viewModel: ChatDialogViewModel,
+    navController: NavHostController,
+) {
+    val colors = LocalWorkspaceColorsPalette.current
+    val sending by viewModel.sending.collectAsStateWithLifecycle()
+    var confirmRetry by remember(outboxEntry.localMessageUuid) {
+        mutableStateOf(false)
+    }
+    var confirmRemove by remember(outboxEntry.localMessageUuid) {
+        mutableStateOf(false)
+    }
+    MessageRow(
+        item = item,
+        viewModel = viewModel,
+        navController = navController,
+    ) {
+        Column(
+            modifier = Modifier
+                .widthIn(max = 310.dp)
+                .background(
+                    colors.messageOwnBackground,
+                    messageBubbleShape(isOwn = true),
+                )
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+        ) {
+            EnhancedMarkdown(
+                markdown = item.payload.content,
+                style = TextStyle(
+                    color = colors.textHeaders,
+                    fontSize = 13.sp,
+                    lineHeight = 17.sp,
+                ),
+                navController = navController,
+                viewModel = viewModel,
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (isVerifying) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(13.dp),
+                        strokeWidth = 2.dp,
+                        color = colors.primary,
+                    )
+                    Spacer(Modifier.size(5.dp))
+                }
+                Text(
+                    text = when (outboxEntry.status) {
+                        PersistedOutboxStatus.SENDING -> "Отправляется…"
+                        PersistedOutboxStatus.FAILED -> "Не отправлено"
+                        PersistedOutboxStatus.UNCERTAIN ->
+                            "Результат отправки не подтверждён"
+                    },
+                    color = when (outboxEntry.status) {
+                        PersistedOutboxStatus.SENDING ->
+                            colors.messageTimeColor
+                        PersistedOutboxStatus.FAILED ->
+                            colors.indicatorRed
+                        PersistedOutboxStatus.UNCERTAIN ->
+                            colors.messageSecondaryText
+                    },
+                    fontSize = 11.sp,
+                    lineHeight = 14.sp,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            outboxEntry.errorMessage
+                ?.takeIf(String::isNotBlank)
+                ?.let { error ->
+                    Text(
+                        text = error,
+                        color = colors.messageSecondaryText,
+                        fontSize = 11.sp,
+                        lineHeight = 14.sp,
+                        modifier = Modifier.padding(top = 3.dp),
+                    )
+                }
+            when (outboxEntry.status) {
+                PersistedOutboxStatus.SENDING -> Unit
+
+                PersistedOutboxStatus.FAILED -> {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(
+                            onClick = {
+                                viewModel.removeOutbox(
+                                    outboxEntry.localMessageUuid,
+                                )
+                            },
+                            enabled = !sending,
+                        ) {
+                            Text("Удалить")
+                        }
+                        TextButton(
+                            onClick = {
+                                viewModel.retryOutbox(
+                                    outboxEntry.localMessageUuid,
+                                )
+                            },
+                            enabled = !sending,
+                        ) {
+                            Text("Повторить")
+                        }
+                    }
+                }
+
+                PersistedOutboxStatus.UNCERTAIN -> {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(
+                            onClick = { confirmRemove = true },
+                        ) {
+                            Text("Скрыть")
+                        }
+                        TextButton(
+                            onClick = {
+                                viewModel.verifyOutbox(
+                                    outboxEntry.localMessageUuid,
+                                )
+                            },
+                            enabled = !isVerifying,
+                        ) {
+                            Text("Проверить")
+                        }
+                        TextButton(
+                            onClick = { confirmRetry = true },
+                            enabled = !sending && !isVerifying,
+                        ) {
+                            Text("Отправить снова")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (confirmRetry) {
+        AlertDialog(
+            onDismissRequest = { confirmRetry = false },
+            title = { Text("Отправить ещё раз?") },
+            text = {
+                Text(
+                    "Сервер мог принять исходное сообщение без ответа. " +
+                        "Повторная отправка может создать дубль.",
+                )
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmRetry = false }) {
+                    Text("Отмена")
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmRetry = false
+                        viewModel.retryOutbox(outboxEntry.localMessageUuid)
+                    },
+                ) {
+                    Text("Всё равно отправить")
+                }
+            },
+        )
+    }
+
+    if (confirmRemove) {
+        AlertDialog(
+            onDismissRequest = { confirmRemove = false },
+            title = { Text("Скрыть локальную запись?") },
+            text = {
+                Text(
+                    "Это уберёт запись только с телефона. " +
+                        "Если сервер уже принял сообщение, оно останется в чате.",
+                )
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmRemove = false }) {
+                    Text("Отмена")
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmRemove = false
+                        viewModel.removeOutbox(outboxEntry.localMessageUuid)
+                    },
+                ) {
+                    Text("Скрыть")
+                }
+            },
+        )
+    }
+}
+
+private fun messageLocalDate(createdAt: String) =
+    runCatching {
+        OffsetDateTime.parse(createdAt)
+            .atZoneSameInstant(ZoneId.systemDefault())
+            .toLocalDate()
+    }.getOrNull()
 
 private val HHMM: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 

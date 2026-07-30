@@ -9,7 +9,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.HTTPMethod
 
 class RemoveMessageReactionRequest(
     reactionUuid: String
-): ApiRequest<EmptyRequestData, AddMessageReactionResponse, ApiError> {
+): ApiRequest<EmptyRequestData, String, ApiError> {
     override val method: HTTPMethod = HTTPMethod.DELETE
     override val requiresApiKey: Boolean = true
     override val url: String = "/api/workspace/v1/messenger/message_reactions/${reactionUuid}"

@@ -9,17 +9,15 @@ import ru.genesiscorporation.workspace.beta.data.remote.HTTPMethod
 
 class FolderChatsRequest(
     folderUuid: String
-): ApiRequest<EmptyRequestData, List<FolderChatResponseData>, ApiError> {
+): ApiRequest<FolderChatsRequestData, List<FolderItem>, ApiError> {
     override val method: HTTPMethod = HTTPMethod.GET
     override val requiresApiKey: Boolean = true
     override val shouldApplySuffix: Boolean = false
-    override val url: String = "/workspace/v1/folders/${folderUuid}/items/"
-    override val data = EmptyRequestData()
+    override val url: String = "/api/workspace/v1/messenger/folder_items/"
+    override val data = FolderChatsRequestData(folderUuid)
 }
 
 @Serializable
-data class FolderChatResponseData(
-    val uuid: String,
-    @SerialName("chat_id") val chatId: Int,
-    @SerialName("background_color_value") val backgroundColorValue: Long
+data class FolderChatsRequestData(
+    @SerialName("folder_uuid") val folderUuid: String,
 )

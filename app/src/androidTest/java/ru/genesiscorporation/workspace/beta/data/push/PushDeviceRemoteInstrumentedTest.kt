@@ -14,6 +14,8 @@ import org.junit.runner.RunWith
 import ru.genesiscorporation.workspace.beta.SessionCookieStore
 import ru.genesiscorporation.workspace.beta.UserViewModel
 import ru.genesiscorporation.workspace.beta.data.ApiKeyRepository
+import ru.genesiscorporation.workspace.beta.data.TinkConversationStateStore
+import ru.genesiscorporation.workspace.beta.data.WorkspaceUiPreferencesRepository
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import java.util.UUID
 
@@ -32,7 +34,11 @@ class PushDeviceRemoteInstrumentedTest {
         assumeTrue(repository.baseUrlFlow.first() != null)
         assumeTrue(repository.accessTokenFlow.first() != null)
 
-        val userViewModel = UserViewModel(repository)
+        val userViewModel = UserViewModel(
+            repository,
+            TinkConversationStateStore(context),
+            WorkspaceUiPreferencesRepository(context),
+        )
         val httpClient = HttpClient {
             install(ContentNegotiation) {
                 json()

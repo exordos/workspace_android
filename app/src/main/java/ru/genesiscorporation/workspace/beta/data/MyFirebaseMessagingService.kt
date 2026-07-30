@@ -1,133 +1,171 @@
 package ru.genesiscorporation.workspace.beta.data
 
-import android.annotation.SuppressLint
-import android.app.NotificationChannel
+import android.Manifest
 import android.app.NotificationManager
 import android.app.PendingIntent
-import android.content.ContentValues.TAG
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.util.Log
+import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationCompat
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 import ru.genesiscorporation.workspace.beta.MainActivity
 import ru.genesiscorporation.workspace.beta.R
+import ru.genesiscorporation.workspace.beta.data.push.PushNavigationRequest
 import ru.genesiscorporation.workspace.beta.data.push.PushTokenUpdates
 
 class MyFirebaseMessagingService: FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
-        Log.d(TAG, "From: ${message.from}")
-
-        // Check if message contains a data payload.
-
-
-        if (message.data.isNotEmpty() && message.data["kind"] != null) {
-            val dataKind = "${message.data["kind"]}"
-            when(dataKind) {
-                "remove_notification_message" -> {
-                    val messageIds = message.data["message_ids"]
-                    if (messageIds != null) {
-                        val messageIdsList: List<Int> = messageIds.split(',')
-                            .map { it.trim().toInt() }
-                        for (messageId in messageIdsList) {
-                            cancelNotification(messageId)
-                        }
-                    }
-                }
-                "private_chat_message" -> {
-                    if (message.data["sender_full_name"] != null && message.data["content"] != null) {
-                        var deepLink: String? = null
-                        val userId = message.data["sender_id"]
-                        if (userId != null) {
-                            deepLink = "dialog/${userId}"
-                        }
-
-                        showNotification(message.data["workspace_message_id"]?.toInt() ?: 0, "${message.data["sender_full_name"]}", "${
-                            message.data["content"]}", deepLink)
-                        Log.d(TAG, "Message data payload: ${message.data}")
-                    }
-                }
-                "stream_chat_message" -> {
-                    if (message.data["sender_full_name"] != null && message.data["content"] != null && message.data["stream"] != null && message.data["topic"] != null) {
-                        var deepLink: String? = "stream/${message.data["stream"]}/${message.data["topic"]}"
-                        val title = "${message.data["stream"]} -> ${message.data["topic"]}"
-                        val body = "${message.data["sender_full_name"]}: ${message.data["content"]}"
-                        showNotification(
-                            message.data["workspace_message_id"]?.toInt() ?: 0,
-                            title,
-                            body,
-                            deepLink
-                        )
-                        Log.d(TAG, "Message data payload: ${message.data}")
-                    }
-                }
-                else -> {
-
-                }
+        when (message.data["kind"]) {
+            "remove_notification_message" -> {
+                message.data["message_ids"]
+                    ?.split(',')
+                    ?.mapNotNull { it.trim().toIntOrNull()?.takeIf { id -> id > 0 } }
+                    ?.forEach(::cancelNotification)
             }
-        }
 
-        // Check if message contains a notification payload.
-        message.notification?.let {
-            Log.d(TAG, "Message Notification Body: ${it.body}")
-        }
+            "private_chat_message",
+            "group_chat_message",
+            "stream_chat_message" -> {
+                val navigationRequest =
+                    PushNavigationRequest.fromMessageData(message.data) ?: return
+                val senderName = message.data["sender_full_name"]
+                    ?.trim()
+                    ?.takeIf { it.isNotEmpty() }
+                    ?: return
+                val content = message.data["content"] ?: return
+                val isStream = navigationRequest.providerChatKey.startsWith("channel:")
+                val title = if (isStream) {
+                    val streamName = message.data["stream"]
+                        ?.trim()
+                        ?.takeIf { it.isNotEmpty() }
+                        ?: return
+                    "$streamName → ${navigationRequest.topicName}"
+                } else {
+                    senderName
+                }
+                val body = if (isStream) "$senderName: $content" else content
+                showNotification(
+                    notificationId = navigationRequest.workspaceMessageId,
+                    title = title.take(MAX_NOTIFICATION_TITLE_LENGTH),
+                    body = body.take(MAX_NOTIFICATION_BODY_LENGTH),
+                    navigationRequest = navigationRequest,
+                    sound = currentNotificationSound(),
+                )
+            }
 
-        // Also if you intend on generating your own notifications as a result of a received FCM
-        // message, here is where that should be initiated. See sendNotification method below.
+            else -> Unit
+        }
     }
 
-    @SuppressLint("ServiceCast")
     private fun showNotification(
         notificationId: Int,
         title: String,
         body: String,
-        deepLink: String?
+        navigationRequest: PushNavigationRequest,
+        sound: WorkspaceNotificationSound,
     ) {
-        val channelId = "fcm_default_channel"
-        // Intent opened when user taps notification
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra("deeplink", deepLink)
+            putExtra(
+                PushNavigationRequest.EXTRA_PROVIDER_CHAT_KEY,
+                navigationRequest.providerChatKey,
+            )
+            navigationRequest.topicName?.let {
+                putExtra(PushNavigationRequest.EXTRA_TOPIC_NAME, it)
+            }
+            putExtra(
+                PushNavigationRequest.EXTRA_WORKSPACE_MESSAGE_ID,
+                navigationRequest.workspaceMessageId,
+            )
         }
         val pendingIntent = PendingIntent.getActivity(
             this,
-            0,
+            notificationId,
             intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val notificationManager =
             getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        // Required on Android 8+
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                channelId,
-                "General notifications",
-                NotificationManager.IMPORTANCE_DEFAULT
+        val channelId = runCatching {
+            WorkspaceNotificationSoundController.ensureChannel(this, sound)
+        }.recoverCatching { exception ->
+            Log.w(
+                TAG,
+                "Could not prepare the selected notification channel; using the default",
+                exception,
             )
-            notificationManager.createNotificationChannel(channel)
-        }
+            WorkspaceNotificationSoundController.ensureChannel(
+                this,
+                WorkspaceNotificationSound.DEFAULT,
+            )
+        }.onFailure { exception ->
+            Log.e(TAG, "Could not prepare a notification channel", exception)
+        }.getOrNull() ?: return
+        val publicNotification = NotificationCompat.Builder(this, channelId)
+            .setSmallIcon(R.drawable.icon)
+            .setContentTitle("Workspace")
+            .setContentText("Новое сообщение")
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .build()
         val notification = NotificationCompat.Builder(this, channelId)
-            .setSmallIcon(R.drawable.icon) // must exist
+            .setSmallIcon(R.drawable.icon)
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(publicNotification)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .build()
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.POST_NOTIFICATIONS,
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
         notificationManager.notify(notificationId, notification)
     }
+
+    private fun currentNotificationSound(): WorkspaceNotificationSound =
+        runCatching {
+            runBlocking(Dispatchers.IO) {
+                resolveActiveWorkspaceNotificationSound(applicationContext)
+            }
+        }.onFailure { exception ->
+            Log.w(
+                TAG,
+                "Could not read the active notification sound; using the default",
+                exception,
+            )
+        }.getOrDefault(WorkspaceNotificationSound.DEFAULT)
+
     override fun onNewToken(token: String) {
         super.onNewToken(token)
         PushTokenUpdates.publish(token)
         Log.d(TAG, "FCM registration token was refreshed")
     }
 
-    fun cancelNotification(notificationId: Int) {
+    private fun cancelNotification(notificationId: Int) {
         val notificationManager =
             getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.cancel(notificationId)
+    }
+
+    private companion object {
+        const val TAG = "WorkspacePush"
+        const val MAX_NOTIFICATION_TITLE_LENGTH = 160
+        const val MAX_NOTIFICATION_BODY_LENGTH = 1_024
     }
 }
