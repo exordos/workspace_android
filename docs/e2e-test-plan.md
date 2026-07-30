@@ -847,6 +847,42 @@ draft/outbox state or credentials as cache.
 | DIAG-009 | Background/recreation while chooser is open | Returning preserves the signed-in app and does not submit, duplicate or mutate state | Chooser Back physical passed; recreation pending |
 | DIAG-010 | Future logs/runtime expansion | Logs are bounded/redacted and correlation identifiers cannot be reversed to account identity | Not implemented; control stays limited to the current truthful snapshot |
 
+## External accounts and projected chats
+
+All destructive scenarios use a dedicated provider/account fixture and the
+isolated sandbox stream. The reporting topic is never selected, moved, muted,
+archived, renamed, or deleted by this suite. Credentials are injected only into
+the create/reconnect request and must be absent from response state, saved
+state, screenshots, diagnostics, logs, crash reports, and process snapshots.
+
+| ID | Scenario | Oracle | Coverage |
+| --- | --- | --- | --- |
+| EXT-001 | Open external integrations without read permission | The entry point is absent or a real forbidden state is shown; no empty catalog is presented as success | Backend/device pending |
+| EXT-002 | Add a valid Zulip account | One client UUID is POSTed with canonical HTTPS origin, email, explicit selection/history/default project and one write-only API key; returned revision/ETag becomes authoritative | Request contract covered; backend/device pending |
+| EXT-003 | Reject unsafe provider coordinates | HTTP, userinfo, path, query, fragment, malformed host/UUID/email, blank/overlong key and unsupported provider fail before network I/O | Unit covered |
+| EXT-004 | Duplicate create or ambiguous timeout | Conflict or uncertain result preserves the form without automatic duplicate create; refresh reconciles a uniquely matching server account | Backend fault injection pending |
+| EXT-005 | Credential non-retention | Rotation, process death, diagnostics export and account switching never reveal or prefill the API key | Instrumented/security pending |
+| EXT-006 | Paginate accounts and chats | Every page uses a canonical marker, bounded page count and exact account filter; loops, invalid markers, duplicates, oversized/malformed rows fail closed | Contract foundation covered; MockEngine pending |
+| EXT-007 | Switch owner during any page or mutation | Late response is discarded as `ACCOUNT_CHANGED`; no account/chat projection crosses owners | Owner fence implemented; delayed-response acceptance pending |
+| EXT-008 | Edit selection/history/default project | One PUT carries only non-secret settings and the current strong `If-Match`; complete returned snapshot replaces no newer revision | Request/reducer covered; backend/device pending |
+| EXT-009 | Concurrent desktop edit | `412` keeps local input, shows current server state and offers functional refresh/reapply/cancel paths; it never blindly overwrites | UI/backend pending |
+| EXT-010 | Reconnect with replacement credential | One POST carries server/email/key plus strong `If-Match`; key clears from UI memory after completion or cancellation | Request contract covered; device pending |
+| EXT-011 | Disconnect and reconnect lifecycle | Disconnect uses the real no-body action, converges through connecting/live or explicit safe error, and does not delete mappings | Request contract covered; backend/device pending |
+| EXT-012 | Delete account confirm/cancel | Cancel is side-effect free; confirm sends one DELETE, removes account/chats/provider streams only after success and remains idempotent with realtime delete | Reducer covered; backend/device pending |
+| EXT-013 | Realtime create/update ordering | A newer full snapshot wins; duplicate or lower revisions cannot roll status/settings/capabilities back | Unit covered |
+| EXT-014 | Realtime account delete replay | Delete tombstone removes child chat state and provider streams; an equal/older create cannot resurrect them, while a genuinely newer create can | Unit covered |
+| EXT-015 | Poison external event | Kind/action/UUID/snapshot mismatch or malformed row is bounded, skipped and cursor-advanced without crash/reconnect loop | Unit covered; live fixture pending |
+| EXT-016 | Select an available external chat | Exact chat/project UUID POST starts one transition; progress is visible until the returned/realtime projection supplies the real Workspace stream | Request contract covered; UI/backend pending |
+| EXT-017 | Deselect a projected chat | Confirmed action removes the projection stream/topics/messages/folder rows without touching the source provider chat | Reducer foundation covered; backend/device pending |
+| EXT-018 | Move a projected chat | Exact target project and strong revision POST once; old projection disappears and new projection is navigable only after authoritative state arrives | Request contract covered; backend/device pending |
+| EXT-019 | Chat assignment conflict | `412`, transition already pending, deleted target and permission loss preserve the last real snapshot and expose refresh/cancel rather than optimistic success | UI/backend pending |
+| EXT-020 | Account status and safe errors | connecting/backfill/live/degraded/auth-required/disconnected/suspended render distinct bounded states; only capability-backed actions appear | UI/device pending |
+| EXT-021 | External chat types | Channel, personal and group rows remain distinguishable, searchable and correctly labeled at 1x/1.5x/2x font scale | UI/device pending |
+| EXT-022 | Provider-origin navigation | Only validated HTTPS original URLs open in a safe external surface; missing/unsafe URL exposes no inert control | UI/security pending |
+| EXT-023 | Offline and radio interruption | Cached real rows remain labeled stale; mutations stay unsent and retryable, reconnect drains REST events before one socket resumes | Device/backend fault injection pending |
+| EXT-024 | Large provider catalog | 25k bounded rows remain responsive, cancellable and memory-stable; search/filter do not start an unbounded request fan-out | Performance/soak pending |
+| EXT-025 | Eight-hour bridge convergence | Repeated provider traffic, auth expiry, server restart, background/foreground and radio changes converge without duplicate streams, revision rollback, reconnect storm or battery runaway | Soak pending |
+
 ## UX and accessibility
 
 ### Functional-control audit

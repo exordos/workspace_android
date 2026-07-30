@@ -6,6 +6,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponsePayload
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ProviderReference
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
@@ -42,6 +43,13 @@ class EventsRepositoryTest {
     @Test
     fun `expired realtime cursor clears derived data but retains local outbox rows`() {
         val repository = EventsRepository()
+        repository.processTextFrame(
+            externalAccountEvent(
+                epoch = 1,
+                action = "created",
+                revision = 1,
+            ),
+        )
         repository.latestEpoch = 42
         repository.epochGeneration = "old-generation"
         repository.setInitialStreams(
@@ -70,6 +78,8 @@ class EventsRepositoryTest {
         assertEquals(0, repository.latestEpoch)
         assertEquals("", repository.epochGeneration)
         assertTrue(repository.streams.value.isEmpty())
+        assertTrue(repository.externalAccounts.value.isEmpty())
+        assertTrue(repository.externalChats.value.isEmpty())
         assertTrue(repository.streamTopics.value.isEmpty())
         assertEquals(
             listOf("local-pending"),
@@ -669,6 +679,189 @@ class EventsRepositoryTest {
         assertTrue("not-visible" !in repository.streamTopics.value)
     }
 
+    @Test
+    fun `external account revisions reject rollback and tombstone resurrection`() {
+        val repository = EventsRepository()
+
+        repository.processTextFrame(
+            externalAccountEvent(
+                epoch = 1,
+                action = "updated",
+                revision = 3,
+                status = "live",
+            ),
+        )
+        repository.processTextFrame(
+            externalAccountEvent(
+                epoch = 2,
+                action = "updated",
+                revision = 2,
+                status = "degraded",
+            ),
+        )
+
+        assertEquals(3, repository.externalAccounts.value.single().revision)
+        assertEquals(
+            "LIVE",
+            repository.externalAccounts.value.single().status.name,
+        )
+
+        repository.processTextFrame(
+            externalAccountEvent(
+                epoch = 3,
+                action = "deleted",
+                revision = 4,
+            ),
+        )
+        repository.processTextFrame(
+            externalAccountEvent(
+                epoch = 4,
+                action = "created",
+                revision = 4,
+            ),
+        )
+        assertTrue(repository.externalAccounts.value.isEmpty())
+
+        repository.processTextFrame(
+            externalAccountEvent(
+                epoch = 5,
+                action = "created",
+                revision = 5,
+            ),
+        )
+        assertEquals(5, repository.externalAccounts.value.single().revision)
+    }
+
+    @Test
+    fun `external chat deletion is revision aware and removes its projection`() {
+        val repository = EventsRepository()
+        repository.processTextFrame(
+            externalAccountEvent(
+                epoch = 1,
+                action = "created",
+                revision = 1,
+            ),
+        )
+        repository.processTextFrame(
+            externalChatEvent(
+                epoch = 2,
+                action = "updated",
+                revision = 3,
+                displayName = "Current",
+            ),
+        )
+        repository.processTextFrame(
+            externalChatEvent(
+                epoch = 3,
+                action = "updated",
+                revision = 2,
+                displayName = "Stale",
+            ),
+        )
+        repository.addStream(
+            stream(
+                defaultTopicUuid = null,
+                notificationMode = "all_messages",
+            ).copy(uuid = PROJECTION_STREAM_UUID),
+        )
+
+        assertEquals(
+            "Current",
+            repository.externalChats.value
+                .getValue(EXTERNAL_ACCOUNT_UUID)
+                .single()
+                .displayName,
+        )
+
+        repository.processTextFrame(
+            externalChatEvent(
+                epoch = 4,
+                action = "deleted",
+                revision = 4,
+            ),
+        )
+        repository.processTextFrame(
+            externalChatEvent(
+                epoch = 5,
+                action = "created",
+                revision = 4,
+                displayName = "Replay",
+            ),
+        )
+
+        assertTrue(
+            repository.externalChats.value[EXTERNAL_ACCOUNT_UUID]
+                .isNullOrEmpty(),
+        )
+        assertTrue(repository.streams.value.isEmpty())
+    }
+
+    @Test
+    fun `external account deletion clears chats and provider streams`() {
+        val repository = EventsRepository()
+        repository.processTextFrame(
+            externalAccountEvent(
+                epoch = 1,
+                action = "created",
+                revision = 1,
+            ),
+        )
+        repository.processTextFrame(
+            externalChatEvent(
+                epoch = 2,
+                action = "created",
+                revision = 1,
+            ),
+        )
+        repository.addStream(
+            stream(
+                defaultTopicUuid = null,
+                notificationMode = "all_messages",
+            ).copy(
+                uuid = PROJECTION_STREAM_UUID,
+                provider = ProviderReference(
+                    kind = "zulip",
+                    accountUuid = EXTERNAL_ACCOUNT_UUID,
+                ),
+            ),
+        )
+
+        repository.processTextFrame(
+            externalAccountEvent(
+                epoch = 3,
+                action = "deleted",
+                revision = 2,
+            ),
+        )
+        repository.processTextFrame(
+            externalChatEvent(
+                epoch = 4,
+                action = "updated",
+                revision = 2,
+            ),
+        )
+
+        assertTrue(repository.externalAccounts.value.isEmpty())
+        assertTrue(repository.externalChats.value.isEmpty())
+        assertTrue(repository.streams.value.isEmpty())
+    }
+
+    @Test
+    fun `malformed external snapshot is skipped without poisoning the cursor`() {
+        val repository = EventsRepository()
+        val mismatchedSnapshot = externalAccountEvent(
+            epoch = 7,
+            action = "created",
+            revision = 1,
+            eventUuid = OTHER_EXTERNAL_ACCOUNT_UUID,
+        )
+
+        repository.processTextFrame(mismatchedSnapshot)
+
+        assertTrue(repository.externalAccounts.value.isEmpty())
+        assertEquals(7, repository.latestEpoch)
+    }
+
     private fun messageEvent(
         epoch: Int,
         action: String,
@@ -742,6 +935,86 @@ class EventsRepositoryTest {
         }
     """.trimIndent()
 
+    private fun externalAccountEvent(
+        epoch: Int,
+        action: String,
+        revision: Int,
+        status: String = "connecting",
+        eventUuid: String = EXTERNAL_ACCOUNT_UUID,
+    ): String = """
+        {
+          "schema_version": 1,
+          "epoch_version": $epoch,
+          "object_type": "external_account",
+          "action": "$action",
+          "payload": {
+            "kind": "external_account.$action",
+            "uuid": "$eventUuid",
+            "snapshot": {
+              "uuid": "$EXTERNAL_ACCOUNT_UUID",
+              "settings": {
+                "kind": "zulip",
+                "server_url": "https://zulip.example.com",
+                "email": "user@example.com",
+                "selection_mode": "explicit",
+                "history_depth": "30_days",
+                "default_project_id": "$EXTERNAL_PROJECT_UUID"
+              },
+              "credential_present": true,
+              "status": "$status",
+              "live_ready": ${status == "live"},
+              "capabilities": {},
+              "safe_error": null,
+              "desired_generation": 1,
+              "applied_generation": 0,
+              "last_progress_at": null,
+              "revision": $revision,
+              "created_at": "2026-07-30T10:00:00Z",
+              "updated_at": "2026-07-30T10:00:00Z"
+            }
+          }
+        }
+    """.trimIndent()
+
+    private fun externalChatEvent(
+        epoch: Int,
+        action: String,
+        revision: Int,
+        displayName: String = "Engineering",
+    ): String = """
+        {
+          "schema_version": 1,
+          "epoch_version": $epoch,
+          "object_type": "external_chat",
+          "action": "$action",
+          "payload": {
+            "kind": "external_chat.$action",
+            "uuid": "$EXTERNAL_CHAT_UUID",
+            "snapshot": {
+              "uuid": "$EXTERNAL_CHAT_UUID",
+              "external_account_uuid": "$EXTERNAL_ACCOUNT_UUID",
+              "source": {
+                "kind": "zulip",
+                "chat_type": "channel",
+                "original_url": "https://zulip.example.com/#narrow/channel/1"
+              },
+              "display_name": "$displayName",
+              "selected": true,
+              "project_id": "$EXTERNAL_PROJECT_UUID",
+              "history_depth": "30_days",
+              "projection_stream_uuid": "$PROJECTION_STREAM_UUID",
+              "status": "live",
+              "capabilities": {},
+              "safe_error": null,
+              "transition_pending": false,
+              "revision": $revision,
+              "created_at": "2026-07-30T10:00:00Z",
+              "updated_at": "2026-07-30T10:00:00Z"
+            }
+          }
+        }
+    """.trimIndent()
+
     private fun message(uuid: String, content: String) = MessageResponse(
         uuid = uuid,
         updatedAt = "2026-07-26T00:00:00Z",
@@ -793,5 +1066,15 @@ class EventsRepositoryTest {
         private const val USER_UUID = "user-1"
         private const val MESSAGE_UUID = "message-1"
         private const val REACTION_UUID = "reaction-1"
+        private const val EXTERNAL_ACCOUNT_UUID =
+            "10000000-0000-4000-8000-000000000001"
+        private const val OTHER_EXTERNAL_ACCOUNT_UUID =
+            "10000000-0000-4000-8000-000000000099"
+        private const val EXTERNAL_CHAT_UUID =
+            "20000000-0000-4000-8000-000000000002"
+        private const val EXTERNAL_PROJECT_UUID =
+            "30000000-0000-4000-8000-000000000003"
+        private const val PROJECTION_STREAM_UUID =
+            "40000000-0000-4000-8000-000000000004"
     }
 }

@@ -71,9 +71,18 @@ class WorkspaceAPIClient(
     private val refreshMutex = Mutex()
     @OptIn(ExperimentalSerializationApi::class)
     suspend inline fun <reified RequestData : Any, reified Response : Any, reified ResponseError : Any> performRequest(
-        request: ApiRequest<RequestData, Response, ResponseError>
+        request: ApiRequest<RequestData, Response, ResponseError>,
+        expectedOwnerKey: String? = null,
     ): ApiResult<Response, ApiError> {
         val session = userViewModel.repo.activeCredentialSnapshot()
+        if (
+            !requestOwnerMatches(
+                actualOwnerKey = session.ownerKey,
+                expectedOwnerKey = expectedOwnerKey,
+            )
+        ) {
+            return ApiResult.Error(accountChangedError())
+        }
         val baseUrl = session.baseUrl
         if (!request.isAbsoluteUrl && baseUrl.isNullOrBlank()) {
             return ApiResult.Error(
@@ -1126,6 +1135,12 @@ internal fun accountChangedError(): ApiError =
         code = "ACCOUNT_CHANGED",
         kind = ApiErrorKind.CONFLICT,
     )
+
+@PublishedApi
+internal fun requestOwnerMatches(
+    actualOwnerKey: String?,
+    expectedOwnerKey: String?,
+): Boolean = expectedOwnerKey == null || actualOwnerKey == expectedOwnerKey
 
 @PublishedApi
 internal fun responseBodyTooLargeError(): ApiError =

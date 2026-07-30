@@ -31,12 +31,17 @@ import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.data.remote.dto.DeletedMessageReaction
 import ru.genesiscorporation.workspace.beta.data.remote.dto.EpochRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.EventsRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalAccountResponse
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalChatResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageReaction
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
+import ru.genesiscorporation.workspace.beta.data.remote.dto.canonicalExternalIntegrationUuid
+import ru.genesiscorporation.workspace.beta.data.remote.dto.validateExternalAccountResponse
+import ru.genesiscorporation.workspace.beta.data.remote.dto.validateExternalChatResponse
 import java.net.URI
 import java.time.Instant
 import java.time.OffsetDateTime
@@ -66,6 +71,20 @@ class EventsRepository(
     private val _realtimeRecoveryVersion = MutableStateFlow(0L)
     val realtimeRecoveryVersion: StateFlow<Long> =
         _realtimeRecoveryVersion.asStateFlow()
+    private val externalProjectionLock = Any()
+    private val externalAccountRevisions =
+        mutableMapOf<String, ExternalProjectionRevision>()
+    private val externalChatRevisions =
+        mutableMapOf<String, ExternalProjectionRevision>()
+    private val _externalAccounts =
+        MutableStateFlow<List<ExternalAccountResponse>>(emptyList())
+    val externalAccounts: StateFlow<List<ExternalAccountResponse>> =
+        _externalAccounts.asStateFlow()
+    private val _externalChats =
+        MutableStateFlow<Map<String, List<ExternalChatResponse>>>(emptyMap())
+    val externalChats:
+        StateFlow<Map<String, List<ExternalChatResponse>>> =
+        _externalChats.asStateFlow()
 
     fun setAppForeground(foreground: Boolean) {
         _appForeground.value = foreground
@@ -93,6 +112,7 @@ class EventsRepository(
         _users.value = emptyList()
         _streams.value = emptyList()
         _folders.value = emptyList()
+        clearExternalProjections()
     }
 
     private fun invalidateDerivedStateForExpiredCursor() {
@@ -110,7 +130,163 @@ class EventsRepository(
         _users.value = emptyList()
         _streams.value = emptyList()
         _folders.value = emptyList()
+        clearExternalProjections()
         _realtimeRecoveryVersion.update { it + 1L }
+    }
+
+    private fun clearExternalProjections() {
+        synchronized(externalProjectionLock) {
+            externalAccountRevisions.clear()
+            externalChatRevisions.clear()
+            _externalAccounts.value = emptyList()
+            _externalChats.value = emptyMap()
+        }
+    }
+
+    internal fun mergeExternalAccountSnapshot(
+        response: ExternalAccountResponse,
+    ) {
+        applyExternalAccountSnapshot(
+            response = validateExternalAccountResponse(response).response,
+            deleted = false,
+        )
+    }
+
+    internal fun mergeExternalChatSnapshot(
+        response: ExternalChatResponse,
+    ) {
+        applyExternalChatSnapshot(
+            response = validateExternalChatResponse(response),
+            deleted = false,
+        )
+    }
+
+    internal fun removeExternalAccountSnapshot(
+        response: ExternalAccountResponse,
+    ) {
+        applyExternalAccountSnapshot(
+            response = validateExternalAccountResponse(response).response,
+            deleted = true,
+        )
+    }
+
+    internal fun removeExternalChatSnapshot(
+        response: ExternalChatResponse,
+    ) {
+        applyExternalChatSnapshot(
+            response = validateExternalChatResponse(response),
+            deleted = true,
+        )
+    }
+
+    private fun applyExternalAccountSnapshot(
+        response: ExternalAccountResponse,
+        deleted: Boolean,
+    ) {
+        val projectionStreamsToRemove = mutableSetOf<String>()
+        synchronized(externalProjectionLock) {
+            if (
+                !recordExternalProjectionRevision(
+                    revisions = externalAccountRevisions,
+                    uuid = response.uuid,
+                    revision = response.revision,
+                    deleted = deleted,
+                )
+            ) {
+                return
+            }
+            if (deleted) {
+                _externalAccounts.update { accounts ->
+                    accounts.filterNot { it.uuid == response.uuid }
+                }
+                _externalChats.update { chatsByAccount ->
+                    chatsByAccount[response.uuid]
+                        .orEmpty()
+                        .mapNotNullTo(projectionStreamsToRemove) {
+                            it.projectionStreamUuid
+                        }
+                    chatsByAccount - response.uuid
+                }
+                _streams.value
+                    .filter {
+                        it.provider
+                            ?.accountUuid
+                            ?.equals(response.uuid, ignoreCase = true) == true
+                    }
+                    .mapTo(projectionStreamsToRemove, Stream::uuid)
+            } else {
+                _externalAccounts.update { accounts ->
+                    accounts.filterNot { it.uuid == response.uuid } + response
+                }
+            }
+        }
+        projectionStreamsToRemove.forEach(::removeStream)
+    }
+
+    private fun applyExternalChatSnapshot(
+        response: ExternalChatResponse,
+        deleted: Boolean,
+    ) {
+        var projectionStreamToRemove: String? = null
+        synchronized(externalProjectionLock) {
+            val accountRevision =
+                externalAccountRevisions[response.externalAccountUuid]
+            if (accountRevision?.deleted == true) return
+            if (
+                !recordExternalProjectionRevision(
+                    revisions = externalChatRevisions,
+                    uuid = response.uuid,
+                    revision = response.revision,
+                    deleted = deleted,
+                )
+            ) {
+                return
+            }
+            _externalChats.update { chatsByAccount ->
+                val current = chatsByAccount[response.externalAccountUuid]
+                    .orEmpty()
+                    .filterNot { it.uuid == response.uuid }
+                if (deleted) {
+                    projectionStreamToRemove = response.projectionStreamUuid
+                    if (current.isEmpty()) {
+                        chatsByAccount - response.externalAccountUuid
+                    } else {
+                        chatsByAccount + (
+                            response.externalAccountUuid to current
+                        )
+                    }
+                } else {
+                    chatsByAccount + (
+                        response.externalAccountUuid to (current + response)
+                    )
+                }
+            }
+        }
+        projectionStreamToRemove?.let(::removeStream)
+    }
+
+    private fun recordExternalProjectionRevision(
+        revisions: MutableMap<String, ExternalProjectionRevision>,
+        uuid: String,
+        revision: Int,
+        deleted: Boolean,
+    ): Boolean {
+        val previous = revisions[uuid]
+        if (previous != null) {
+            if (revision < previous.revision) return false
+            if (
+                revision == previous.revision &&
+                previous.deleted &&
+                !deleted
+            ) {
+                return false
+            }
+        }
+        revisions[uuid] = ExternalProjectionRevision(
+            revision = revision,
+            deleted = deleted,
+        )
+        return true
     }
 
     internal fun handleRealtimeConnectionClosed(closeCode: Int?): Boolean {
@@ -1288,6 +1464,8 @@ class EventsRepository(
             "stream" -> didReceiveStreamEvent(payload, action)
             "topic" -> didReceiveTopicEvent(payload, action)
             "message_reaction" -> didReceiveReactionEvent(payload, action)
+            "external_account" -> didReceiveExternalAccountEvent(payload, action)
+            "external_chat" -> didReceiveExternalChatEvent(payload, action)
             else -> Log.d(
                 "WebSocket",
                 "Ignored unsupported event type: " +
@@ -1399,6 +1577,103 @@ class EventsRepository(
         }
     }
 
+    fun didReceiveExternalAccountEvent(payload: String, action: String) {
+        val event = decodeExternalSnapshotEvent(
+            payload = payload,
+            objectType = "external_account",
+            action = action,
+        ) ?: return
+        val response = runCatching {
+            validateExternalAccountResponse(
+                response = json.decodeFromString<ExternalAccountResponse>(
+                    event.snapshot.toString(),
+                ),
+                expectedUuid = event.uuid,
+            ).response
+        }.getOrElse { error ->
+            logRealtimeWarning(
+                message = "Ignored malformed external account event",
+                error = error,
+            )
+            return
+        }
+        applyExternalAccountSnapshot(
+            response = response,
+            deleted = action == "deleted",
+        )
+    }
+
+    fun didReceiveExternalChatEvent(payload: String, action: String) {
+        val event = decodeExternalSnapshotEvent(
+            payload = payload,
+            objectType = "external_chat",
+            action = action,
+        ) ?: return
+        val response = runCatching {
+            validateExternalChatResponse(
+                response = json.decodeFromString<ExternalChatResponse>(
+                    event.snapshot.toString(),
+                ),
+                expectedUuid = event.uuid,
+            )
+        }.getOrElse { error ->
+            logRealtimeWarning(
+                message = "Ignored malformed external chat event",
+                error = error,
+            )
+            return
+        }
+        applyExternalChatSnapshot(
+            response = response,
+            deleted = action == "deleted",
+        )
+    }
+
+    private fun decodeExternalSnapshotEvent(
+        payload: String,
+        objectType: String,
+        action: String,
+    ): ExternalSnapshotEventPayload? {
+        if (action !in EXTERNAL_EVENT_ACTIONS) {
+            logRealtimeWarning(
+                message = "Ignored unsupported $objectType action: $action",
+            )
+            return null
+        }
+        return runCatching {
+            val event =
+                json.decodeFromString<ExternalSnapshotEventPayload>(payload)
+            require(event.kind == "$objectType.$action") {
+                "External event kind does not match its envelope"
+            }
+            event.copy(
+                uuid = canonicalExternalIntegrationUuid(event.uuid),
+            )
+        }.getOrElse { error ->
+            logRealtimeWarning(
+                message = "Ignored malformed $objectType event envelope",
+                error = error,
+            )
+            null
+        }
+    }
+
+    private fun logRealtimeWarning(
+        message: String,
+        error: Throwable? = null,
+    ) {
+        // android.util.Log is a runtime stub in local JVM tests. The realtime
+        // parser must remain independently testable without making logging a
+        // functional dependency of poison-event handling.
+        runCatching {
+            if (error == null) {
+                Log.w("WebSocket", message)
+            } else {
+                Log.w("WebSocket", message, error)
+            }
+        }
+    }
+
     fun didReceiveStreamEvent(payload: String, action: String) {
         when(action) {
             "created" -> {
@@ -1441,8 +1716,22 @@ class EventsRepository(
         private const val HTTP_GONE = 410
         private const val MAX_CATCH_UP_PAGES = 20
         private const val NANOS_PER_MILLISECOND = 1_000_000L
+        private val EXTERNAL_EVENT_ACTIONS =
+            setOf("created", "updated", "deleted")
     }
 }
+
+private data class ExternalProjectionRevision(
+    val revision: Int,
+    val deleted: Boolean,
+)
+
+@Serializable
+private data class ExternalSnapshotEventPayload(
+    val kind: String,
+    val uuid: String,
+    val snapshot: JsonObject,
+)
 
 enum class RealtimeConnectionState {
     PAUSED,
