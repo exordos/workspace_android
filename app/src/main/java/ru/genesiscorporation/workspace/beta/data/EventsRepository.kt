@@ -85,6 +85,28 @@ class EventsRepository() {
         }
     }
 
+    fun replaceStreamTopicMessages(
+        streamUuid: String,
+        topicUuid: String,
+        messages: List<MessageResponse>,
+    ) {
+        val messagesWithUser = messages.map { message ->
+            message.user = users.value.firstOrNull { it.uuid == message.authorUuid }
+            message
+        }
+        val key = "$streamUuid.$topicUuid"
+        _streamTopicMessages.update { current ->
+            val incomingUuids = messagesWithUser
+                .mapTo(mutableSetOf(), MessageResponse::uuid)
+            val retained = current[key]
+                .orEmpty()
+                .filter {
+                    it.uuid.startsWith("local-") || it.uuid in incomingUuids
+                }
+            current + (key to mergeMessages(retained, messagesWithUser))
+        }
+    }
+
     fun addMessageToStreamTopic(message: MessageResponse) {
         val key = "${message.streamUuid}.${message.topicUuid}"
         message.user = users.value.firstOrNull { it.uuid == message.authorUuid }

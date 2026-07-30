@@ -106,10 +106,70 @@ class MessagePaginationTest {
         assertTrue(state.error?.contains("некорректную страницу") == true)
     }
 
-    private fun message(uuid: String) = MessageResponse(
+    @Test
+    fun `around-message pages accept only their strict keyset side and order`() {
+        val anchor = message(ANCHOR_UUID)
+        val older = validateMessageWindowPageState(
+            messages = listOf(message(OLDER_UUID), message(OLDEST_UUID)),
+            nextMarkerHeader = OLDEST_UUID,
+            rawMessageCount = 2,
+            boundary = anchor,
+            direction = MessageWindowDirection.OLDER,
+        )
+        val newer = validateMessageWindowPageState(
+            messages = listOf(message(NEWER_UUID), message(NEWEST_UUID)),
+            nextMarkerHeader = NEWEST_UUID,
+            rawMessageCount = 2,
+            boundary = anchor,
+            direction = MessageWindowDirection.NEWER,
+        )
+
+        assertEquals(OLDEST_UUID, older.nextMarker)
+        assertNull(older.error)
+        assertEquals(NEWEST_UUID, newer.nextMarker)
+        assertNull(newer.error)
+    }
+
+    @Test
+    fun `around-message pages reject gaps masked as the wrong side or order`() {
+        val anchor = message(ANCHOR_UUID)
+        listOf(
+            validateMessageWindowPageState(
+                messages = listOf(message(NEWER_UUID)),
+                nextMarkerHeader = null,
+                rawMessageCount = 1,
+                boundary = anchor,
+                direction = MessageWindowDirection.OLDER,
+            ),
+            validateMessageWindowPageState(
+                messages = listOf(message(OLDEST_UUID), message(OLDER_UUID)),
+                nextMarkerHeader = null,
+                rawMessageCount = 2,
+                boundary = anchor,
+                direction = MessageWindowDirection.OLDER,
+            ),
+            validateMessageWindowPageState(
+                messages = listOf(
+                    message(OLDER_UUID, createdAt = "invalid"),
+                ),
+                nextMarkerHeader = null,
+                rawMessageCount = 1,
+                boundary = anchor,
+                direction = MessageWindowDirection.OLDER,
+            ),
+        ).forEach { state ->
+            assertNull(state.nextMarker)
+            assertTrue(state.error?.contains("некорректную страницу") == true)
+        }
+    }
+
+    private fun message(
+        uuid: String,
+        createdAt: String = "2026-07-30T00:00:00Z",
+    ) = MessageResponse(
         uuid = uuid,
         updatedAt = "2026-07-30T00:00:00Z",
-        createdAt = "2026-07-30T00:00:00Z",
+        createdAt = createdAt,
         streamUuid = STREAM_UUID,
         topicUuid = TOPIC_UUID,
         userUuid = USER_UUID,
@@ -123,7 +183,10 @@ class MessagePaginationTest {
         const val STREAM_UUID = "11111111-1111-4111-8111-111111111111"
         const val TOPIC_UUID = "22222222-2222-4222-8222-222222222222"
         const val USER_UUID = "33333333-3333-4333-8333-333333333333"
-        const val NEWER_UUID = "44444444-4444-4444-8444-444444444444"
-        const val OLDER_UUID = "55555555-5555-4555-8555-555555555555"
+        const val OLDEST_UUID = "11111111-1111-4111-8111-111111111112"
+        const val OLDER_UUID = "22222222-2222-4222-8222-222222222223"
+        const val ANCHOR_UUID = "44444444-4444-4444-8444-444444444444"
+        const val NEWER_UUID = "55555555-5555-4555-8555-555555555555"
+        const val NEWEST_UUID = "66666666-6666-4666-8666-666666666666"
     }
 }

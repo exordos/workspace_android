@@ -54,6 +54,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.CreateDraftRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.DeleteDraftRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.EditMessageRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MarkMessagesReadRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponsePayload
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageSortDirection
@@ -166,6 +167,12 @@ class ChatDialogViewModel(
     val hasOlderMessages: StateFlow<Boolean> = _hasOlderMessages
     private val _olderMessagesError = MutableStateFlow<String?>(null)
     val olderMessagesError: StateFlow<String?> = _olderMessagesError
+    private val _loadingNewerMessages = MutableStateFlow(false)
+    val loadingNewerMessages: StateFlow<Boolean> = _loadingNewerMessages
+    private val _hasNewerMessages = MutableStateFlow(false)
+    val hasNewerMessages: StateFlow<Boolean> = _hasNewerMessages
+    private val _newerMessagesError = MutableStateFlow<String?>(null)
+    val newerMessagesError: StateFlow<String?> = _newerMessagesError
     private val _conversationStateReady = MutableStateFlow(false)
     val conversationStateReady: StateFlow<Boolean> = _conversationStateReady
     private val _uploadStatus = MutableStateFlow<String?>(null)
@@ -201,6 +208,9 @@ class ChatDialogViewModel(
     private var nextOlderPageMarker: String? = null
     private var olderMessagesJob: Job? = null
     private var refreshHistoryBeforeOlderRetry = false
+    private var nextNewerPageMarker: String? = null
+    private var newerMessagesJob: Job? = null
+    private var refreshHistoryBeforeNewerRetry = false
     private var forwardCatalogJob: Job? = null
     private var forwardTopicLoadJob: Job? = null
     private var forwardSelectionGeneration = 0L
@@ -2740,7 +2750,7 @@ class ChatDialogViewModel(
             }
             var messagesLoaded = false
             try {
-                messagesLoaded = loadLatestMessages()
+                messagesLoaded = loadInitialMessages()
                 if (messagesLoaded) {
                     finalizeRestoredComposerReferences()
                 }
@@ -2769,9 +2779,257 @@ class ChatDialogViewModel(
         }
     }
 
-    suspend fun loadLatestMessages(): Boolean {
+    private suspend fun loadInitialMessages(): Boolean =
+        focusMessageUuid
+            ?.let { loadMessageWindowAround(it) }
+            ?: loadLatestMessages()
+
+    private suspend fun loadMessageWindowAround(requestedUuid: String): Boolean {
         _isLoading.value = true
         _loadError.value = null
+        _olderMessagesError.value = null
+        _newerMessagesError.value = null
+        refreshHistoryBeforeOlderRetry = false
+        refreshHistoryBeforeNewerRetry = false
+
+        val requestOwnerKey = userViewModel.repo
+            .activeCredentialSnapshot()
+            .ownerKey
+        var anchorError: ApiError? = null
+        var anchorScopeMismatch = false
+        val anchor = when (
+            val response = client.performRequest(MessageRequest(requestedUuid))
+        ) {
+            is ApiResult.Success -> response.value.takeIf { message ->
+                val matches =
+                    message.uuid == requestedUuid &&
+                    message.streamUuid == chatId &&
+                    message.topicUuid == topicUuid
+                anchorScopeMismatch = !matches
+                matches
+            }
+
+            is ApiResult.Error -> {
+                anchorError = response.error
+                null
+            }
+        }
+        if (anchor == null) {
+            _actionError.value = when {
+                anchorScopeMismatch ->
+                    "Сервер вернул сообщение из другого чата; ссылка не открыта"
+
+                anchorError?.kind == ApiErrorKind.NOT_FOUND ->
+                    "Чат открыт, но ссылка на сообщение больше недоступна"
+
+                else -> anchorError?.message
+                    ?.takeIf(String::isNotBlank)
+                    ?.let { "Не удалось загрузить сообщение по ссылке: $it" }
+                    ?: "Не удалось загрузить сообщение по ссылке"
+            }
+            _isLoading.value = false
+            return loadLatestMessages(resolveMessageFocus = false)
+        }
+        if (
+            requestOwnerKey.isNullOrBlank() ||
+            !userViewModel.repo.isActiveCredentialOwner(requestOwnerKey)
+        ) {
+            _isLoading.value = false
+            return false
+        }
+
+        // Render the exact route anchor before its two context pages finish.
+        // This keeps a slow page request from leaving a valid message link on
+        // an unrelated latest-history loading screen.
+        repo.replaceStreamTopicMessages(chatId, topicUuid, listOf(anchor))
+        nextOlderPageMarker = anchor.uuid
+        nextNewerPageMarker = anchor.uuid
+        _hasOlderMessages.value = true
+        _hasNewerMessages.value = true
+        _loadingOlderMessages.value = true
+        _loadingNewerMessages.value = true
+        requestMessageFocus(anchor.uuid)
+        fun finishInitialContextLoading() {
+            _loadingOlderMessages.value = false
+            _loadingNewerMessages.value = false
+        }
+
+        val (olderResponse, newerResponse) = try {
+            coroutineScope {
+                val older = async {
+                    client.performRequest(
+                        MessagesRequest(
+                            streamId = chatId,
+                            topicId = topicUuid,
+                            pageLimit = MESSAGE_HISTORY_PAGE_SIZE,
+                            pageMarker = anchor.uuid,
+                            sortDirection = MessageSortDirection.DESCENDING,
+                        ),
+                    )
+                }
+                val newer = async {
+                    client.performRequest(
+                        MessagesRequest(
+                            streamId = chatId,
+                            topicId = topicUuid,
+                            pageLimit = MESSAGE_HISTORY_PAGE_SIZE,
+                            pageMarker = anchor.uuid,
+                            sortDirection = MessageSortDirection.ASCENDING,
+                        ),
+                    )
+                }
+                older.await() to newer.await()
+            }
+        } catch (cancellation: CancellationException) {
+            finishInitialContextLoading()
+            _isLoading.value = false
+            throw cancellation
+        } catch (exception: Exception) {
+            finishInitialContextLoading()
+            _isLoading.value = false
+            throw exception
+        }
+        try {
+            if (!userViewModel.repo.isActiveCredentialOwner(requestOwnerKey)) {
+                _isLoading.value = false
+                return false
+            }
+
+            val loadedMessages = mutableListOf(anchor)
+            when (olderResponse) {
+                is ApiResult.Success -> {
+                    val messages = olderResponse.value.filter {
+                        it.streamUuid == chatId && it.topicUuid == topicUuid
+                    }
+                    val pageState = validateMessageWindowPageState(
+                        messages = messages,
+                        nextMarkerHeader = olderResponse.metadata.nextPageMarker,
+                        rawMessageCount = olderResponse.value.size,
+                        boundary = anchor,
+                        direction = MessageWindowDirection.OLDER,
+                    )
+                    if (pageState.error == null) {
+                        loadedMessages += messages
+                        nextOlderPageMarker = pageState.nextMarker
+                        _hasOlderMessages.value = pageState.nextMarker != null
+                    } else {
+                        nextOlderPageMarker = anchor.uuid
+                        _hasOlderMessages.value = true
+                        refreshHistoryBeforeOlderRetry = true
+                    }
+                    _olderMessagesError.value = pageState.error
+                }
+
+                is ApiResult.Error -> {
+                    nextOlderPageMarker = anchor.uuid
+                    _hasOlderMessages.value = true
+                    _olderMessagesError.value = olderResponse.error.message
+                        ?: "Не удалось загрузить предыдущие сообщения"
+                }
+            }
+            when (newerResponse) {
+                is ApiResult.Success -> {
+                    val messages = newerResponse.value.filter {
+                        it.streamUuid == chatId && it.topicUuid == topicUuid
+                    }
+                    val pageState = validateMessageWindowPageState(
+                        messages = messages,
+                        nextMarkerHeader = newerResponse.metadata.nextPageMarker,
+                        rawMessageCount = newerResponse.value.size,
+                        boundary = anchor,
+                        direction = MessageWindowDirection.NEWER,
+                    )
+                    if (pageState.error == null) {
+                        loadedMessages += messages
+                        nextNewerPageMarker = pageState.nextMarker
+                        _hasNewerMessages.value = pageState.nextMarker != null
+                    } else {
+                        nextNewerPageMarker = anchor.uuid
+                        _hasNewerMessages.value = true
+                        refreshHistoryBeforeNewerRetry = true
+                    }
+                    _newerMessagesError.value = pageState.error
+                }
+
+                is ApiResult.Error -> {
+                    nextNewerPageMarker = anchor.uuid
+                    _hasNewerMessages.value = true
+                    _newerMessagesError.value = newerResponse.error.message
+                        ?: "Не удалось загрузить следующие сообщения"
+                }
+            }
+
+            val missingComposerMessageUuids = listOfNotNull(
+                pendingEditingMessageUuid,
+                pendingQuotedMessageUuid,
+                suspendedDraft?.quotedMessageUuid,
+            ).distinct().filter { messageUuid ->
+                loadedMessages.none { it.uuid == messageUuid }
+            }
+            var composerReferenceMessages = emptyList<MessageResponse>()
+            if (missingComposerMessageUuids.isNotEmpty()) {
+                when (
+                    val response = client.performRequest(
+                        MessagesByIdsRequest(missingComposerMessageUuids),
+                    )
+                ) {
+                    is ApiResult.Success -> {
+                        composerReferenceMessages = response.value.filter {
+                            it.uuid in missingComposerMessageUuids &&
+                                it.streamUuid == chatId &&
+                                it.topicUuid == topicUuid
+                        }
+                    }
+
+                    is ApiResult.Error -> Unit
+                }
+            }
+            if (!userViewModel.repo.isActiveCredentialOwner(requestOwnerKey)) {
+                _isLoading.value = false
+                return false
+            }
+
+            repo.replaceStreamTopicMessages(chatId, topicUuid, loadedMessages)
+            restoreComposerReferences(loadedMessages + composerReferenceMessages)
+            reconcileOutboxWithServer(loadedMessages)
+            focusProviderMessageId?.let { providerMessageId ->
+                loadedMessages
+                    .filter { it.provider?.externalId == providerMessageId }
+                    .singleOrNull()
+                    ?.let { requestMessageFocus(it.uuid) }
+            }
+            beginForwardMessageUuid
+                ?.takeUnless { initialForwardRequestHandled }
+                ?.let { messageUuid ->
+                    initialForwardRequestHandled = true
+                    loadedMessages
+                        .filter { it.uuid == messageUuid }
+                        .singleOrNull()
+                        ?.let(::beginForward)
+                        ?: run {
+                            _actionError.value =
+                                "Чат открыт, но сообщение для пересылки недоступно"
+                        }
+                }
+            // Re-apply focus after status-row and context layout changes.
+            requestMessageFocus(anchor.uuid)
+            _isLoading.value = false
+            viewModelScope.launch {
+                markMessagesReadUpTo(anchor.uuid)
+            }
+            return true
+        } finally {
+            finishInitialContextLoading()
+        }
+    }
+
+    suspend fun loadLatestMessages(resolveMessageFocus: Boolean = true): Boolean {
+        _isLoading.value = true
+        _loadError.value = null
+        nextNewerPageMarker = null
+        _hasNewerMessages.value = false
+        _newerMessagesError.value = null
+        refreshHistoryBeforeNewerRetry = false
         val messagesRequest = MessagesRequest(
             streamId = chatId,
             topicId = topicUuid,
@@ -2797,7 +3055,7 @@ class ChatDialogViewModel(
                     _loadError.value = pageState.error
                 }
                 var loadedMessages = latestPageMessages
-                focusMessageUuid?.let { requestedUuid ->
+                focusMessageUuid?.takeIf { resolveMessageFocus }?.let { requestedUuid ->
                     if (loadedMessages.none { it.uuid == requestedUuid }) {
                         when (
                             val focusedResponse = client.performRequest(
@@ -2827,6 +3085,7 @@ class ChatDialogViewModel(
                         }
                     }
                 }
+                val visibleMessages = loadedMessages.toList()
                 val missingComposerMessageUuids = listOfNotNull(
                     pendingEditingMessageUuid,
                     pendingQuotedMessageUuid,
@@ -2851,11 +3110,15 @@ class ChatDialogViewModel(
                         is ApiResult.Error -> Unit
                     }
                 }
-                repo.addStreamTopicMessages(chatId, topicUuid, loadedMessages)
+                repo.replaceStreamTopicMessages(
+                    chatId,
+                    topicUuid,
+                    visibleMessages,
+                )
                 restoreComposerReferences(loadedMessages)
-                reconcileOutboxWithServer(loadedMessages)
+                reconcileOutboxWithServer(visibleMessages)
                 focusProviderMessageId?.let { providerMessageId ->
-                    val matchingMessages = loadedMessages.filter {
+                    val matchingMessages = visibleMessages.filter {
                         it.provider?.externalId == providerMessageId
                     }
                     val matchingMessage = matchingMessages.singleOrNull()
@@ -2866,7 +3129,7 @@ class ChatDialogViewModel(
                             "Чат открыт, но сообщение из уведомления уже не загружено"
                     }
                 }
-                focusMessageUuid?.let { requestedUuid ->
+                focusMessageUuid?.takeIf { resolveMessageFocus }?.let { requestedUuid ->
                     if (loadedMessages.any { it.uuid == requestedUuid }) {
                         requestMessageFocus(requestedUuid)
                     }
@@ -2907,13 +3170,22 @@ class ChatDialogViewModel(
     fun retryLoad() {
         if (_isLoading.value) return
         viewModelScope.launch {
-            if (loadLatestMessages()) {
-                finalizeRestoredComposerReferences()
-                _conversationStateReady.value = true
-                persistConversationStateSafely(
-                    failureMessage =
-                        "Не удалось сохранить восстановленный черновик",
-                )
+            try {
+                if (loadInitialMessages()) {
+                    finalizeRestoredComposerReferences()
+                    _conversationStateReady.value = true
+                    persistConversationStateSafely(
+                        failureMessage =
+                            "Не удалось сохранить восстановленный черновик",
+                    )
+                }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (exception: Exception) {
+                _isLoading.value = false
+                _loadingOlderMessages.value = false
+                _loadingNewerMessages.value = false
+                _loadError.value = "Не удалось загрузить сообщения"
             }
         }
     }
@@ -2934,6 +3206,12 @@ class ChatDialogViewModel(
         if (_loadingOlderMessages.value) return false
         _olderMessagesError.value = null
         if (refreshHistoryBeforeOlderRetry) {
+            focusMessageUuid?.let { anchorUuid ->
+                refreshHistoryBeforeOlderRetry = false
+                nextOlderPageMarker = anchorUuid
+                _hasOlderMessages.value = true
+                return startOlderMessagesLoad()
+            }
             return refreshHistoryForOlderRetry()
         }
         if (!_hasOlderMessages.value) return false
@@ -2983,12 +3261,28 @@ class ChatDialogViewModel(
                         val pageMessages = response.value.filter {
                             it.streamUuid == chatId && it.topicUuid == topicUuid
                         }
-                        val pageState = validateMessagePageState(
-                            messages = pageMessages,
-                            nextMarkerHeader = response.metadata.nextPageMarker,
-                            previousMarker = marker,
-                            rawMessageCount = response.value.size,
-                        )
+                        val boundary = streamTopicMessages.value[
+                            "$chatId.$topicUuid"
+                        ]?.singleOrNull { it.uuid == marker }
+                        val pageState =
+                            if (focusMessageUuid != null && boundary != null) {
+                                validateMessageWindowPageState(
+                                    messages = pageMessages,
+                                    nextMarkerHeader =
+                                        response.metadata.nextPageMarker,
+                                    rawMessageCount = response.value.size,
+                                    boundary = boundary,
+                                    direction = MessageWindowDirection.OLDER,
+                                )
+                            } else {
+                                validateMessagePageState(
+                                    messages = pageMessages,
+                                    nextMarkerHeader =
+                                        response.metadata.nextPageMarker,
+                                    previousMarker = marker,
+                                    rawMessageCount = response.value.size,
+                                )
+                            }
                         if (pageState.error == null) {
                             repo.addStreamTopicMessages(
                                 chatId,
@@ -3023,6 +3317,110 @@ class ChatDialogViewModel(
                 throw cancellation
             } finally {
                 _loadingOlderMessages.value = false
+            }
+        }
+        return true
+    }
+
+    fun loadNewerMessages(): Boolean {
+        if (
+            focusMessageUuid == null ||
+            !_hasNewerMessages.value ||
+            _loadingNewerMessages.value ||
+            _newerMessagesError.value != null ||
+            refreshHistoryBeforeNewerRetry
+        ) {
+            return false
+        }
+        return startNewerMessagesLoad()
+    }
+
+    fun retryNewerMessages(): Boolean {
+        if (_loadingNewerMessages.value || focusMessageUuid == null) return false
+        _newerMessagesError.value = null
+        if (refreshHistoryBeforeNewerRetry) {
+            refreshHistoryBeforeNewerRetry = false
+            nextNewerPageMarker = focusMessageUuid
+            _hasNewerMessages.value = true
+        }
+        if (!_hasNewerMessages.value) return false
+        return startNewerMessagesLoad()
+    }
+
+    private fun startNewerMessagesLoad(): Boolean {
+        val marker = nextNewerPageMarker ?: run {
+            _hasNewerMessages.value = false
+            return false
+        }
+        if (newerMessagesJob?.isActive == true) return false
+        _loadingNewerMessages.value = true
+        newerMessagesJob = viewModelScope.launch {
+            try {
+                when (
+                    val response = client.performRequest(
+                        MessagesRequest(
+                            streamId = chatId,
+                            topicId = topicUuid,
+                            pageLimit = MESSAGE_HISTORY_PAGE_SIZE,
+                            pageMarker = marker,
+                            sortDirection = MessageSortDirection.ASCENDING,
+                        ),
+                    )
+                ) {
+                    is ApiResult.Success -> {
+                        val pageMessages = response.value.filter {
+                            it.streamUuid == chatId && it.topicUuid == topicUuid
+                        }
+                        val boundary = streamTopicMessages.value[
+                            "$chatId.$topicUuid"
+                        ]?.singleOrNull { it.uuid == marker }
+                        val pageState = if (boundary == null) {
+                            malformedMessagePageState()
+                        } else {
+                            validateMessageWindowPageState(
+                                messages = pageMessages,
+                                nextMarkerHeader =
+                                    response.metadata.nextPageMarker,
+                                rawMessageCount = response.value.size,
+                                boundary = boundary,
+                                direction = MessageWindowDirection.NEWER,
+                            )
+                        }
+                        if (pageState.error == null) {
+                            repo.addStreamTopicMessages(
+                                chatId,
+                                topicUuid,
+                                pageMessages,
+                            )
+                            nextNewerPageMarker = pageState.nextMarker
+                            _hasNewerMessages.value = pageState.nextMarker != null
+                            refreshHistoryBeforeNewerRetry = false
+                        } else {
+                            refreshHistoryBeforeNewerRetry = true
+                            nextNewerPageMarker = null
+                            _hasNewerMessages.value = false
+                        }
+                        _newerMessagesError.value = pageState.error
+                    }
+
+                    is ApiResult.Error -> {
+                        refreshHistoryBeforeNewerRetry =
+                            response.error.kind == ApiErrorKind.NOT_FOUND ||
+                                response.error.kind == ApiErrorKind.VALIDATION ||
+                                response.error.kind ==
+                                    ApiErrorKind.MALFORMED_RESPONSE
+                        if (refreshHistoryBeforeNewerRetry) {
+                            nextNewerPageMarker = null
+                            _hasNewerMessages.value = false
+                        }
+                        _newerMessagesError.value = response.error.message
+                            ?: "Не удалось загрузить следующие сообщения"
+                    }
+                }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } finally {
+                _loadingNewerMessages.value = false
             }
         }
         return true
@@ -3257,7 +3655,82 @@ internal fun validateMessagePageState(
     return MessagePageState(nextMarker = marker)
 }
 
-private fun malformedMessagePageState() = MessagePageState(
+internal enum class MessageWindowDirection {
+    OLDER,
+    NEWER,
+}
+
+internal fun validateMessageWindowPageState(
+    messages: List<MessageResponse>,
+    nextMarkerHeader: String?,
+    rawMessageCount: Int,
+    boundary: MessageResponse,
+    direction: MessageWindowDirection,
+): MessagePageState {
+    val baseState = validateMessagePageState(
+        messages = messages,
+        nextMarkerHeader = nextMarkerHeader,
+        previousMarker = boundary.uuid,
+        rawMessageCount = rawMessageCount,
+    )
+    if (baseState.error != null) return baseState
+
+    val boundaryPosition = messagePosition(boundary)
+        ?: return malformedMessagePageState()
+    val positions = messages.map { message ->
+        messagePosition(message) ?: return malformedMessagePageState()
+    }
+    if (positions.map { it.uuid }.toSet().size != positions.size) {
+        return malformedMessagePageState()
+    }
+
+    val belongsToWindowSide = positions.all { position ->
+        val comparison = compareMessagePositions(position, boundaryPosition)
+        when (direction) {
+            MessageWindowDirection.OLDER -> comparison < 0
+            MessageWindowDirection.NEWER -> comparison > 0
+        }
+    }
+    val followsServerOrder = positions.zipWithNext().all { (left, right) ->
+        val comparison = compareMessagePositions(left, right)
+        when (direction) {
+            MessageWindowDirection.OLDER -> comparison > 0
+            MessageWindowDirection.NEWER -> comparison < 0
+        }
+    }
+    return if (belongsToWindowSide && followsServerOrder) {
+        baseState
+    } else {
+        malformedMessagePageState()
+    }
+}
+
+private data class MessagePosition(
+    val createdAt: Instant,
+    val uuid: String,
+)
+
+private fun messagePosition(message: MessageResponse): MessagePosition? {
+    val createdAt = runCatching {
+        OffsetDateTime.parse(message.createdAt).toInstant()
+    }.getOrNull() ?: return null
+    val uuid = parseCanonicalMessageUuid(message.uuid) ?: return null
+    return MessagePosition(createdAt = createdAt, uuid = uuid)
+}
+
+private fun compareMessagePositions(
+    left: MessagePosition,
+    right: MessagePosition,
+): Int {
+    val timeComparison = left.createdAt.compareTo(right.createdAt)
+    return if (timeComparison != 0) {
+        timeComparison
+    } else {
+        left.uuid.compareTo(right.uuid)
+    }
+}
+
+internal fun malformedMessagePageState() = MessagePageState(
     nextMarker = null,
     error = "Сервер вернул некорректную страницу истории",
 )

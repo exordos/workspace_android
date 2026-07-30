@@ -13,14 +13,15 @@ implementation are the API contract source of truth.
 ## Verified baselines
 
 - Android starting point: `64f7faa` (`cassi/android-app-updates`).
-- Desktop reference: `812479d` (`workspace_ui` `master` at audit time).
-- Backend contract reference: `296133b` (`workspace_backend` `master` at audit time).
+- Android upstream reference: `684f2e8` (`workspace_android` `master` at audit time).
+- Desktop reference: `3e168762` (`workspace_ui` `master` at audit time).
+- Backend contract reference: `f8d59dd` (`workspace_backend` `master` at audit time).
 - Android baseline unit tests pass for both product flavors.
 - A physical Android 14 phone is available for device acceptance.
-- The newer upstream Android OTP work is still isolated in an open release
-  branch. It must be reviewed and ported selectively because it diverges from
-  the Android starting point and does not contain the later messaging, profile,
-  push, and test work.
+- The newer upstream Android OTP work is merged as `1.0.7`. It still diverges
+  from the Android starting point and does not contain the later messaging,
+  profile, push, and test work, so useful changes must be reviewed and ported
+  selectively instead of merging the branch wholesale.
 
 Re-check all moving references before integration or release.
 
@@ -94,7 +95,7 @@ outcome. A screen is not complete merely because it matches a design.
 | Channel management | Desktop-visible notification, read, membership, folder and topic actions | Partial: notification mode, mark-read, folders and real membership are wired; backend-only archive/delete controls remain hidden | Add only actions present in the desktop product contract or confirmed by a focused product decision |
 | Membership | Add/remove users and show roles/presence | Partial: real stream bindings, owner/self removal rules, role labels, active count and multi-add are wired without mock fallbacks | Complete real-backend permission/restart E2E and delayed-response reconciliation |
 | Topic management | Desktop-visible create, rename, notification, read and done actions | Partial: all listed actions use current endpoints and update the shared projection; backend-only delete/default/move controls remain hidden | Complete cross-client/restart E2E and request product direction before exposing an action absent from desktop |
-| Message history | Initial window, older/newer pagination, focused message | Partial: the initial 50-row latest window and older history now use backend `created_at + uuid` keyset markers; exact-conversation validation, single-flight retry, deleted-marker refresh fallback, stable UUID item keys, realtime-newer-wins merging and manual/scroll loading are wired; physical large-history offline/retry and portrait/landscape recreation preserve the visible anchor | Add a true around-message window, first-unread marker, durable Room-backed pages/cursors, and automated delayed-request/process-death/timeout/5xx E2E |
+| Message history | Initial window, older/newer pagination, focused message | Partial: normal entry uses a bounded latest window; an exact message route first renders the validated detail anchor and then atomically replaces the conversation projection with strict older/anchor/newer keyset pages; both directions paginate by `created_at + uuid`, keep local outbox rows, reject cross-scope/wrong-side/out-of-order data, preserve newer realtime edits on overlapping UUIDs, and retain focus across recreation; physical Pixel acceptance covered a 55-message generated sequence, bidirectional continuation and portrait/landscape/portrait | Add first-unread marker, durable Room-backed pages/cursors, and automated delayed-request/process-death/timeout/5xx E2E |
 | Message sending | Text, optimistic row, retry/remove failed send | Partial: an encrypted account/conversation-scoped outbox is persisted before POST; optimistic rows survive Activity/process recreation and a fully cold offline exact-topic start; rejected and ambiguous outcomes expose different retry/verify/remove paths; successful responses are validated against the exact conversation and payload | Expand real-backend/process-failure E2E to attachments, edits and concurrent sends; backend request idempotency is required before ambiguous delivery can be retried automatically without duplicate risk |
 | Message editing | Edit own message | Present | Preserve reply context, enforce permissions, expose conflict and retry states |
 | Message deletion | Delete own message with confirmation | Present for owned native messages: canonical UUID DELETE, explicit irreversible confirmation, per-message single-flight state, no optimistic removal, recoverable failure, realtime/cache projection cleanup, and text/image/file/call action parity; external-provider edit/delete stay hidden without capability/preflight data | Add provider capability/preflight support, then automate delayed-response/process-recreation and edit/quote-source deletion cases |

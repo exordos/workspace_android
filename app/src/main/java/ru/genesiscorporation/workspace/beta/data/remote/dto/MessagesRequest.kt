@@ -4,6 +4,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import ru.genesiscorporation.workspace.beta.data.remote.ApiError
 import ru.genesiscorporation.workspace.beta.data.remote.ApiRequest
+import ru.genesiscorporation.workspace.beta.data.remote.EmptyRequestData
 import ru.genesiscorporation.workspace.beta.data.remote.HTTPMethod
 
 @Serializable
@@ -57,6 +58,21 @@ data class MessagesByIdsRequest(
     override val data = MessagesByIdsRequestData(
        messageIds
     )
+}
+
+class MessageRequest(
+    messageUuid: String,
+) : ApiRequest<EmptyRequestData, MessageResponse, ApiError> {
+    private val canonicalMessageUuid = requireNotNull(
+        parseCanonicalMessageUuid(messageUuid),
+    ) {
+        "messageUuid must be a canonical UUID"
+    }
+
+    override val method = HTTPMethod.GET
+    override val url =
+        "/api/workspace/v1/messenger/messages/$canonicalMessageUuid"
+    override val data = EmptyRequestData()
 }
 
 

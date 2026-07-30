@@ -10,6 +10,51 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 
 class EventsRepositoryTest {
+    @Test
+    fun `replacing a conversation window drops stale server rows but keeps local outbox`() {
+        val repository = EventsRepository()
+        val stale = message(
+            uuid = "10000000-0000-4000-8000-000000000001",
+            content = "stale",
+        )
+        val local = message(
+            uuid = "local-20000000-0000-4000-8000-000000000002",
+            content = "pending",
+        )
+        val anchor = message(
+            uuid = "30000000-0000-4000-8000-000000000003",
+            content = "anchor",
+        ).copy(updatedAt = "2026-07-26T00:00:02Z")
+        val staleAnchor = anchor.copy(
+            updatedAt = "2026-07-26T00:00:01Z",
+            payload = anchor.payload.copy(content = "stale anchor"),
+        )
+        repository.addStreamTopicMessages(
+            STREAM_UUID,
+            TOPIC_UUID,
+            listOf(stale, local, anchor),
+        )
+
+        repository.replaceStreamTopicMessages(
+            STREAM_UUID,
+            TOPIC_UUID,
+            listOf(staleAnchor),
+        )
+
+        assertEquals(
+            listOf(local.uuid, anchor.uuid),
+            repository.streamTopicMessages.value["$STREAM_UUID.$TOPIC_UUID"]
+                ?.map(MessageResponse::uuid),
+        )
+        assertEquals(
+            "anchor",
+            repository.streamTopicMessages.value["$STREAM_UUID.$TOPIC_UUID"]
+                ?.last()
+                ?.payload
+                ?.content,
+        )
+    }
+
 
     @Test
     fun `created event is retained before the topic snapshot loads`() {

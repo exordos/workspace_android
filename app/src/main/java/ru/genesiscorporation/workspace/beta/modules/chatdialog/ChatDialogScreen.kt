@@ -98,6 +98,10 @@ fun ChatDialogScreen(
         viewModel.loadingOlderMessages.collectAsStateWithLifecycle()
     val hasOlderMessages by viewModel.hasOlderMessages.collectAsStateWithLifecycle()
     val olderMessagesError by viewModel.olderMessagesError.collectAsStateWithLifecycle()
+    val loadingNewerMessages by
+        viewModel.loadingNewerMessages.collectAsStateWithLifecycle()
+    val hasNewerMessages by viewModel.hasNewerMessages.collectAsStateWithLifecycle()
+    val newerMessagesError by viewModel.newerMessagesError.collectAsStateWithLifecycle()
     val forwardDialogState by
         viewModel.forwardDialogState.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
@@ -117,10 +121,12 @@ fun ChatDialogScreen(
     val currentOldestMessageUuid by rememberUpdatedState(
         messages.firstOrNull()?.uuid,
     )
-    val showHistoryStatus =
+    val showOlderHistoryStatus =
         loadingOlderMessages || olderMessagesError != null || hasOlderMessages
-    val historyItemOffset = if (showHistoryStatus) 1 else 0
-    val lastListIndex = messages.lastIndex + historyItemOffset
+    val showNewerHistoryStatus =
+        loadingNewerMessages || newerMessagesError != null || hasNewerMessages
+    val historyTopItemOffset = if (showOlderHistoryStatus) 1 else 0
+    val lastMessageListIndex = messages.lastIndex + historyTopItemOffset
 
     LaunchedEffect(viewModel, navController) {
         viewModel.openSourceMessageEvents.collect { event ->
@@ -144,7 +150,7 @@ fun ChatDialogScreen(
         )
     }
 
-    LaunchedEffect(messages.size, uiMode, historyItemOffset) {
+    LaunchedEffect(messages.size, uiMode, historyTopItemOffset) {
         if (messages.isNotEmpty() && focusedMessageUuid == null) {
             val lastVisibleIndex = listState.layoutInfo.visibleItemsInfo
                 .lastOrNull()
@@ -152,10 +158,10 @@ fun ChatDialogScreen(
             if (shouldPositionConversationAtLatest(
                     hasPositionedConversation = hasPositionedConversation,
                     lastVisibleIndex = lastVisibleIndex,
-                    lastListIndex = lastListIndex,
+                    lastListIndex = lastMessageListIndex,
                 )
             ) {
-                listState.scrollToItem(lastListIndex)
+                listState.scrollToItem(lastMessageListIndex)
             }
             hasPositionedConversation = true
         }
@@ -170,7 +176,8 @@ fun ChatDialogScreen(
             // An animation can be cancelled by that relayout and leave the
             // user at an unrelated older row.
             withFrameNanos { }
-            listState.scrollToItem(index + historyItemOffset)
+            listState.scrollToItem(index + historyTopItemOffset)
+            hasPositionedConversation = true
             viewModel.clearMessageFocus()
         }
     }
@@ -190,9 +197,29 @@ fun ChatDialogScreen(
     }
 
     LaunchedEffect(
+        listState,
+        showNewerHistoryStatus,
+        lastMessageListIndex,
+    ) {
+        snapshotFlow {
+            listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index
+        }
+            .distinctUntilChanged()
+            .collect { lastVisibleItemIndex ->
+                if (
+                    lastVisibleItemIndex != null &&
+                    lastVisibleItemIndex >=
+                        lastMessageListIndex - HISTORY_LOAD_TRIGGER_INDEX
+                ) {
+                    viewModel.loadNewerMessages()
+                }
+            }
+    }
+
+    LaunchedEffect(
         messages.size,
         loadingOlderMessages,
-        historyItemOffset,
+        historyTopItemOffset,
     ) {
         val anchor = pendingHistoryViewportAnchor ?: return@LaunchedEffect
         if (loadingOlderMessages) return@LaunchedEffect
@@ -205,7 +232,7 @@ fun ChatDialogScreen(
             // row can shift the viewport again immediately after restoration.
             withFrameNanos { }
             listState.scrollToItem(
-                index = messageIndex + historyItemOffset,
+                index = messageIndex + historyTopItemOffset,
                 scrollOffset = -anchor.offsetFromViewportStart,
             )
             repeat(HISTORY_ANCHOR_CORRECTION_FRAMES) {
@@ -308,12 +335,14 @@ fun ChatDialogScreen(
                             alignment = Alignment.Bottom,
                         ),
                     ) {
-                        if (showHistoryStatus) {
-                            item(key = HISTORY_STATUS_KEY) {
+                        if (showOlderHistoryStatus) {
+                            item(key = OLDER_HISTORY_STATUS_KEY) {
                                 MessageHistoryStatus(
                                     loading = loadingOlderMessages,
                                     error = olderMessagesError,
                                     hasMore = hasOlderMessages,
+                                    loadingLabel = "Загрузка предыдущих сообщений…",
+                                    loadLabel = "Загрузить предыдущие",
                                     onLoad = {
                                         if (viewModel.loadOlderMessages()) {
                                             captureAndStoreHistoryViewportAnchor(
@@ -352,14 +381,30 @@ fun ChatDialogScreen(
                                             ?.index
                                     if (
                                         lastVisibleIndex == null ||
-                                        lastVisibleIndex >= lastListIndex - 1
+                                        lastVisibleIndex >=
+                                            lastMessageListIndex - 1
                                     ) {
                                         scope.launch {
-                                            listState.scrollToItem(lastListIndex)
+                                            listState.scrollToItem(
+                                                lastMessageListIndex,
+                                            )
                                         }
                                     }
                                 },
                             )
+                        }
+                        if (showNewerHistoryStatus) {
+                            item(key = NEWER_HISTORY_STATUS_KEY) {
+                                MessageHistoryStatus(
+                                    loading = loadingNewerMessages,
+                                    error = newerMessagesError,
+                                    hasMore = hasNewerMessages,
+                                    loadingLabel = "Загрузка следующих сообщений…",
+                                    loadLabel = "Загрузить следующие",
+                                    onLoad = { viewModel.loadNewerMessages() },
+                                    onRetry = { viewModel.retryNewerMessages() },
+                                )
+                            }
                         }
                     }
                 }
@@ -496,6 +541,8 @@ private fun MessageHistoryStatus(
     loading: Boolean,
     error: String?,
     hasMore: Boolean,
+    loadingLabel: String,
+    loadLabel: String,
     onLoad: () -> Unit,
     onRetry: () -> Unit,
 ) {
@@ -515,7 +562,7 @@ private fun MessageHistoryStatus(
                     strokeWidth = 2.dp,
                 )
                 Text(
-                    text = "Загрузка истории…",
+                    text = loadingLabel,
                     color = colors.textAdditional50,
                     fontSize = 12.sp,
                     modifier = Modifier.padding(start = 8.dp),
@@ -536,7 +583,7 @@ private fun MessageHistoryStatus(
 
             hasMore -> {
                 TextButton(onClick = onLoad) {
-                    Text("Загрузить предыдущие")
+                    Text(loadLabel)
                 }
             }
         }
@@ -576,7 +623,8 @@ private fun androidx.compose.foundation.lazy.LazyListState
     ): HistoryViewportAnchor? {
     val layout = layoutInfo
     val visibleMessages = layout.visibleItemsInfo.filter {
-        it.key != HISTORY_STATUS_KEY
+        it.key != OLDER_HISTORY_STATUS_KEY &&
+            it.key != NEWER_HISTORY_STATUS_KEY
     }
     // Prepending a page can add/remove the date separator inside the previous
     // oldest message. Prefer the next visible message, whose internal layout
@@ -591,7 +639,8 @@ private fun androidx.compose.foundation.lazy.LazyListState
     )
 }
 
-private const val HISTORY_STATUS_KEY = "message-history-status"
+private const val OLDER_HISTORY_STATUS_KEY = "message-history-status-older"
+private const val NEWER_HISTORY_STATUS_KEY = "message-history-status-newer"
 
 @Composable
 private fun ConversationHeader(

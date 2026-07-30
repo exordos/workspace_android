@@ -78,6 +78,28 @@ class MessagesRequestContractTest {
         assertEquals(MESSAGE_UUID, params["page_marker"])
     }
 
+    @OptIn(ExperimentalSerializationApi::class)
+    @Test
+    fun `message anchor uses the canonical detail endpoint without query data`() {
+        val request = MessageRequest(MESSAGE_UUID)
+
+        assertEquals(
+            "/api/workspace/v1/messenger/messages/$MESSAGE_UUID",
+            request.url,
+        )
+        assertEquals(
+            mapOf("emptyString" to ""),
+            Properties.encodeToStringMap(request.data),
+        )
+    }
+
+    @Test
+    fun `message anchor rejects malformed identifiers before a request`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            MessageRequest("$MESSAGE_UUID/path")
+        }
+    }
+
     @Test
     fun `message page rejects unsafe limits and malformed markers`() {
         assertThrows(IllegalArgumentException::class.java) {

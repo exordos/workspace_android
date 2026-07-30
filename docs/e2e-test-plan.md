@@ -314,6 +314,20 @@ unsupported.
 | MSG-HIST-008 | Edit while positioned in older history | Stable UUID keys preserve the viewport and the updated bubble replaces its content in place |
 | MSG-HIST-009 | Rotation/background during page load | The retained ViewModel owns the single request; completion merges once and restored UI keeps a valid anchor |
 | MSG-HIST-010 | Final page | Missing continuation header ends pagination without an empty/dead control |
+| MSG-HIST-011 | Open an exact route to a message outside the latest page | The canonical detail endpoint validates the anchor and renders it before the two context requests finish; failure falls back to the usable conversation with an actionable error |
+| MSG-HIST-012 | Load context around a route anchor | Descending rows are strictly older and ascending rows strictly newer by `(created_at, uuid)`; wrong-side, duplicate, out-of-order, malformed-time, malformed-UUID, and cross-conversation rows fail the whole affected page closed |
+| MSG-HIST-013 | A latest-page projection already exists before opening an old route | The around-message window atomically replaces stale server rows instead of merging a hidden gap, while local `local-*` outbox rows and a newer overlapping realtime edit survive |
+| MSG-HIST-014 | Scroll below an around-message window | The ascending continuation loads once near the lower boundary or through `Загрузить следующие`, appends in chronological order, and removes its status control at the real newest row |
+| MSG-HIST-015 | One context direction fails | The anchor and successful side remain usable; the failed side exposes a real Retry using the safe boundary, while rejected/malformed later markers reset to the route anchor instead of looping |
+| MSG-HIST-016 | Rotate while focused on an old route anchor | Portrait → landscape → portrait keeps the exact anchor visible and does not jump to the latest row when status rows or context pages relayout |
+
+Current physical coverage: MSG-HIST-001/002, 009–014 and 016 passed on the USB
+Android 14 Pixel using the sandbox topic's 55-message generated sequence.
+MSG-HIST-003/004/007/010–015 have focused automated contract/model coverage.
+MSG-HIST-005 controlled timeout/5xx, MSG-HIST-006 deleted-marker injection and
+MSG-HIST-008 edit-in-old-history remain fault/interaction automation work;
+merely disabling radios is not counted as proof because an already resolved
+in-app route can reuse retained runtime state.
 
 ### Current history acceptance coverage
 
