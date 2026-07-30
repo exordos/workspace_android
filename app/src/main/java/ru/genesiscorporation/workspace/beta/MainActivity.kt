@@ -109,6 +109,8 @@ import ru.genesiscorporation.workspace.beta.modules.feed.MessageTimelineKind
 import ru.genesiscorporation.workspace.beta.modules.drafts.DraftsScreen
 import ru.genesiscorporation.workspace.beta.modules.drafts.DraftsViewModel
 import ru.genesiscorporation.workspace.beta.modules.about.AboutScreen
+import ru.genesiscorporation.workspace.beta.modules.externalintegrations.ExternalIntegrationsScreen
+import ru.genesiscorporation.workspace.beta.modules.externalintegrations.ExternalIntegrationsViewModel
 import ru.genesiscorporation.workspace.beta.modules.profile.ProfileScreen
 import ru.genesiscorporation.workspace.beta.modules.profile.ProfileViewModel
 import ru.genesiscorporation.workspace.beta.modules.share.IncomingShareDialog
@@ -624,6 +626,7 @@ fun WokspaceApp(
                 currentDestination = 1
                 ProfileNavigation(
                     workspaceApiClient,
+                    eventsRepository,
                     pushDeviceRegistrationManager,
                     onBottomNavigationVisibilityChange = {
                         showBottomNavigation = it
@@ -1033,6 +1036,7 @@ fun LoginNavigation(workspaceApiClient: WorkspaceAPIClient) {
 @Composable
 fun ProfileNavigation(
     workspaceApiClient: WorkspaceAPIClient,
+    eventsRepository: EventsRepository,
     pushDeviceRegistrationManager: PushDeviceRegistrationManager,
     onBottomNavigationVisibilityChange: (Boolean) -> Unit,
 ) {
@@ -1056,6 +1060,9 @@ fun ProfileNavigation(
             ProfileScreen(
                 viewModel = profileViewModel,
                 onOpenAbout = { navController.navigate(ProfileFlow.About) },
+                onOpenExternalIntegrations = {
+                    navController.navigate(ProfileFlow.ExternalIntegrations)
+                },
             )
         }
         composable<ProfileFlow.About> {
@@ -1063,6 +1070,24 @@ fun ProfileNavigation(
                 onBottomNavigationVisibilityChange(false)
             }
             AboutScreen(onBack = navController::popBackStack)
+        }
+        composable<ProfileFlow.ExternalIntegrations> {
+            LaunchedEffect(Unit) {
+                onBottomNavigationVisibilityChange(false)
+            }
+            val factory = remember {
+                ExternalIntegrationsViewModelFactory(
+                    userViewModel = user,
+                    client = workspaceApiClient,
+                    eventsRepository = eventsRepository,
+                )
+            }
+            val externalIntegrationsViewModel:
+                ExternalIntegrationsViewModel = viewModel(factory = factory)
+            ExternalIntegrationsScreen(
+                viewModel = externalIntegrationsViewModel,
+                onBack = navController::popBackStack,
+            )
         }
         composable<ProfileFlow.Login> {
             LaunchedEffect(Unit) {

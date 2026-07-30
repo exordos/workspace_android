@@ -1,5 +1,6 @@
 package ru.genesiscorporation.workspace.beta.data
 
+import kotlinx.coroutines.flow.StateFlow
 import ru.genesiscorporation.workspace.beta.data.remote.ApiError
 import ru.genesiscorporation.workspace.beta.data.remote.ApiErrorKind
 import ru.genesiscorporation.workspace.beta.data.remote.ApiRequest
@@ -27,14 +28,88 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.canonicalExternalInt
 import ru.genesiscorporation.workspace.beta.data.remote.dto.validateExternalAccountResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.validateExternalChatResponse
 
+interface ExternalIntegrationDataSource {
+    val accounts: StateFlow<List<ExternalAccountResponse>>
+    val chats: StateFlow<Map<String, List<ExternalChatResponse>>>
+
+    suspend fun listAccounts():
+        ApiResult<List<ValidatedExternalAccount>, ApiError>
+
+    suspend fun getAccount(
+        accountUuid: String,
+    ): ApiResult<ValidatedExternalAccount, ApiError>
+
+    suspend fun createAccount(
+        accountUuid: String,
+        serverUrl: String,
+        email: String,
+        apiKey: String,
+        selectionMode: ExternalAccountSelectionMode,
+        historyDepth: ExternalHistoryDepth,
+        defaultProjectId: String,
+    ): ApiResult<ValidatedExternalAccount, ApiError>
+
+    suspend fun updateAccount(
+        accountUuid: String,
+        selectionMode: ExternalAccountSelectionMode,
+        historyDepth: ExternalHistoryDepth,
+        defaultProjectId: String,
+        entityTag: String,
+    ): ApiResult<ValidatedExternalAccount, ApiError>
+
+    suspend fun reconnectAccount(
+        accountUuid: String,
+        serverUrl: String,
+        email: String,
+        apiKey: String,
+        entityTag: String,
+    ): ApiResult<ValidatedExternalAccount, ApiError>
+
+    suspend fun disconnectAccount(
+        accountUuid: String,
+    ): ApiResult<ValidatedExternalAccount, ApiError>
+
+    suspend fun deleteAccount(
+        accountUuid: String,
+    ): ApiResult<Unit, ApiError>
+
+    suspend fun listChats(
+        externalAccountUuid: String,
+    ): ApiResult<List<ExternalChatResponse>, ApiError>
+
+    suspend fun getChat(
+        chatUuid: String,
+    ): ApiResult<ExternalChatResponse, ApiError>
+
+    suspend fun selectChat(
+        chatUuid: String,
+        projectId: String,
+    ): ApiResult<ExternalChatResponse, ApiError>
+
+    suspend fun deselectChat(
+        chatUuid: String,
+    ): ApiResult<ExternalChatResponse, ApiError>
+
+    suspend fun moveChat(
+        chatUuid: String,
+        projectId: String,
+        entityTag: String,
+    ): ApiResult<ExternalChatResponse, ApiError>
+}
+
 class ExternalIntegrationRepository(
     private val client: WorkspaceAPIClient,
     private val eventsRepository: EventsRepository,
-) {
-    suspend fun listAccounts():
+) : ExternalIntegrationDataSource {
+    override val accounts = eventsRepository.externalAccounts
+    override val chats = eventsRepository.externalChats
+
+    override suspend fun listAccounts():
         ApiResult<List<ValidatedExternalAccount>, ApiError> {
         val ownerKey = activeOwnerKey()
             ?: return ApiResult.Error(authenticationRequiredError())
+        val baselineRevisions = eventsRepository.externalAccounts.value
+            .associate { it.uuid to it.revision }
         val accounts = mutableListOf<ValidatedExternalAccount>()
         val seenAccountUuids = mutableSetOf<String>()
         val seenMarkers = mutableSetOf<String>()
@@ -75,11 +150,10 @@ class ExternalIntegrationRepository(
                         if (!isOwnerCurrent(ownerKey)) {
                             return ApiResult.Error(accountChangedError())
                         }
-                        accounts.forEach {
-                            eventsRepository.mergeExternalAccountSnapshot(
-                                it.response,
-                            )
-                        }
+                        eventsRepository.reconcileExternalAccountSnapshots(
+                            responses = accounts.map { it.response },
+                            baselineRevisions = baselineRevisions,
+                        )
                         return ApiResult.Success(accounts)
                     }
                     if (!seenMarkers.add(nextMarker)) {
@@ -94,7 +168,7 @@ class ExternalIntegrationRepository(
         return ApiResult.Error(externalPaginationLimitError())
     }
 
-    suspend fun getAccount(
+    override suspend fun getAccount(
         accountUuid: String,
     ): ApiResult<ValidatedExternalAccount, ApiError> {
         val ownerKey = activeOwnerKey()
@@ -120,7 +194,7 @@ class ExternalIntegrationRepository(
         }
     }
 
-    suspend fun createAccount(
+    override suspend fun createAccount(
         accountUuid: String,
         serverUrl: String,
         email: String,
@@ -155,7 +229,7 @@ class ExternalIntegrationRepository(
         }
     }
 
-    suspend fun updateAccount(
+    override suspend fun updateAccount(
         accountUuid: String,
         selectionMode: ExternalAccountSelectionMode,
         historyDepth: ExternalHistoryDepth,
@@ -194,7 +268,7 @@ class ExternalIntegrationRepository(
         }
     }
 
-    suspend fun reconnectAccount(
+    override suspend fun reconnectAccount(
         accountUuid: String,
         serverUrl: String,
         email: String,
@@ -235,7 +309,7 @@ class ExternalIntegrationRepository(
         }
     }
 
-    suspend fun disconnectAccount(
+    override suspend fun disconnectAccount(
         accountUuid: String,
     ): ApiResult<ValidatedExternalAccount, ApiError> {
         val ownerKey = activeOwnerKey()
@@ -261,7 +335,7 @@ class ExternalIntegrationRepository(
         }
     }
 
-    suspend fun deleteAccount(
+    override suspend fun deleteAccount(
         accountUuid: String,
     ): ApiResult<Unit, ApiError> {
         val ownerKey = activeOwnerKey()
@@ -293,7 +367,7 @@ class ExternalIntegrationRepository(
         }
     }
 
-    suspend fun listChats(
+    override suspend fun listChats(
         externalAccountUuid: String,
     ): ApiResult<List<ExternalChatResponse>, ApiError> {
         val ownerKey = activeOwnerKey()
@@ -303,6 +377,10 @@ class ExternalIntegrationRepository(
         }.getOrElse {
             return ApiResult.Error(invalidExternalInputError())
         }
+        val baselineRevisions =
+            eventsRepository.externalChats.value[canonicalAccountUuid]
+                .orEmpty()
+                .associate { it.uuid to it.revision }
         val chats = mutableListOf<ExternalChatResponse>()
         val seenChatUuids = mutableSetOf<String>()
         val seenMarkers = mutableSetOf<String>()
@@ -346,8 +424,10 @@ class ExternalIntegrationRepository(
                         if (!isOwnerCurrent(ownerKey)) {
                             return ApiResult.Error(accountChangedError())
                         }
-                        chats.forEach(
-                            eventsRepository::mergeExternalChatSnapshot,
+                        eventsRepository.reconcileExternalChatSnapshots(
+                            externalAccountUuid = canonicalAccountUuid,
+                            responses = chats,
+                            baselineRevisions = baselineRevisions,
                         )
                         return ApiResult.Success(chats)
                     }
@@ -363,7 +443,7 @@ class ExternalIntegrationRepository(
         return ApiResult.Error(externalPaginationLimitError())
     }
 
-    suspend fun getChat(
+    override suspend fun getChat(
         chatUuid: String,
     ): ApiResult<ExternalChatResponse, ApiError> {
         val ownerKey = activeOwnerKey()
@@ -388,7 +468,7 @@ class ExternalIntegrationRepository(
         }
     }
 
-    suspend fun selectChat(
+    override suspend fun selectChat(
         chatUuid: String,
         projectId: String,
     ): ApiResult<ExternalChatResponse, ApiError> {
@@ -411,7 +491,7 @@ class ExternalIntegrationRepository(
         )
     }
 
-    suspend fun deselectChat(
+    override suspend fun deselectChat(
         chatUuid: String,
     ): ApiResult<ExternalChatResponse, ApiError> {
         val ownerKey = activeOwnerKey()
@@ -430,7 +510,7 @@ class ExternalIntegrationRepository(
         )
     }
 
-    suspend fun moveChat(
+    override suspend fun moveChat(
         chatUuid: String,
         projectId: String,
         entityTag: String,

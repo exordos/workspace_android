@@ -70,6 +70,9 @@ object ProfileFlow {
     object About
 
     @Serializable
+    object ExternalIntegrations
+
+    @Serializable
     object Login
 }
 

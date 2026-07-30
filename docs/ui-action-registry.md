@@ -170,6 +170,25 @@ Compose semantics traversal on every supported role and account.
 | SET-A07 | Share diagnostics | Collects a fresh allowlisted local snapshot and opens the real Android `text/plain` chooser | No identity/content fields exist in the report model; missing share handler produces a dismissible error | DIAG-001–010 |
 | SET-A08 | About app and open-source licenses | Opens an offline screen with the exact version name/code/build type plus a searchable catalog generated from the current runtime dependency graph; every component opens details, bundled terms are readable, and Close/Back return safely | Empty search is explicit and clearable; missing license metadata is stated instead of leaving an inert row; generated-resource parsing is an instrumented build gate; no update action is exposed until Android has a verified distribution contract | ABOUT-001–010 |
 
+## External integrations
+
+| ID | Screen / interaction | Handler and effect | Failure/recovery | Acceptance |
+| --- | --- | --- | --- | --- |
+| EXT-A01 | Profile external-integrations row | Opens the typed external-integration destination | Back stack remains valid; the row is a button, not a placeholder | EXT-001 |
+| EXT-A02 | Header Back / Refresh | Pops the route or starts one owner-fenced authoritative account/chat refresh | Refresh is single-flight; network, permission, malformed and owner-change failures are bounded and retryable | EXT-001/006/007 |
+| EXT-A03 | Connect Zulip | Opens the real credential/settings dialog and submits one canonical create request | Blank/invalid data cannot submit; rejected or ambiguous requests keep the form and expose a safe error | EXT-002–005 |
+| EXT-A04 | Server, email and API-key fields | Keep bounded input in memory; the key is password-masked, never saveable or prefilled, and enables temporary window screenshot protection | Cancel/success clears the key; rotation/process-death/device checks remain release gates | EXT-003/005/010 |
+| EXT-A05 | Account sync settings | Sends selection/history/current-project settings with the current strong revision | No-op settings disable Save; conflicts keep the dialog and offer functional refresh/cancel | EXT-008/009 |
+| EXT-A06 | Reconnect account | Submits one replacement server/email/write-only key with the current strong revision | Unsupported/invalid/conflicting responses retain bounded form state and never reveal the prior key | EXT-009–011 |
+| EXT-A07 | Disconnect account | Requires confirmation and invokes the exact non-destructive disconnect action | Cancel is side-effect free; failure returns to a usable account card | EXT-011 |
+| EXT-A08 | Delete external account | Requires destructive confirmation and deletes the exact account | State is removed only after success/realtime authority; failure preserves the account and retry path | EXT-012–014 |
+| EXT-A09 | Chat search / clear | Locally filters the current authoritative catalog by bounded display name and clears the query | Empty result is explicit; no unbounded network request is started | EXT-021/024 |
+| EXT-A10 | Open original chat | Launches only a validated same-origin HTTPS URL from the provider snapshot | Unsafe/missing URL exposes no control; missing platform handler shows a dismissible error | EXT-022 |
+| EXT-A11 | Select external chat | Adds the exact available chat to the current project | Missing project disables the action; pending, conflict and transport states remain visible and retryable | EXT-016/019 |
+| EXT-A12 | Deselect external chat | Requires confirmation and removes only the Workspace projection | Source-provider chat is untouched; failure preserves the authoritative row | EXT-017/019 |
+| EXT-A13 | Move projected chat here | Moves the exact selected chat to the active project with its strong revision | Control appears only for a different known project; conflict never overwrites a newer row | EXT-018/019 |
+| EXT-A14 | Error/success cards | Refreshes where applicable or dismisses only the visible bounded message | Refresh is hidden by state transition once accepted; no control silently no-ops | EXT-001/004/009/023 |
+
 ## Platform interactions
 
 | ID | Interaction | Handler and effect | Failure/recovery | Acceptance |
@@ -205,6 +224,9 @@ end-to-end behavior exists:
   read-only Starred destination is functional and remains visible.
 - Hamburger menu without a navigation destination.
 - Mail, calendar, services, and calls-list placeholders.
+- External-operation retry/discard and provider-administration controls until
+  their desktop capability, permission and duplicate-risk contracts are
+  implemented end to end on mobile.
 
 Mock channel memberships, mock shared channels, phone numbers, work profiles,
 managers, birthdays, local times, and fallback message previews are prohibited.

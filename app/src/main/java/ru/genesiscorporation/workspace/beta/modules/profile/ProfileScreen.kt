@@ -75,6 +75,7 @@ import java.net.URI
 fun ProfileScreen(
     viewModel: ProfileViewModel,
     onOpenAbout: () -> Unit,
+    onOpenExternalIntegrations: () -> Unit,
 ) {
     val accounts by viewModel.accounts.collectAsStateWithLifecycle()
     val activeAccountId by viewModel.activeAccountId.collectAsStateWithLifecycle()
@@ -350,6 +351,15 @@ fun ProfileScreen(
                                 diagnosticsError = true
                             }
                         },
+                    )
+                }
+                item(key = "external-integrations") {
+                    ExternalIntegrationsPreference(
+                        enabled =
+                            activeAccount != null &&
+                                !operationInProgress &&
+                                !profileMutationInProgress,
+                        onOpen = onOpenExternalIntegrations,
                     )
                 }
 
@@ -824,6 +834,47 @@ fun ProfileScreen(
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun ExternalIntegrationsPreference(
+    enabled: Boolean,
+    onOpen: () -> Unit,
+) {
+    val colors = LocalWorkspaceColorsPalette.current
+    OutlinedButton(
+        onClick = onOpen,
+        enabled = enabled,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Icon(
+            painter = painterResource(R.drawable.ic_handshake),
+            contentDescription = null,
+            tint = if (enabled) colors.primary else colors.iconDisable,
+            modifier = Modifier.size(24.dp),
+        )
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 10.dp),
+            horizontalAlignment = Alignment.Start,
+        ) {
+            Text(
+                text = "Внешние интеграции",
+                color = if (enabled) {
+                    colors.textHeaders
+                } else {
+                    colors.textAdditional30
+                },
+                fontWeight = FontWeight.Medium,
+            )
+            Text(
+                text = "Подключение Zulip и выбор внешних чатов",
+                color = colors.textAdditional50,
+                fontSize = 12.sp,
+            )
+        }
     }
 }
 

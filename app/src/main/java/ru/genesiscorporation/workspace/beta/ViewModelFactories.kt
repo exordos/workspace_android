@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModelProvider
 import ru.genesiscorporation.workspace.beta.data.ApiKeyRepository
 import ru.genesiscorporation.workspace.beta.data.ConversationStateStore
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
+import ru.genesiscorporation.workspace.beta.data.ExternalIntegrationRepository
 import ru.genesiscorporation.workspace.beta.data.TinkConversationStateStore
 import ru.genesiscorporation.workspace.beta.data.TinkRealtimeCursorStore
 import ru.genesiscorporation.workspace.beta.data.WorkspaceNotificationSoundController
@@ -20,6 +21,7 @@ import ru.genesiscorporation.workspace.beta.modules.chatdialog.ChatDialogViewMod
 import ru.genesiscorporation.workspace.beta.modules.chatuserinfo.ChatUserInfoViewModel
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.ChooseServerViewModel
 import ru.genesiscorporation.workspace.beta.modules.feed.FeedViewModel
+import ru.genesiscorporation.workspace.beta.modules.externalintegrations.ExternalIntegrationsViewModel
 import ru.genesiscorporation.workspace.beta.modules.feed.MessageTimelineKind
 import ru.genesiscorporation.workspace.beta.modules.drafts.DraftsViewModel
 import ru.genesiscorporation.workspace.beta.modules.login.LoginViewModel
@@ -230,6 +232,30 @@ class ProfileViewModelFactory(
                 deleteAttachmentCache = { ownerKey ->
                     clearAccountAttachmentCache(appContext.cacheDir, ownerKey)
                 },
+            ) as T
+        }
+        throw IllegalArgumentException("Unknown ViewModel class")
+    }
+}
+
+class ExternalIntegrationsViewModelFactory(
+    private val userViewModel: UserViewModel,
+    private val client: WorkspaceAPIClient,
+    private val eventsRepository: EventsRepository,
+) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        if (
+            modelClass.isAssignableFrom(
+                ExternalIntegrationsViewModel::class.java,
+            )
+        ) {
+            @Suppress("UNCHECKED_CAST")
+            return ExternalIntegrationsViewModel(
+                userViewModel = userViewModel,
+                dataSource = ExternalIntegrationRepository(
+                    client = client,
+                    eventsRepository = eventsRepository,
+                ),
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")

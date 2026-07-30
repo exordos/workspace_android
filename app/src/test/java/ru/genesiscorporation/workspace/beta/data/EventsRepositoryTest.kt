@@ -847,6 +847,124 @@ class EventsRepositoryTest {
     }
 
     @Test
+    fun `authoritative account refresh removes missing snapshots and projections`() {
+        val repository = EventsRepository()
+        repository.processTextFrame(
+            externalAccountEvent(
+                epoch = 1,
+                action = "created",
+                revision = 1,
+            ),
+        )
+        repository.processTextFrame(
+            externalChatEvent(
+                epoch = 2,
+                action = "created",
+                revision = 1,
+            ),
+        )
+        repository.addStream(
+            stream(
+                defaultTopicUuid = null,
+                notificationMode = "all_messages",
+            ).copy(
+                uuid = PROJECTION_STREAM_UUID,
+                provider = ProviderReference(
+                    kind = "zulip",
+                    accountUuid = EXTERNAL_ACCOUNT_UUID,
+                ),
+            ),
+        )
+
+        repository.reconcileExternalAccountSnapshots(
+            responses = emptyList(),
+            baselineRevisions = mapOf(EXTERNAL_ACCOUNT_UUID to 1),
+        )
+        repository.processTextFrame(
+            externalAccountEvent(
+                epoch = 3,
+                action = "updated",
+                revision = 1,
+            ),
+        )
+
+        assertTrue(repository.externalAccounts.value.isEmpty())
+        assertTrue(repository.externalChats.value.isEmpty())
+        assertTrue(repository.streams.value.isEmpty())
+    }
+
+    @Test
+    fun `authoritative refresh does not erase a newer realtime snapshot`() {
+        val repository = EventsRepository()
+        repository.processTextFrame(
+            externalAccountEvent(
+                epoch = 1,
+                action = "created",
+                revision = 1,
+            ),
+        )
+        val baseline = mapOf(EXTERNAL_ACCOUNT_UUID to 1)
+        repository.processTextFrame(
+            externalAccountEvent(
+                epoch = 2,
+                action = "updated",
+                revision = 2,
+                status = "live",
+            ),
+        )
+
+        repository.reconcileExternalAccountSnapshots(
+            responses = emptyList(),
+            baselineRevisions = baseline,
+        )
+
+        assertEquals(2, repository.externalAccounts.value.single().revision)
+        assertTrue(repository.externalAccounts.value.single().liveReady)
+    }
+
+    @Test
+    fun `authoritative chat refresh prunes only unchanged missing rows`() {
+        val repository = EventsRepository()
+        repository.processTextFrame(
+            externalAccountEvent(
+                epoch = 1,
+                action = "created",
+                revision = 1,
+            ),
+        )
+        repository.processTextFrame(
+            externalChatEvent(
+                epoch = 2,
+                action = "created",
+                revision = 1,
+            ),
+        )
+        val baseline = mapOf(EXTERNAL_CHAT_UUID to 1)
+        repository.processTextFrame(
+            externalChatEvent(
+                epoch = 3,
+                action = "updated",
+                revision = 2,
+                displayName = "Current",
+            ),
+        )
+
+        repository.reconcileExternalChatSnapshots(
+            externalAccountUuid = EXTERNAL_ACCOUNT_UUID,
+            responses = emptyList(),
+            baselineRevisions = baseline,
+        )
+
+        assertEquals(
+            "Current",
+            repository.externalChats.value
+                .getValue(EXTERNAL_ACCOUNT_UUID)
+                .single()
+                .displayName,
+        )
+    }
+
+    @Test
     fun `malformed external snapshot is skipped without poisoning the cursor`() {
         val repository = EventsRepository()
         val mismatchedSnapshot = externalAccountEvent(

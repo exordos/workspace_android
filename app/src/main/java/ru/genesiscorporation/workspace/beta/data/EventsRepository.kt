@@ -161,6 +161,49 @@ class EventsRepository(
         )
     }
 
+    internal fun reconcileExternalAccountSnapshots(
+        responses: List<ExternalAccountResponse>,
+        baselineRevisions: Map<String, Int>,
+    ) {
+        val validated = responses.map {
+            validateExternalAccountResponse(it).response
+        }
+        validated.forEach(::mergeExternalAccountSnapshot)
+        val authoritativeUuids = validated
+            .mapTo(mutableSetOf(), ExternalAccountResponse::uuid)
+        _externalAccounts.value
+            .filter { current ->
+                current.uuid !in authoritativeUuids &&
+                    baselineRevisions[current.uuid] == current.revision
+            }
+            .forEach(::removeExternalAccountSnapshot)
+    }
+
+    internal fun reconcileExternalChatSnapshots(
+        externalAccountUuid: String,
+        responses: List<ExternalChatResponse>,
+        baselineRevisions: Map<String, Int>,
+    ) {
+        val canonicalAccountUuid =
+            canonicalExternalIntegrationUuid(externalAccountUuid)
+        val validated = responses.map {
+            validateExternalChatResponse(
+                response = it,
+                expectedExternalAccountUuid = canonicalAccountUuid,
+            )
+        }
+        validated.forEach(::mergeExternalChatSnapshot)
+        val authoritativeUuids = validated
+            .mapTo(mutableSetOf(), ExternalChatResponse::uuid)
+        _externalChats.value[canonicalAccountUuid]
+            .orEmpty()
+            .filter { current ->
+                current.uuid !in authoritativeUuids &&
+                    baselineRevisions[current.uuid] == current.revision
+            }
+            .forEach(::removeExternalChatSnapshot)
+    }
+
     internal fun removeExternalAccountSnapshot(
         response: ExternalAccountResponse,
     ) {
