@@ -120,6 +120,9 @@ class ChatDialogViewModel(
     draftStorageSlot: String? = null,
     private val conversationStateStore: ConversationStateStore,
 ): ViewModel() {
+    val hasExplicitMessageRoute: Boolean =
+        focusMessageUuid != null || focusProviderMessageId != null
+
     private val selectedDraftStorageSlot =
         draftStorageSlot?.let(::canonicalDraftUuid)
 
@@ -151,6 +154,8 @@ class ChatDialogViewModel(
     val loadError: StateFlow<String?> = _loadError
     private val _actionError = MutableStateFlow<String?>(null)
     val actionError: StateFlow<String?> = _actionError
+    private val _readError = MutableStateFlow<String?>(null)
+    val readError: StateFlow<String?> = _readError
     private val _sending = MutableStateFlow(false)
     val sending: StateFlow<Boolean> = _sending
     private val _focusedMessageUuid = MutableStateFlow<String?>(null)
@@ -230,6 +235,7 @@ class ChatDialogViewModel(
     private var refreshHistoryBeforeNewerRetry = false
     private var readMessagesJob: Job? = null
     private var pendingReadBoundaryUuid: String? = null
+    private var failedReadBoundaryUuid: String? = null
     private var forwardCatalogJob: Job? = null
     private var forwardTopicLoadJob: Job? = null
     private var forwardSelectionGeneration = 0L
@@ -3706,14 +3712,18 @@ class ChatDialogViewModel(
                                 topicUuid = topicUuid,
                                 boundaryUuid = currentTarget.uuid,
                             )
+                            failedReadBoundaryUuid = null
+                            _readError.value = null
                         } else {
-                            _actionError.value =
+                            failedReadBoundaryUuid = currentTarget.uuid
+                            _readError.value =
                                 "Сервер не подтвердил прочтение сообщений"
                         }
                     }
 
                     is ApiResult.Error -> {
-                        _actionError.value = response.error.message
+                        failedReadBoundaryUuid = currentTarget.uuid
+                        _readError.value = response.error.message
                             ?.takeIf(String::isNotBlank)
                             ?.let { "Не удалось отметить сообщения прочитанными: $it" }
                             ?: "Не удалось отметить сообщения прочитанными"
@@ -3722,7 +3732,8 @@ class ChatDialogViewModel(
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (exception: Exception) {
-                _actionError.value =
+                failedReadBoundaryUuid = requestedUuid
+                _readError.value =
                     "Не удалось отметить сообщения прочитанными"
             } finally {
                 readMessagesJob = null
@@ -3731,6 +3742,25 @@ class ChatDialogViewModel(
                 }
             }
         }
+    }
+
+    fun retryReadMessages() {
+        val failedUuid = failedReadBoundaryUuid ?: return
+        failedReadBoundaryUuid = null
+        _readError.value = null
+        val messages = streamTopicMessages.value["$chatId.$topicUuid"]
+            .orEmpty()
+        pendingReadBoundaryUuid = newestMessageUuid(
+            messages = messages,
+            firstUuid = pendingReadBoundaryUuid,
+            secondUuid = failedUuid,
+        )
+        startPendingReadRequest()
+    }
+
+    fun clearReadError() {
+        failedReadBoundaryUuid = null
+        _readError.value = null
     }
 
     fun onMessageReactionTap(messageUuid: String, emoji: String) {

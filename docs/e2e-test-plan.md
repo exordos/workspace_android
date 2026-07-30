@@ -327,10 +327,10 @@ unsupported.
 | MSG-UNREAD-005 | The read response is malformed, cross-topic, wrong-message, or still unread | Local rows and badges remain unread and a visible error is reported; no unconfirmed optimistic read is committed |
 | MSG-UNREAD-006 | Receive full `message.read` and batch `messages.read` realtime events | Loaded row flags, topic count and stream count converge; replaying the batch does not decrement projections twice |
 | MSG-UNREAD-007 | A page response races a confirmed read | A later/stale snapshot may update content and reactions but cannot resurrect a locally confirmed read flag |
-| MSG-UNREAD-008 | Offline, timeout or 5xx during viewport read | Rows remain unread, the error is visible, and a later viewport pass retries after connectivity returns |
+| MSG-UNREAD-008 | Offline, timeout or 5xx during viewport read | Rows remain unread; a dedicated banner exposes functional Retry and Close; Retry keeps/coalesces the exact failed boundary and confirms it after connectivity returns |
 | MSG-UNREAD-009 | Rotate before and after crossing the unread marker | The saved marker/gesture state does not cause eager read, duplicate read requests, a jump to latest, or a marker attached to an already-read row |
 | MSG-UNREAD-010 | The first unread predates the bounded latest page | The client fetches and anchors the exact server-first unread window instead of silently treating the latest loaded unread as globally first |
-| MSG-UNREAD-011 | All unread rows fit without a scrollable drag | After the explicit desktop-compatible bottom/visibility condition, visible rows become read; merely opening the short chat is insufficient |
+| MSG-UNREAD-011 | All unread rows fit without a scrollable drag | Gesture-free read is allowed only while resumed, with no newer page pending, the fully loaded newest edge visible, and every authoritative unread row at least 50% visible; any missing condition preserves unread |
 
 Current physical coverage: MSG-HIST-001/002, 009–014 and 016 passed on the USB
 Android 14 Pixel using the sandbox topic's 55-message generated sequence.
@@ -340,16 +340,16 @@ MSG-HIST-008 edit-in-old-history remain fault/interaction automation work;
 merely disabling radios is not counted as proof because an already resolved
 in-app route can reuse retained runtime state.
 
-Current unread coverage: MSG-UNREAD-003–007 and 010 have focused
+Current unread coverage: MSG-UNREAD-003–007 and 010–011 have focused
 request/model/repository tests, including the strict earliest-unread filter,
 candidate scope validation, composite-boundary selection, full and batch
-realtime frames, duplicate delivery and stale-page regression. Latest and
+realtime frames, duplicate delivery, stale-page regression and the complete
+visible-tail decision matrix. Latest and
 earliest-unread requests run concurrently; an unread already in the latest page
 reuses that response, while an off-page unread uses the strict bidirectional
 context loader. Physical acceptance in a naturally unread sandbox conversation
-is required before marking MSG-UNREAD-001–010 passed. MSG-UNREAD-008 controlled
-post-gesture faults and MSG-UNREAD-011 explicit short-chat completion remain
-implementation/automation work.
+is required before marking MSG-UNREAD-001–011 passed. Controlled post-request
+offline/timeout/5xx Retry and process-death persistence remain automation work.
 
 ### Current history acceptance coverage
 

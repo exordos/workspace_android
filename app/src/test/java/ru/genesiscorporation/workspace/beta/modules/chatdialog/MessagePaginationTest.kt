@@ -233,6 +233,43 @@ class MessagePaginationTest {
     }
 
     @Test
+    fun `complete visible unread tail is the only gesture free read case`() {
+        fun decision(
+            userScrollSeen: Boolean = false,
+            isScreenResumed: Boolean = true,
+            hasExplicitMessageRoute: Boolean = false,
+            hasNewerMessages: Boolean = false,
+            loadingNewerMessages: Boolean = false,
+            loadedUnreadCount: Int = 2,
+            topicUnreadCount: Int = 2,
+            visibleUnreadCount: Int = 2,
+            lastMessageFullyVisible: Boolean = true,
+        ) = shouldAutoReadCompleteUnreadTail(
+            userScrollSeen = userScrollSeen,
+            isScreenResumed = isScreenResumed,
+            hasExplicitMessageRoute = hasExplicitMessageRoute,
+            hasNewerMessages = hasNewerMessages,
+            loadingNewerMessages = loadingNewerMessages,
+            loadedUnreadCount = loadedUnreadCount,
+            topicUnreadCount = topicUnreadCount,
+            visibleUnreadCount = visibleUnreadCount,
+            lastMessageFullyVisible = lastMessageFullyVisible,
+        )
+
+        assertTrue(decision())
+        assertTrue(decision(topicUnreadCount = 0))
+        assertFalse(decision(userScrollSeen = true))
+        assertFalse(decision(isScreenResumed = false))
+        assertFalse(decision(hasExplicitMessageRoute = true))
+        assertFalse(decision(hasNewerMessages = true))
+        assertFalse(decision(loadingNewerMessages = true))
+        assertFalse(decision(loadedUnreadCount = 0, visibleUnreadCount = 0))
+        assertFalse(decision(topicUnreadCount = 3))
+        assertFalse(decision(visibleUnreadCount = 1))
+        assertFalse(decision(lastMessageFullyVisible = false))
+    }
+
+    @Test
     fun `read through confirmation requires the exact readable scope`() {
         val confirmed = message(ANCHOR_UUID, read = true)
 

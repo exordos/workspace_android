@@ -35,6 +35,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -58,7 +59,10 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation.NavHostController
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -93,6 +97,7 @@ fun ChatDialogScreen(
     val isLoading by viewModel.isLoading.collectAsState()
     val loadError by viewModel.loadError.collectAsState()
     val actionError by viewModel.actionError.collectAsState()
+    val readError by viewModel.readError.collectAsStateWithLifecycle()
     val focusedMessageUuid by viewModel.focusedMessageUuid.collectAsState()
     val outboxEntries by viewModel.outboxEntries.collectAsStateWithLifecycle()
     val draftSyncState by viewModel.draftSyncState.collectAsStateWithLifecycle()
@@ -109,6 +114,26 @@ fun ChatDialogScreen(
     val forwardDialogState by
         viewModel.forwardDialogState.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var isScreenResumed by remember(lifecycleOwner) {
+        mutableStateOf(
+            lifecycleOwner.lifecycle.currentState.isAtLeast(
+                Lifecycle.State.RESUMED,
+            ),
+        )
+    }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, _ ->
+            isScreenResumed =
+                lifecycleOwner.lifecycle.currentState.isAtLeast(
+                    Lifecycle.State.RESUMED,
+                )
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
     val scope = rememberCoroutineScope()
     val uiMode = LocalConfiguration.current.uiMode
     val key = "${viewModel.chatId}.${viewModel.topicUuid}"
@@ -245,6 +270,88 @@ fun ChatDialogScreen(
         }
             .distinctUntilChanged()
             .collect(viewModel::markVisibleMessagesRead)
+    }
+
+    LaunchedEffect(
+        listState,
+        messages,
+        loadedUnreadMessages,
+        topicUnreadCount,
+        userScrollSeen,
+        isScreenResumed,
+        hasNewerMessages,
+        loadingNewerMessages,
+        historyTopItemOffset,
+    ) {
+        if (
+            userScrollSeen ||
+            !isScreenResumed ||
+            hasNewerMessages ||
+            loadingNewerMessages ||
+            loadedUnreadMessages.isEmpty()
+        ) {
+            return@LaunchedEffect
+        }
+        snapshotFlow {
+            val layout = listState.layoutInfo
+            val visibleUnread = mutableListOf<String>()
+            var lastMessageFullyVisible = false
+            layout.visibleItemsInfo.forEach { itemInfo ->
+                val messageIndex = itemInfo.index - historyTopItemOffset
+                val message = messages.getOrNull(messageIndex)
+                    ?: return@forEach
+                val visibleStart = max(
+                    itemInfo.offset,
+                    layout.viewportStartOffset,
+                )
+                val visibleEnd = min(
+                    itemInfo.offset + itemInfo.size,
+                    layout.viewportEndOffset,
+                )
+                val visiblePixels =
+                    (visibleEnd - visibleStart).coerceAtLeast(0)
+                if (
+                    !message.read &&
+                    !message.isOwn &&
+                    visiblePixels * 2 >= itemInfo.size
+                ) {
+                    visibleUnread += message.uuid
+                }
+                if (
+                    messageIndex == messages.lastIndex &&
+                    visiblePixels >= itemInfo.size
+                ) {
+                    lastMessageFullyVisible = true
+                }
+            }
+            CompleteUnreadTailSnapshot(
+                visibleUnreadUuids = visibleUnread,
+                lastMessageFullyVisible = lastMessageFullyVisible,
+            )
+        }
+            .distinctUntilChanged()
+            .collect { snapshot ->
+                if (
+                    shouldAutoReadCompleteUnreadTail(
+                        userScrollSeen = userScrollSeen,
+                        isScreenResumed = isScreenResumed,
+                        hasExplicitMessageRoute =
+                            viewModel.hasExplicitMessageRoute,
+                        hasNewerMessages = hasNewerMessages,
+                        loadingNewerMessages = loadingNewerMessages,
+                        loadedUnreadCount = loadedUnreadMessages.size,
+                        topicUnreadCount = topicUnreadCount,
+                        visibleUnreadCount =
+                            snapshot.visibleUnreadUuids.size,
+                        lastMessageFullyVisible =
+                            snapshot.lastMessageFullyVisible,
+                    )
+                ) {
+                    viewModel.markVisibleMessagesRead(
+                        snapshot.visibleUnreadUuids,
+                    )
+                }
+            }
     }
 
     LaunchedEffect(focusedMessageUuid, messages) {
@@ -541,6 +648,37 @@ fun ChatDialogScreen(
                     }
                 }
             }
+            readError?.let { error ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                        .background(
+                            LocalWorkspaceColorsPalette.current.infoCardBackground,
+                            RoundedCornerShape(8.dp),
+                        )
+                        .padding(start = 12.dp, top = 8.dp),
+                ) {
+                    Text(
+                        text = error,
+                        color = LocalWorkspaceColorsPalette.current.indicatorRed,
+                        fontSize = 12.sp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(end = 12.dp),
+                    )
+                    Row(
+                        modifier = Modifier.align(Alignment.End),
+                    ) {
+                        TextButton(onClick = viewModel::clearReadError) {
+                            Text("Закрыть")
+                        }
+                        TextButton(onClick = viewModel::retryReadMessages) {
+                            Text("Повторить")
+                        }
+                    }
+                }
+            }
             val visibleDraftSync = draftSyncState?.takeIf {
                 it.status == PersistedDraftSyncStatus.FAILED ||
                     it.status == PersistedDraftSyncStatus.CONFLICT
@@ -620,6 +758,39 @@ private fun DraftSyncBanner(
             }
         }
     }
+}
+
+private data class CompleteUnreadTailSnapshot(
+    val visibleUnreadUuids: List<String>,
+    val lastMessageFullyVisible: Boolean,
+)
+
+internal fun shouldAutoReadCompleteUnreadTail(
+    userScrollSeen: Boolean,
+    isScreenResumed: Boolean,
+    hasExplicitMessageRoute: Boolean,
+    hasNewerMessages: Boolean,
+    loadingNewerMessages: Boolean,
+    loadedUnreadCount: Int,
+    topicUnreadCount: Int,
+    visibleUnreadCount: Int,
+    lastMessageFullyVisible: Boolean,
+): Boolean {
+    if (
+        userScrollSeen ||
+        !isScreenResumed ||
+        hasExplicitMessageRoute ||
+        hasNewerMessages ||
+        loadingNewerMessages ||
+        loadedUnreadCount <= 0 ||
+        !lastMessageFullyVisible
+    ) {
+        return false
+    }
+    val entireUnreadSetLoaded =
+        topicUnreadCount <= 0 || topicUnreadCount == loadedUnreadCount
+    return entireUnreadSetLoaded &&
+        visibleUnreadCount == loadedUnreadCount
 }
 
 @Composable
