@@ -65,6 +65,9 @@ import ru.genesiscorporation.workspace.beta.data.WorkspaceAccount
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalAccountResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalAccountSelectionMode
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalAccountStatus
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalBridgeInstanceAction
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalBridgeInstanceResponse
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalBridgeInstanceStatus
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalChatResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalChatStatus
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalChatType
@@ -72,6 +75,11 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalHistoryDepth
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalOperationReconciliationReason
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalOperationResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalOperationStatus
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalProviderHealthResponse
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalProviderLimits
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalProviderSuspensionAction
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ValidatedExternalProviderPolicy
+import ru.genesiscorporation.workspace.beta.data.remote.dto.splitExternalProviderCaCertificates
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.net.URI
 
@@ -89,6 +97,15 @@ fun ExternalIntegrationsScreen(
     val activeAction by viewModel.activeAction.collectAsStateWithLifecycle()
     val error by viewModel.error.collectAsStateWithLifecycle()
     val notice by viewModel.notice.collectAsStateWithLifecycle()
+    val ownerAccess by viewModel.ownerAccess.collectAsStateWithLifecycle()
+    val adminAccess by viewModel.adminAccess.collectAsStateWithLifecycle()
+    val providerPolicy by
+        viewModel.providerPolicy.collectAsStateWithLifecycle()
+    val providerHealth by
+        viewModel.providerHealth.collectAsStateWithLifecycle()
+    val bridgeInstances by
+        viewModel.bridgeInstances.collectAsStateWithLifecycle()
+    val adminError by viewModel.adminError.collectAsStateWithLifecycle()
     val colors = LocalWorkspaceColorsPalette.current
     var connectOpen by rememberSaveable { mutableStateOf(false) }
     var settingsAccountUuid by rememberSaveable {
@@ -110,6 +127,19 @@ fun ExternalIntegrationsScreen(
         mutableStateOf<String?>(null)
     }
     var discardOperationUuid by rememberSaveable {
+        mutableStateOf<String?>(null)
+    }
+    var policyEditorOpen by rememberSaveable { mutableStateOf(false) }
+    var providerSuspensionAction by rememberSaveable {
+        mutableStateOf<String?>(null)
+    }
+    var bridgeActionUuid by rememberSaveable {
+        mutableStateOf<String?>(null)
+    }
+    var bridgeActionRevision by rememberSaveable {
+        mutableStateOf<Int?>(null)
+    }
+    var bridgeActionName by rememberSaveable {
         mutableStateOf<String?>(null)
     }
     var query by rememberSaveable { mutableStateOf("") }
@@ -218,197 +248,461 @@ fun ExternalIntegrationsScreen(
             }
             if (
                 loadStatus == ExternalIntegrationsLoadStatus.LOADING &&
-                accounts.isEmpty()
+                accounts.isEmpty() &&
+                ownerAccess == ExternalOwnerIntegrationAccess.UNKNOWN &&
+                adminAccess == ExternalProviderAdminAccess.UNKNOWN
             ) {
                 item(key = "loading") {
                     ExternalLoadingCard()
                 }
             } else if (
-                loadStatus == ExternalIntegrationsLoadStatus.ERROR &&
+                ownerAccess == ExternalOwnerIntegrationAccess.ERROR &&
                 accounts.isEmpty()
             ) {
                 item(key = "unavailable") {
                     ExternalIntegrationsUnavailableCard()
                 }
-            } else if (accounts.isEmpty()) {
-                item(key = "empty") {
-                    ExternalAccountEmptyCard(
-                        enabled = !busy && activeAccount != null,
-                        onConnect = { connectOpen = true },
-                    )
-                }
-            } else {
-                item(key = "accounts-heading") {
-                    ExternalSectionHeading(
-                        title = "Подключённые аккаунты",
-                        subtitle =
-                            "Workspace поддерживает один Zulip-аккаунт на профиль.",
-                    )
-                }
-                items(
-                    items = accounts,
-                    key = ExternalAccountResponse::uuid,
-                ) { account ->
-                    ExternalAccountCard(
-                        account = account,
-                        busy = busy,
-                        onSettings = {
-                            settingsAccountUuid = account.uuid
-                        },
-                        onReconnect = {
-                            reconnectAccountUuid = account.uuid
-                        },
-                        onDisconnect = {
-                            disconnectAccountUuid = account.uuid
-                        },
-                        onDelete = {
-                            deleteAccountUuid = account.uuid
-                        },
-                    )
-                }
-                if (chatCatalogAccounts.isEmpty()) {
-                    item(key = "chats-unavailable") {
-                        ExternalChatsUnavailableCard()
+            } else if (
+                ownerAccess == ExternalOwnerIntegrationAccess.ALLOWED
+            ) {
+                if (accounts.isEmpty()) {
+                    item(key = "empty") {
+                        ExternalAccountEmptyCard(
+                            enabled = !busy && activeAccount != null,
+                            onConnect = { connectOpen = true },
+                        )
                     }
                 } else {
-                    item(key = "chats-heading") {
+                    item(key = "accounts-heading") {
                         ExternalSectionHeading(
-                            title = "Чаты Zulip",
-                            subtitle = if (
-                                chatCatalogAccounts.singleOrNull()
-                                    ?.settings
-                                    ?.selectionMode ==
-                                ExternalAccountSelectionMode.ALL
-                            ) {
-                                "Новые чаты синхронизируются автоматически."
-                            } else {
-                                "Выберите, какие чаты появятся в Workspace."
-                            },
-                        )
-                    }
-                    item(key = "search") {
-                        OutlinedTextField(
-                            value = query,
-                            onValueChange = {
-                                query = it.take(MAX_SEARCH_CHARS)
-                            },
-                            label = { Text("Поиск чатов") },
-                            singleLine = true,
-                            enabled = !busy,
-                            leadingIcon = {
-                                Icon(
-                                    painter = painterResource(
-                                        R.drawable.ic_search,
-                                    ),
-                                    contentDescription = null,
-                                )
-                            },
-                            trailingIcon = if (query.isNotEmpty()) {
-                                {
-                                    IconButton(onClick = { query = "" }) {
-                                        Icon(
-                                            painter = painterResource(
-                                                R.drawable.ic_close_small,
-                                            ),
-                                            contentDescription =
-                                                "Очистить поиск",
-                                        )
-                                    }
-                                }
-                            } else {
-                                null
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-
-                    chatCatalogAccounts.forEach { account ->
-                        val visibleChats =
-                            visibleChatsByAccount[account.uuid].orEmpty()
-                        if (visibleChats.isEmpty()) {
-                            item(key = "chats-empty-${account.uuid}") {
-                                ExternalChatsEmptyCard(
-                                    searching = query.isNotBlank(),
-                                    preparing = !account.liveReady,
-                                )
-                            }
-                        } else {
-                            items(
-                                items = visibleChats,
-                                key = ExternalChatResponse::uuid,
-                            ) { chat ->
-                                ExternalChatCard(
-                                    account = account,
-                                    chat = chat,
-                                    workspaceAccount = activeAccount,
-                                    busy = busy,
-                                    automatic =
-                                        account.settings.selectionMode ==
-                                            ExternalAccountSelectionMode.ALL,
-                                    onSelect = {
-                                        viewModel.selectChat(chat)
-                                    },
-                                    onDeselect = {
-                                        deselectChatUuid = chat.uuid
-                                    },
-                                    onMoveHere = {
-                                        viewModel.moveChatHere(chat)
-                                    },
-                                    onExternalOpenError = {
-                                        platformError =
-                                            "Не удалось открыть исходный чат в браузере."
-                                    },
-                                )
-                            }
-                        }
-                    }
-                }
-                if (visibleOperations.isNotEmpty()) {
-                    item(key = "operations-heading") {
-                        ExternalSectionHeading(
-                            title = "Операции интеграции",
+                            title = "Подключённые аккаунты",
                             subtitle =
-                                "Восстановление незавершённых действий и безопасное удаление очереди.",
+                                "Workspace поддерживает один Zulip-аккаунт на профиль.",
                         )
                     }
                     items(
-                        items = visibleOperations,
-                        key = ExternalOperationResponse::uuid,
-                    ) { operation ->
-                        val providerOrigin = accounts
-                            .firstOrNull {
-                                it.uuid == operation.externalAccountUuid
-                            }
-                            ?.settings
-                            ?.serverUrl
-                            .orEmpty()
-                        ExternalOperationCard(
-                            operation = operation,
-                            providerOrigin = providerOrigin,
+                        items = accounts,
+                        key = ExternalAccountResponse::uuid,
+                    ) { account ->
+                        ExternalAccountCard(
+                            account = account,
                             busy = busy,
-                            onRetry = {
-                                if (operation.retryRequiresConfirmation) {
-                                    retryOperationUuid = operation.uuid
-                                } else {
-                                    viewModel.retryOperation(
-                                        operation = operation,
-                                        confirmDuplicateRisk = false,
-                                    )
-                                }
+                            onSettings = {
+                                settingsAccountUuid = account.uuid
                             },
-                            onDiscard = {
-                                discardOperationUuid = operation.uuid
+                            onReconnect = {
+                                reconnectAccountUuid = account.uuid
                             },
-                            onExternalOpenError = {
-                                platformError =
-                                    "Не удалось открыть исходную операцию в браузере."
+                            onDisconnect = {
+                                disconnectAccountUuid = account.uuid
+                            },
+                            onDelete = {
+                                deleteAccountUuid = account.uuid
                             },
                         )
+                    }
+                    if (chatCatalogAccounts.isEmpty()) {
+                        item(key = "chats-unavailable") {
+                            ExternalChatsUnavailableCard()
+                        }
+                    } else {
+                        item(key = "chats-heading") {
+                            ExternalSectionHeading(
+                                title = "Чаты Zulip",
+                                subtitle = if (
+                                    chatCatalogAccounts.singleOrNull()
+                                        ?.settings
+                                        ?.selectionMode ==
+                                    ExternalAccountSelectionMode.ALL
+                                ) {
+                                    "Новые чаты синхронизируются автоматически."
+                                } else {
+                                    "Выберите, какие чаты появятся в Workspace."
+                                },
+                            )
+                        }
+                        item(key = "search") {
+                            OutlinedTextField(
+                                value = query,
+                                onValueChange = {
+                                    query = it.take(MAX_SEARCH_CHARS)
+                                },
+                                label = { Text("Поиск чатов") },
+                                singleLine = true,
+                                enabled = !busy,
+                                leadingIcon = {
+                                    Icon(
+                                        painter = painterResource(
+                                            R.drawable.ic_search,
+                                        ),
+                                        contentDescription = null,
+                                    )
+                                },
+                                trailingIcon = if (query.isNotEmpty()) {
+                                    {
+                                        IconButton(onClick = { query = "" }) {
+                                            Icon(
+                                                painter = painterResource(
+                                                    R.drawable.ic_close_small,
+                                                ),
+                                                contentDescription =
+                                                    "Очистить поиск",
+                                            )
+                                        }
+                                    }
+                                } else {
+                                    null
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+
+                        chatCatalogAccounts.forEach { account ->
+                            val visibleChats =
+                                visibleChatsByAccount[account.uuid].orEmpty()
+                            if (visibleChats.isEmpty()) {
+                                item(key = "chats-empty-${account.uuid}") {
+                                    ExternalChatsEmptyCard(
+                                        searching = query.isNotBlank(),
+                                        preparing = !account.liveReady,
+                                    )
+                                }
+                            } else {
+                                items(
+                                    items = visibleChats,
+                                    key = ExternalChatResponse::uuid,
+                                ) { chat ->
+                                    ExternalChatCard(
+                                        account = account,
+                                        chat = chat,
+                                        workspaceAccount = activeAccount,
+                                        busy = busy,
+                                        automatic =
+                                            account.settings.selectionMode ==
+                                                ExternalAccountSelectionMode.ALL,
+                                        onSelect = {
+                                            viewModel.selectChat(chat)
+                                        },
+                                        onDeselect = {
+                                            deselectChatUuid = chat.uuid
+                                        },
+                                        onMoveHere = {
+                                            viewModel.moveChatHere(chat)
+                                        },
+                                        onExternalOpenError = {
+                                            platformError =
+                                                "Не удалось открыть исходный чат в браузере."
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    if (visibleOperations.isNotEmpty()) {
+                        item(key = "operations-heading") {
+                            ExternalSectionHeading(
+                                title = "Операции интеграции",
+                                subtitle =
+                                    "Восстановление незавершённых действий и безопасное удаление очереди.",
+                            )
+                        }
+                        items(
+                            items = visibleOperations,
+                            key = ExternalOperationResponse::uuid,
+                        ) { operation ->
+                            val providerOrigin = accounts
+                                .firstOrNull {
+                                    it.uuid == operation.externalAccountUuid
+                                }
+                                ?.settings
+                                ?.serverUrl
+                                .orEmpty()
+                            ExternalOperationCard(
+                                operation = operation,
+                                providerOrigin = providerOrigin,
+                                busy = busy,
+                                onRetry = {
+                                    if (
+                                        operation.retryRequiresConfirmation
+                                    ) {
+                                        retryOperationUuid = operation.uuid
+                                    } else {
+                                        viewModel.retryOperation(
+                                            operation = operation,
+                                            confirmDuplicateRisk = false,
+                                        )
+                                    }
+                                },
+                                onDiscard = {
+                                    discardOperationUuid = operation.uuid
+                                },
+                                onExternalOpenError = {
+                                    platformError =
+                                        "Не удалось открыть исходную операцию в браузере."
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+            if (
+                adminAccess == ExternalProviderAdminAccess.VISIBLE ||
+                adminAccess == ExternalProviderAdminAccess.ERROR
+            ) {
+                item(key = "admin-heading") {
+                    ExternalSectionHeading(
+                        title = "Администрирование Zulip",
+                        subtitle =
+                            "Политика организации, здоровье провайдера и bridge-инстансы.",
+                    )
+                }
+                adminError?.let { message ->
+                    item(key = "admin-error") {
+                        ExternalMessageCard(
+                            text = message,
+                            color = colors.indicatorRed,
+                            primaryActionLabel = "Обновить",
+                            onPrimaryAction = viewModel::refresh,
+                            onDismiss = viewModel::clearAdminError,
+                        )
+                    }
+                }
+                providerHealth?.let { health ->
+                    item(key = "admin-health") {
+                        ExternalProviderHealthCard(health)
+                    }
+                }
+                providerPolicy?.let { policy ->
+                    item(key = "admin-policy") {
+                        ExternalProviderPolicyCard(
+                            policy = policy,
+                            busy = busy,
+                            onEdit = { policyEditorOpen = true },
+                            onSuspensionChange = { action ->
+                                providerSuspensionAction = action.path
+                            },
+                        )
+                    }
+                }
+                bridgeInstances?.let { instances ->
+                    if (instances.isEmpty()) {
+                        item(key = "admin-bridge-empty") {
+                            ExternalAdminEmptyCard(
+                                text =
+                                    "Bridge-инстансы Zulip пока не зарегистрированы.",
+                            )
+                        }
+                    } else {
+                        items(
+                            items = instances.sortedWith(
+                                compareBy<ExternalBridgeInstanceResponse> {
+                                    externalBridgeStatusSortRank(it.status)
+                                }.thenBy { it.uuid },
+                            ),
+                            key = ExternalBridgeInstanceResponse::uuid,
+                        ) { instance ->
+                            ExternalBridgeInstanceCard(
+                                instance = instance,
+                                busy = busy,
+                                onAction = { action ->
+                                    if (
+                                        action ==
+                                        ExternalBridgeInstanceAction.RESUME
+                                    ) {
+                                        viewModel.changeBridgeInstanceStatus(
+                                            instance = instance,
+                                            action = action,
+                                        )
+                                    } else {
+                                        bridgeActionUuid = instance.uuid
+                                        bridgeActionRevision =
+                                            instance.revision
+                                        bridgeActionName = action.path
+                                    }
+                                },
+                            )
+                        }
                     }
                 }
             }
         }
     }
+    LaunchedEffect(policyEditorOpen, providerPolicy) {
+        if (policyEditorOpen && providerPolicy == null) {
+            policyEditorOpen = false
+        }
+    }
+    providerPolicy?.takeIf { policyEditorOpen }?.let { policy ->
+        ExternalProviderPolicyDialog(
+            policy = policy,
+            busy = activeAction ==
+                ExternalIntegrationAction.UPDATE_PROVIDER_POLICY,
+            successNotice = notice,
+            error = error,
+            onDismiss = { policyEditorOpen = false },
+            onSubmit = {
+                    policy,
+                    enabled,
+                    limits,
+                    certificates,
+                    removeCustomCa,
+                ->
+                viewModel.updateProviderPolicy(
+                    policy = policy,
+                    enabled = enabled,
+                    limits = limits,
+                    customCaCertificatesPem = certificates,
+                    removeCustomCa = removeCustomCa,
+                )
+            },
+        )
+    }
+
+    val pendingProviderSuspension = ExternalProviderSuspensionAction.entries
+        .firstOrNull { it.path == providerSuspensionAction }
+    val providerSuspensionAllowed = when (pendingProviderSuspension) {
+        ExternalProviderSuspensionAction.SUSPEND ->
+            providerPolicy?.response?.emergencySuspended == false
+
+        ExternalProviderSuspensionAction.RESUME ->
+            providerPolicy?.response?.emergencySuspended == true
+
+        null -> false
+    }
+    LaunchedEffect(
+        providerSuspensionAction,
+        providerPolicy?.entityTag,
+        providerSuspensionAllowed,
+    ) {
+        if (
+            providerSuspensionAction != null &&
+            !providerSuspensionAllowed
+        ) {
+            providerSuspensionAction = null
+        }
+    }
+    val providerSuspensionPolicy = providerPolicy?.takeIf {
+        providerSuspensionAllowed
+    }
+    if (
+        pendingProviderSuspension != null &&
+        providerSuspensionPolicy != null
+    ) {
+        val suspending =
+            pendingProviderSuspension ==
+                ExternalProviderSuspensionAction.SUSPEND
+        ExternalConfirmationDialog(
+            title = if (suspending) {
+                "Аварийно приостановить Zulip?"
+            } else {
+                "Возобновить Zulip?"
+            },
+            text = if (suspending) {
+                "Новые операции всех Zulip-аккаунтов организации будут остановлены до ручного возобновления."
+            } else {
+                "Workspace снова разрешит обработку Zulip-аккаунтов после серверной проверки."
+            },
+            confirmLabel = if (suspending) {
+                "Приостановить"
+            } else {
+                "Возобновить"
+            },
+            destructive = suspending,
+            busy = activeAction == if (suspending) {
+                ExternalIntegrationAction.SUSPEND_PROVIDER
+            } else {
+                ExternalIntegrationAction.RESUME_PROVIDER
+            },
+            onDismiss = { providerSuspensionAction = null },
+            onConfirm = {
+                if (
+                    viewModel.changeProviderSuspension(
+                        policy = providerSuspensionPolicy,
+                        action = pendingProviderSuspension,
+                    )
+                ) {
+                    providerSuspensionAction = null
+                }
+            },
+        )
+    }
+
+    val pendingBridgeAction = ExternalBridgeInstanceAction.entries
+        .firstOrNull { it.path == bridgeActionName }
+    val pendingBridgeInstance = bridgeInstances
+        ?.firstOrNull {
+            it.uuid == bridgeActionUuid &&
+                it.revision == bridgeActionRevision
+        }
+    val bridgeActionIsAllowed =
+        pendingBridgeAction != null &&
+            pendingBridgeInstance != null &&
+            bridgeActionAllowed(
+                pendingBridgeInstance.status,
+                pendingBridgeAction,
+            )
+    LaunchedEffect(
+        bridgeActionUuid,
+        bridgeActionRevision,
+        bridgeActionName,
+        pendingBridgeInstance?.status,
+        bridgeActionIsAllowed,
+    ) {
+        if (bridgeActionUuid != null && !bridgeActionIsAllowed) {
+            bridgeActionUuid = null
+            bridgeActionRevision = null
+            bridgeActionName = null
+        }
+    }
+    if (
+        pendingBridgeAction != null &&
+        pendingBridgeInstance != null &&
+        bridgeActionIsAllowed
+    ) {
+        val revoking =
+            pendingBridgeAction == ExternalBridgeInstanceAction.REVOKE
+        ExternalConfirmationDialog(
+            title = if (revoking) {
+                "Отозвать сертификат bridge?"
+            } else {
+                "Приостановить bridge-инстанс?"
+            },
+            text = if (revoking) {
+                "Текущая identity generation будет отозвана без возможности восстановления. Для возвращения bridge потребуется новая выдача сертификата оператором платформы."
+            } else {
+                "Инстанс немедленно перестанет обрабатывать назначенные аккаунты до ручного возобновления."
+            },
+            confirmLabel = if (revoking) {
+                "Отозвать"
+            } else {
+                "Приостановить"
+            },
+            destructive = true,
+            busy = activeAction == if (revoking) {
+                ExternalIntegrationAction.REVOKE_BRIDGE
+            } else {
+                ExternalIntegrationAction.SUSPEND_BRIDGE
+            },
+            onDismiss = {
+                bridgeActionUuid = null
+                bridgeActionRevision = null
+                bridgeActionName = null
+            },
+            onConfirm = {
+                if (
+                    viewModel.changeBridgeInstanceStatus(
+                        instance = pendingBridgeInstance,
+                        action = pendingBridgeAction,
+                    )
+                ) {
+                    bridgeActionUuid = null
+                    bridgeActionRevision = null
+                    bridgeActionName = null
+                }
+            },
+        )
+    }
+
     if (connectOpen) {
         ExternalAccountCredentialDialog(
             title = "Подключить Zulip",
@@ -669,6 +963,618 @@ private fun ExternalChatsUnavailableCard() {
             )
         }
     }
+}
+
+@Composable
+private fun ExternalProviderHealthCard(
+    health: ExternalProviderHealthResponse,
+) {
+    val colors = LocalWorkspaceColorsPalette.current
+    Surface(
+        color = colors.cardBackgroundBase,
+        shape = RoundedCornerShape(14.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Здоровье провайдера",
+                    color = colors.textHeaders,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                ExternalStatusBadge(
+                    text = externalProviderHealthStatusLabel(health.status),
+                    color = if (health.status == "healthy") {
+                        colors.indicatorGreen
+                    } else {
+                        colors.indicatorOrange
+                    },
+                )
+            }
+            Text(
+                text = externalAdminCountSummary(
+                    "Аккаунты",
+                    health.accountCounts,
+                ),
+                color = colors.textAdditional50,
+                fontSize = 13.sp,
+                lineHeight = 18.sp,
+            )
+            Text(
+                text = externalAdminCountSummary(
+                    "Чаты",
+                    health.chatCounts,
+                ),
+                color = colors.textAdditional50,
+                fontSize = 13.sp,
+                lineHeight = 18.sp,
+            )
+            Text(
+                text = externalAdminCountSummary(
+                    "Bridge",
+                    health.bridgeCounts,
+                ),
+                color = colors.textAdditional50,
+                fontSize = 13.sp,
+                lineHeight = 18.sp,
+            )
+            Text(
+                text = externalAdminCountSummary(
+                    "Операции",
+                    health.operationCounts,
+                ),
+                color = colors.textAdditional50,
+                fontSize = 13.sp,
+                lineHeight = 18.sp,
+            )
+            health.updatedAt?.let {
+                Text(
+                    text = "Обновлено: $it",
+                    color = colors.textAdditional50,
+                    fontSize = 12.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExternalProviderPolicyCard(
+    policy: ValidatedExternalProviderPolicy,
+    busy: Boolean,
+    onEdit: () -> Unit,
+    onSuspensionChange: (ExternalProviderSuspensionAction) -> Unit,
+) {
+    val colors = LocalWorkspaceColorsPalette.current
+    val response = policy.response
+    Surface(
+        color = colors.cardBackgroundBase,
+        shape = RoundedCornerShape(14.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(9.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Политика организации",
+                        color = colors.textHeaders,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = "Ревизия ${response.revision}",
+                        color = colors.textAdditional50,
+                        fontSize = 12.sp,
+                    )
+                }
+                ExternalStatusBadge(
+                    text = when {
+                        response.emergencySuspended -> "Приостановлен"
+                        response.enabled -> "Разрешён"
+                        else -> "Отключён"
+                    },
+                    color = when {
+                        response.emergencySuspended ->
+                            colors.indicatorOrange
+
+                        response.enabled -> colors.indicatorGreen
+                        else -> colors.indicatorGrey
+                    },
+                )
+            }
+            Text(
+                text =
+                    "Аккаунтов: ${response.limits.maxAccounts} · " +
+                        "чатов на аккаунт: " +
+                        "${response.limits.maxSelectedChatsPerAccount}",
+                color = colors.textAdditional50,
+                fontSize = 13.sp,
+                lineHeight = 18.sp,
+            )
+            Text(
+                text =
+                    "Файл: до " +
+                        formatExternalByteLimit(
+                            response.limits.maxFileBytes,
+                        ),
+                color = colors.textAdditional50,
+                fontSize = 13.sp,
+            )
+            response.customCaBundle?.let { bundle ->
+                Text(
+                    text =
+                        "Свой CA: ${bundle.certificateCount} · " +
+                            "generation ${bundle.generation} · " +
+                            bundle.sha256.take(12),
+                    color = colors.textAdditional50,
+                    fontSize = 12.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            OutlinedButton(
+                onClick = onEdit,
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Изменить политику")
+            }
+            TextButton(
+                onClick = {
+                    onSuspensionChange(
+                        if (response.emergencySuspended) {
+                            ExternalProviderSuspensionAction.RESUME
+                        } else {
+                            ExternalProviderSuspensionAction.SUSPEND
+                        },
+                    )
+                },
+                enabled = !busy,
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = if (response.emergencySuspended) {
+                        colors.primary
+                    } else {
+                        colors.indicatorRed
+                    },
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    if (response.emergencySuspended) {
+                        "Возобновить провайдера"
+                    } else {
+                        "Аварийно приостановить провайдера"
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExternalBridgeInstanceCard(
+    instance: ExternalBridgeInstanceResponse,
+    busy: Boolean,
+    onAction: (ExternalBridgeInstanceAction) -> Unit,
+) {
+    val colors = LocalWorkspaceColorsPalette.current
+    Surface(
+        color = colors.cardBackgroundBase,
+        shape = RoundedCornerShape(14.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Bridge ${instance.uuid.take(8)}",
+                        color = colors.textHeaders,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text =
+                            "Identity generation " +
+                                instance.identityGeneration,
+                        color = colors.textAdditional50,
+                        fontSize = 12.sp,
+                    )
+                }
+                ExternalStatusBadge(
+                    text = externalBridgeStatusLabel(instance.status),
+                    color = externalBridgeStatusColor(instance.status),
+                )
+            }
+            instance.lastHeartbeatAt?.let {
+                Text(
+                    text = "Heartbeat: $it",
+                    color = colors.textAdditional50,
+                    fontSize = 12.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            instance.certificateNotAfter?.let {
+                Text(
+                    text = "Сертификат до: $it",
+                    color = colors.textAdditional50,
+                    fontSize = 12.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            instance.safeError?.let {
+                Text(
+                    text = it,
+                    color = colors.indicatorRed,
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp,
+                    maxLines = 4,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (
+                bridgeActionAllowed(
+                    instance.status,
+                    ExternalBridgeInstanceAction.RESUME,
+                )
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        onAction(ExternalBridgeInstanceAction.RESUME)
+                    },
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Возобновить bridge")
+                }
+            } else if (
+                bridgeActionAllowed(
+                    instance.status,
+                    ExternalBridgeInstanceAction.SUSPEND,
+                )
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        onAction(ExternalBridgeInstanceAction.SUSPEND)
+                    },
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Приостановить bridge")
+                }
+            }
+            if (
+                bridgeActionAllowed(
+                    instance.status,
+                    ExternalBridgeInstanceAction.REVOKE,
+                )
+            ) {
+                TextButton(
+                    onClick = {
+                        onAction(ExternalBridgeInstanceAction.REVOKE)
+                    },
+                    enabled = !busy,
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = colors.indicatorRed,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Отозвать сертификат")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExternalAdminEmptyCard(
+    text: String,
+) {
+    val colors = LocalWorkspaceColorsPalette.current
+    Surface(
+        color = colors.cardBackgroundBase,
+        shape = RoundedCornerShape(12.dp),
+    ) {
+        Text(
+            text = text,
+            color = colors.textAdditional50,
+            fontSize = 14.sp,
+            lineHeight = 20.sp,
+            modifier = Modifier.padding(18.dp),
+        )
+    }
+}
+
+@Composable
+private fun ExternalProviderPolicyDialog(
+    policy: ValidatedExternalProviderPolicy,
+    busy: Boolean,
+    successNotice: String?,
+    error: String?,
+    onDismiss: () -> Unit,
+    onSubmit: (
+        ValidatedExternalProviderPolicy,
+        Boolean,
+        ExternalProviderLimits,
+        List<String>?,
+        Boolean,
+    ) -> Boolean,
+) {
+    val response = policy.response
+    var enabled by rememberSaveable(policy.entityTag) {
+        mutableStateOf(response.enabled)
+    }
+    var maxAccounts by rememberSaveable(policy.entityTag) {
+        mutableStateOf(response.limits.maxAccounts.toString())
+    }
+    var maxChats by rememberSaveable(policy.entityTag) {
+        mutableStateOf(
+            response.limits.maxSelectedChatsPerAccount.toString(),
+        )
+    }
+    var maxFileBytes by rememberSaveable(policy.entityTag) {
+        mutableStateOf(response.limits.maxFileBytes.toString())
+    }
+    // A CA bundle may approach the API's multi-megabyte bound. Keeping it out
+    // of the Activity saved-state bundle avoids TransactionTooLargeException;
+    // rotation can safely require reselecting this public write-only input.
+    var customCa by remember(policy.entityTag) {
+        mutableStateOf("")
+    }
+    var removeCustomCa by rememberSaveable(policy.entityTag) {
+        mutableStateOf(false)
+    }
+    var submitted by rememberSaveable(policy.entityTag) {
+        mutableStateOf(false)
+    }
+    val parsedMaxAccounts = maxAccounts.toIntOrNull()
+    val parsedMaxChats = maxChats.toIntOrNull()
+    val parsedMaxFileBytes = maxFileBytes.toLongOrNull()
+    val limits = if (
+        parsedMaxAccounts != null &&
+        parsedMaxAccounts in 0..MAX_ADMIN_ACCOUNTS &&
+        parsedMaxChats != null &&
+        parsedMaxChats in 0..MAX_ADMIN_CHATS &&
+        parsedMaxFileBytes != null &&
+        parsedMaxFileBytes in 0..MAX_ADMIN_FILE_BYTES
+    ) {
+        ExternalProviderLimits(
+            maxAccounts = parsedMaxAccounts,
+            maxSelectedChatsPerAccount = parsedMaxChats,
+            maxFileBytes = parsedMaxFileBytes,
+        )
+    } else {
+        null
+    }
+    val certificates = remember(customCa) {
+        customCa.takeIf(String::isNotBlank)
+            ?.let(::splitExternalProviderCaCertificates)
+    }
+    val caInputValid = customCa.isBlank() || certificates != null
+    val requiresCaChoice =
+        response.customCaBundle != null &&
+            certificates == null &&
+            !removeCustomCa
+    val dirty =
+        enabled != response.enabled ||
+            limits != response.limits ||
+            certificates != null ||
+            removeCustomCa
+    val canSubmit =
+        !busy &&
+            limits != null &&
+            caInputValid &&
+            !requiresCaChoice &&
+            dirty
+    LaunchedEffect(busy, successNotice) {
+        if (submitted && !busy && successNotice != null) {
+            onDismiss()
+        }
+    }
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        title = { Text("Политика Zulip") },
+        text = {
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                item {
+                    FilterChip(
+                        selected = enabled,
+                        onClick = { enabled = !enabled },
+                        enabled = !busy,
+                        label = {
+                            Text(
+                                if (enabled) {
+                                    "Zulip разрешён в организации"
+                                } else {
+                                    "Zulip отключён в организации"
+                                },
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                item {
+                    OutlinedTextField(
+                        value = maxAccounts,
+                        onValueChange = {
+                            if (it.all(Char::isDigit)) {
+                                maxAccounts = it.take(6)
+                            }
+                        },
+                        label = { Text("Максимум аккаунтов") },
+                        enabled = !busy,
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Number,
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                item {
+                    OutlinedTextField(
+                        value = maxChats,
+                        onValueChange = {
+                            if (it.all(Char::isDigit)) {
+                                maxChats = it.take(7)
+                            }
+                        },
+                        label = { Text("Чатов на аккаунт") },
+                        enabled = !busy,
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Number,
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                item {
+                    OutlinedTextField(
+                        value = maxFileBytes,
+                        onValueChange = {
+                            if (it.all(Char::isDigit)) {
+                                maxFileBytes = it.take(10)
+                            }
+                        },
+                        label = { Text("Максимальный файл, байт") },
+                        enabled = !busy,
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Number,
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                item {
+                    OutlinedTextField(
+                        value = customCa,
+                        onValueChange = {
+                            customCa = it.take(MAX_ADMIN_CA_INPUT_CHARS)
+                        },
+                        label = { Text("Новый CA bundle, PEM") },
+                        enabled = !busy && !removeCustomCa,
+                        minLines = 4,
+                        maxLines = 8,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                if (response.customCaBundle != null) {
+                    item {
+                        FilterChip(
+                            selected = removeCustomCa,
+                            onClick = {
+                                removeCustomCa = !removeCustomCa
+                                if (removeCustomCa) customCa = ""
+                            },
+                            enabled = !busy,
+                            label = { Text("Удалить текущий CA bundle") },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+                if (requiresCaChoice) {
+                    item {
+                        Text(
+                            text =
+                                "Текущий CA нельзя отправить обратно: выберите замену или явное удаление.",
+                            color = LocalWorkspaceColorsPalette
+                                .current
+                                .indicatorOrange,
+                            fontSize = 12.sp,
+                            lineHeight = 17.sp,
+                        )
+                    }
+                } else if (!caInputValid) {
+                    item {
+                        Text(
+                            text =
+                                "Введите от 1 до 32 PEM-сертификатов CA без приватных ключей.",
+                            color = LocalWorkspaceColorsPalette
+                                .current
+                                .indicatorRed,
+                            fontSize = 12.sp,
+                            lineHeight = 17.sp,
+                        )
+                    }
+                }
+                if (limits == null) {
+                    item {
+                        Text(
+                            text = "Проверьте числовые лимиты.",
+                            color = LocalWorkspaceColorsPalette
+                                .current
+                                .indicatorRed,
+                            fontSize = 12.sp,
+                        )
+                    }
+                }
+                error?.let {
+                    item {
+                        Text(
+                            text = it,
+                            color = LocalWorkspaceColorsPalette
+                                .current
+                                .indicatorRed,
+                            fontSize = 13.sp,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val validLimits = limits ?: return@TextButton
+                    submitted = onSubmit(
+                        policy,
+                        enabled,
+                        validLimits,
+                        certificates,
+                        removeCustomCa,
+                    )
+                },
+                enabled = canSubmit,
+            ) {
+                if (busy) {
+                    CircularProgressIndicator(
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(18.dp),
+                    )
+                } else {
+                    Text("Сохранить")
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                enabled = !busy,
+            ) {
+                Text("Отмена")
+            }
+        },
+    )
 }
 
 @Composable
@@ -2009,6 +2915,90 @@ private fun externalReconciliationReasonLabel(
     null -> "проверьте результат у провайдера"
 }
 
+internal fun externalProviderHealthStatusLabel(
+    status: String,
+): String = when (status) {
+    "healthy" -> "Работает"
+    "unavailable" -> "Недоступен"
+    else -> status
+}
+
+internal fun externalAdminCountSummary(
+    title: String,
+    values: Map<String, Long>,
+): String {
+    val entries = values.entries
+        .sortedBy { it.key }
+    val summary = entries
+        .take(MAX_VISIBLE_ADMIN_COUNT_KEYS)
+        .joinToString(", ") { (name, count) -> "$name: $count" }
+        .let {
+            if (entries.size > MAX_VISIBLE_ADMIN_COUNT_KEYS) {
+                "$it, ещё ${entries.size - MAX_VISIBLE_ADMIN_COUNT_KEYS}"
+            } else {
+                it
+            }
+        }
+        .take(MAX_VISIBLE_ADMIN_SUMMARY_CHARS)
+    return if (summary.isBlank()) "$title: нет" else "$title · $summary"
+}
+
+internal fun externalBridgeStatusLabel(
+    status: ExternalBridgeInstanceStatus,
+): String = when (status) {
+    ExternalBridgeInstanceStatus.ENROLLING -> "Регистрация"
+    ExternalBridgeInstanceStatus.ACTIVE -> "Активен"
+    ExternalBridgeInstanceStatus.DEGRADED -> "Сбой"
+    ExternalBridgeInstanceStatus.INCOMPATIBLE -> "Несовместим"
+    ExternalBridgeInstanceStatus.SUSPENDED -> "Приостановлен"
+    ExternalBridgeInstanceStatus.REVOKED -> "Отозван"
+}
+
+@Composable
+private fun externalBridgeStatusColor(
+    status: ExternalBridgeInstanceStatus,
+): Color {
+    val colors = LocalWorkspaceColorsPalette.current
+    return when (status) {
+        ExternalBridgeInstanceStatus.ACTIVE -> colors.indicatorGreen
+        ExternalBridgeInstanceStatus.ENROLLING -> colors.indicatorBlue
+        ExternalBridgeInstanceStatus.DEGRADED,
+        ExternalBridgeInstanceStatus.INCOMPATIBLE,
+        -> colors.indicatorOrange
+
+        ExternalBridgeInstanceStatus.SUSPENDED,
+        ExternalBridgeInstanceStatus.REVOKED,
+        -> colors.indicatorGrey
+    }
+}
+
+internal fun externalBridgeStatusSortRank(
+    status: ExternalBridgeInstanceStatus,
+): Int = when (status) {
+    ExternalBridgeInstanceStatus.DEGRADED -> 0
+    ExternalBridgeInstanceStatus.INCOMPATIBLE -> 1
+    ExternalBridgeInstanceStatus.ENROLLING -> 2
+    ExternalBridgeInstanceStatus.SUSPENDED -> 3
+    ExternalBridgeInstanceStatus.ACTIVE -> 4
+    ExternalBridgeInstanceStatus.REVOKED -> 5
+}
+
+private fun formatExternalByteLimit(bytes: Long): String {
+    if (bytes < 1_024) return "$bytes Б"
+    val units = arrayOf("КиБ", "МиБ", "ГиБ")
+    var value = bytes.toDouble()
+    var unitIndex = -1
+    while (value >= 1_024 && unitIndex < units.lastIndex) {
+        value /= 1_024
+        unitIndex += 1
+    }
+    return if (value >= 10 || value % 1.0 == 0.0) {
+        "${value.toLong()} ${units[unitIndex]}"
+    } else {
+        "${"%.1f".format(value)} ${units[unitIndex]}"
+    }
+}
+
 private const val MAX_SEARCH_CHARS = 256
 private const val MAX_SERVER_URL_CHARS = 2_048
 private const val MAX_EMAIL_CHARS = 320
@@ -2016,5 +3006,11 @@ private const val MAX_API_KEY_CHARS = 4_096
 private const val MAX_EXTERNAL_LINK_CHARS = 4_096
 private const val MAX_CAPABILITY_REASON_CHARS = 512
 private const val MAX_VISIBLE_CAPABILITY_REASONS = 8
+private const val MAX_VISIBLE_ADMIN_COUNT_KEYS = 8
+private const val MAX_VISIBLE_ADMIN_SUMMARY_CHARS = 512
+private const val MAX_ADMIN_ACCOUNTS = 100_000
+private const val MAX_ADMIN_CHATS = 1_000_000
+private const val MAX_ADMIN_FILE_BYTES = 5_368_709_120L
+private const val MAX_ADMIN_CA_INPUT_CHARS = 2_097_152
 private const val EXTERNAL_CHAT_CATALOG_CAPABILITY =
     "messenger.chat_catalog"

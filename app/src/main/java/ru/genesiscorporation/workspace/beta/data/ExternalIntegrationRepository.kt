@@ -16,22 +16,38 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalAccountReque
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalAccountResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalAccountSelectionMode
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalAccountsRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalBridgeInstanceAction
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalBridgeInstanceResponse
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalBridgeInstancesRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalChatRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalChatResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalChatsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalHistoryDepth
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalOperationResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalOperationsRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalProviderHealthRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalProviderHealthResponse
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalProviderLimits
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalProviderPolicyRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalProviderPolicyResponse
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalProviderSuspensionAction
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MoveExternalChatRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ReconnectExternalAccountRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.RetryExternalOperationRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.SelectExternalChatRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UpdateExternalAccountRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.UpdateExternalProviderPolicyRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ValidatedExternalAccount
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ValidatedExternalProviderPolicy
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ChangeExternalBridgeInstanceStatusRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ChangeExternalProviderSuspensionRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.canonicalExternalIntegrationUuid
 import ru.genesiscorporation.workspace.beta.data.remote.dto.validateExternalAccountResponse
+import ru.genesiscorporation.workspace.beta.data.remote.dto.validateExternalBridgeInstanceResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.validateExternalChatResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.validateExternalOperationResponse
+import ru.genesiscorporation.workspace.beta.data.remote.dto.validateExternalProviderHealthResponse
+import ru.genesiscorporation.workspace.beta.data.remote.dto.validateExternalProviderPolicyResponse
 
 interface ExternalIntegrationDataSource {
     val accounts: StateFlow<List<ExternalAccountResponse>>
@@ -116,6 +132,31 @@ interface ExternalIntegrationDataSource {
         operationUuid: String,
         externalAccountUuid: String,
     ): ApiResult<Unit, ApiError>
+
+    suspend fun getProviderPolicy():
+        ApiResult<ValidatedExternalProviderPolicy?, ApiError>
+
+    suspend fun updateProviderPolicy(
+        enabled: Boolean,
+        limits: ExternalProviderLimits,
+        customCaCertificatesPem: List<String>?,
+        entityTag: String,
+    ): ApiResult<ValidatedExternalProviderPolicy, ApiError>
+
+    suspend fun changeProviderSuspension(
+        action: ExternalProviderSuspensionAction,
+    ): ApiResult<ValidatedExternalProviderPolicy, ApiError>
+
+    suspend fun getProviderHealth():
+        ApiResult<ExternalProviderHealthResponse?, ApiError>
+
+    suspend fun listBridgeInstances():
+        ApiResult<List<ExternalBridgeInstanceResponse>?, ApiError>
+
+    suspend fun changeBridgeInstanceStatus(
+        instanceUuid: String,
+        action: ExternalBridgeInstanceAction,
+    ): ApiResult<ExternalBridgeInstanceResponse, ApiError>
 }
 
 class ExternalIntegrationRepository(
@@ -711,6 +752,214 @@ class ExternalIntegrationRepository(
         }
     }
 
+    override suspend fun getProviderPolicy():
+        ApiResult<ValidatedExternalProviderPolicy?, ApiError> {
+        val ownerKey = activeOwnerKey()
+            ?: return ApiResult.Error(authenticationRequiredError())
+        return when (
+            val result = performOwned(
+                ownerKey = ownerKey,
+                request = ExternalProviderPolicyRequest(),
+            )
+        ) {
+            is ApiResult.Error -> if (
+                result.error.kind == ApiErrorKind.FORBIDDEN
+            ) {
+                ApiResult.Success(null)
+            } else {
+                result
+            }
+            is ApiResult.Success -> {
+                val validated = runCatching {
+                    validateExternalProviderPolicyResponse(
+                        response = result.value,
+                        responseEntityTag = result.metadata.entityTag,
+                    )
+                }.getOrNull() ?: return ApiResult.Error(
+                    malformedExternalResponseError(),
+                )
+                ApiResult.Success(validated)
+            }
+        }
+    }
+
+    override suspend fun updateProviderPolicy(
+        enabled: Boolean,
+        limits: ExternalProviderLimits,
+        customCaCertificatesPem: List<String>?,
+        entityTag: String,
+    ): ApiResult<ValidatedExternalProviderPolicy, ApiError> {
+        val ownerKey = activeOwnerKey()
+            ?: return ApiResult.Error(authenticationRequiredError())
+        val request = runCatching {
+            UpdateExternalProviderPolicyRequest(
+                enabled = enabled,
+                limits = limits,
+                customCaCertificatesPem = customCaCertificatesPem,
+                entityTag = entityTag,
+            )
+        }.getOrElse {
+            return ApiResult.Error(invalidExternalInputError())
+        }
+        return when (val result = performOwned(ownerKey, request)) {
+            is ApiResult.Error -> result
+            is ApiResult.Success -> validatedProviderPolicyResult(
+                ownerKey = ownerKey,
+                response = result.value,
+                entityTag = result.metadata.entityTag,
+            )
+        }
+    }
+
+    override suspend fun changeProviderSuspension(
+        action: ExternalProviderSuspensionAction,
+    ): ApiResult<ValidatedExternalProviderPolicy, ApiError> {
+        val ownerKey = activeOwnerKey()
+            ?: return ApiResult.Error(authenticationRequiredError())
+        return when (
+            val result = performOwned(
+                ownerKey = ownerKey,
+                request = ChangeExternalProviderSuspensionRequest(action),
+            )
+        ) {
+            is ApiResult.Error -> result
+            is ApiResult.Success -> validatedProviderPolicyResult(
+                ownerKey = ownerKey,
+                response = result.value,
+                entityTag = result.metadata.entityTag,
+            )
+        }
+    }
+
+    override suspend fun getProviderHealth():
+        ApiResult<ExternalProviderHealthResponse?, ApiError> {
+        val ownerKey = activeOwnerKey()
+            ?: return ApiResult.Error(authenticationRequiredError())
+        return when (
+            val result = performOwned(
+                ownerKey = ownerKey,
+                request = ExternalProviderHealthRequest(),
+            )
+        ) {
+            is ApiResult.Error -> if (
+                result.error.kind == ApiErrorKind.FORBIDDEN
+            ) {
+                ApiResult.Success(null)
+            } else {
+                result
+            }
+            is ApiResult.Success -> {
+                val validated = runCatching {
+                    validateExternalProviderHealthResponse(result.value)
+                }.getOrNull() ?: return ApiResult.Error(
+                    malformedExternalResponseError(),
+                )
+                ApiResult.Success(validated)
+            }
+        }
+    }
+
+    override suspend fun listBridgeInstances():
+        ApiResult<List<ExternalBridgeInstanceResponse>?, ApiError> {
+        val ownerKey = activeOwnerKey()
+            ?: return ApiResult.Error(authenticationRequiredError())
+        val instances = mutableListOf<ExternalBridgeInstanceResponse>()
+        val seenUuids = mutableSetOf<String>()
+        val seenMarkers = mutableSetOf<String>()
+        var pageMarker: String? = null
+        repeat(MAX_EXTERNAL_PAGES) { pageIndex ->
+            when (
+                val result = performOwned(
+                    ownerKey = ownerKey,
+                    request = ExternalBridgeInstancesRequest(
+                        pageLimit = EXTERNAL_PAGE_SIZE,
+                        pageMarker = pageMarker,
+                    ),
+                )
+            ) {
+                is ApiResult.Error -> {
+                    if (
+                        pageIndex == 0 &&
+                        result.error.kind == ApiErrorKind.FORBIDDEN
+                    ) {
+                        return ApiResult.Success(null)
+                    }
+                    return result
+                }
+
+                is ApiResult.Success -> {
+                    val validated = runCatching {
+                        result.value
+                            .filter { it.provider == "zulip" }
+                            .map(::validateExternalBridgeInstanceResponse)
+                    }.getOrNull() ?: return ApiResult.Error(
+                        malformedExternalResponseError(),
+                    )
+                    if (validated.any { !seenUuids.add(it.uuid) }) {
+                        return ApiResult.Error(
+                            malformedExternalResponseError(),
+                        )
+                    }
+                    instances += validated
+                    val nextMarker = runCatching {
+                        canonicalPageMarker(result.metadata.nextPageMarker)
+                    }.getOrElse {
+                        return ApiResult.Error(
+                            malformedExternalResponseError(),
+                        )
+                    } ?: run {
+                        if (!isOwnerCurrent(ownerKey)) {
+                            return ApiResult.Error(accountChangedError())
+                        }
+                        return ApiResult.Success(instances)
+                    }
+                    if (!seenMarkers.add(nextMarker)) {
+                        return ApiResult.Error(
+                            malformedExternalResponseError(),
+                        )
+                    }
+                    pageMarker = nextMarker
+                }
+            }
+        }
+        return ApiResult.Error(externalPaginationLimitError())
+    }
+
+    override suspend fun changeBridgeInstanceStatus(
+        instanceUuid: String,
+        action: ExternalBridgeInstanceAction,
+    ): ApiResult<ExternalBridgeInstanceResponse, ApiError> {
+        val ownerKey = activeOwnerKey()
+            ?: return ApiResult.Error(authenticationRequiredError())
+        val canonicalUuid = runCatching {
+            canonicalExternalIntegrationUuid(instanceUuid)
+        }.getOrElse {
+            return ApiResult.Error(invalidExternalInputError())
+        }
+        return when (
+            val result = performOwned(
+                ownerKey = ownerKey,
+                request = ChangeExternalBridgeInstanceStatusRequest(
+                    instanceUuid = canonicalUuid,
+                    action = action,
+                ),
+            )
+        ) {
+            is ApiResult.Error -> result
+            is ApiResult.Success -> {
+                val validated = runCatching {
+                    validateExternalBridgeInstanceResponse(
+                        response = result.value,
+                        expectedUuid = canonicalUuid,
+                    )
+                }.getOrNull() ?: return ApiResult.Error(
+                    malformedExternalResponseError(),
+                )
+                ApiResult.Success(validated)
+            }
+        }
+    }
+
     private suspend inline fun <
         reified RequestData : Any,
         reified Response : Any,
@@ -815,6 +1064,25 @@ class ExternalIntegrationRepository(
             return ApiResult.Error(accountChangedError())
         }
         eventsRepository.mergeExternalOperationSnapshot(validated)
+        return ApiResult.Success(validated)
+    }
+
+    private suspend fun validatedProviderPolicyResult(
+        ownerKey: String,
+        response: ExternalProviderPolicyResponse,
+        entityTag: String?,
+    ): ApiResult<ValidatedExternalProviderPolicy, ApiError> {
+        val validated = runCatching {
+            validateExternalProviderPolicyResponse(
+                response = response,
+                responseEntityTag = entityTag,
+            )
+        }.getOrNull() ?: return ApiResult.Error(
+            malformedExternalResponseError(),
+        )
+        if (!isOwnerCurrent(ownerKey)) {
+            return ApiResult.Error(accountChangedError())
+        }
         return ApiResult.Success(validated)
     }
 

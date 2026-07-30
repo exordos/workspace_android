@@ -193,6 +193,12 @@ Compose semantics traversal on every supported role and account.
 | EXT-A17 | Retry external operation | Invokes retry once only when `can_retry`; ordinary retries send explicit no-risk consent | Failure retains the authoritative operation and exposes refresh/retry | EXT-027–029/032 |
 | EXT-A18 | Retry operation with duplicate risk | Requires a destructive confirmation and sends `confirm_duplicate_risk=true` only after acceptance | Cancel/rotation is side-effect free; a stale or no-longer-retryable row cannot submit | EXT-029/034 |
 | EXT-A19 | Discard external operation | Requires confirmation and deletes only an operation whose snapshot says `can_discard` | Existing provider effects are explicitly not represented as undone; failure retains the row | EXT-030/032/034 |
+| EXT-A20 | Provider-admin discovery and Refresh | Independently reads realm policy, aggregate health and bridge instances; the section exists only when at least one resource is authorized or a real transient failure must be retried | All-forbidden is silent; partial permission keeps authorized data, and malformed/owner-changed responses fail closed | EXT-037/043/047–049 |
+| EXT-A21 | Edit provider enabled state and limits | Opens a revision-bound editor and PUTs all validated policy settings once with strong `If-Match` | No changes cannot submit; invalid/overflow input and conflict preserve the dialog and expose refresh/cancel | EXT-038–040/049 |
+| EXT-A22 | Replace/remove provider custom CA | Accepts bounded complete PEM certificate blocks or an explicit removal and sends exact `custom_ca_bundle` intent | Existing write-only CA must be explicitly replaced or removed; private-key/foreign/oversized input never reaches the network | EXT-039–041 |
+| EXT-A23 | Emergency suspend/resume provider | Confirms realm-wide impact before suspend and invokes resume only from the suspended snapshot | Cancel/rotation is side-effect free; stale policy closes the dialog and permission/failure never displays success | EXT-042/047–049 |
+| EXT-A24 | Suspend/resume bridge instance | Shows only actions valid for the current sanitized instance state and invokes the exact UUID once | Revision/state changes close pending confirmation; returned UUID mismatch, denial or transport failure retains the prior row | EXT-044/045/047–049 |
+| EXT-A25 | Revoke bridge certificate | Requires an irreversible warning, invokes revoke once and removes every lifecycle action after the authoritative revoked snapshot | Cancel/recreation sends nothing; platform reenrollment remains intentionally outside the Messenger UI | EXT-046/048–050 |
 
 ## Platform interactions
 
@@ -229,9 +235,6 @@ end-to-end behavior exists:
   read-only Starred destination is functional and remains visible.
 - Hamburger menu without a navigation destination.
 - Mail, calendar, services, and calls-list placeholders.
-- External-operation retry/discard and provider-administration controls until
-  their desktop capability, permission and duplicate-risk contracts are
-  implemented end to end on mobile.
 
 Mock channel memberships, mock shared channels, phone numbers, work profiles,
 managers, birthdays, local times, and fallback message previews are prohibited.

@@ -3,6 +3,7 @@ package ru.genesiscorporation.workspace.beta.modules.externalintegrations
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -11,6 +12,8 @@ import ru.genesiscorporation.workspace.beta.data.remote.ApiErrorKind
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalAccountResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalAccountSelectionMode
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalAccountStatus
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalBridgeInstanceAction
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalBridgeInstanceStatus
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalHistoryDepth
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalOperationStatus
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ZulipExternalAccountSettings
@@ -173,6 +176,61 @@ class ExternalIntegrationsModelTest {
         assertEquals(
             "В очереди",
             externalOperationStatusLabel(ExternalOperationStatus.QUEUED),
+        )
+    }
+
+    @Test
+    fun `bridge lifecycle hides impossible or terminal actions`() {
+        assertTrue(
+            bridgeActionAllowed(
+                ExternalBridgeInstanceStatus.ACTIVE,
+                ExternalBridgeInstanceAction.SUSPEND,
+            ),
+        )
+        assertFalse(
+            bridgeActionAllowed(
+                ExternalBridgeInstanceStatus.ACTIVE,
+                ExternalBridgeInstanceAction.RESUME,
+            ),
+        )
+        assertTrue(
+            bridgeActionAllowed(
+                ExternalBridgeInstanceStatus.SUSPENDED,
+                ExternalBridgeInstanceAction.RESUME,
+            ),
+        )
+        ExternalBridgeInstanceAction.entries.forEach { action ->
+            assertFalse(
+                bridgeActionAllowed(
+                    ExternalBridgeInstanceStatus.REVOKED,
+                    action,
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun `admin health and bridge labels remain bounded and deterministic`() {
+        assertEquals(
+            "Аккаунты · degraded: 1, live: 3",
+            externalAdminCountSummary(
+                "Аккаунты",
+                mapOf("live" to 3, "degraded" to 1),
+            ),
+        )
+        assertEquals(
+            "Bridge: нет",
+            externalAdminCountSummary("Bridge", emptyMap()),
+        )
+        assertEquals(
+            "Несовместим",
+            externalBridgeStatusLabel(
+                ExternalBridgeInstanceStatus.INCOMPATIBLE,
+            ),
+        )
+        assertEquals(
+            "Работает",
+            externalProviderHealthStatusLabel("healthy"),
         )
     }
 
