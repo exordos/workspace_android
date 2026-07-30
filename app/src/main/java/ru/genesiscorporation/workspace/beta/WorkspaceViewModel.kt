@@ -37,8 +37,11 @@ class WorkspaceViewModel(
                 .distinctUntilChanged()
                 .collectLatest { runtime ->
                 repo.resetAccountState()
-                if (runtime.authenticated) {
-                    repo.start()
+                if (
+                    runtime.authenticated &&
+                    !runtime.ownerKey.isNullOrBlank()
+                ) {
+                    repo.start(runtime.ownerKey)
                 } else {
                     repo.resetRealtimeCursor()
                     repo.pauseRealtimeForAuthentication()

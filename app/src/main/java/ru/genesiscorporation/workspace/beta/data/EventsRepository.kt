@@ -7,6 +7,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.URLProtocol
 import io.ktor.http.path
 import io.ktor.websocket.Frame
+import io.ktor.websocket.close
 import io.ktor.websocket.readReason
 import io.ktor.websocket.readText
 import kotlinx.coroutines.CancellationException
@@ -29,6 +30,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.data.remote.dto.DeletedMessageReaction
 import ru.genesiscorporation.workspace.beta.data.remote.dto.EpochRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.EventsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageReaction
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
@@ -42,7 +44,10 @@ import java.util.UUID
 import kotlin.plus
 
 
-class EventsRepository() {
+class EventsRepository(
+    private val cursorStore: RealtimeCursorStore =
+        InMemoryRealtimeCursorStore(),
+) {
 
     var client: WorkspaceAPIClient? = null
     var latestEpoch: Int = 0
@@ -759,11 +764,14 @@ class EventsRepository() {
         }
     }
 
-    suspend fun start() {
+    suspend fun start(ownerKey: String) {
+        require(ownerKey.isNotBlank()) {
+            "Realtime account owner must not be blank"
+        }
         _appForeground
             .collectLatest { foreground ->
                 if (foreground) {
-                    runForegroundConnectionLoop()
+                    runForegroundConnectionLoop(ownerKey)
                 } else {
                     _realtimeConnectionState.value =
                         RealtimeConnectionState.PAUSED
@@ -772,23 +780,59 @@ class EventsRepository() {
             }
     }
 
-    private suspend fun runForegroundConnectionLoop() {
+    private suspend fun runForegroundConnectionLoop(ownerKey: String) {
         val webSocketClient = client
         if (webSocketClient == null) return
 
         var retryDelayMillis = INITIAL_RETRY_DELAY_MILLIS
+        var consecutiveExpiredCursors = 0
         try {
             while (currentCoroutineContext().isActive) {
-                if (epochGeneration.isBlank()) {
+                if (
+                    !webSocketClient.userViewModel.repo
+                        .isActiveCredentialOwner(ownerKey)
+                ) {
+                    return
+                }
+                _realtimeConnectionState.value =
+                    RealtimeConnectionState.CONNECTING
+                if (
+                    !ensureRealtimeCursor(
+                        webSocketClient = webSocketClient,
+                        ownerKey = ownerKey,
+                    )
+                ) {
+                    if (
+                        !webSocketClient.userViewModel.repo
+                            .isActiveCredentialOwner(ownerKey)
+                    ) {
+                        return
+                    }
+                    Log.d("WebSocket", "Failed to load the initial event cursor")
                     _realtimeConnectionState.value =
-                        RealtimeConnectionState.CONNECTING
-                    when (val response = webSocketClient.performRequest(EpochRequest())) {
-                        is ApiResult.Success -> {
-                            latestEpoch = response.value.epochVersion
-                            epochGeneration = response.value.epochGeneration
-                        }
-                        is ApiResult.Error -> {
-                            Log.d("WebSocket", "Failed to load the initial event cursor")
+                        RealtimeConnectionState.BACKING_OFF
+                    delay(retryDelayMillis)
+                    retryDelayMillis = nextRealtimeRetryDelay(
+                        currentDelayMillis = retryDelayMillis,
+                        readyReceived = false,
+                        connectedDurationMillis = 0L,
+                    )
+                    continue
+                }
+
+                when (
+                    catchUpRealtimeEvents(
+                        webSocketClient = webSocketClient,
+                        ownerKey = ownerKey,
+                    )
+                ) {
+                    RealtimeCatchUpResult.COMPLETE -> {
+                        consecutiveExpiredCursors = 0
+                    }
+
+                    RealtimeCatchUpResult.CURSOR_EXPIRED -> {
+                        consecutiveExpiredCursors += 1
+                        if (consecutiveExpiredCursors > 1) {
                             _realtimeConnectionState.value =
                                 RealtimeConnectionState.BACKING_OFF
                             delay(retryDelayMillis)
@@ -797,15 +841,38 @@ class EventsRepository() {
                                 readyReceived = false,
                                 connectedDurationMillis = 0L,
                             )
-                            continue
+                        } else {
+                            retryDelayMillis = INITIAL_RETRY_DELAY_MILLIS
                         }
+                        continue
+                    }
+
+                    RealtimeCatchUpResult.RETRY -> {
+                        if (
+                            !webSocketClient.userViewModel.repo
+                                .isActiveCredentialOwner(ownerKey)
+                        ) {
+                            return
+                        }
+                        _realtimeConnectionState.value =
+                            RealtimeConnectionState.BACKING_OFF
+                        delay(retryDelayMillis)
+                        retryDelayMillis = nextRealtimeRetryDelay(
+                            currentDelayMillis = retryDelayMillis,
+                            readyReceived = false,
+                            connectedDurationMillis = 0L,
+                        )
+                        continue
                     }
                 }
 
                 val connectionResult = try {
                     _realtimeConnectionState.value =
                         RealtimeConnectionState.CONNECTING
-                    startWebsocketConnection(webSocketClient)
+                    startWebsocketConnection(
+                        webSocketClient = webSocketClient,
+                        ownerKey = ownerKey,
+                    )
                 } catch (cancellation: CancellationException) {
                     throw cancellation
                 } catch (exception: Exception) {
@@ -815,9 +882,23 @@ class EventsRepository() {
                     )
                     RealtimeConnectionResult()
                 }
+                if (
+                    !webSocketClient.userViewModel.repo
+                        .isActiveCredentialOwner(ownerKey)
+                ) {
+                    return
+                }
 
                 if (handleRealtimeConnectionClosed(connectionResult.closeCode)) {
                     Log.d("WebSocket", "Realtime cursor expired; refreshing snapshots")
+                    runCatching {
+                        cursorStore.clearAccount(ownerKey)
+                    }.onFailure {
+                        Log.d(
+                            "WebSocket",
+                            "Failed to clear an expired event cursor",
+                        )
+                    }
                     retryDelayMillis = INITIAL_RETRY_DELAY_MILLIS
                 }
 
@@ -850,11 +931,230 @@ class EventsRepository() {
         }
     }
 
+    private suspend fun ensureRealtimeCursor(
+        webSocketClient: WorkspaceAPIClient,
+        ownerKey: String,
+    ): Boolean {
+        if (epochGeneration.isNotBlank()) return true
+        if (
+            !webSocketClient.userViewModel.repo
+                .isActiveCredentialOwner(ownerKey)
+        ) {
+            return false
+        }
+
+        val persistedCursor = try {
+            cursorStore.read(ownerKey)
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (exception: Exception) {
+            Log.d(
+                "WebSocket",
+                "Stored event cursor is unreadable; requesting a fresh cursor",
+            )
+            try {
+                cursorStore.clearAccount(ownerKey)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (clearException: Exception) {
+                Log.d("WebSocket", "Failed to clear an unreadable event cursor")
+                return false
+            }
+            null
+        }
+        if (
+            !webSocketClient.userViewModel.repo
+                .isActiveCredentialOwner(ownerKey)
+        ) {
+            return false
+        }
+        if (persistedCursor != null) {
+            latestEpoch = persistedCursor.epochVersion
+            epochGeneration = persistedCursor.epochGeneration
+            Log.d("WebSocket", "Restored the saved event cursor")
+            return true
+        }
+
+        return when (val response = webSocketClient.performRequest(EpochRequest())) {
+            is ApiResult.Success -> {
+                if (
+                    !webSocketClient.userViewModel.repo
+                        .isActiveCredentialOwner(ownerKey)
+                ) {
+                    return false
+                }
+                val cursor = runCatching {
+                    PersistedRealtimeCursor(
+                        epochVersion = response.value.epochVersion,
+                        epochGeneration = response.value.epochGeneration,
+                    )
+                }.getOrElse {
+                    Log.d("WebSocket", "Server returned an invalid event cursor")
+                    return false
+                }
+                latestEpoch = cursor.epochVersion
+                epochGeneration = cursor.epochGeneration
+                if (!persistRealtimeCursor(ownerKey)) {
+                    resetRealtimeCursor()
+                    return false
+                }
+                true
+            }
+
+            is ApiResult.Error -> false
+        }
+    }
+
+    private suspend fun catchUpRealtimeEvents(
+        webSocketClient: WorkspaceAPIClient,
+        ownerKey: String,
+    ): RealtimeCatchUpResult {
+        repeat(MAX_CATCH_UP_PAGES) {
+            if (
+                !webSocketClient.userViewModel.repo
+                    .isActiveCredentialOwner(ownerKey)
+            ) {
+                return RealtimeCatchUpResult.RETRY
+            }
+            val pageStartEpoch = latestEpoch
+            when (
+                val response = webSocketClient.performRequest(
+                    EventsRequest(
+                        afterEpochVersion = pageStartEpoch,
+                        epochGeneration = epochGeneration,
+                    ),
+                )
+            ) {
+                is ApiResult.Error -> {
+                    if (
+                        !webSocketClient.userViewModel.repo
+                            .isActiveCredentialOwner(ownerKey)
+                    ) {
+                        return RealtimeCatchUpResult.RETRY
+                    }
+                    if (response.error.httpStatus == HTTP_GONE) {
+                        invalidateDerivedStateForExpiredCursor()
+                        try {
+                            cursorStore.clearAccount(ownerKey)
+                        } catch (cancellation: CancellationException) {
+                            throw cancellation
+                        } catch (exception: Exception) {
+                            Log.d(
+                                "WebSocket",
+                                "Failed to clear an expired event cursor",
+                            )
+                            return RealtimeCatchUpResult.RETRY
+                        }
+                        Log.d(
+                            "WebSocket",
+                            "Saved event cursor expired; refreshing snapshots",
+                        )
+                        return RealtimeCatchUpResult.CURSOR_EXPIRED
+                    }
+                    Log.d("WebSocket", "Failed to catch up realtime events")
+                    return RealtimeCatchUpResult.RETRY
+                }
+
+                is ApiResult.Success -> {
+                    if (
+                        !webSocketClient.userViewModel.repo
+                            .isActiveCredentialOwner(ownerKey)
+                    ) {
+                        return RealtimeCatchUpResult.RETRY
+                    }
+                    val orderedEvents =
+                        validateAndOrderRealtimeCatchUpPage(
+                            events = response.value,
+                            afterEpoch = pageStartEpoch,
+                        )
+                    if (orderedEvents == null) {
+                        Log.d(
+                            "WebSocket",
+                            "Server returned an invalid event catch-up page",
+                        )
+                        return RealtimeCatchUpResult.RETRY
+                    }
+                    for (event in orderedEvents) {
+                        val previousEpoch = latestEpoch
+                        try {
+                            processTextFrame(event.toString())
+                        } catch (cancellation: CancellationException) {
+                            throw cancellation
+                        } catch (exception: Exception) {
+                            Log.d(
+                                "WebSocket",
+                                "Failed to apply a caught-up event: " +
+                                    exception::class.simpleName,
+                            )
+                            return RealtimeCatchUpResult.RETRY
+                        }
+                        if (latestEpoch <= previousEpoch) {
+                            Log.d(
+                                "WebSocket",
+                                "Caught-up event did not advance the cursor",
+                            )
+                            return RealtimeCatchUpResult.RETRY
+                        }
+                        if (!persistRealtimeCursor(ownerKey)) {
+                            return RealtimeCatchUpResult.RETRY
+                        }
+                    }
+
+                    if (response.metadata.nextPageMarker == null) {
+                        return RealtimeCatchUpResult.COMPLETE
+                    }
+                    if (latestEpoch <= pageStartEpoch) {
+                        Log.d(
+                            "WebSocket",
+                            "Event catch-up pagination made no progress",
+                        )
+                        return RealtimeCatchUpResult.RETRY
+                    }
+                }
+            }
+        }
+        Log.d("WebSocket", "Event catch-up exceeded its bounded page limit")
+        return RealtimeCatchUpResult.RETRY
+    }
+
+    private suspend fun persistRealtimeCursor(ownerKey: String): Boolean {
+        val cursor = runCatching {
+            PersistedRealtimeCursor(
+                epochVersion = latestEpoch,
+                epochGeneration = epochGeneration,
+            )
+        }.getOrElse {
+            Log.d("WebSocket", "Refused to persist an invalid event cursor")
+            return false
+        }
+        return try {
+            client
+                ?.userViewModel
+                ?.repo
+                ?.withActiveCredentialOwner(ownerKey) {
+                    cursorStore.write(ownerKey, cursor)
+                    true
+                }
+                ?: false
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (exception: Exception) {
+            Log.d("WebSocket", "Failed to persist the event cursor")
+            false
+        }
+    }
+
     private suspend fun startWebsocketConnection(
         webSocketClient: WorkspaceAPIClient,
+        ownerKey: String,
     ): RealtimeConnectionResult {
-        val accessToken = webSocketClient.userViewModel.accessToken.value
-        val baseUrl = webSocketClient.userViewModel.baseUrl.value
+        val session =
+            webSocketClient.userViewModel.repo.activeCredentialSnapshot()
+        if (session.ownerKey != ownerKey) {
+            return RealtimeConnectionResult()
+        }
+        val accessToken = session.accessToken
+        val baseUrl = session.baseUrl
         if (accessToken == null || baseUrl == null) {
             return RealtimeConnectionResult()
         }
@@ -895,9 +1195,26 @@ class EventsRepository() {
                     is Frame.Text -> {
                         val receivedText = frame.readText()
                         try {
+                            val previousEpoch = latestEpoch
+                            val frameReady =
+                                processTextFrame(receivedText)
                             readyReceived =
-                                processTextFrame(receivedText) ||
-                                    readyReceived
+                                frameReady || readyReceived
+                            if (
+                                latestEpoch > previousEpoch ||
+                                frameReady
+                            ) {
+                                if (!persistRealtimeCursor(ownerKey)) {
+                                    Log.d(
+                                        "WebSocket",
+                                        "Closing realtime after cursor persistence failed",
+                                    )
+                                    close()
+                                    break
+                                }
+                            }
+                        } catch (cancellation: CancellationException) {
+                            throw cancellation
                         } catch (exception: Exception) {
                             Log.d(
                                 "WebSocket",
@@ -1121,6 +1438,8 @@ class EventsRepository() {
         private const val MAX_RETRY_DELAY_MILLIS = 30_000L
         private const val STABLE_CONNECTION_MILLIS = 60_000L
         private const val EVENTS_CURSOR_EXPIRED_CLOSE_CODE = 4_410
+        private const val HTTP_GONE = 410
+        private const val MAX_CATCH_UP_PAGES = 20
         private const val NANOS_PER_MILLISECOND = 1_000_000L
     }
 }
@@ -1137,6 +1456,38 @@ private data class RealtimeConnectionResult(
     val readyReceived: Boolean = false,
     val connectedDurationMillis: Long = 0L,
 )
+
+private enum class RealtimeCatchUpResult {
+    COMPLETE,
+    CURSOR_EXPIRED,
+    RETRY,
+}
+
+private fun JsonObject.eventEpochVersion(): Int? =
+    this["epoch_version"]
+        ?.jsonPrimitive
+        ?.contentOrNull
+        ?.toIntOrNull()
+
+internal fun validateAndOrderRealtimeCatchUpPage(
+    events: List<JsonObject>,
+    afterEpoch: Int,
+): List<JsonObject>? {
+    if (afterEpoch < 0) return null
+    val ordered = events
+        .map { event ->
+            val epoch = event.eventEpochVersion()
+                ?: return null
+            epoch to event
+        }
+        .sortedBy { (epoch, _) -> epoch }
+    var previousEpoch = afterEpoch
+    ordered.forEach { (epoch, _) ->
+        if (epoch <= previousEpoch) return null
+        previousEpoch = epoch
+    }
+    return ordered.map { (_, event) -> event }
+}
 
 internal fun nextRealtimeRetryDelay(
     currentDelayMillis: Long,

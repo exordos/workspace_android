@@ -46,7 +46,9 @@ class WorkspaceNetworkViewModel(
         userViewModel = userViewModel,
         sessionCookieStore = sessionCookieStore,
     )
-    val eventsRepository = EventsRepository().also { repository ->
+    val eventsRepository = EventsRepository(
+        cursorStore = userViewModel.realtimeCursorStore,
+    ).also { repository ->
         repository.client = apiClient
     }
     private val processLifecycle = ProcessLifecycleOwner.get().lifecycle

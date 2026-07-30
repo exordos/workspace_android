@@ -19,6 +19,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 import ru.genesiscorporation.workspace.beta.data.ApiKeyRepository
 import ru.genesiscorporation.workspace.beta.data.ConversationStateStore
+import ru.genesiscorporation.workspace.beta.data.InMemoryRealtimeCursorStore
+import ru.genesiscorporation.workspace.beta.data.RealtimeCursorStore
 import ru.genesiscorporation.workspace.beta.data.WorkspaceAccount
 import ru.genesiscorporation.workspace.beta.data.WorkspaceUiPreferences
 import ru.genesiscorporation.workspace.beta.data.WorkspaceUiPreferencesRepository
@@ -29,6 +31,8 @@ class UserViewModel(
     val repo: ApiKeyRepository,
     val conversationStateStore: ConversationStateStore,
     private val uiPreferencesRepository: WorkspaceUiPreferencesRepository,
+    val realtimeCursorStore: RealtimeCursorStore =
+        InMemoryRealtimeCursorStore(),
 ):  ViewModel() {
 
     private val _userData = MutableStateFlow<UserResponseData?>(null)

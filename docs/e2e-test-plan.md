@@ -642,10 +642,18 @@ retains `local-*` outbox rows, increments one recovery generation, and leaves
 ordinary closes untouched. The retained runtime observes process
 foreground/background lifecycle (so configuration changes do not create socket
 churn); the catalog and an open conversation observe the recovery generation
-and refetch authoritative snapshots. RT-001/002/005
-still require controlled socket/request-count device automation, RT-012 still
-requires an injected real `4410` cross-client convergence pass, and durable
-cursor/REST catch-up/process-death coverage in RT-004/013 remains open.
+and refetch authoritative snapshots. The generation/version cursor is now
+Keystore-encrypted, account-scoped, removed with account-local logout data, and
+restored before reconnect. Foreground recovery drains strict-generation REST
+pages before the websocket; each cursor is persisted only after its event was
+successfully applied, duplicate/non-advancing pages fail closed, pagination is
+bounded, and REST `410` follows the same snapshot-recovery path as socket
+`4410`. Unit/contract tests cover isolation, selective cleanup, validation,
+ordering and exact query fields; an Android Keystore test verifies encrypted
+round-trip and cross-account separation. RT-001/002/005 still require
+controlled socket/request-count device automation, while RT-004/012/013 still
+require process-kill and injected real `410`/`4410` cross-client convergence
+passes. Durable catalog/message snapshots are not implied by the cursor store.
 
 Use Android network controls and a controllable backend proxy for latency,
 disconnect, status-code, body-corruption, and reorder cases. Do not rely on
