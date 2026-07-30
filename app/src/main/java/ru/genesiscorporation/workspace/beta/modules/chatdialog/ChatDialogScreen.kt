@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -80,6 +81,8 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
 
 @Composable
 fun ChatDialogScreen(
@@ -102,6 +105,7 @@ fun ChatDialogScreen(
         viewModel.loadingNewerMessages.collectAsStateWithLifecycle()
     val hasNewerMessages by viewModel.hasNewerMessages.collectAsStateWithLifecycle()
     val newerMessagesError by viewModel.newerMessagesError.collectAsStateWithLifecycle()
+    val topicUnreadCount by viewModel.topicUnreadCount.collectAsStateWithLifecycle()
     val forwardDialogState by
         viewModel.forwardDialogState.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
@@ -114,10 +118,23 @@ fun ChatDialogScreen(
     var pendingHistoryViewportAnchor by remember(key) {
         mutableStateOf<HistoryViewportAnchor?>(null)
     }
+    var unreadAnchorUuid by rememberSaveable(key, "unread-anchor") {
+        mutableStateOf<String?>(null)
+    }
+    var userScrollSeen by rememberSaveable(key, "read-scroll") {
+        mutableStateOf(false)
+    }
     val messages = remember(streamTopicMessages[key]) {
         streamTopicMessages[key].orEmpty()
             .sortedBy { messageSortInstant(it.createdAt) }
     }
+    val loadedUnreadMessages = remember(messages) {
+        messages.filter { !it.read && !it.isOwn }
+    }
+    val effectiveUnreadAnchorUuid =
+        unreadAnchorUuid ?: loadedUnreadMessages.firstOrNull()?.uuid
+    val effectiveUnreadCount =
+        topicUnreadCount.takeIf { it > 0 } ?: loadedUnreadMessages.size
     val currentOldestMessageUuid by rememberUpdatedState(
         messages.firstOrNull()?.uuid,
     )
@@ -150,12 +167,33 @@ fun ChatDialogScreen(
         )
     }
 
-    LaunchedEffect(messages.size, uiMode, historyTopItemOffset) {
+    LaunchedEffect(messages, loadedUnreadMessages) {
+        unreadAnchorUuid = when {
+            loadedUnreadMessages.isEmpty() -> null
+            unreadAnchorUuid != null &&
+                loadedUnreadMessages.any { it.uuid == unreadAnchorUuid } ->
+                unreadAnchorUuid
+
+            else -> loadedUnreadMessages.first().uuid
+        }
+    }
+
+    LaunchedEffect(
+        messages.size,
+        uiMode,
+        historyTopItemOffset,
+        effectiveUnreadAnchorUuid,
+    ) {
         if (messages.isNotEmpty() && focusedMessageUuid == null) {
             val lastVisibleIndex = listState.layoutInfo.visibleItemsInfo
                 .lastOrNull()
                 ?.index
-            if (shouldPositionConversationAtLatest(
+            val unreadIndex = messages.indexOfFirst {
+                it.uuid == effectiveUnreadAnchorUuid
+            }
+            if (!hasPositionedConversation && unreadIndex >= 0) {
+                listState.scrollToItem(unreadIndex + historyTopItemOffset)
+            } else if (shouldPositionConversationAtLatest(
                     hasPositionedConversation = hasPositionedConversation,
                     lastVisibleIndex = lastVisibleIndex,
                     lastListIndex = lastMessageListIndex,
@@ -165,6 +203,48 @@ fun ChatDialogScreen(
             }
             hasPositionedConversation = true
         }
+    }
+
+    LaunchedEffect(listState, key) {
+        listState.interactionSource.interactions.collect { interaction ->
+            if (interaction is DragInteraction.Start) {
+                userScrollSeen = true
+            }
+        }
+    }
+
+    LaunchedEffect(
+        listState,
+        messages,
+        userScrollSeen,
+        historyTopItemOffset,
+    ) {
+        if (!userScrollSeen) return@LaunchedEffect
+        snapshotFlow {
+            val layout = listState.layoutInfo
+            layout.visibleItemsInfo.mapNotNull { itemInfo ->
+                val messageIndex = itemInfo.index - historyTopItemOffset
+                val message = messages.getOrNull(messageIndex)
+                    ?: return@mapNotNull null
+                val visibleStart = max(
+                    itemInfo.offset,
+                    layout.viewportStartOffset,
+                )
+                val visibleEnd = min(
+                    itemInfo.offset + itemInfo.size,
+                    layout.viewportEndOffset,
+                )
+                val visiblePixels =
+                    (visibleEnd - visibleStart).coerceAtLeast(0)
+                message.uuid.takeIf {
+                    !message.read &&
+                        !message.isOwn &&
+                        visiblePixels * 2 >= itemInfo.size
+                }
+            }
+        }
+            .distinctUntilChanged()
+            .collect(viewModel::markVisibleMessagesRead)
     }
 
     LaunchedEffect(focusedMessageUuid, messages) {
@@ -366,32 +446,38 @@ fun ChatDialogScreen(
                             items = messages,
                             key = { it.uuid },
                         ) { message ->
-                            ChatMessage(
-                                item = message,
-                                viewModel = viewModel,
-                                navController = navController,
-                                outboxEntry = outboxEntries.firstOrNull {
-                                    it.localMessageUuid == message.uuid
-                                },
-                                isVerifyingOutbox = message.uuid in verifyingOutbox,
-                                onImageLoad = {
-                                    val lastVisibleIndex =
-                                        listState.layoutInfo.visibleItemsInfo
-                                            .lastOrNull()
-                                            ?.index
-                                    if (
-                                        lastVisibleIndex == null ||
-                                        lastVisibleIndex >=
-                                            lastMessageListIndex - 1
-                                    ) {
-                                        scope.launch {
-                                            listState.scrollToItem(
-                                                lastMessageListIndex,
-                                            )
+                            Column {
+                                if (message.uuid == effectiveUnreadAnchorUuid) {
+                                    UnreadMessagesMarker(effectiveUnreadCount)
+                                }
+                                ChatMessage(
+                                    item = message,
+                                    viewModel = viewModel,
+                                    navController = navController,
+                                    outboxEntry = outboxEntries.firstOrNull {
+                                        it.localMessageUuid == message.uuid
+                                    },
+                                    isVerifyingOutbox =
+                                        message.uuid in verifyingOutbox,
+                                    onImageLoad = {
+                                        val lastVisibleIndex =
+                                            listState.layoutInfo.visibleItemsInfo
+                                                .lastOrNull()
+                                                ?.index
+                                        if (
+                                            lastVisibleIndex == null ||
+                                            lastVisibleIndex >=
+                                                lastMessageListIndex - 1
+                                        ) {
+                                            scope.launch {
+                                                listState.scrollToItem(
+                                                    lastMessageListIndex,
+                                                )
+                                            }
                                         }
-                                    }
-                                },
-                            )
+                                    },
+                                )
+                            }
                         }
                         if (showNewerHistoryStatus) {
                             item(key = NEWER_HISTORY_STATUS_KEY) {
@@ -533,6 +619,43 @@ private fun DraftSyncBanner(
                 Text("Повторить")
             }
         }
+    }
+}
+
+@Composable
+private fun UnreadMessagesMarker(unreadCount: Int) {
+    val colors = LocalWorkspaceColorsPalette.current
+    val markerColor = colors.messageAccentBlue
+    val label = if (unreadCount > 0) {
+        "Непрочитанные сообщения • $unreadCount"
+    } else {
+        "Непрочитанные сообщения"
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(1.dp)
+                .background(markerColor.copy(alpha = 0.55f)),
+        )
+        Text(
+            text = label,
+            color = markerColor,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+        )
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(1.dp)
+                .background(markerColor.copy(alpha = 0.55f)),
+        )
     }
 }
 

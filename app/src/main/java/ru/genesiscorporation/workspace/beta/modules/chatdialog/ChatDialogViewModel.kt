@@ -18,6 +18,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
@@ -128,6 +129,21 @@ class ChatDialogViewModel(
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = emptyMap()
         )
+    val topicUnreadCount: StateFlow<Int> = combine(
+        repo.streamTopics,
+        repo.streamTopicMessages,
+    ) { topicsByStream, messagesByConversation ->
+        topicsByStream[chatId]
+            ?.singleOrNull { it.uuid == topicUuid }
+            ?.unreadCount
+            ?: messagesByConversation["$chatId.$topicUuid"]
+                .orEmpty()
+                .count { !it.read && !it.isOwn }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = 0,
+    )
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading
@@ -211,6 +227,8 @@ class ChatDialogViewModel(
     private var nextNewerPageMarker: String? = null
     private var newerMessagesJob: Job? = null
     private var refreshHistoryBeforeNewerRetry = false
+    private var readMessagesJob: Job? = null
+    private var pendingReadBoundaryUuid: String? = null
     private var forwardCatalogJob: Job? = null
     private var forwardTopicLoadJob: Job? = null
     private var forwardSelectionGeneration = 0L
@@ -3014,9 +3032,6 @@ class ChatDialogViewModel(
             // Re-apply focus after status-row and context layout changes.
             requestMessageFocus(anchor.uuid)
             _isLoading.value = false
-            viewModelScope.launch {
-                markMessagesReadUpTo(anchor.uuid)
-            }
             return true
         } finally {
             finishInitialContextLoading()
@@ -3149,13 +3164,6 @@ class ChatDialogViewModel(
                         }
                     }
                 _isLoading.value = false
-                loadedMessages
-                    .maxByOrNull { messageSortInstant(it.createdAt) }
-                    ?.let { lastMessage ->
-                        viewModelScope.launch {
-                            markMessagesReadUpTo(lastMessage.uuid)
-                        }
-                    }
                 true
             }
             is ApiResult.Error -> {
@@ -3553,15 +3561,74 @@ class ChatDialogViewModel(
         _focusedMessageUuid.value = null
     }
 
-    suspend fun markMessagesReadUpTo(messageUuid: String) {
-        val markMessagesReadResponse = client.performRequest(MarkMessagesReadRequest(messageUuid))
-        when(markMessagesReadResponse) {
-            is ApiResult.Success -> {
+    fun markVisibleMessagesRead(visibleMessageUuids: Collection<String>) {
+        val messages = streamTopicMessages.value["$chatId.$topicUuid"]
+            .orEmpty()
+        val target = newestVisibleUnreadBoundary(
+            messages = messages,
+            visibleMessageUuids = visibleMessageUuids,
+        ) ?: return
+        pendingReadBoundaryUuid = newestMessageUuid(
+            messages = messages,
+            firstUuid = pendingReadBoundaryUuid,
+            secondUuid = target.uuid,
+        )
+        startPendingReadRequest()
+    }
 
-            }
+    private fun startPendingReadRequest() {
+        if (readMessagesJob?.isActive == true) return
+        val requestedUuid = pendingReadBoundaryUuid ?: return
+        pendingReadBoundaryUuid = null
+        readMessagesJob = viewModelScope.launch {
+            try {
+                val currentTarget = streamTopicMessages.value[
+                    "$chatId.$topicUuid"
+                ].orEmpty().singleOrNull {
+                    it.uuid == requestedUuid && !it.read && !it.isOwn
+                } ?: return@launch
+                when (
+                    val response = client.performRequest(
+                        MarkMessagesReadRequest(currentTarget.uuid),
+                    )
+                ) {
+                    is ApiResult.Success -> {
+                        val confirmed = response.value
+                        if (isConfirmedReadThrough(
+                                expectedMessageUuid = currentTarget.uuid,
+                                expectedStreamUuid = chatId,
+                                expectedTopicUuid = topicUuid,
+                                confirmed = confirmed,
+                            )
+                        ) {
+                            repo.markStreamTopicMessagesReadThrough(
+                                streamUuid = chatId,
+                                topicUuid = topicUuid,
+                                boundaryUuid = currentTarget.uuid,
+                            )
+                        } else {
+                            _actionError.value =
+                                "Сервер не подтвердил прочтение сообщений"
+                        }
+                    }
 
-            is ApiResult.Error -> {
-                Unit
+                    is ApiResult.Error -> {
+                        _actionError.value = response.error.message
+                            ?.takeIf(String::isNotBlank)
+                            ?.let { "Не удалось отметить сообщения прочитанными: $it" }
+                            ?: "Не удалось отметить сообщения прочитанными"
+                    }
+                }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (exception: Exception) {
+                _actionError.value =
+                    "Не удалось отметить сообщения прочитанными"
+            } finally {
+                readMessagesJob = null
+                if (pendingReadBoundaryUuid != null) {
+                    startPendingReadRequest()
+                }
             }
         }
     }
@@ -3703,6 +3770,57 @@ internal fun validateMessageWindowPageState(
     } else {
         malformedMessagePageState()
     }
+}
+
+internal fun newestVisibleUnreadBoundary(
+    messages: List<MessageResponse>,
+    visibleMessageUuids: Collection<String>,
+): MessageResponse? {
+    val visible = visibleMessageUuids.toSet()
+    return messages
+        .asSequence()
+        .filter { message ->
+            message.uuid in visible &&
+                !message.read &&
+                !message.isOwn
+        }
+        .mapNotNull { message ->
+            messagePosition(message)?.let { message to it }
+        }
+        .maxWithOrNull { left, right ->
+            compareMessagePositions(left.second, right.second)
+        }
+        ?.first
+}
+
+internal fun isConfirmedReadThrough(
+    expectedMessageUuid: String,
+    expectedStreamUuid: String,
+    expectedTopicUuid: String,
+    confirmed: MessageResponse,
+): Boolean =
+    confirmed.uuid == expectedMessageUuid &&
+        confirmed.streamUuid == expectedStreamUuid &&
+        confirmed.topicUuid == expectedTopicUuid &&
+        confirmed.read
+
+private fun newestMessageUuid(
+    messages: List<MessageResponse>,
+    firstUuid: String?,
+    secondUuid: String,
+): String {
+    val candidates = setOfNotNull(firstUuid, secondUuid)
+    return messages
+        .asSequence()
+        .filter { it.uuid in candidates }
+        .mapNotNull { message ->
+            messagePosition(message)?.let { message.uuid to it }
+        }
+        .maxWithOrNull { left, right ->
+            compareMessagePositions(left.second, right.second)
+        }
+        ?.first
+        ?: secondUuid
 }
 
 private data class MessagePosition(

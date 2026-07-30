@@ -104,6 +104,7 @@ data class MessageResponse(
     var payload: MessageResponsePayload,
     @SerialName("is_own") val isOwn: Boolean,
     var reactions: Map<String, Int>,
+    val read: Boolean = true,
     val starred: Boolean = false,
     var user: UserResponseData? = null,
     val provider: ProviderReference? = null,

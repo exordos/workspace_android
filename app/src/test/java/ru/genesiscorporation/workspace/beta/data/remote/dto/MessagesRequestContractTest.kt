@@ -101,6 +101,20 @@ class MessagesRequestContractTest {
     }
 
     @Test
+    fun `read through action uses one canonical message boundary`() {
+        val request = MarkMessagesReadRequest(MESSAGE_UUID.uppercase())
+
+        assertEquals(
+            "/api/workspace/v1/messenger/messages/" +
+                "$MESSAGE_UUID/actions/read_up_to/invoke",
+            request.url,
+        )
+        assertThrows(IllegalArgumentException::class.java) {
+            MarkMessagesReadRequest("$MESSAGE_UUID/path")
+        }
+    }
+
+    @Test
     fun `message page rejects unsafe limits and malformed markers`() {
         assertThrows(IllegalArgumentException::class.java) {
             MessagesRequest(

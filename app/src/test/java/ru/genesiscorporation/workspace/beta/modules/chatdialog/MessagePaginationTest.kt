@@ -1,6 +1,7 @@
 package ru.genesiscorporation.workspace.beta.modules.chatdialog
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -163,9 +164,69 @@ class MessagePaginationTest {
         }
     }
 
+    @Test
+    fun `visible read boundary selects only the newest incoming unread row`() {
+        val messages = listOf(
+            message(OLDEST_UUID, read = false),
+            message(OLDER_UUID, read = false, isOwn = true),
+            message(ANCHOR_UUID, read = true),
+            message(NEWER_UUID, read = false),
+            message(NEWEST_UUID, read = false),
+        )
+
+        val boundary = newestVisibleUnreadBoundary(
+            messages = messages,
+            visibleMessageUuids = setOf(
+                OLDEST_UUID,
+                OLDER_UUID,
+                ANCHOR_UUID,
+                NEWER_UUID,
+            ),
+        )
+
+        assertEquals(NEWER_UUID, boundary?.uuid)
+        assertNull(
+            newestVisibleUnreadBoundary(
+                messages = messages,
+                visibleMessageUuids = setOf(OLDER_UUID, ANCHOR_UUID),
+            ),
+        )
+    }
+
+    @Test
+    fun `read through confirmation requires the exact readable scope`() {
+        val confirmed = message(ANCHOR_UUID, read = true)
+
+        assertTrue(
+            isConfirmedReadThrough(
+                expectedMessageUuid = ANCHOR_UUID,
+                expectedStreamUuid = STREAM_UUID,
+                expectedTopicUuid = TOPIC_UUID,
+                confirmed = confirmed,
+            ),
+        )
+        listOf(
+            confirmed.copy(uuid = NEWER_UUID),
+            confirmed.copy(streamUuid = "foreign-stream"),
+            confirmed.copy(topicUuid = "foreign-topic"),
+            confirmed.copy(read = false),
+        ).forEach { rejected ->
+            assertFalse(
+                isConfirmedReadThrough(
+                    expectedMessageUuid = ANCHOR_UUID,
+                    expectedStreamUuid = STREAM_UUID,
+                    expectedTopicUuid = TOPIC_UUID,
+                    confirmed = rejected,
+                ),
+            )
+        }
+    }
+
     private fun message(
         uuid: String,
         createdAt: String = "2026-07-30T00:00:00Z",
+        read: Boolean = true,
+        isOwn: Boolean = false,
     ) = MessageResponse(
         uuid = uuid,
         updatedAt = "2026-07-30T00:00:00Z",
@@ -175,8 +236,9 @@ class MessagePaginationTest {
         userUuid = USER_UUID,
         authorUuid = USER_UUID,
         payload = MessageResponsePayload(kind = "markdown", content = uuid),
-        isOwn = false,
+        isOwn = isOwn,
         reactions = emptyMap(),
+        read = read,
     )
 
     private companion object {

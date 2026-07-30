@@ -22,6 +22,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
@@ -36,6 +37,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import java.net.URI
 import java.time.Instant
 import java.time.OffsetDateTime
+import java.util.UUID
 import kotlin.plus
 
 
@@ -107,6 +109,78 @@ class EventsRepository() {
         }
     }
 
+    fun markStreamTopicMessagesReadThrough(
+        streamUuid: String,
+        topicUuid: String,
+        boundaryUuid: String,
+    ): List<String> {
+        val messages = _streamTopicMessages.value["$streamUuid.$topicUuid"]
+            .orEmpty()
+        val boundary = messages.singleOrNull { it.uuid == boundaryUuid }
+            ?: return emptyList()
+        val boundaryPosition = repositoryMessagePosition(boundary)
+            ?: return emptyList()
+        val messageUuids = messages.mapNotNull { message ->
+            val position = repositoryMessagePosition(message)
+                ?: return@mapNotNull null
+            message.uuid.takeIf {
+                !message.read &&
+                    !message.isOwn &&
+                    compareRepositoryMessagePositions(
+                        position,
+                        boundaryPosition,
+                    ) <= 0
+            }
+        }
+        markMessagesRead(messageUuids)
+        return messageUuids
+    }
+
+    fun markMessagesRead(messageUuids: Collection<String>) {
+        val targetUuids = messageUuids.toSet()
+        if (targetUuids.isEmpty()) return
+        var newlyReadMessages =
+            emptyMap<String, Pair<String, String>>()
+        _streamTopicMessages.update { current ->
+            val changed = mutableMapOf<String, Pair<String, String>>()
+            val updated = current.mapValues { (_, messages) ->
+                messages.map { message ->
+                    if (message.uuid in targetUuids && !message.read) {
+                        changed[message.uuid] =
+                            message.streamUuid to message.topicUuid
+                        message.copy(read = true)
+                    } else {
+                        message
+                    }
+                }
+            }
+            // MutableStateFlow may re-run this transform after a concurrent
+            // update. Keep only the rows changed by the successful attempt so
+            // duplicate realtime frames cannot decrement badges twice.
+            newlyReadMessages = changed
+            updated
+        }
+        _messagesPool.update { current ->
+            current.map { message ->
+                if (message.uuid in targetUuids && !message.read) {
+                    message.copy(read = true)
+                } else {
+                    message
+                }
+            }
+        }
+        newlyReadMessages.values
+            .groupingBy { it }
+            .eachCount()
+            .forEach { (conversation, count) ->
+            decrementTopicUnreadProjection(
+                streamUuid = conversation.first,
+                topicUuid = conversation.second,
+                count = count,
+            )
+        }
+    }
+
     fun addMessageToStreamTopic(message: MessageResponse) {
         val key = "${message.streamUuid}.${message.topicUuid}"
         message.user = users.value.firstOrNull { it.uuid == message.authorUuid }
@@ -118,21 +192,11 @@ class EventsRepository() {
 
     fun updateMessage(updatedMessage: MessageResponse) {
         val key = "${updatedMessage.streamUuid}.${updatedMessage.topicUuid}"
+        updatedMessage.user =
+            users.value.firstOrNull { it.uuid == updatedMessage.authorUuid }
         _streamTopicMessages.update { current ->
             val messages = current[key] ?: return@update current
-            val updatedMessages = messages.map { message ->
-                if (message.uuid == updatedMessage.uuid) {
-                    message.copy(
-                        payload = updatedMessage.payload,
-                        reactions = updatedMessage.reactions
-                    )
-                } else {
-                    message
-                }
-            }
-
-            if (updatedMessages == messages) return@update current
-            current + (key to updatedMessages)
+            current + (key to mergeMessages(messages, listOf(updatedMessage)))
         }
     }
 
@@ -238,7 +302,16 @@ class EventsRepository() {
                 current == null ||
                 messageUpdatedAt(message) >= messageUpdatedAt(current)
             ) {
-                merged[message.uuid] = message
+                // Workspace exposes read-only read actions: once this client
+                // has confirmed a row as read, an in-flight older page must
+                // not resurrect it as unread while still being allowed to
+                // deliver newer content or reaction fields.
+                merged[message.uuid] =
+                    if (current?.read == true && !message.read) {
+                        message.copy(read = true)
+                    } else {
+                        message
+                    }
             }
         }
         return merged.values.toList()
@@ -377,6 +450,32 @@ class EventsRepository() {
                     )
                 }
             }
+        }
+    }
+
+    private fun decrementTopicUnreadProjection(
+        streamUuid: String,
+        topicUuid: String,
+        count: Int,
+    ) {
+        if (count <= 0) return
+        var appliedDelta = 0
+        _streamTopics.update { current ->
+            val topics = current[streamUuid] ?: return@update current
+            val updatedTopics = topics.map { topic ->
+                if (topic.uuid == topicUuid) {
+                    val updatedCount =
+                        (topic.unreadCount - count).coerceAtLeast(0)
+                    appliedDelta = updatedCount - topic.unreadCount
+                    topic.copy(unreadCount = updatedCount)
+                } else {
+                    topic
+                }
+            }
+            current + (streamUuid to updatedTopics)
+        }
+        if (appliedDelta != 0) {
+            updateStreamUnreadProjection(streamUuid, appliedDelta)
         }
     }
 
@@ -792,6 +891,34 @@ class EventsRepository() {
                 updateMessagesPool(listOf(message))
                 updateMessage(message)
             }
+            "read" -> {
+                val kind = runCatching {
+                    json.parseToJsonElement(payload)
+                        .jsonObject["kind"]
+                        ?.jsonPrimitive
+                        ?.contentOrNull
+                }.getOrNull()
+                when (kind) {
+                    "message.read" -> {
+                        val message =
+                            json.decodeFromString<MessageResponse>(payload)
+                        markMessagesRead(listOf(message.uuid))
+                        updateMessagesPool(listOf(message))
+                        updateMessage(message)
+                    }
+
+                    "messages.read" -> {
+                        val event =
+                            json.decodeFromString<MessagesReadPayload>(payload)
+                        markMessagesRead(event.messageUuids)
+                    }
+
+                    else -> Log.w(
+                        "WebSocket",
+                        "Ignored unsupported message read event kind: $kind",
+                    )
+                }
+            }
             "deleted" -> {
                 removeMessageEverywhere(
                     json.decodeFromString<DeletedObjectPayload>(payload).uuid,
@@ -887,6 +1014,40 @@ data class MessageEvent(
     val message: MessageResponse,
     @SerialName("epoch_version") val epoch_version: Int
 )
+
+@Serializable
+data class MessagesReadPayload(
+    @SerialName("message_uuids") val messageUuids: List<String>,
+)
+
+private data class RepositoryMessagePosition(
+    val createdAt: Instant,
+    val uuid: String,
+)
+
+private fun repositoryMessagePosition(
+    message: MessageResponse,
+): RepositoryMessagePosition? {
+    val createdAt = runCatching {
+        OffsetDateTime.parse(message.createdAt).toInstant()
+    }.getOrNull() ?: return null
+    val uuid = runCatching {
+        UUID.fromString(message.uuid).toString()
+    }.getOrNull() ?: return null
+    return RepositoryMessagePosition(createdAt = createdAt, uuid = uuid)
+}
+
+private fun compareRepositoryMessagePositions(
+    left: RepositoryMessagePosition,
+    right: RepositoryMessagePosition,
+): Int {
+    val timeComparison = left.createdAt.compareTo(right.createdAt)
+    return if (timeComparison != 0) {
+        timeComparison
+    } else {
+        left.uuid.compareTo(right.uuid)
+    }
+}
 
 @Serializable
 data class StreamEvent(

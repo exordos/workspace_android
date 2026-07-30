@@ -55,6 +55,11 @@ class WorkspaceMessageContrastTest {
         ).forEachIndexed { index, accent ->
             assertContrast(accent, colors.messageBackground, "author accent $index")
         }
+        assertContrast(
+            colors.messageAccentBlue,
+            colors.background,
+            "first-unread marker",
+        )
     }
 
     private fun assertApplicationContrast(colors: WorkspaceColorsPalette) {

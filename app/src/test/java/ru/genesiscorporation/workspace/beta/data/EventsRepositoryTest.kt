@@ -1,6 +1,7 @@
 package ru.genesiscorporation.workspace.beta.data
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
@@ -10,6 +11,210 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 
 class EventsRepositoryTest {
+    @Test
+    fun `confirmed read through marks the composite prefix and updates badges`() {
+        val repository = EventsRepository()
+        val oldestUuid = "10000000-0000-4000-8000-000000000001"
+        val boundaryUuid = "20000000-0000-4000-8000-000000000002"
+        val newestUuid = "30000000-0000-4000-8000-000000000003"
+        val unreadMessages = listOf(
+            message(oldestUuid, "oldest").copy(read = false),
+            message(boundaryUuid, "boundary").copy(read = false),
+            message(newestUuid, "newest").copy(read = false),
+        )
+        repository.setInitialStreams(
+            listOf(
+                stream(
+                    defaultTopicUuid = TOPIC_UUID,
+                    notificationMode = "all_messages",
+                ).copy(unreadCount = 3),
+            ),
+        )
+        repository.addStreamTopics(
+            STREAM_UUID,
+            listOf(
+                topic(lastMessageUuid = newestUuid).copy(unreadCount = 3),
+            ),
+        )
+        repository.addStreamTopicMessages(
+            STREAM_UUID,
+            TOPIC_UUID,
+            unreadMessages,
+        )
+
+        val marked = repository.markStreamTopicMessagesReadThrough(
+            STREAM_UUID,
+            TOPIC_UUID,
+            boundaryUuid,
+        )
+
+        assertEquals(listOf(oldestUuid, boundaryUuid), marked)
+        val stored = repository.streamTopicMessages.value.getValue(TOPIC_KEY)
+        assertTrue(stored.single { it.uuid == oldestUuid }.read)
+        assertTrue(stored.single { it.uuid == boundaryUuid }.read)
+        assertFalse(stored.single { it.uuid == newestUuid }.read)
+        assertEquals(
+            1,
+            repository.streamTopics.value
+                .getValue(STREAM_UUID)
+                .single()
+                .unreadCount,
+        )
+        assertEquals(1, repository.streams.value.single().unreadCount)
+    }
+
+    @Test
+    fun `bulk read realtime event updates loaded rows and projections once`() {
+        val repository = EventsRepository()
+        val firstUuid = "40000000-0000-4000-8000-000000000004"
+        val secondUuid = "50000000-0000-4000-8000-000000000005"
+        repository.setInitialStreams(
+            listOf(
+                stream(
+                    defaultTopicUuid = TOPIC_UUID,
+                    notificationMode = "all_messages",
+                ).copy(unreadCount = 2),
+            ),
+        )
+        repository.addStreamTopics(
+            STREAM_UUID,
+            listOf(
+                topic(lastMessageUuid = secondUuid).copy(unreadCount = 2),
+            ),
+        )
+        repository.addStreamTopicMessages(
+            STREAM_UUID,
+            TOPIC_UUID,
+            listOf(
+                message(firstUuid, "first").copy(read = false),
+                message(secondUuid, "second").copy(read = false),
+            ),
+        )
+
+        repository.processTextFrame(
+            """
+                {
+                  "schema_version": 1,
+                  "epoch_version": 1,
+                  "object_type": "message",
+                  "action": "read",
+                  "payload": {
+                    "kind": "messages.read",
+                    "message_uuids": ["$firstUuid", "$secondUuid"]
+                  }
+                }
+            """.trimIndent(),
+        )
+        repository.processTextFrame(
+            """
+                {
+                  "schema_version": 1,
+                  "epoch_version": 2,
+                  "object_type": "message",
+                  "action": "read",
+                  "payload": {
+                    "kind": "messages.read",
+                    "message_uuids": ["$firstUuid", "$secondUuid"]
+                  }
+                }
+            """.trimIndent(),
+        )
+
+        assertTrue(
+            repository.streamTopicMessages.value
+                .getValue(TOPIC_KEY)
+                .all(MessageResponse::read),
+        )
+        assertEquals(
+            0,
+            repository.streamTopics.value
+                .getValue(STREAM_UUID)
+                .single()
+                .unreadCount,
+        )
+        assertEquals(0, repository.streams.value.single().unreadCount)
+    }
+
+    @Test
+    fun `single read realtime snapshot updates the complete loaded message`() {
+        val repository = EventsRepository()
+        repository.setInitialStreams(
+            listOf(
+                stream(
+                    defaultTopicUuid = TOPIC_UUID,
+                    notificationMode = "all_messages",
+                ).copy(unreadCount = 1),
+            ),
+        )
+        repository.addStreamTopics(
+            STREAM_UUID,
+            listOf(
+                topic(lastMessageUuid = MESSAGE_UUID).copy(unreadCount = 1),
+            ),
+        )
+        repository.addStreamTopicMessages(
+            STREAM_UUID,
+            TOPIC_UUID,
+            listOf(
+                message(MESSAGE_UUID, "before").copy(read = false),
+            ),
+        )
+
+        repository.processTextFrame(
+            messageEvent(
+                epoch = 1,
+                action = "read",
+                content = "authoritative snapshot",
+                read = true,
+            ),
+        )
+
+        val stored = repository.streamTopicMessages.value
+            .getValue(TOPIC_KEY)
+            .single()
+        assertTrue(stored.read)
+        assertEquals("authoritative snapshot", stored.payload.content)
+        assertEquals(
+            0,
+            repository.streamTopics.value
+                .getValue(STREAM_UUID)
+                .single()
+                .unreadCount,
+        )
+        assertEquals(0, repository.streams.value.single().unreadCount)
+    }
+
+    @Test
+    fun `a stale page cannot resurrect a confirmed read flag`() {
+        val repository = EventsRepository()
+        val confirmed = message(MESSAGE_UUID, "before").copy(
+            read = true,
+            updatedAt = "2026-07-30T10:00:01Z",
+        )
+        val laterSnapshotWithStaleReadFlag = confirmed.copy(
+            read = false,
+            updatedAt = "2026-07-30T10:00:02Z",
+            payload = confirmed.payload.copy(content = "newer content"),
+        )
+        repository.addStreamTopicMessages(
+            STREAM_UUID,
+            TOPIC_UUID,
+            listOf(confirmed),
+        )
+
+        repository.addStreamTopicMessages(
+            STREAM_UUID,
+            TOPIC_UUID,
+            listOf(laterSnapshotWithStaleReadFlag),
+        )
+
+        val stored = repository.streamTopicMessages.value
+            .getValue(TOPIC_KEY)
+            .single()
+        assertTrue(stored.read)
+        assertEquals("newer content", stored.payload.content)
+    }
+
     @Test
     fun `replacing a conversation window drops stale server rows but keeps local outbox`() {
         val repository = EventsRepository()
@@ -378,6 +583,7 @@ class EventsRepositoryTest {
         action: String,
         content: String,
         reactions: String = "",
+        read: Boolean? = null,
     ): String = """
         {
           "schema_version": 1,
@@ -396,6 +602,7 @@ class EventsRepositoryTest {
             "payload": {"kind": "markdown", "content": "$content"},
             "is_own": false,
             "reactions": {$reactions}
+            ${read?.let { ""","read":$it""" }.orEmpty()}
           }
         }
     """.trimIndent()

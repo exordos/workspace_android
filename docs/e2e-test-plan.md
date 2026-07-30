@@ -320,6 +320,17 @@ unsupported.
 | MSG-HIST-014 | Scroll below an around-message window | The ascending continuation loads once near the lower boundary or through `Загрузить следующие`, appends in chronological order, and removes its status control at the real newest row |
 | MSG-HIST-015 | One context direction fails | The anchor and successful side remain usable; the failed side exposes a real Retry using the safe boundary, while rejected/malformed later markers reset to the route anchor instead of looping |
 | MSG-HIST-016 | Rotate while focused on an old route anchor | Portrait → landscape → portrait keeps the exact anchor visible and does not jump to the latest row when status rows or context pages relayout |
+| MSG-UNREAD-001 | Open a latest window containing incoming unread rows | The list initially positions the first loaded incoming unread row at a non-interactive `Непрочитанные сообщения • N` marker; loading alone sends no read request |
+| MSG-UNREAD-002 | Open an exact focused-message route while unread rows exist | Exact focus has priority over the first-unread anchor and opening the route still sends no read request |
+| MSG-UNREAD-003 | Drag the list until unread rows are at least 50% visible | Only incoming unread rows qualify; one canonical `read_up_to` request uses the newest visible `(created_at, uuid)` boundary |
+| MSG-UNREAD-004 | Visible boundaries change while a read request is in flight | One ViewModel-owned request remains active and the newest queued boundary is processed next without duplicate requests |
+| MSG-UNREAD-005 | The read response is malformed, cross-topic, wrong-message, or still unread | Local rows and badges remain unread and a visible error is reported; no unconfirmed optimistic read is committed |
+| MSG-UNREAD-006 | Receive full `message.read` and batch `messages.read` realtime events | Loaded row flags, topic count and stream count converge; replaying the batch does not decrement projections twice |
+| MSG-UNREAD-007 | A page response races a confirmed read | A later/stale snapshot may update content and reactions but cannot resurrect a locally confirmed read flag |
+| MSG-UNREAD-008 | Offline, timeout or 5xx during viewport read | Rows remain unread, the error is visible, and a later viewport pass retries after connectivity returns |
+| MSG-UNREAD-009 | Rotate before and after crossing the unread marker | The saved marker/gesture state does not cause eager read, duplicate read requests, a jump to latest, or a marker attached to an already-read row |
+| MSG-UNREAD-010 | The first unread predates the bounded latest page | The client fetches and anchors the exact server-first unread window instead of silently treating the latest loaded unread as globally first |
+| MSG-UNREAD-011 | All unread rows fit without a scrollable drag | After the explicit desktop-compatible bottom/visibility condition, visible rows become read; merely opening the short chat is insufficient |
 
 Current physical coverage: MSG-HIST-001/002, 009–014 and 016 passed on the USB
 Android 14 Pixel using the sandbox topic's 55-message generated sequence.
@@ -328,6 +339,14 @@ MSG-HIST-005 controlled timeout/5xx, MSG-HIST-006 deleted-marker injection and
 MSG-HIST-008 edit-in-old-history remain fault/interaction automation work;
 merely disabling radios is not counted as proof because an already resolved
 in-app route can reuse retained runtime state.
+
+Current unread coverage: MSG-UNREAD-003–007 have focused request/model/repository
+tests, including composite-boundary selection, full and batch realtime frames,
+duplicate delivery and stale-page regression. Physical acceptance in a
+naturally unread sandbox conversation is required before marking
+MSG-UNREAD-001–009 passed. MSG-UNREAD-008 controlled post-gesture faults,
+MSG-UNREAD-010 exact off-page first-unread loading and MSG-UNREAD-011 explicit
+short-chat completion remain implementation/automation work.
 
 ### Current history acceptance coverage
 
