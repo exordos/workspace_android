@@ -24,7 +24,14 @@ class WorkspaceNetworkViewModel(
 ) : ViewModel() {
     private val sessionCookieStore = SessionCookieStore()
     private val httpClient = HttpClient {
-        install(WebSockets)
+        install(WebSockets) {
+            // Ktor closes a session when a pong is not received within twice
+            // this interval. That turns a half-open mobile transport into the
+            // normal bounded reconnect + REST catch-up path instead of leaving
+            // the catalog silently stale indefinitely.
+            pingIntervalMillis = REALTIME_PING_INTERVAL_MILLIS
+            maxFrameSize = MAX_REALTIME_FRAME_BYTES
+        }
         install(HttpTimeout) {
             requestTimeoutMillis = 45_000
             connectTimeoutMillis = 15_000
@@ -82,3 +89,6 @@ class WorkspaceNetworkViewModel(
         super.onCleared()
     }
 }
+
+internal const val REALTIME_PING_INTERVAL_MILLIS = 20_000L
+internal const val MAX_REALTIME_FRAME_BYTES = 2L * 1_024L * 1_024L

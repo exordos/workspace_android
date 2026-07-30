@@ -650,10 +650,17 @@ successfully applied, duplicate/non-advancing pages fail closed, pagination is
 bounded, and REST `410` follows the same snapshot-recovery path as socket
 `4410`. Unit/contract tests cover isolation, selective cleanup, validation,
 ordering and exact query fields; an Android Keystore test verifies encrypted
-round-trip and cross-account separation. RT-001/002/005 still require
-controlled socket/request-count device automation, while RT-004/012/013 still
-require process-kill and injected real `410`/`4410` cross-client convergence
-passes. Durable catalog/message snapshots are not implied by the cursor store.
+round-trip and cross-account separation. The Ktor client now sends protocol
+pings every 20 seconds; its 40-second pong deadline turns a half-open socket
+into the normal reconnect/catch-up path, and a 2 MiB frame ceiling prevents an
+unbounded single-frame allocation. On the physical Android 14 Pixel, removing
+active network connectivity kept the same process alive and produced catch-up
+retries at approximately 2/4/8/16/30-second intervals; restoring connectivity
+produced exactly one new connection after the active backoff. RT-001/002/005
+still require controlled socket/request-count device automation, while
+RT-004/012/013 still require process-kill and injected real
+`410`/`4410`/packet-blackhole cross-client convergence passes. Durable
+catalog/message snapshots are not implied by the cursor store.
 
 Use Android network controls and a controllable backend proxy for latency,
 disconnect, status-code, body-corruption, and reorder cases. Do not rely on
