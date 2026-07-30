@@ -1,3 +1,6 @@
 <resources>
-    <string name="app_name">Exordos Workspace</string>
+    <string name="app_name" translatable="false">Exordos Workspace</string>
+    <string name="realtime_connecting">Connecting to live updates…</string>
+    <string name="realtime_recovering">Live updates are interrupted. Showing the latest available data.</string>
+    <string name="realtime_retry_now">Retry now</string>
 </resources>

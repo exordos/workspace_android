@@ -21,6 +21,7 @@ class WorkspaceViewModel(
 ): ViewModel() {
     private val _currentCallMessage = MutableStateFlow<MessageResponse?>(null)
     val currentCallMessage: StateFlow<MessageResponse?> = _currentCallMessage
+    val realtimeConnectionState = repo.realtimeConnectionState
 
     init {
         viewModelScope.launch {
@@ -78,6 +79,9 @@ class WorkspaceViewModel(
     fun setCurrentCallMessage(callMessage: MessageResponse?) {
         _currentCallMessage.value = callMessage
     }
+
+    fun retryRealtimeConnectionNow(): Boolean =
+        repo.requestRealtimeReconnect()
 }
 
 private data class AccountRuntime(

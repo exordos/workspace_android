@@ -955,6 +955,23 @@ state, screenshots, diagnostics, logs, crash reports, and process snapshots.
 - Interrupted actions remain understandable without relying on toast-only
   feedback.
 
+## Realtime connection health and recovery
+
+| ID | Scenario | Expected result | Current evidence |
+| --- | --- | --- | --- |
+| RT-001 | Healthy cold/warm foreground connection completes within 1.5 seconds | No transient banner flashes; the catalog remains usable | Physical Android 14 Pixel pass |
+| RT-002 | Cursor bootstrap, REST catch-up or websocket handshake remains in progress beyond 1.5 seconds | A resource-backed connecting banner appears without an inert retry control | Mapping/compile covered; controlled delay pending |
+| RT-003 | Websocket transport opens but no protocol `ready` frame arrives | The connection never reports healthy; heartbeat timeout reaches bounded backoff | Ready gating implemented; controlled half-open pending |
+| RT-004 | Valid `ready` frame arrives after strict catch-up | The banner disappears only after the server generation/version is accepted and persisted | Cursor tests + physical Android 14 Pixel pass |
+| RT-005 | Disable every network transport while the app is foregrounded | Existing rows remain visible, the half-open socket closes within 40 seconds, and an assertive recovery banner explains that shown data may be stale | Ping policy + physical Android 14 Pixel pass |
+| RT-006 | Tap **Retry now** during backoff | The current delay is interrupted once and the retained owner immediately starts cursor/bootstrap recovery; rapid taps are conflated | Guard/channel tests + physical Android 14 Pixel pass |
+| RT-007 | Restore network after one or more failed attempts | REST catch-up completes before a new socket opens, missed events converge once, and the banner clears only on `ready` | Catch-up ordering + physical Android 14 Pixel pass |
+| RT-008 | Background and foreground the app during connect/backoff | Background pause is silent and produces no retry loop; foreground resumes through the single retained runtime | Lifecycle owner implemented; controlled lifecycle pending |
+| RT-009 | Rotate and switch light/dark theme while either banner is visible | Content remains reachable, contrast stays legible, TalkBack has one live-region announcement, and retry remains functional | Portrait/landscape and light/dark physical pass; TalkBack traversal pending |
+| RT-010 | Switch or remove the active account after queuing manual retry | Pending retry is discarded and cannot start work with the previous owner credentials | Owner guard + queue clearing implemented; delayed switch pending |
+| RT-011 | Receive REST `410` or websocket `4410` during recovery | Server-derived projections reset, local outbox rows survive, catch-up restarts from a fresh cursor and health remains visible until ready | Repository unit covered; backend/device pending |
+| RT-012 | Repeated flapping through maximum backoff | Delay remains bounded, no duplicate socket owner appears, banner semantics do not spam on unchanged state, and manual retry never runs in background | Backoff/unit partly covered; soak pending |
+
 ## Security and privacy
 
 - Reject cleartext server URLs outside an explicit development-only policy.

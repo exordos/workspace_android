@@ -12,13 +12,15 @@ import io.ktor.websocket.readReason
 import io.ktor.websocket.readText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -70,6 +72,9 @@ class EventsRepository(
         MutableStateFlow(RealtimeConnectionState.PAUSED)
     val realtimeConnectionState: StateFlow<RealtimeConnectionState> =
         _realtimeConnectionState.asStateFlow()
+    private val manualRealtimeReconnectRequests =
+        Channel<Unit>(capacity = Channel.CONFLATED)
+    private val realtimeControlLock = Any()
     private val _realtimeRecoveryVersion = MutableStateFlow(0L)
     val realtimeRecoveryVersion: StateFlow<Long> =
         _realtimeRecoveryVersion.asStateFlow()
@@ -96,12 +101,50 @@ class EventsRepository(
             _externalOperations.asStateFlow()
 
     fun setAppForeground(foreground: Boolean) {
-        _appForeground.value = foreground
+        synchronized(realtimeControlLock) {
+            if (!foreground) {
+                clearPendingRealtimeReconnectRequests()
+            }
+            _appForeground.value = foreground
+        }
     }
 
     fun pauseRealtimeForAuthentication() {
-        _realtimeConnectionState.value = RealtimeConnectionState.PAUSED
+        synchronized(realtimeControlLock) {
+            clearPendingRealtimeReconnectRequests()
+            _realtimeConnectionState.value =
+                RealtimeConnectionState.PAUSED
+        }
     }
+
+    fun requestRealtimeReconnect(): Boolean =
+        synchronized(realtimeControlLock) {
+            if (
+                !shouldAcceptRealtimeReconnect(
+                    state = _realtimeConnectionState.value,
+                    appForeground = _appForeground.value,
+                )
+            ) {
+                return@synchronized false
+            }
+            if (
+                !_realtimeConnectionState.compareAndSet(
+                    expect = RealtimeConnectionState.BACKING_OFF,
+                    update = RealtimeConnectionState.CONNECTING,
+                )
+            ) {
+                return@synchronized false
+            }
+            val accepted =
+                manualRealtimeReconnectRequests.trySend(Unit).isSuccess
+            if (!accepted) {
+                _realtimeConnectionState.compareAndSet(
+                    expect = RealtimeConnectionState.CONNECTING,
+                    update = RealtimeConnectionState.BACKING_OFF,
+                )
+            }
+            accepted
+        }
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -111,6 +154,11 @@ class EventsRepository(
     var currentUser: UserResponseData? = null
 
     fun resetAccountState() {
+        synchronized(realtimeControlLock) {
+            clearPendingRealtimeReconnectRequests()
+            _realtimeConnectionState.value =
+                RealtimeConnectionState.PAUSED
+        }
         currentUser = null
         jitsiServerUrl = ""
         resetRealtimeCursor()
@@ -1127,7 +1175,7 @@ class EventsRepository(
                     Log.d("WebSocket", "Failed to load the initial event cursor")
                     _realtimeConnectionState.value =
                         RealtimeConnectionState.BACKING_OFF
-                    delay(retryDelayMillis)
+                    awaitRealtimeRetry(retryDelayMillis)
                     retryDelayMillis = nextRealtimeRetryDelay(
                         currentDelayMillis = retryDelayMillis,
                         readyReceived = false,
@@ -1151,7 +1199,7 @@ class EventsRepository(
                         if (consecutiveExpiredCursors > 1) {
                             _realtimeConnectionState.value =
                                 RealtimeConnectionState.BACKING_OFF
-                            delay(retryDelayMillis)
+                            awaitRealtimeRetry(retryDelayMillis)
                             retryDelayMillis = nextRealtimeRetryDelay(
                                 currentDelayMillis = retryDelayMillis,
                                 readyReceived = false,
@@ -1172,7 +1220,7 @@ class EventsRepository(
                         }
                         _realtimeConnectionState.value =
                             RealtimeConnectionState.BACKING_OFF
-                        delay(retryDelayMillis)
+                        awaitRealtimeRetry(retryDelayMillis)
                         retryDelayMillis = nextRealtimeRetryDelay(
                             currentDelayMillis = retryDelayMillis,
                             readyReceived = false,
@@ -1228,7 +1276,7 @@ class EventsRepository(
                     }
                     _realtimeConnectionState.value =
                         RealtimeConnectionState.BACKING_OFF
-                    delay(retryDelayMillis)
+                    awaitRealtimeRetry(retryDelayMillis)
                     retryDelayMillis = nextRealtimeRetryDelay(
                         currentDelayMillis = retryDelayMillis,
                         readyReceived = connectionResult.readyReceived,
@@ -1244,6 +1292,20 @@ class EventsRepository(
                 } else {
                     RealtimeConnectionState.PAUSED
                 }
+        }
+    }
+
+    private suspend fun awaitRealtimeRetry(delayMillis: Long) {
+        awaitRealtimeRetryOrTimeout(
+            requests = manualRealtimeReconnectRequests,
+            timeoutMillis = delayMillis,
+        )
+    }
+
+    private fun clearPendingRealtimeReconnectRequests() {
+        while (manualRealtimeReconnectRequests.tryReceive().isSuccess) {
+            // A reconnect request is account- and foreground-scoped. Never let
+            // an old tap leak into a later account or authentication session.
         }
     }
 
@@ -1503,9 +1565,6 @@ class EventsRepository(
             }
         ) {
             connectedAtNanos = System.nanoTime()
-            _realtimeConnectionState.value =
-                RealtimeConnectionState.CONNECTED
-            Log.d("WebSocket", "Connected")
             for (frame in incoming) {
                 when (frame) {
                     is Frame.Text -> {
@@ -1514,6 +1573,11 @@ class EventsRepository(
                             val previousEpoch = latestEpoch
                             val frameReady =
                                 processTextFrame(receivedText)
+                            if (frameReady && !readyReceived) {
+                                _realtimeConnectionState.value =
+                                    RealtimeConnectionState.CONNECTED
+                                Log.d("WebSocket", "Ready")
+                            }
                             readyReceived =
                                 frameReady || readyReceived
                             if (
@@ -1906,6 +1970,25 @@ enum class RealtimeConnectionState {
     CONNECTING,
     CONNECTED,
     BACKING_OFF,
+}
+
+internal fun shouldAcceptRealtimeReconnect(
+    state: RealtimeConnectionState,
+    appForeground: Boolean,
+): Boolean =
+    appForeground && state == RealtimeConnectionState.BACKING_OFF
+
+internal suspend fun awaitRealtimeRetryOrTimeout(
+    requests: ReceiveChannel<Unit>,
+    timeoutMillis: Long,
+): Boolean {
+    require(timeoutMillis > 0L) {
+        "Realtime retry timeout must be positive"
+    }
+    return withTimeoutOrNull(timeoutMillis) {
+        requests.receive()
+        true
+    } ?: false
 }
 
 private data class RealtimeConnectionResult(

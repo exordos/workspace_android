@@ -1,0 +1,5 @@
+<resources>
+    <string name="realtime_connecting">Подключаемся к обновлениям…</string>
+    <string name="realtime_recovering">Связь с обновлениями прервана. Показаны последние доступные данные.</string>
+    <string name="realtime_retry_now">Повторить сейчас</string>
+</resources>

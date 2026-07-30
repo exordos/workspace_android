@@ -44,6 +44,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -65,19 +66,20 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -131,6 +133,7 @@ import ru.genesiscorporation.workspace.beta.data.ConversationStateStore
 import ru.genesiscorporation.workspace.beta.data.push.PushDeviceRegistrationManager
 import ru.genesiscorporation.workspace.beta.data.push.PushNavigationRequest
 import ru.genesiscorporation.workspace.beta.ui.IncomingCall
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -568,12 +571,31 @@ fun WokspaceApp(
     onIncomingShareHandled: () -> Unit,
 ) {
     val colors = LocalWorkspaceColorsPalette.current
-    val lifecycleOwner = LocalLifecycleOwner.current
     val navController = rememberNavController()
     val context = LocalContext.current
     val currentCallMessage by viewModel.currentCallMessage.collectAsState()
+    val realtimeConnectionState by
+        viewModel.realtimeConnectionState.collectAsState()
+    var visibleConnectionBanner by remember {
+        mutableStateOf<RealtimeConnectionBannerState?>(null)
+    }
     var currentDestination by rememberSaveable { mutableIntStateOf(0) }
     var showBottomNavigation by rememberSaveable { mutableStateOf(true) }
+
+    LaunchedEffect(realtimeConnectionState) {
+        val nextBanner =
+            realtimeConnectionBannerState(realtimeConnectionState)
+        if (nextBanner?.kind == RealtimeConnectionBannerKind.CONNECTING) {
+            val recovering =
+                visibleConnectionBanner?.kind ==
+                    RealtimeConnectionBannerKind.RECOVERING
+            if (!recovering) {
+                visibleConnectionBanner = null
+                delay(CONNECTION_BANNER_CONNECTING_DELAY_MILLIS)
+            }
+        }
+        visibleConnectionBanner = nextBanner
+    }
 
     LaunchedEffect(
         pendingPushNavigation,
@@ -598,61 +620,87 @@ fun WokspaceApp(
             .background(colors.background)
             .windowInsetsPadding(WindowInsets.statusBars),
     ) {
-        RequestNotificationPermissionIfNeeded()
-        NavHost(
-            navController = navController,
-            startDestination = Chat.route,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(bottom = if (showBottomNavigation) 102.dp else 0.dp),
+        Column(
+            modifier = Modifier.fillMaxSize(),
         ) {
-            composable(Chat.route) {
-                currentDestination = 0
-                ChatNavigation(
-                    workspaceApiClient = workspaceApiClient,
-                    eventsRepository = eventsRepository,
-                    conversationStateStore = conversationStateStore,
-                    pendingPushNavigation = pendingPushNavigation,
-                    onPushNavigationHandled = onPushNavigationHandled,
-                    pendingDeepLink = pendingDeepLink,
-                    onDeepLinkHandled = onDeepLinkHandled,
-                    pendingIncomingShare = pendingIncomingShare,
-                    onIncomingShareHandled = onIncomingShareHandled,
-                    onBottomNavigationVisibilityChange = { showBottomNavigation = it },
+            visibleConnectionBanner?.let { banner ->
+                WorkspaceConnectionBanner(
+                    state = banner,
+                    onRetryNow = viewModel::retryRealtimeConnectionNow,
                 )
             }
-            composable(Profile.route) {
-                LaunchedEffect(Unit) { showBottomNavigation = true }
-                currentDestination = 1
-                ProfileNavigation(
-                    workspaceApiClient,
-                    eventsRepository,
-                    pushDeviceRegistrationManager,
-                    onBottomNavigationVisibilityChange = {
-                        showBottomNavigation = it
-                    },
-                )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+            ) {
+                RequestNotificationPermissionIfNeeded()
+                NavHost(
+                    navController = navController,
+                    startDestination = Chat.route,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(
+                            bottom =
+                                if (showBottomNavigation) 102.dp else 0.dp,
+                        ),
+                ) {
+                    composable(Chat.route) {
+                        currentDestination = 0
+                        ChatNavigation(
+                            workspaceApiClient = workspaceApiClient,
+                            eventsRepository = eventsRepository,
+                            conversationStateStore = conversationStateStore,
+                            pendingPushNavigation = pendingPushNavigation,
+                            onPushNavigationHandled =
+                                onPushNavigationHandled,
+                            pendingDeepLink = pendingDeepLink,
+                            onDeepLinkHandled = onDeepLinkHandled,
+                            pendingIncomingShare = pendingIncomingShare,
+                            onIncomingShareHandled =
+                                onIncomingShareHandled,
+                            onBottomNavigationVisibilityChange = {
+                                showBottomNavigation = it
+                            },
+                        )
+                    }
+                    composable(Profile.route) {
+                        LaunchedEffect(Unit) {
+                            showBottomNavigation = true
+                        }
+                        currentDestination = 1
+                        ProfileNavigation(
+                            workspaceApiClient,
+                            eventsRepository,
+                            pushDeviceRegistrationManager,
+                            onBottomNavigationVisibilityChange = {
+                                showBottomNavigation = it
+                            },
+                        )
+                    }
+                }
+                if (showBottomNavigation) {
+                    WorkspaceBottomNavigation(
+                        selectedDestination = currentDestination,
+                        onChatClick = {
+                            currentDestination = 0
+                            navController.navigate(Chat.route) {
+                                popUpTo(Chat.route)
+                                launchSingleTop = true
+                            }
+                        },
+                        onProfileClick = {
+                            currentDestination = 1
+                            navController.navigate(Profile.route) {
+                                popUpTo(Chat.route)
+                                launchSingleTop = true
+                            }
+                        },
+                        modifier =
+                            Modifier.align(Alignment.BottomCenter),
+                    )
+                }
             }
-        }
-        if (showBottomNavigation) {
-            WorkspaceBottomNavigation(
-                selectedDestination = currentDestination,
-                onChatClick = {
-                    currentDestination = 0
-                    navController.navigate(Chat.route) {
-                        popUpTo(Chat.route)
-                        launchSingleTop = true
-                    }
-                },
-                onProfileClick = {
-                    currentDestination = 1
-                    navController.navigate(Profile.route) {
-                        popUpTo(Chat.route)
-                        launchSingleTop = true
-                    }
-                },
-                modifier = Modifier.align(Alignment.BottomCenter),
-            )
         }
         val callMessage = currentCallMessage
         if (callMessage != null) {
@@ -660,6 +708,66 @@ fun WokspaceApp(
         }
     }
 }
+
+@Composable
+private fun WorkspaceConnectionBanner(
+    state: RealtimeConnectionBannerState,
+    onRetryNow: () -> Unit,
+) {
+    val colors = LocalWorkspaceColorsPalette.current
+    val message = stringResource(
+        when (state.kind) {
+            RealtimeConnectionBannerKind.CONNECTING ->
+                R.string.realtime_connecting
+            RealtimeConnectionBannerKind.RECOVERING ->
+                R.string.realtime_recovering
+        },
+    )
+    val foreground = Color(0xFF1B1B1D)
+
+    Surface(
+        color = colors.indicatorYellow,
+        contentColor = foreground,
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics {
+                liveRegion = LiveRegionMode.Assertive
+                contentDescription = message
+            },
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = message,
+                color = foreground,
+                fontSize = 14.sp,
+                lineHeight = 18.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
+            )
+            if (state.canRetryNow) {
+                TextButton(
+                    onClick = onRetryNow,
+                ) {
+                    Text(
+                        text = stringResource(
+                            R.string.realtime_retry_now,
+                        ),
+                        color = foreground,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+        }
+    }
+}
+
+private const val CONNECTION_BANNER_CONNECTING_DELAY_MILLIS = 1_500L
 
 @Composable
 private fun WorkspaceBottomNavigation(
