@@ -1,6 +1,9 @@
 package ru.genesiscorporation.workspace.beta
 
 import android.content.Context
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.ViewModel
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeout
@@ -46,6 +49,16 @@ class WorkspaceNetworkViewModel(
     val eventsRepository = EventsRepository().also { repository ->
         repository.client = apiClient
     }
+    private val processLifecycle = ProcessLifecycleOwner.get().lifecycle
+    private val processLifecycleObserver = LifecycleEventObserver { _, event ->
+        when (event) {
+            Lifecycle.Event.ON_START ->
+                eventsRepository.setAppForeground(true)
+            Lifecycle.Event.ON_STOP ->
+                eventsRepository.setAppForeground(false)
+            else -> Unit
+        }
+    }
     val conversationStateStore = userViewModel.conversationStateStore
     val pushDeviceRegistrationManager = PushDeviceRegistrationManager(
         tokenProvider = FirebasePushRegistrationTokenProvider(),
@@ -53,7 +66,16 @@ class WorkspaceNetworkViewModel(
         remoteDataSource = WorkspacePushDeviceRemoteDataSource(apiClient),
     )
 
+    init {
+        processLifecycle.addObserver(processLifecycleObserver)
+        eventsRepository.setAppForeground(
+            processLifecycle.currentState.isAtLeast(Lifecycle.State.STARTED),
+        )
+    }
+
     override fun onCleared() {
+        processLifecycle.removeObserver(processLifecycleObserver)
+        eventsRepository.setAppForeground(false)
         httpClient.close()
         super.onCleared()
     }

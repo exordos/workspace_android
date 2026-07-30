@@ -12,6 +12,97 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 
 class EventsRepositoryTest {
     @Test
+    fun `realtime retry backs off across flapping connections and resets after stability`() {
+        assertEquals(
+            2_000L,
+            nextRealtimeRetryDelay(
+                currentDelayMillis = 1_000L,
+                readyReceived = false,
+                connectedDurationMillis = 0L,
+            ),
+        )
+        assertEquals(
+            30_000L,
+            nextRealtimeRetryDelay(
+                currentDelayMillis = 30_000L,
+                readyReceived = true,
+                connectedDurationMillis = 59_999L,
+            ),
+        )
+        assertEquals(
+            1_000L,
+            nextRealtimeRetryDelay(
+                currentDelayMillis = 30_000L,
+                readyReceived = true,
+                connectedDurationMillis = 60_000L,
+            ),
+        )
+    }
+
+    @Test
+    fun `expired realtime cursor clears derived data but retains local outbox rows`() {
+        val repository = EventsRepository()
+        repository.latestEpoch = 42
+        repository.epochGeneration = "old-generation"
+        repository.setInitialStreams(
+            listOf(
+                stream(
+                    defaultTopicUuid = TOPIC_UUID,
+                    notificationMode = "all_messages",
+                ),
+            ),
+        )
+        repository.addStreamTopics(
+            STREAM_UUID,
+            listOf(topic(lastMessageUuid = MESSAGE_UUID)),
+        )
+        repository.addStreamTopicMessages(
+            STREAM_UUID,
+            TOPIC_UUID,
+            listOf(
+                message(MESSAGE_UUID, "server"),
+                message("local-pending", "pending"),
+            ),
+        )
+
+        assertTrue(repository.handleRealtimeConnectionClosed(4_410))
+
+        assertEquals(0, repository.latestEpoch)
+        assertEquals("", repository.epochGeneration)
+        assertTrue(repository.streams.value.isEmpty())
+        assertTrue(repository.streamTopics.value.isEmpty())
+        assertEquals(
+            listOf("local-pending"),
+            repository.streamTopicMessages.value
+                .getValue(TOPIC_KEY)
+                .map(MessageResponse::uuid),
+        )
+        assertEquals(1L, repository.realtimeRecoveryVersion.value)
+    }
+
+    @Test
+    fun `ordinary realtime close leaves cursor and projections untouched`() {
+        val repository = EventsRepository()
+        repository.latestEpoch = 42
+        repository.epochGeneration = "generation"
+        repository.setInitialStreams(
+            listOf(
+                stream(
+                    defaultTopicUuid = TOPIC_UUID,
+                    notificationMode = "all_messages",
+                ),
+            ),
+        )
+
+        assertFalse(repository.handleRealtimeConnectionClosed(1_006))
+
+        assertEquals(42, repository.latestEpoch)
+        assertEquals("generation", repository.epochGeneration)
+        assertEquals(1, repository.streams.value.size)
+        assertEquals(0L, repository.realtimeRecoveryVersion.value)
+    }
+
+    @Test
     fun `confirmed read through marks the composite prefix and updates badges`() {
         val repository = EventsRepository()
         val oldestUuid = "10000000-0000-4000-8000-000000000001"

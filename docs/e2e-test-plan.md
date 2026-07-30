@@ -633,6 +633,20 @@ the soak profile remain required and are not claimed.
 | RT-013 | Process killed during catch-up | Durable cursor is never advanced past unapplied events |
 | RT-014 | Backend permission changes | Cached forbidden actions disappear after reconciliation |
 
+Current verified coverage: the retry decision matrix proves that failed or
+short-lived sockets back off from 1 to at most 30 seconds and that the delay
+resets only after a ready connection remains stable for 60 seconds. Repository
+tests prove duplicate event suppression and exact cursor advancement, plus
+`4410` recovery that clears the expired cursor and server-derived projections,
+retains `local-*` outbox rows, increments one recovery generation, and leaves
+ordinary closes untouched. The retained runtime observes process
+foreground/background lifecycle (so configuration changes do not create socket
+churn); the catalog and an open conversation observe the recovery generation
+and refetch authoritative snapshots. RT-001/002/005
+still require controlled socket/request-count device automation, RT-012 still
+requires an injected real `4410` cross-client convergence pass, and durable
+cursor/REST catch-up/process-death coverage in RT-004/013 remains open.
+
 Use Android network controls and a controllable backend proxy for latency,
 disconnect, status-code, body-corruption, and reorder cases. Do not rely on
 visual observation alone; assert request counts, cursor values, entity counts,

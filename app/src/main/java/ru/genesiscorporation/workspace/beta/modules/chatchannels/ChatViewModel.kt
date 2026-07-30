@@ -8,6 +8,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.dropWhile
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -183,8 +185,14 @@ class ChatViewModel(
     }
 
     init {
+        val initialRecoveryVersion = repo.realtimeRecoveryVersion.value
         viewModelScope.launch {
             loadServerSettings()
+            repo.realtimeRecoveryVersion
+                .dropWhile { it <= initialRecoveryVersion }
+                .collectLatest {
+                    loadServerSettings()
+                }
         }
     }
 

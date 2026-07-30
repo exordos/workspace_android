@@ -41,6 +41,7 @@ class WorkspaceViewModel(
                     repo.start()
                 } else {
                     repo.resetRealtimeCursor()
+                    repo.pauseRealtimeForAuthentication()
                 }
             }
         }

@@ -18,7 +18,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.dropWhile
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
@@ -2757,6 +2759,7 @@ class ChatDialogViewModel(
     }
 
     init {
+        val initialRecoveryVersion = repo.realtimeRecoveryVersion.value
         _isLoading.value = true
         viewModelScope.launch {
             try {
@@ -2801,6 +2804,11 @@ class ChatDialogViewModel(
                     scheduleRemoteDraftSync(initialDelayMillis = 0)
                 }
             }
+            repo.realtimeRecoveryVersion
+                .dropWhile { it <= initialRecoveryVersion }
+                .collectLatest {
+                    loadLatestMessages(resolveMessageFocus = false)
+                }
         }
     }
 

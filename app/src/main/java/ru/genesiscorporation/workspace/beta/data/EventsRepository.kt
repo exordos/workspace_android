@@ -16,6 +16,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -52,6 +53,23 @@ class EventsRepository() {
         epochGeneration = ""
     }
 
+    private val _appForeground = MutableStateFlow(false)
+    private val _realtimeConnectionState =
+        MutableStateFlow(RealtimeConnectionState.PAUSED)
+    val realtimeConnectionState: StateFlow<RealtimeConnectionState> =
+        _realtimeConnectionState.asStateFlow()
+    private val _realtimeRecoveryVersion = MutableStateFlow(0L)
+    val realtimeRecoveryVersion: StateFlow<Long> =
+        _realtimeRecoveryVersion.asStateFlow()
+
+    fun setAppForeground(foreground: Boolean) {
+        _appForeground.value = foreground
+    }
+
+    fun pauseRealtimeForAuthentication() {
+        _realtimeConnectionState.value = RealtimeConnectionState.PAUSED
+    }
+
     private val json = Json {
         ignoreUnknownKeys = true
         isLenient = true
@@ -70,6 +88,30 @@ class EventsRepository() {
         _users.value = emptyList()
         _streams.value = emptyList()
         _folders.value = emptyList()
+    }
+
+    private fun invalidateDerivedStateForExpiredCursor() {
+        currentUser = null
+        jitsiServerUrl = ""
+        resetRealtimeCursor()
+        _streamTopicMessages.update { conversations ->
+            conversations.mapValues { (_, messages) ->
+                messages.filter { it.uuid.startsWith("local-") }
+            }.filterValues(List<MessageResponse>::isNotEmpty)
+        }
+        _streamTopics.value = emptyMap()
+        _messagesPool.value = emptyList()
+        _userReactions.value = emptyList()
+        _users.value = emptyList()
+        _streams.value = emptyList()
+        _folders.value = emptyList()
+        _realtimeRecoveryVersion.update { it + 1L }
+    }
+
+    internal fun handleRealtimeConnectionClosed(closeCode: Int?): Boolean {
+        if (closeCode != EVENTS_CURSOR_EXPIRED_CLOSE_CODE) return false
+        invalidateDerivedStateForExpiredCursor()
+        return true
     }
 
 
@@ -718,106 +760,182 @@ class EventsRepository() {
     }
 
     suspend fun start() {
+        _appForeground
+            .collectLatest { foreground ->
+                if (foreground) {
+                    runForegroundConnectionLoop()
+                } else {
+                    _realtimeConnectionState.value =
+                        RealtimeConnectionState.PAUSED
+                    Log.d("WebSocket", "Paused while the app is in background")
+                }
+            }
+    }
+
+    private suspend fun runForegroundConnectionLoop() {
         val webSocketClient = client
         if (webSocketClient == null) return
 
         var retryDelayMillis = INITIAL_RETRY_DELAY_MILLIS
-        while (currentCoroutineContext().isActive) {
-            if (epochGeneration.isBlank()) {
-                when (val response = webSocketClient.performRequest(EpochRequest())) {
-                    is ApiResult.Success -> {
-                        latestEpoch = response.value.epochVersion
-                        epochGeneration = response.value.epochGeneration
-                    }
-                    is ApiResult.Error -> {
-                        Log.d("WebSocket", "Failed to load the initial event cursor")
-                        delay(retryDelayMillis)
-                        retryDelayMillis = (retryDelayMillis * 2)
-                            .coerceAtMost(MAX_RETRY_DELAY_MILLIS)
-                        continue
+        try {
+            while (currentCoroutineContext().isActive) {
+                if (epochGeneration.isBlank()) {
+                    _realtimeConnectionState.value =
+                        RealtimeConnectionState.CONNECTING
+                    when (val response = webSocketClient.performRequest(EpochRequest())) {
+                        is ApiResult.Success -> {
+                            latestEpoch = response.value.epochVersion
+                            epochGeneration = response.value.epochGeneration
+                        }
+                        is ApiResult.Error -> {
+                            Log.d("WebSocket", "Failed to load the initial event cursor")
+                            _realtimeConnectionState.value =
+                                RealtimeConnectionState.BACKING_OFF
+                            delay(retryDelayMillis)
+                            retryDelayMillis = nextRealtimeRetryDelay(
+                                currentDelayMillis = retryDelayMillis,
+                                readyReceived = false,
+                                connectedDurationMillis = 0L,
+                            )
+                            continue
+                        }
                     }
                 }
-            }
 
-            try {
-                startWebsocketConnection(webSocketClient)
-                retryDelayMillis = INITIAL_RETRY_DELAY_MILLIS
-            } catch (cancellation: CancellationException) {
-                throw cancellation
-            } catch (exception: Exception) {
-                Log.d(
-                    "WebSocket",
-                    "Connection failed: ${exception::class.simpleName}"
-                )
-            }
+                val connectionResult = try {
+                    _realtimeConnectionState.value =
+                        RealtimeConnectionState.CONNECTING
+                    startWebsocketConnection(webSocketClient)
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (exception: Exception) {
+                    Log.d(
+                        "WebSocket",
+                        "Connection failed: ${exception::class.simpleName}"
+                    )
+                    RealtimeConnectionResult()
+                }
 
-            if (currentCoroutineContext().isActive) {
-                delay(retryDelayMillis)
-                retryDelayMillis = (retryDelayMillis * 2)
-                    .coerceAtMost(MAX_RETRY_DELAY_MILLIS)
+                if (handleRealtimeConnectionClosed(connectionResult.closeCode)) {
+                    Log.d("WebSocket", "Realtime cursor expired; refreshing snapshots")
+                    retryDelayMillis = INITIAL_RETRY_DELAY_MILLIS
+                }
+
+                if (currentCoroutineContext().isActive) {
+                    if (
+                        connectionResult.readyReceived &&
+                        connectionResult.connectedDurationMillis >=
+                            STABLE_CONNECTION_MILLIS
+                    ) {
+                        retryDelayMillis = INITIAL_RETRY_DELAY_MILLIS
+                    }
+                    _realtimeConnectionState.value =
+                        RealtimeConnectionState.BACKING_OFF
+                    delay(retryDelayMillis)
+                    retryDelayMillis = nextRealtimeRetryDelay(
+                        currentDelayMillis = retryDelayMillis,
+                        readyReceived = connectionResult.readyReceived,
+                        connectedDurationMillis =
+                            connectionResult.connectedDurationMillis,
+                    )
+                }
             }
+        } finally {
+            _realtimeConnectionState.value =
+                if (_appForeground.value) {
+                    RealtimeConnectionState.BACKING_OFF
+                } else {
+                    RealtimeConnectionState.PAUSED
+                }
         }
     }
 
-    suspend fun startWebsocketConnection(webSocketClient: WorkspaceAPIClient) {
+    private suspend fun startWebsocketConnection(
+        webSocketClient: WorkspaceAPIClient,
+    ): RealtimeConnectionResult {
         val accessToken = webSocketClient.userViewModel.accessToken.value
         val baseUrl = webSocketClient.userViewModel.baseUrl.value
-        if (accessToken != null && baseUrl != null) {
-            val baseUri = URI(baseUrl)
-            webSocketClient.client.webSocket(
-                request = {
-                    url {
-                        protocol = if (baseUri.scheme.equals("https", ignoreCase = true)) {
-                            URLProtocol.WSS
-                        } else {
-                            URLProtocol.WS
-                        }
-                        host = requireNotNull(baseUri.host) {
-                            "Workspace base URL must contain a host"
-                        }
-                        if (baseUri.port != -1) port = baseUri.port
-                        path("/api/workspace/v1/events/ws")
-                        parameters.append("last_epoch_version", latestEpoch.toString())
-                        parameters.append("epoch_generation", epochGeneration)
+        if (accessToken == null || baseUrl == null) {
+            return RealtimeConnectionResult()
+        }
+        val baseUri = URI(baseUrl)
+        var closeCode: Int? = null
+        var readyReceived = false
+        var connectedAtNanos: Long? = null
+        webSocketClient.client.webSocket(
+            request = {
+                url {
+                    protocol = if (baseUri.scheme.equals("https", ignoreCase = true)) {
+                        URLProtocol.WSS
+                    } else {
+                        URLProtocol.WS
                     }
-                    headers {
-                        append(
-                            HttpHeaders.SecWebSocketProtocol,
-                            "workspace.events.v1, bearer.$accessToken"
-                        )
+                    host = requireNotNull(baseUri.host) {
+                        "Workspace base URL must contain a host"
                     }
+                    if (baseUri.port != -1) port = baseUri.port
+                    path("/api/workspace/v1/events/ws")
+                    parameters.append("last_epoch_version", latestEpoch.toString())
+                    parameters.append("epoch_generation", epochGeneration)
                 }
-            ) {
-                Log.d("WebSocket", "Connected")
-                for (frame in incoming) {
-                    when (frame) {
-                        is Frame.Text -> {
-                            val receivedText = frame.readText()
-                            try {
-                                processTextFrame(receivedText)
-                            } catch (exception: Exception) {
-                                Log.d(
-                                    "WebSocket",
-                                    "Ignored invalid event: " +
-                                        exception::class.simpleName
-                                )
-                            }
-                        }
-                        is Frame.Binary -> Log.d("WebSocket", "Received binary data bundle")
-                        is Frame.Close -> {
-                            Log.d(
-                                "WebSocket",
-                                "Connection closing reason: ${frame.readReason()}"
-                            )
-                        }
-                        else -> Log.d("WebSocket", "Received control or ping/pong frame")
-                    }
+                headers {
+                    append(
+                        HttpHeaders.SecWebSocketProtocol,
+                        "workspace.events.v1, bearer.$accessToken"
+                    )
                 }
             }
+        ) {
+            connectedAtNanos = System.nanoTime()
+            _realtimeConnectionState.value =
+                RealtimeConnectionState.CONNECTED
+            Log.d("WebSocket", "Connected")
+            for (frame in incoming) {
+                when (frame) {
+                    is Frame.Text -> {
+                        val receivedText = frame.readText()
+                        try {
+                            readyReceived =
+                                processTextFrame(receivedText) ||
+                                    readyReceived
+                        } catch (exception: Exception) {
+                            Log.d(
+                                "WebSocket",
+                                "Ignored invalid event: " +
+                                    exception::class.simpleName
+                            )
+                        }
+                    }
+                    is Frame.Binary -> Log.d("WebSocket", "Received binary data bundle")
+                    is Frame.Close -> {
+                        val reason = frame.readReason()
+                        closeCode = reason?.code?.toInt()
+                        Log.d(
+                            "WebSocket",
+                            "Connection closing reason: $reason"
+                        )
+                    }
+                    else -> Log.d("WebSocket", "Received control or ping/pong frame")
+                }
+            }
+            if (closeCode == null) {
+                closeCode = closeReason.await()?.code?.toInt()
+            }
         }
+        val connectedDurationMillis = connectedAtNanos
+            ?.let { startedAt ->
+                (System.nanoTime() - startedAt)
+                    .coerceAtLeast(0L) / NANOS_PER_MILLISECOND
+            }
+            ?: 0L
+        return RealtimeConnectionResult(
+            closeCode = closeCode,
+            readyReceived = readyReceived,
+            connectedDurationMillis = connectedDurationMillis,
+        )
     }
 
-    fun processTextFrame(receivedText: String) {
+    fun processTextFrame(receivedText: String): Boolean {
         val jsonObject = json.decodeFromString<JsonObject>(receivedText)
         val frameType = jsonObject["type"]?.jsonPrimitive?.contentOrNull
         if (frameType == "ready") {
@@ -833,17 +951,18 @@ class EventsRepository() {
                     ?.toIntOrNull()
                     ?: latestEpoch
             )
-            return
+            return true
         }
 
         val eventEpoch = jsonObject["epoch_version"]
             ?.jsonPrimitive
             ?.contentOrNull
             ?.toIntOrNull()
-        if (eventEpoch != null && eventEpoch <= latestEpoch) return
+        if (eventEpoch != null && eventEpoch <= latestEpoch) return false
 
-        val action = jsonObject["action"]?.jsonPrimitive?.contentOrNull ?: return
-        val payload = jsonObject["payload"]?.toString() ?: return
+        val action = jsonObject["action"]?.jsonPrimitive?.contentOrNull
+            ?: return false
+        val payload = jsonObject["payload"]?.toString() ?: return false
         when (jsonObject["object_type"]?.jsonPrimitive?.contentOrNull) {
             "message" -> didReceiveMessageEvent(payload, action)
             "user" -> didReceiveUserEvent(payload, action)
@@ -861,6 +980,7 @@ class EventsRepository() {
         if (eventEpoch != null) {
             latestEpoch = maxOf(latestEpoch, eventEpoch)
         }
+        return false
     }
 
     fun didReceiveUserEvent(payload: String, action: String) {
@@ -999,8 +1119,43 @@ class EventsRepository() {
     companion object {
         private const val INITIAL_RETRY_DELAY_MILLIS = 1_000L
         private const val MAX_RETRY_DELAY_MILLIS = 30_000L
+        private const val STABLE_CONNECTION_MILLIS = 60_000L
+        private const val EVENTS_CURSOR_EXPIRED_CLOSE_CODE = 4_410
+        private const val NANOS_PER_MILLISECOND = 1_000_000L
     }
 }
+
+enum class RealtimeConnectionState {
+    PAUSED,
+    CONNECTING,
+    CONNECTED,
+    BACKING_OFF,
+}
+
+private data class RealtimeConnectionResult(
+    val closeCode: Int? = null,
+    val readyReceived: Boolean = false,
+    val connectedDurationMillis: Long = 0L,
+)
+
+internal fun nextRealtimeRetryDelay(
+    currentDelayMillis: Long,
+    readyReceived: Boolean,
+    connectedDurationMillis: Long,
+): Long =
+    if (
+        readyReceived &&
+        connectedDurationMillis >= STABLE_REALTIME_CONNECTION_MILLIS
+    ) {
+        INITIAL_REALTIME_RETRY_DELAY_MILLIS
+    } else {
+        (currentDelayMillis * 2L)
+            .coerceAtMost(MAX_REALTIME_RETRY_DELAY_MILLIS)
+    }
+
+private const val INITIAL_REALTIME_RETRY_DELAY_MILLIS = 1_000L
+private const val MAX_REALTIME_RETRY_DELAY_MILLIS = 30_000L
+private const val STABLE_REALTIME_CONNECTION_MILLIS = 60_000L
 
 @Serializable
 data class PongMessage(
