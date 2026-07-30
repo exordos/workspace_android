@@ -1,6 +1,7 @@
 package ru.genesiscorporation.workspace.beta.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -15,6 +16,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -39,7 +43,69 @@ fun Avatar(
     size: Int,
     hasPadding: Boolean,
     ownerAccountId: String? = null,
+    modifier: Modifier = Modifier,
+    contentDescription: String? = null,
+    onClick: (() -> Unit)? = null,
 ) {
+    val imageRequest = rememberWorkspaceAvatarImageRequest(
+        avatarUrn = avatarUrn,
+        baseUrl = baseUrl,
+        ownerAccountId = ownerAccountId,
+    )
+    val activeOnClick = onClick?.takeIf { imageRequest != null }
+    val avatarModifier = modifier
+        .padding(end = if (hasPadding) 12.dp else 0.dp)
+        .size(size.dp)
+        .clip(CircleShape)
+        .then(
+            if (activeOnClick != null) {
+                Modifier
+                    .clickable(
+                        role = Role.Button,
+                        onClick = activeOnClick,
+                    )
+                    .semantics(mergeDescendants = true) {
+                        contentDescription?.let {
+                            this.contentDescription = it
+                        }
+                    }
+            } else {
+                Modifier
+            },
+        )
+    if (imageRequest != null) {
+        AsyncImage(
+            model = imageRequest,
+            contentDescription = contentDescription.takeIf { activeOnClick == null },
+            contentScale = ContentScale.Crop,
+            modifier = avatarModifier,
+        )
+    } else {
+        val avatarColor = try {
+            Color(0xFF000000 or (color?.toLong() ?: 0))
+        } catch (e: IllegalArgumentException) {
+            Color.Gray
+        }
+        Box(
+            modifier = avatarModifier
+                .background(color = avatarColor, shape = CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(text = name.firstOrNull()?.titlecase() ?: "",
+                color = Color.White,
+                fontSize = (size * 0.44f).sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+    }
+}
+
+@Composable
+internal fun rememberWorkspaceAvatarImageRequest(
+    avatarUrn: String?,
+    baseUrl: String,
+    ownerAccountId: String? = null,
+): ImageRequest? {
     val user = LocalUserState.current
     val activeAccountId by user.activeAccountId.collectAsStateWithLifecycle()
     val accessToken by user.accessToken.collectAsStateWithLifecycle()
@@ -87,36 +153,7 @@ fun Avatar(
                 .build()
         }
     }
-    if (imageRequest != null) {
-        AsyncImage(
-            model = imageRequest,
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier
-                .padding(end = if (hasPadding) 12.dp else 0.dp)
-                .size(size.dp)
-                .clip(CircleShape),
-        )
-    } else {
-        val avatarColor = try {
-            Color(0xFF000000 or (color?.toLong() ?: 0))
-        } catch (e: IllegalArgumentException) {
-            Color.Gray
-        }
-        Box(
-            modifier = Modifier
-                .padding(end = if (hasPadding) 12.dp else 0.dp)
-                .size(size.dp)
-                .background(color = avatarColor, shape = CircleShape),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(text = name.firstOrNull()?.titlecase() ?: "",
-                color = Color.White,
-                fontSize = (size * 0.44f).sp,
-                fontWeight = FontWeight.SemiBold,
-            )
-        }
-    }
+    return imageRequest
 }
 
 internal data class WorkspaceAvatarSource(

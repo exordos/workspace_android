@@ -1,5 +1,8 @@
 package ru.genesiscorporation.workspace.beta.modules.chatuserinfo
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.selection.selectable
@@ -32,15 +35,20 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalAccessibilityManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -48,14 +56,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
+import kotlinx.coroutines.delay
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
-import ru.genesiscorporation.workspace.beta.modules.chatchannels.isDirectProviderChat
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import ru.genesiscorporation.workspace.beta.modules.chatchannels.messagePreview
+import ru.genesiscorporation.workspace.beta.modules.chatdialog.FullscreenZoomableImage
 import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.UnreadBadge
+import ru.genesiscorporation.workspace.beta.ui.rememberWorkspaceAvatarImageRequest
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import ru.genesiscorporation.workspace.beta.ui.theme.NavigationFontFamily
 
@@ -80,11 +90,45 @@ fun ChatUserInfoScreen(
         viewModel.directChatOpening.collectAsStateWithLifecycle()
     val directChatError by
         viewModel.directChatError.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val accessibilityManager = LocalAccessibilityManager.current
+    val copyFeedbackMillis = accessibilityManager?.calculateRecommendedTimeoutMillis(
+        originalTimeoutMillis = PROFILE_COPY_FEEDBACK_MILLIS,
+        containsIcons = false,
+        containsText = true,
+        containsControls = false,
+    ) ?: PROFILE_COPY_FEEDBACK_MILLIS
     var selectedTab by rememberSaveable { mutableStateOf(ProfileTab.Profile) }
+    var copyFeedback by remember { mutableStateOf<ProfileCopyFeedback?>(null) }
     val canOpenDirectChat = canOpenDirectChatWith(
         profile = profile,
         currentUserUuid = currentUserUuid,
     )
+
+    fun copyProfileValue(
+        label: String,
+        value: String,
+    ) {
+        val eventId = (copyFeedback?.eventId ?: 0L) + 1L
+        val copied = copyPlainProfileText(context, label, value)
+        copyFeedback = ProfileCopyFeedback(
+            eventId = eventId,
+            message = if (copied) {
+                "$label: скопировано"
+            } else {
+                "Не удалось скопировать: $label"
+            },
+            success = copied,
+        )
+    }
+
+    LaunchedEffect(copyFeedback?.eventId) {
+        val acceptedEventId = copyFeedback?.eventId ?: return@LaunchedEffect
+        delay(copyFeedbackMillis)
+        if (copyFeedback?.eventId == acceptedEventId) {
+            copyFeedback = null
+        }
+    }
 
     LaunchedEffect(viewModel, navController) {
         viewModel.openDirectChatEvents.collect { destination ->
@@ -137,8 +181,19 @@ fun ChatUserInfoScreen(
                 fallbackName = viewModel.userName,
                 fallbackAvatar = viewModel.avatarUrl,
                 baseUrl = baseUrl.orEmpty(),
+                onCopyName = { name ->
+                    copyProfileValue("Имя", name)
+                },
                 modifier = Modifier.padding(top = 20.dp),
             )
+        }
+        copyFeedback?.let { feedback ->
+            item(key = "copy-feedback-${feedback.eventId}") {
+                ProfileCopyFeedback(
+                    feedback = feedback,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
         }
         if (canOpenDirectChat) {
             item(key = "open-direct-chat") {
@@ -207,6 +262,16 @@ fun ChatUserInfoScreen(
                     ) { field ->
                         ProfileRow(
                             field = field,
+                            onCopy = if (field.copyable) {
+                                {
+                                    copyProfileValue(
+                                        field.title,
+                                        field.value,
+                                    )
+                                }
+                            } else {
+                                null
+                            },
                             modifier = Modifier.padding(top = 12.dp),
                         )
                     }
@@ -276,6 +341,32 @@ fun ChatUserInfoScreen(
 private enum class ProfileTab(val title: String) {
     Profile("Профиль"),
     Channels("Каналы"),
+}
+
+private data class ProfileCopyFeedback(
+    val eventId: Long,
+    val message: String,
+    val success: Boolean,
+)
+
+@Composable
+private fun ProfileCopyFeedback(
+    feedback: ProfileCopyFeedback,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalWorkspaceColorsPalette.current
+    Text(
+        text = feedback.message,
+        color = if (feedback.success) colors.primary else colors.indicatorRed,
+        fontSize = 12.sp,
+        lineHeight = 16.sp,
+        modifier = modifier
+            .fillMaxWidth()
+            .semantics {
+                liveRegion = LiveRegionMode.Polite
+            }
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+    )
 }
 
 @Composable
@@ -456,21 +547,28 @@ private fun ProfileHeader(
     fallbackName: String,
     fallbackAvatar: String,
     baseUrl: String,
+    onCopyName: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalWorkspaceColorsPalette.current
     val name = profile?.displayableName()?.takeIf(String::isNotBlank) ?: fallbackName
+    val avatarUrn = profile?.avatar ?: fallbackAvatar
+    var showAvatarPreview by rememberSaveable(avatarUrn) {
+        mutableStateOf(false)
+    }
     Row(
         modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Avatar(
-            avatarUrn = profile?.avatar ?: fallbackAvatar,
+            avatarUrn = avatarUrn,
             baseUrl = baseUrl,
             color = null,
             name = name,
             size = 64,
             hasPadding = false,
+            contentDescription = "Открыть фото профиля",
+            onClick = { showAvatarPreview = true },
         )
         Column(
             modifier = Modifier
@@ -495,6 +593,30 @@ private fun ProfileHeader(
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                if (name.isNotBlank()) {
+                    IconButton(
+                        onClick = { onCopyName(name) },
+                        modifier = Modifier.size(48.dp),
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_copy),
+                            contentDescription = "Скопировать имя",
+                            tint = colors.iconBase,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
+            }
+            externalIdentityLabel(profile)?.let { identityLabel ->
+                Text(
+                    text = identityLabel,
+                    color = colors.primary,
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             presenceLabel(profile?.status)?.let { statusLabel ->
@@ -505,6 +627,23 @@ private fun ProfileHeader(
                     lineHeight = 16.sp,
                 )
             }
+        }
+    }
+    if (showAvatarPreview) {
+        val avatarRequest = rememberWorkspaceAvatarImageRequest(
+            avatarUrn = avatarUrn,
+            baseUrl = baseUrl,
+        )
+        if (avatarRequest == null) {
+            LaunchedEffect(avatarUrn, baseUrl) {
+                showAvatarPreview = false
+            }
+        } else {
+            FullscreenZoomableImage(
+                model = avatarRequest,
+                contentDescription = "Фото профиля пользователя $name",
+                onDismiss = { showAvatarPreview = false },
+            )
         }
     }
 }
@@ -562,6 +701,7 @@ private fun ProfileTabs(
 @Composable
 private fun ProfileRow(
     field: ProfileField,
+    onCopy: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalWorkspaceColorsPalette.current
@@ -596,6 +736,19 @@ private fun ProfileRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+        }
+        if (onCopy != null) {
+            IconButton(
+                onClick = onCopy,
+                modifier = Modifier.size(48.dp),
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_copy),
+                    contentDescription = "Скопировать ${field.title.lowercase()}",
+                    tint = colors.iconBase,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
         }
     }
 }
@@ -693,3 +846,37 @@ internal fun presenceLabel(status: String?): String? = when (status) {
     "dnd", "do_not_disturb" -> "Не беспокоить"
     else -> null
 }
+
+internal fun externalIdentityLabel(profile: UserResponseData?): String? {
+    if (!profile?.identityKind.equals("external", ignoreCase = true)) {
+        return null
+    }
+    val provider = profile?.provider?.kind
+        ?.trim()
+        ?.take(PROFILE_PROVIDER_LABEL_CHARS)
+        ?.takeIf(String::isNotBlank)
+    return if (provider == null) {
+        "Внешний профиль"
+    } else {
+        "Внешний профиль · $provider"
+    }
+}
+
+internal fun copyPlainProfileText(
+    context: Context,
+    label: String,
+    value: String,
+): Boolean {
+    if (value.isBlank()) return false
+    val clipboard = context.getSystemService(ClipboardManager::class.java)
+        ?: return false
+    return runCatching {
+        clipboard.setPrimaryClip(
+            ClipData.newPlainText(label.take(PROFILE_COPY_LABEL_CHARS), value),
+        )
+    }.isSuccess
+}
+
+private const val PROFILE_COPY_FEEDBACK_MILLIS = 2_000L
+private const val PROFILE_COPY_LABEL_CHARS = 64
+private const val PROFILE_PROVIDER_LABEL_CHARS = 32

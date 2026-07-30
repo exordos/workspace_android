@@ -60,6 +60,7 @@ data class UserResponseData(
     var status: String,
     var avatar: String,
     @SerialName("identity_kind") val identityKind: String? = null,
+    val provider: ProviderReference? = null,
 ) {
     fun displayableName(): String {
         var displayName = ""

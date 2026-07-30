@@ -110,7 +110,7 @@ outcome. A screen is not complete merely because it matches a design.
 | Push | Encrypted device identity, register/rotate/delete token | Partial | Notification permission, channels, deep links, token rotation, logout cleanup, delivery tests |
 | Realtime | REST catch-up, websocket, epoch cursor reset | Partial | Lifecycle-aware single connection, idempotent dispatcher, gap recovery, bounded backoff |
 | Offline | Cache-first desktop state and outbox | Partial: encrypted drafts and failed/ambiguous outgoing rows survive restart; exact-topic links with retained local work recover from bounded encrypted route metadata even on a fully cold offline start, while general catalog/history still requires network | Add Room-backed catalogs/messages/cursors with explicit stale/offline UX and a backend idempotency contract |
-| User profile | View profile, shared channels, status and contact fields | Partial: authoritative refresh/error/retry, exact status/contact fields, binding-backed non-DM shared channels, and safe reuse/create of a personal chat are wired | Add avatar preview/copyable contacts where useful and expose calls only after the maintained mobile call bridge has a real profile contract |
+| User profile | View profile, shared channels, status and contact fields | Partial: authoritative refresh/error/retry, exact status/contact fields, authenticated avatar preview, copyable identity values, bounded external-identity badge, binding-backed non-DM shared channels, and safe reuse/create of a personal chat are wired | Expose calls only after the maintained mobile call bridge has a real profile contract; keep desktop media counters absent until they have a real handler |
 | Personal profile | Avatar, name, timezone, status | Partial: authoritative self-profile refresh, status/away update and clear, bounded gallery preview/upload, and conditional avatar reset are wired; name/timezone controls stay hidden because the maintained desktop mutation is currently a no-op | Add a verified name/timezone backend contract, camera capture/crop, and complete upload/reset/account-switch fault acceptance |
 | Settings | Theme, language, sound, sorting, folder layout, idle timeout | Partial: account-scoped system/light/dark mode, six real notification-sound modes, standard/compact chat rows, personal-unread priority and unmuted-channel priority are persisted and applied; unknown/corrupt values fail to independent safe defaults | Finish resource-backed language, validated mobile folder presentation and lifecycle-enforced idle timeout; keep every unsupported control hidden |
 | Diagnostics | Logs, memory/runtime overview, export | Partial: offline redacted snapshot and functional Android share sheet cover build/device/network/notification/settings/cache/account-count state | Add bounded redacted logs, runtime/memory health and support correlation identifiers without identity or content leakage |
@@ -412,6 +412,24 @@ portrait/landscape restoration, and reuse of an existing DM pass. Creating a
 new DM was intentionally not run against the
 working account; injected create/post-request faults, account switching,
 process death and large-font/TalkBack remain open.
+
+Valid HTTP(S) profile avatars now open the existing authenticated fullscreen
+zoom viewer; initials and rejected schemes do not become misleading buttons.
+Name, displayed email and an authoritative target UUID have explicit 48 dp
+copy actions backed by Android's clipboard and a live-region result message.
+External users receive a bounded provider badge while the unsupported native
+DM action remains hidden. Desktop media-count rows are not copied: the current
+desktop elements are buttons without maintained click handlers, so mirroring
+them would add prohibited placeholder UI.
+
+Physical Android 14 acceptance now covers the real internal-user avatar in the
+fullscreen viewer, portrait/landscape/portrait recreation, accessible Close,
+and all three copy actions with visible result feedback. A foreground
+instrumented check confirms exact clipboard text and bounded labels and clears
+the clipboard afterwards. The shared image viewer's previously clipped
+text-only close control was replaced with a readable 48 dp icon action. An
+external-user fixture, failed clipboard service and spoken TalkBack remain
+open and are not claimed.
 
 Current settings slice: the signed-in profile exposes five settings whose
 effects are wired end to end. Theme selection rebuilds the application color

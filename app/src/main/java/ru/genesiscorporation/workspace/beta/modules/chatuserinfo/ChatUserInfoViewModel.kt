@@ -262,35 +262,11 @@ class ChatUserInfoViewModel(
     }
 
     fun profileFields(): List<ProfileField> {
-        val user = profile.value
-        return buildList {
-            user?.statusText?.takeIf(String::isNotBlank)?.let { status ->
-                add(
-                    ProfileField(
-                        title = "Статус",
-                        value = status,
-                        icon = R.drawable.ic_figma_profile_status,
-                    ),
-                )
-            }
-            (user?.email?.takeIf(String::isNotBlank)
-                ?: email.takeIf(String::isNotBlank))?.let { resolvedEmail ->
-                add(
-                    ProfileField(
-                        title = "Email",
-                        value = resolvedEmail,
-                        icon = R.drawable.ic_figma_profile_email,
-                    ),
-                )
-            }
-            add(
-                ProfileField(
-                    title = "ID пользователя",
-                    value = userId,
-                    icon = R.drawable.ic_userid,
-                ),
-            )
-        }
+        return buildProfileFields(
+            user = profile.value,
+            targetUserId = userId,
+            fallbackEmail = email,
+        )
     }
 
     private suspend fun resolveOrCreateDirectChat(
@@ -480,7 +456,45 @@ data class ProfileField(
     val title: String,
     val value: String,
     @param:DrawableRes val icon: Int,
+    val copyable: Boolean = false,
 )
+
+internal fun buildProfileFields(
+    user: UserResponseData?,
+    targetUserId: String,
+    fallbackEmail: String,
+): List<ProfileField> = buildList {
+    user?.statusText?.takeIf(String::isNotBlank)?.let { status ->
+        add(
+            ProfileField(
+                title = "Статус",
+                value = status,
+                icon = R.drawable.ic_figma_profile_status,
+            ),
+        )
+    }
+    (user?.email?.takeIf(String::isNotBlank)
+        ?: fallbackEmail.takeIf(String::isNotBlank))?.let { resolvedEmail ->
+        add(
+            ProfileField(
+                title = "Email",
+                value = resolvedEmail,
+                icon = R.drawable.ic_figma_profile_email,
+                copyable = true,
+            ),
+        )
+    }
+    val authoritativeUserId = user?.uuid
+        ?.takeIf { canonicalUuid(it) == canonicalUuid(targetUserId) }
+    add(
+        ProfileField(
+            title = "ID пользователя",
+            value = authoritativeUserId ?: targetUserId,
+            icon = R.drawable.ic_userid,
+            copyable = authoritativeUserId != null,
+        ),
+    )
+}
 
 data class DirectChatDestination(
     val title: String,

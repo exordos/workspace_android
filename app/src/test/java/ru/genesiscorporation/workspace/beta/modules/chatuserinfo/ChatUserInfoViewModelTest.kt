@@ -1,5 +1,6 @@
 package ru.genesiscorporation.workspace.beta.modules.chatuserinfo
 
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -282,6 +283,91 @@ class ChatUserInfoViewModelTest {
         assertEquals("Не беспокоить", presenceLabel("do_not_disturb"))
     }
 
+    @Test
+    fun `external identity badge is explicit and provider label is bounded`() {
+        assertEquals(null, externalIdentityLabel(user(SELECTED_USER)))
+        assertEquals(
+            "Внешний профиль",
+            externalIdentityLabel(
+                user(SELECTED_USER, identityKind = "external"),
+            ),
+        )
+        assertEquals(
+            "Внешний профиль · zulip",
+            externalIdentityLabel(
+                user(
+                    uuid = SELECTED_USER,
+                    identityKind = "EXTERNAL",
+                    provider = ProviderReference(kind = "  zulip  "),
+                ),
+            ),
+        )
+        assertEquals(
+            "Внешний профиль · ${"p".repeat(32)}",
+            externalIdentityLabel(
+                user(
+                    uuid = SELECTED_USER,
+                    identityKind = "external",
+                    provider = ProviderReference(kind = "p".repeat(40)),
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun `user provider identity is decoded from the maintained response contract`() {
+        val profile = Json.decodeFromString<UserResponseData>(
+            """
+            {
+              "username": "external-user",
+              "uuid": "$SELECTED_USER",
+              "status": "active",
+              "avatar": "",
+              "identity_kind": "external",
+              "provider": {
+                "kind": "zulip",
+                "account_uuid": "$OTHER_USER",
+                "external_id": "user:42"
+              }
+            }
+            """.trimIndent(),
+        )
+
+        assertEquals("external", profile.identityKind)
+        assertEquals("zulip", profile.provider?.kind)
+        assertEquals("user:42", profile.provider?.externalId)
+    }
+
+    @Test
+    fun `profile fields copy only useful and authoritative values`() {
+        val loadedFields = buildProfileFields(
+            user = user(SELECTED_USER).copy(
+                email = "selected@example.com",
+                statusText = "Фокус",
+            ),
+            targetUserId = SELECTED_USER.uppercase(),
+            fallbackEmail = "stale@example.com",
+        )
+
+        assertEquals(
+            listOf("Статус", "Email", "ID пользователя"),
+            loadedFields.map(ProfileField::title),
+        )
+        assertEquals(
+            listOf(false, true, true),
+            loadedFields.map(ProfileField::copyable),
+        )
+        assertEquals("selected@example.com", loadedFields[1].value)
+        assertEquals(SELECTED_USER, loadedFields[2].value)
+
+        val unloadedFields = buildProfileFields(
+            user = null,
+            targetUserId = "invalid-route-id",
+            fallbackEmail = "fallback@example.com",
+        )
+        assertEquals(listOf(true, false), unloadedFields.map(ProfileField::copyable))
+    }
+
     private fun stream(
         uuid: String,
         private: Boolean = false,
@@ -311,12 +397,14 @@ class ChatUserInfoViewModelTest {
     private fun user(
         uuid: String,
         identityKind: String? = null,
+        provider: ProviderReference? = null,
     ) = UserResponseData(
         username = uuid,
         uuid = uuid,
         status = "active",
         avatar = "",
         identityKind = identityKind,
+        provider = provider,
     )
 
     private fun topic(
