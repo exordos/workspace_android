@@ -17,6 +17,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalAccountRespo
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalAccountSelectionMode
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalChatResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalHistoryDepth
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalOperationResponse
 import java.util.UUID
 
 class ExternalIntegrationsViewModel(
@@ -25,6 +26,7 @@ class ExternalIntegrationsViewModel(
 ) : ViewModel() {
     val accounts = dataSource.accounts
     val chats = dataSource.chats
+    val operations = dataSource.operations
     val activeAccount = userViewModel.activeAccount
 
     private val _loadStatus =
@@ -187,6 +189,44 @@ class ExternalIntegrationsViewModel(
         )
     }
 
+    fun retryOperation(
+        operation: ExternalOperationResponse,
+        confirmDuplicateRisk: Boolean,
+    ): Boolean {
+        if (!operation.canRetry) return false
+        if (
+            operation.retryRequiresConfirmation &&
+            !confirmDuplicateRisk
+        ) {
+            return false
+        }
+        return runMutation(
+            action = ExternalIntegrationAction.RETRY_OPERATION,
+            successNotice = "Повторная отправка поставлена в очередь.",
+        ) {
+            dataSource.retryOperation(
+                operationUuid = operation.uuid,
+                externalAccountUuid = operation.externalAccountUuid,
+                confirmDuplicateRisk = confirmDuplicateRisk,
+            )
+        }
+    }
+
+    fun discardOperation(
+        operation: ExternalOperationResponse,
+    ): Boolean {
+        if (!operation.canDiscard) return false
+        return runMutation(
+            action = ExternalIntegrationAction.DISCARD_OPERATION,
+            successNotice = "Операция удалена из очереди.",
+        ) {
+            dataSource.discardOperation(
+                operationUuid = operation.uuid,
+                externalAccountUuid = operation.externalAccountUuid,
+            )
+        }
+    }
+
     private suspend fun refreshScope(
         ownerKey: String,
         showLoading: Boolean,
@@ -217,6 +257,24 @@ class ExternalIntegrationsViewModel(
                                 if (isOwnerCurrent(ownerKey)) {
                                     _error.value = externalIntegrationErrorText(
                                         chatsResult.error,
+                                    )
+                                    _loadStatus.value =
+                                        ExternalIntegrationsLoadStatus.ERROR
+                                }
+                                return
+                            }
+                        }
+                        when (
+                            val operationsResult =
+                                dataSource.listOperations(
+                                    account.response.uuid,
+                                )
+                        ) {
+                            is ApiResult.Success -> Unit
+                            is ApiResult.Error -> {
+                                if (isOwnerCurrent(ownerKey)) {
+                                    _error.value = externalIntegrationErrorText(
+                                        operationsResult.error,
                                     )
                                     _loadStatus.value =
                                         ExternalIntegrationsLoadStatus.ERROR
@@ -319,6 +377,8 @@ enum class ExternalIntegrationAction {
     SELECT_CHAT,
     DESELECT_CHAT,
     MOVE_CHAT,
+    RETRY_OPERATION,
+    DISCARD_OPERATION,
 }
 
 private data class ExternalIntegrationScope(

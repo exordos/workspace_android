@@ -175,7 +175,7 @@ Compose semantics traversal on every supported role and account.
 | ID | Screen / interaction | Handler and effect | Failure/recovery | Acceptance |
 | --- | --- | --- | --- | --- |
 | EXT-A01 | Profile external-integrations row | Opens the typed external-integration destination | Back stack remains valid; the row is a button, not a placeholder | EXT-001 |
-| EXT-A02 | Header Back / Refresh | Pops the route or starts one owner-fenced authoritative account/chat refresh | Refresh is single-flight; network, permission, malformed and owner-change failures are bounded and retryable | EXT-001/006/007 |
+| EXT-A02 | Header Back / Refresh | Pops the route or starts one owner-fenced authoritative account/chat/operation refresh | Refresh is single-flight; network, permission, malformed and owner-change failures are bounded and retryable | EXT-001/006/007/026/032 |
 | EXT-A03 | Connect Zulip | Opens the real credential/settings dialog and submits one canonical create request | Blank/invalid data cannot submit; rejected or ambiguous requests keep the form and expose a safe error | EXT-002–005 |
 | EXT-A04 | Server, email and API-key fields | Keep bounded input in memory; the key is password-masked, never saveable or prefilled, and enables temporary window screenshot protection | Cancel/success clears the key; rotation/process-death/device checks remain release gates | EXT-003/005/010 |
 | EXT-A05 | Account sync settings | Sends selection/history/current-project settings with the current strong revision | No-op settings disable Save; conflicts keep the dialog and offer functional refresh/cancel | EXT-008/009 |
@@ -188,6 +188,11 @@ Compose semantics traversal on every supported role and account.
 | EXT-A12 | Deselect external chat | Requires confirmation and removes only the Workspace projection | Source-provider chat is untouched; failure preserves the authoritative row | EXT-017/019 |
 | EXT-A13 | Move projected chat here | Moves the exact selected chat to the active project with its strong revision | Control appears only for a different known project; conflict never overwrites a newer row | EXT-018/019 |
 | EXT-A14 | Error/success cards | Refreshes where applicable or dismisses only the visible bounded message | Refresh is hidden by state transition once accepted; no control silently no-ops | EXT-001/004/009/023 |
+| EXT-A15 | External capability notice | Hides capability-dependent catalog/actions and renders the backend's bounded sanitized reason | Malformed descriptors fail closed; absent capabilities never create an enabled control | EXT-020/031 |
+| EXT-A16 | Open original operation | Launches only the operation URL that matches the configured provider HTTPS origin and port | Unsafe/missing URL has no control; launcher failure is dismissible | EXT-022/033 |
+| EXT-A17 | Retry external operation | Invokes retry once only when `can_retry`; ordinary retries send explicit no-risk consent | Failure retains the authoritative operation and exposes refresh/retry | EXT-027–029/032 |
+| EXT-A18 | Retry operation with duplicate risk | Requires a destructive confirmation and sends `confirm_duplicate_risk=true` only after acceptance | Cancel/rotation is side-effect free; a stale or no-longer-retryable row cannot submit | EXT-029/034 |
+| EXT-A19 | Discard external operation | Requires confirmation and deletes only an operation whose snapshot says `can_discard` | Existing provider effects are explicitly not represented as undone; failure retains the row | EXT-030/032/034 |
 
 ## Platform interactions
 

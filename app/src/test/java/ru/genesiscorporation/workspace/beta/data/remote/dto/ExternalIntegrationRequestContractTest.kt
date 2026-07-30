@@ -2,6 +2,8 @@ package ru.genesiscorporation.workspace.beta.data.remote.dto
 
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.properties.Properties
 import kotlinx.serialization.properties.encodeToStringMap
@@ -156,9 +158,102 @@ class ExternalIntegrationRequestContractTest {
         }
     }
 
+    @OptIn(ExperimentalSerializationApi::class)
+    @Test
+    fun `operation queue uses scoped paging and explicit duplicate consent`() {
+        val list = ExternalOperationsRequest(
+            externalAccountUuid = ACCOUNT_UUID,
+            pageLimit = 200,
+            pageMarker = OPERATION_UUID,
+        )
+        val retry = RetryExternalOperationRequest(
+            operationUuid = OPERATION_UUID,
+            confirmDuplicateRisk = true,
+        )
+        val discard = DiscardExternalOperationRequest(OPERATION_UUID)
+
+        val params = Properties.encodeToStringMap(list.data)
+        assertEquals(ACCOUNT_UUID, params["external_account_uuid"])
+        assertEquals("200", params["page_limit"])
+        assertEquals(OPERATION_UUID, params["page_marker"])
+        assertEquals(
+            "/api/workspace/v1/messenger/external_operations/" +
+                "$OPERATION_UUID/actions/retry/invoke",
+            retry.url,
+        )
+        assertTrue(retry.data.confirmDuplicateRisk)
+        assertEquals(HTTPMethod.DELETE, discard.method)
+        assertEquals(
+            "/api/workspace/v1/messenger/external_operations/$OPERATION_UUID",
+            discard.url,
+        )
+    }
+
+    @Test
+    fun `operation response validation enforces scope and retry risk`() {
+        val valid = externalOperation()
+
+        assertEquals(
+            valid,
+            validateExternalOperationResponse(
+                response = valid,
+                expectedUuid = OPERATION_UUID,
+                expectedExternalAccountUuid = ACCOUNT_UUID,
+            ),
+        )
+        assertThrows(IllegalArgumentException::class.java) {
+            validateExternalOperationResponse(
+                response = valid.copy(
+                    externalAccountUuid = CHAT_UUID,
+                ),
+                expectedExternalAccountUuid = ACCOUNT_UUID,
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            validateExternalOperationResponse(
+                valid.copy(
+                    duplicateRisk = false,
+                    retryRequiresConfirmation = true,
+                ),
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            validateExternalOperationResponse(
+                valid.copy(action = "message.send\nunsafe"),
+            )
+        }
+    }
+
+    private fun externalOperation() = ExternalOperationResponse(
+        uuid = OPERATION_UUID,
+        externalAccountUuid = ACCOUNT_UUID,
+        action = "message.send",
+        targetType = "message",
+        targetUuid = CHAT_UUID,
+        status = ExternalOperationStatus.FAILED,
+        safeError = "Provider confirmation timed out",
+        canRetry = true,
+        canDiscard = true,
+        duplicateRisk = true,
+        retryRequiresConfirmation = true,
+        originalUrl = "https://zulip.example.com/#narrow/channel/42",
+        reconciliationState =
+            ExternalOperationReconciliationState.MANUAL_REQUIRED,
+        reconciliationReason =
+            ExternalOperationReconciliationReason.UNSAFE_PROVIDER_STATE,
+        reconciliationEvidence = buildJsonObject {},
+        attempt = 1,
+        attemptHistory = buildJsonArray {},
+        details = buildJsonObject {},
+        revision = 4,
+        createdAt = "2026-07-30T10:00:00Z",
+        updatedAt = "2026-07-30T10:01:00Z",
+    )
+
     private companion object {
         const val ACCOUNT_UUID = "10000000-0000-4000-8000-000000000001"
         const val CHAT_UUID = "20000000-0000-4000-8000-000000000002"
         const val PROJECT_UUID = "30000000-0000-4000-8000-000000000003"
+        const val OPERATION_UUID = "40000000-0000-4000-8000-000000000004"
     }
 }

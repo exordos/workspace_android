@@ -9,6 +9,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.data.remote.accountChangedError
 import ru.genesiscorporation.workspace.beta.data.remote.dto.CreateExternalAccountRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.DeleteExternalAccountRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.DiscardExternalOperationRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.DeselectExternalChatRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.DisconnectExternalAccountRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalAccountRequest
@@ -19,18 +20,23 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalChatRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalChatResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalChatsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalHistoryDepth
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalOperationResponse
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalOperationsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MoveExternalChatRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ReconnectExternalAccountRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.RetryExternalOperationRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.SelectExternalChatRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UpdateExternalAccountRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ValidatedExternalAccount
 import ru.genesiscorporation.workspace.beta.data.remote.dto.canonicalExternalIntegrationUuid
 import ru.genesiscorporation.workspace.beta.data.remote.dto.validateExternalAccountResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.validateExternalChatResponse
+import ru.genesiscorporation.workspace.beta.data.remote.dto.validateExternalOperationResponse
 
 interface ExternalIntegrationDataSource {
     val accounts: StateFlow<List<ExternalAccountResponse>>
     val chats: StateFlow<Map<String, List<ExternalChatResponse>>>
+    val operations: StateFlow<Map<String, List<ExternalOperationResponse>>>
 
     suspend fun listAccounts():
         ApiResult<List<ValidatedExternalAccount>, ApiError>
@@ -95,6 +101,21 @@ interface ExternalIntegrationDataSource {
         projectId: String,
         entityTag: String,
     ): ApiResult<ExternalChatResponse, ApiError>
+
+    suspend fun listOperations(
+        externalAccountUuid: String,
+    ): ApiResult<List<ExternalOperationResponse>, ApiError>
+
+    suspend fun retryOperation(
+        operationUuid: String,
+        externalAccountUuid: String,
+        confirmDuplicateRisk: Boolean,
+    ): ApiResult<ExternalOperationResponse, ApiError>
+
+    suspend fun discardOperation(
+        operationUuid: String,
+        externalAccountUuid: String,
+    ): ApiResult<Unit, ApiError>
 }
 
 class ExternalIntegrationRepository(
@@ -103,6 +124,7 @@ class ExternalIntegrationRepository(
 ) : ExternalIntegrationDataSource {
     override val accounts = eventsRepository.externalAccounts
     override val chats = eventsRepository.externalChats
+    override val operations = eventsRepository.externalOperations
 
     override suspend fun listAccounts():
         ApiResult<List<ValidatedExternalAccount>, ApiError> {
@@ -535,6 +557,160 @@ class ExternalIntegrationRepository(
         )
     }
 
+    override suspend fun listOperations(
+        externalAccountUuid: String,
+    ): ApiResult<List<ExternalOperationResponse>, ApiError> {
+        val ownerKey = activeOwnerKey()
+            ?: return ApiResult.Error(authenticationRequiredError())
+        val canonicalAccountUuid = runCatching {
+            canonicalExternalIntegrationUuid(externalAccountUuid)
+        }.getOrElse {
+            return ApiResult.Error(invalidExternalInputError())
+        }
+        val baselineRevisions =
+            eventsRepository.externalOperations.value[canonicalAccountUuid]
+                .orEmpty()
+                .associate { it.uuid to it.revision }
+        val operations = mutableListOf<ExternalOperationResponse>()
+        val seenOperationUuids = mutableSetOf<String>()
+        val seenMarkers = mutableSetOf<String>()
+        var pageMarker: String? = null
+        repeat(MAX_EXTERNAL_PAGES) {
+            when (
+                val result = performOwned(
+                    ownerKey = ownerKey,
+                    request = ExternalOperationsRequest(
+                        externalAccountUuid = canonicalAccountUuid,
+                        pageLimit = EXTERNAL_PAGE_SIZE,
+                        pageMarker = pageMarker,
+                    ),
+                )
+            ) {
+                is ApiResult.Error -> return result
+                is ApiResult.Success -> {
+                    val validated = validateOperations(
+                        responses = result.value,
+                        expectedExternalAccountUuid = canonicalAccountUuid,
+                    ) ?: return ApiResult.Error(
+                        malformedExternalResponseError(),
+                    )
+                    if (
+                        validated.any {
+                            !seenOperationUuids.add(it.uuid)
+                        }
+                    ) {
+                        return ApiResult.Error(
+                            malformedExternalResponseError(),
+                        )
+                    }
+                    operations += validated
+                    val nextMarker = runCatching {
+                        canonicalPageMarker(result.metadata.nextPageMarker)
+                    }.getOrElse {
+                        return ApiResult.Error(
+                            malformedExternalResponseError(),
+                        )
+                    } ?: run {
+                        if (!isOwnerCurrent(ownerKey)) {
+                            return ApiResult.Error(accountChangedError())
+                        }
+                        eventsRepository.reconcileExternalOperationSnapshots(
+                            externalAccountUuid = canonicalAccountUuid,
+                            responses = operations,
+                            baselineRevisions = baselineRevisions,
+                        )
+                        return ApiResult.Success(operations)
+                    }
+                    if (!seenMarkers.add(nextMarker)) {
+                        return ApiResult.Error(
+                            malformedExternalResponseError(),
+                        )
+                    }
+                    pageMarker = nextMarker
+                }
+            }
+        }
+        return ApiResult.Error(externalPaginationLimitError())
+    }
+
+    override suspend fun retryOperation(
+        operationUuid: String,
+        externalAccountUuid: String,
+        confirmDuplicateRisk: Boolean,
+    ): ApiResult<ExternalOperationResponse, ApiError> {
+        val ownerKey = activeOwnerKey()
+            ?: return ApiResult.Error(authenticationRequiredError())
+        val input = runCatching {
+            val canonicalOperationUuid =
+                canonicalExternalIntegrationUuid(operationUuid)
+            val canonicalAccountUuid =
+                canonicalExternalIntegrationUuid(externalAccountUuid)
+            Triple(
+                canonicalOperationUuid,
+                canonicalAccountUuid,
+                RetryExternalOperationRequest(
+                    operationUuid = canonicalOperationUuid,
+                    confirmDuplicateRisk = confirmDuplicateRisk,
+                ),
+            )
+        }.getOrElse {
+            return ApiResult.Error(invalidExternalInputError())
+        }
+        val (canonicalOperationUuid, canonicalAccountUuid, request) = input
+        return when (
+            val result = performOwned(
+                ownerKey = ownerKey,
+                request = request,
+            )
+        ) {
+            is ApiResult.Error -> result
+            is ApiResult.Success -> validatedOperationResult(
+                ownerKey = ownerKey,
+                response = result.value,
+                expectedUuid = canonicalOperationUuid,
+                expectedExternalAccountUuid = canonicalAccountUuid,
+            )
+        }
+    }
+
+    override suspend fun discardOperation(
+        operationUuid: String,
+        externalAccountUuid: String,
+    ): ApiResult<Unit, ApiError> {
+        val ownerKey = activeOwnerKey()
+            ?: return ApiResult.Error(authenticationRequiredError())
+        val input = runCatching {
+            canonicalExternalIntegrationUuid(operationUuid) to
+                canonicalExternalIntegrationUuid(externalAccountUuid)
+        }.getOrElse {
+            return ApiResult.Error(invalidExternalInputError())
+        }
+        val (canonicalOperationUuid, canonicalAccountUuid) = input
+        val current =
+            eventsRepository.externalOperations.value[canonicalAccountUuid]
+                .orEmpty()
+                .singleOrNull { it.uuid == canonicalOperationUuid }
+        return when (
+            val result = performOwned(
+                ownerKey = ownerKey,
+                request =
+                    DiscardExternalOperationRequest(canonicalOperationUuid),
+            )
+        ) {
+            is ApiResult.Error -> result
+            is ApiResult.Success -> {
+                if (!isOwnerCurrent(ownerKey)) {
+                    ApiResult.Error(accountChangedError())
+                } else {
+                    current?.let(
+                        eventsRepository::removeExternalOperationSnapshot,
+                    )
+                    ApiResult.Success(Unit)
+                }
+            }
+        }
+    }
+
     private suspend inline fun <
         reified RequestData : Any,
         reified Response : Any,
@@ -620,6 +796,28 @@ class ExternalIntegrationRepository(
         return ApiResult.Success(validated)
     }
 
+    private suspend fun validatedOperationResult(
+        ownerKey: String,
+        response: ExternalOperationResponse,
+        expectedUuid: String,
+        expectedExternalAccountUuid: String,
+    ): ApiResult<ExternalOperationResponse, ApiError> {
+        val validated = runCatching {
+            validateExternalOperationResponse(
+                response = response,
+                expectedUuid = expectedUuid,
+                expectedExternalAccountUuid = expectedExternalAccountUuid,
+            )
+        }.getOrNull() ?: return ApiResult.Error(
+            malformedExternalResponseError(),
+        )
+        if (!isOwnerCurrent(ownerKey)) {
+            return ApiResult.Error(accountChangedError())
+        }
+        eventsRepository.mergeExternalOperationSnapshot(validated)
+        return ApiResult.Success(validated)
+    }
+
     private fun validateAccounts(
         responses: List<ExternalAccountResponse>,
     ): List<ValidatedExternalAccount>? = runCatching {
@@ -632,6 +830,18 @@ class ExternalIntegrationRepository(
     ): List<ExternalChatResponse>? = runCatching {
         responses.map {
             validateExternalChatResponse(
+                response = it,
+                expectedExternalAccountUuid = expectedExternalAccountUuid,
+            )
+        }
+    }.getOrNull()
+
+    private fun validateOperations(
+        responses: List<ExternalOperationResponse>,
+        expectedExternalAccountUuid: String,
+    ): List<ExternalOperationResponse>? = runCatching {
+        responses.map {
+            validateExternalOperationResponse(
                 response = it,
                 expectedExternalAccountUuid = expectedExternalAccountUuid,
             )

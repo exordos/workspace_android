@@ -2,6 +2,7 @@ package ru.genesiscorporation.workspace.beta.data.remote.dto
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import ru.genesiscorporation.workspace.beta.data.remote.ApiError
 import ru.genesiscorporation.workspace.beta.data.remote.ApiRequest
@@ -555,6 +556,253 @@ data class ExternalChatAssignmentRequestData(
     val projectId: String,
 )
 
+@Serializable
+enum class ExternalOperationStatus {
+    @SerialName("queued")
+    QUEUED,
+
+    @SerialName("running")
+    RUNNING,
+
+    @SerialName("succeeded")
+    SUCCEEDED,
+
+    @SerialName("failed")
+    FAILED,
+
+    @SerialName("manual_reconciliation_required")
+    MANUAL_RECONCILIATION_REQUIRED,
+
+    @SerialName("discarded")
+    DISCARDED,
+}
+
+@Serializable
+enum class ExternalOperationReconciliationState {
+    @SerialName("not_required")
+    NOT_REQUIRED,
+
+    @SerialName("delayed_check")
+    DELAYED_CHECK,
+
+    @SerialName("committed_match")
+    COMMITTED_MATCH,
+
+    @SerialName("automatic_resend_queued")
+    AUTOMATIC_RESEND_QUEUED,
+
+    @SerialName("manual_required")
+    MANUAL_REQUIRED,
+}
+
+@Serializable
+enum class ExternalOperationReconciliationReason {
+    @SerialName("provider_history_unavailable")
+    PROVIDER_HISTORY_UNAVAILABLE,
+
+    @SerialName("no_match_after_auto_resend")
+    NO_MATCH_AFTER_AUTO_RESEND,
+
+    @SerialName("unsafe_provider_state")
+    UNSAFE_PROVIDER_STATE,
+}
+
+@Serializable
+data class ExternalOperationResponse(
+    val uuid: String,
+    @SerialName("external_account_uuid")
+    val externalAccountUuid: String,
+    val action: String,
+    @SerialName("target_type")
+    val targetType: String,
+    @SerialName("target_uuid")
+    val targetUuid: String? = null,
+    val status: ExternalOperationStatus,
+    @SerialName("safe_error")
+    val safeError: String? = null,
+    @SerialName("can_retry")
+    val canRetry: Boolean,
+    @SerialName("can_discard")
+    val canDiscard: Boolean,
+    @SerialName("duplicate_risk")
+    val duplicateRisk: Boolean,
+    @SerialName("retry_requires_confirmation")
+    val retryRequiresConfirmation: Boolean,
+    @SerialName("original_url")
+    val originalUrl: String? = null,
+    @SerialName("reconciliation_state")
+    val reconciliationState: ExternalOperationReconciliationState,
+    @SerialName("reconciliation_reason")
+    val reconciliationReason: ExternalOperationReconciliationReason? = null,
+    @SerialName("reconciliation_evidence")
+    val reconciliationEvidence: JsonObject,
+    val attempt: Int,
+    @SerialName("attempt_history")
+    val attemptHistory: JsonArray,
+    val details: JsonObject,
+    val revision: Int,
+    @SerialName("created_at")
+    val createdAt: String? = null,
+    @SerialName("updated_at")
+    val updatedAt: String? = null,
+)
+
+fun validateExternalOperationResponse(
+    response: ExternalOperationResponse,
+    expectedUuid: String? = null,
+    expectedExternalAccountUuid: String? = null,
+): ExternalOperationResponse {
+    val canonicalUuid = canonicalExternalIntegrationUuid(response.uuid)
+    val canonicalAccountUuid =
+        canonicalExternalIntegrationUuid(response.externalAccountUuid)
+    expectedUuid?.let {
+        require(canonicalUuid == canonicalExternalIntegrationUuid(it)) {
+            "External operation response UUID does not match the request"
+        }
+    }
+    expectedExternalAccountUuid?.let {
+        require(
+            canonicalAccountUuid == canonicalExternalIntegrationUuid(it),
+        ) {
+            "External operation belongs to another external account"
+        }
+    }
+    val action = requireExternalOperationName(response.action, "action")
+    val targetType =
+        requireExternalOperationName(response.targetType, "target type")
+    val canonicalTargetUuid =
+        response.targetUuid?.let(::canonicalExternalIntegrationUuid)
+    require(response.attempt >= 0) {
+        "External operation attempt must not be negative"
+    }
+    require(response.revision >= 1) {
+        "External operation revision must be positive"
+    }
+    require(
+        response.attemptHistory.size <= MAX_EXTERNAL_OPERATION_HISTORY_ITEMS,
+    ) {
+        "External operation attempt history is too large"
+    }
+    require(
+        response.details.toString().length +
+            response.attemptHistory.toString().length +
+            response.reconciliationEvidence.toString().length <=
+            MAX_EXTERNAL_OPERATION_METADATA_CHARS,
+    ) {
+        "External operation metadata is too large"
+    }
+    response.safeError?.let {
+        require(it.length <= MAX_SAFE_ERROR_CHARS) {
+            "External operation safe error is too large"
+        }
+    }
+    val originalUrl = response.originalUrl
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+    require(originalUrl == null || originalUrl.length <= MAX_EXTERNAL_URL_CHARS) {
+        "External operation original URL is too large"
+    }
+    require(!response.retryRequiresConfirmation || response.canRetry) {
+        "External operation retry confirmation requires a retry action"
+    }
+    require(!response.retryRequiresConfirmation || response.duplicateRisk) {
+        "External operation retry confirmation requires duplicate risk"
+    }
+    response.createdAt?.let {
+        require(it.isNotBlank()) {
+            "External operation creation timestamp must not be blank"
+        }
+    }
+    response.updatedAt?.let {
+        require(it.isNotBlank()) {
+            "External operation update timestamp must not be blank"
+        }
+    }
+    return response.copy(
+        uuid = canonicalUuid,
+        externalAccountUuid = canonicalAccountUuid,
+        action = action,
+        targetType = targetType,
+        targetUuid = canonicalTargetUuid,
+        originalUrl = originalUrl,
+    )
+}
+
+data class ExternalOperationsRequest(
+    val externalAccountUuid: String,
+    val pageLimit: Int = DEFAULT_EXTERNAL_PAGE_SIZE,
+    val pageMarker: String? = null,
+) : ApiRequest<ExternalOperationsRequestData, List<ExternalOperationResponse>, ApiError> {
+    init {
+        canonicalExternalIntegrationUuid(externalAccountUuid)
+        requireExternalPage(pageLimit, pageMarker)
+    }
+
+    override val method = HTTPMethod.GET
+    override val url = EXTERNAL_OPERATIONS_URL
+    override val data = ExternalOperationsRequestData(
+        externalAccountUuid =
+            canonicalExternalIntegrationUuid(externalAccountUuid),
+        pageLimit = pageLimit,
+        pageMarker = pageMarker?.let(::canonicalExternalIntegrationUuid),
+    )
+}
+
+class RetryExternalOperationRequest(
+    operationUuid: String,
+    confirmDuplicateRisk: Boolean,
+) : ApiRequest<RetryExternalOperationRequestData, ExternalOperationResponse, ApiError> {
+    override val method = HTTPMethod.POST
+    override val url =
+        "$EXTERNAL_OPERATIONS_URL" +
+            "${canonicalExternalIntegrationUuid(operationUuid)}/" +
+            "actions/retry/invoke"
+    override val data = RetryExternalOperationRequestData(
+        confirmDuplicateRisk = confirmDuplicateRisk,
+    )
+}
+
+class DiscardExternalOperationRequest(
+    operationUuid: String,
+) : ApiRequest<EmptyRequestData, String, ApiError> {
+    override val method = HTTPMethod.DELETE
+    override val url =
+        "$EXTERNAL_OPERATIONS_URL" +
+            canonicalExternalIntegrationUuid(operationUuid)
+    override val data = EmptyRequestData()
+}
+
+@Serializable
+data class ExternalOperationsRequestData(
+    @SerialName("external_account_uuid")
+    val externalAccountUuid: String,
+    @SerialName("page_limit")
+    val pageLimit: Int,
+    @SerialName("page_marker")
+    val pageMarker: String?,
+)
+
+@Serializable
+data class RetryExternalOperationRequestData(
+    @SerialName("confirm_duplicate_risk")
+    val confirmDuplicateRisk: Boolean,
+)
+
+private fun requireExternalOperationName(
+    value: String,
+    field: String,
+): String {
+    val normalized = value.trim()
+    require(
+        normalized.isNotEmpty() &&
+            normalized.length <= MAX_EXTERNAL_OPERATION_NAME_CHARS &&
+            normalized.none(Char::isISOControl),
+    ) {
+        "External operation $field is invalid"
+    }
+    return normalized
+}
+
 fun canonicalExternalIntegrationUuid(value: String): String {
     val trimmed = value.trim()
     val canonical = runCatching { UUID.fromString(trimmed).toString() }
@@ -651,8 +899,14 @@ private const val MAX_EXTERNAL_API_KEY_CHARS = 4_096
 private const val MAX_EXTERNAL_DISPLAY_NAME_CHARS = 512
 private const val MAX_CAPABILITIES_CHARS = 65_536
 private const val MAX_SAFE_ERROR_CHARS = 4_096
+private const val MAX_EXTERNAL_URL_CHARS = 2_048
+private const val MAX_EXTERNAL_OPERATION_NAME_CHARS = 128
+private const val MAX_EXTERNAL_OPERATION_HISTORY_ITEMS = 256
+private const val MAX_EXTERNAL_OPERATION_METADATA_CHARS = 131_072
 private const val ZULIP_PROVIDER_KIND = "zulip"
 private const val EXTERNAL_ACCOUNTS_URL =
     "/api/workspace/v1/messenger/external_accounts/"
 private const val EXTERNAL_CHATS_URL =
     "/api/workspace/v1/messenger/external_chats/"
+private const val EXTERNAL_OPERATIONS_URL =
+    "/api/workspace/v1/messenger/external_operations/"

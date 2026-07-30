@@ -1,6 +1,7 @@
 package ru.genesiscorporation.workspace.beta.modules.externalintegrations
 
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -11,6 +12,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalAccountRespo
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalAccountSelectionMode
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalAccountStatus
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalHistoryDepth
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalOperationStatus
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ZulipExternalAccountSettings
 
 class ExternalIntegrationsModelTest {
@@ -112,6 +114,66 @@ class ExternalIntegrationsModelTest {
         assertTrue(ownerChanged.contains("Аккаунт сменился"))
         assertTrue("raw" !in conflict)
         assertTrue("identifier" !in ownerChanged)
+    }
+
+    @Test
+    fun `capability descriptors hide unavailable surfaces and explain why`() {
+        val capabilities = buildJsonObject {
+            put(
+                "messenger.chat_catalog",
+                buildJsonObject {
+                    put("available", JsonPrimitive(false))
+                    put(
+                        "unavailable_reason",
+                        buildJsonObject {
+                            put(
+                                "message",
+                                JsonPrimitive(
+                                    "Provider catalog is temporarily unavailable",
+                                ),
+                            )
+                        },
+                    )
+                },
+            )
+            put(
+                "messenger.message.send",
+                buildJsonObject {
+                    put("available", JsonPrimitive(true))
+                },
+            )
+        }
+
+        assertTrue(
+            !externalCapabilityAvailable(
+                capabilities,
+                "messenger.chat_catalog",
+            ),
+        )
+        assertTrue(
+            externalCapabilityAvailable(
+                capabilities,
+                "messenger.message.send",
+            ),
+        )
+        assertEquals(
+            listOf("Provider catalog is temporarily unavailable"),
+            externalCapabilityUnavailableReasons(capabilities),
+        )
+    }
+
+    @Test
+    fun `operation statuses use user facing labels`() {
+        assertEquals(
+            "Нужна проверка",
+            externalOperationStatusLabel(
+                ExternalOperationStatus.MANUAL_RECONCILIATION_REQUIRED,
+            ),
+        )
+        assertEquals(
+            "В очереди",
+            externalOperationStatusLabel(ExternalOperationStatus.QUEUED),
+        )
     }
 
     private fun account(

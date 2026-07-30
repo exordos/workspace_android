@@ -965,6 +965,137 @@ class EventsRepositoryTest {
     }
 
     @Test
+    fun `external operation realtime tombstone rejects stale replay`() {
+        val repository = EventsRepository()
+        repository.processTextFrame(
+            externalAccountEvent(
+                epoch = 1,
+                action = "created",
+                revision = 1,
+            ),
+        )
+        repository.processTextFrame(
+            externalOperationEvent(
+                epoch = 2,
+                action = "created",
+                revision = 1,
+                status = "failed",
+            ),
+        )
+        repository.processTextFrame(
+            externalOperationEvent(
+                epoch = 3,
+                action = "updated",
+                revision = 2,
+                status = "queued",
+            ),
+        )
+
+        assertEquals(
+            "queued",
+            repository.externalOperations.value
+                .getValue(EXTERNAL_ACCOUNT_UUID)
+                .single()
+                .status
+                .name
+                .lowercase(),
+        )
+
+        repository.processTextFrame(
+            externalOperationEvent(
+                epoch = 4,
+                action = "deleted",
+                revision = 3,
+                status = "discarded",
+            ),
+        )
+        repository.processTextFrame(
+            externalOperationEvent(
+                epoch = 5,
+                action = "updated",
+                revision = 2,
+                status = "failed",
+            ),
+        )
+
+        assertTrue(
+            repository.externalOperations.value[EXTERNAL_ACCOUNT_UUID]
+                .isNullOrEmpty(),
+        )
+    }
+
+    @Test
+    fun `authoritative operation refresh preserves newer realtime snapshot`() {
+        val repository = EventsRepository()
+        repository.processTextFrame(
+            externalAccountEvent(
+                epoch = 1,
+                action = "created",
+                revision = 1,
+            ),
+        )
+        repository.processTextFrame(
+            externalOperationEvent(
+                epoch = 2,
+                action = "created",
+                revision = 1,
+                status = "failed",
+            ),
+        )
+        val baseline = mapOf(EXTERNAL_OPERATION_UUID to 1)
+        repository.processTextFrame(
+            externalOperationEvent(
+                epoch = 3,
+                action = "updated",
+                revision = 2,
+                status = "running",
+            ),
+        )
+
+        repository.reconcileExternalOperationSnapshots(
+            externalAccountUuid = EXTERNAL_ACCOUNT_UUID,
+            responses = emptyList(),
+            baselineRevisions = baseline,
+        )
+
+        val operation = repository.externalOperations.value
+            .getValue(EXTERNAL_ACCOUNT_UUID)
+            .single()
+        assertEquals(2, operation.revision)
+        assertEquals("RUNNING", operation.status.name)
+    }
+
+    @Test
+    fun `external account deletion clears operation queue`() {
+        val repository = EventsRepository()
+        repository.processTextFrame(
+            externalAccountEvent(
+                epoch = 1,
+                action = "created",
+                revision = 1,
+            ),
+        )
+        repository.processTextFrame(
+            externalOperationEvent(
+                epoch = 2,
+                action = "created",
+                revision = 1,
+                status = "failed",
+            ),
+        )
+
+        repository.processTextFrame(
+            externalAccountEvent(
+                epoch = 3,
+                action = "deleted",
+                revision = 2,
+            ),
+        )
+
+        assertTrue(repository.externalOperations.value.isEmpty())
+    }
+
+    @Test
     fun `malformed external snapshot is skipped without poisoning the cursor`() {
         val repository = EventsRepository()
         val mismatchedSnapshot = externalAccountEvent(
@@ -1133,6 +1264,51 @@ class EventsRepositoryTest {
         }
     """.trimIndent()
 
+    private fun externalOperationEvent(
+        epoch: Int,
+        action: String,
+        revision: Int,
+        status: String,
+    ): String {
+        val canRetry = status == "failed"
+        val canDiscard = status == "failed" || status == "queued"
+        return """
+            {
+              "schema_version": 1,
+              "epoch_version": $epoch,
+              "object_type": "external_operation",
+              "action": "$action",
+              "payload": {
+                "kind": "external_operation.$action",
+                "uuid": "$EXTERNAL_OPERATION_UUID",
+                "snapshot": {
+                  "uuid": "$EXTERNAL_OPERATION_UUID",
+                  "external_account_uuid": "$EXTERNAL_ACCOUNT_UUID",
+                  "action": "message.send",
+                  "target_type": "message",
+                  "target_uuid": "$EXTERNAL_CHAT_UUID",
+                  "status": "$status",
+                  "safe_error": null,
+                  "can_retry": $canRetry,
+                  "can_discard": $canDiscard,
+                  "duplicate_risk": $canRetry,
+                  "retry_requires_confirmation": $canRetry,
+                  "original_url": "https://zulip.example.com/#narrow/channel/1",
+                  "reconciliation_state": "not_required",
+                  "reconciliation_reason": null,
+                  "reconciliation_evidence": {},
+                  "attempt": 1,
+                  "attempt_history": [],
+                  "details": {},
+                  "revision": $revision,
+                  "created_at": "2026-07-30T10:00:00Z",
+                  "updated_at": "2026-07-30T10:00:00Z"
+                }
+              }
+            }
+        """.trimIndent()
+    }
+
     private fun message(uuid: String, content: String) = MessageResponse(
         uuid = uuid,
         updatedAt = "2026-07-26T00:00:00Z",
@@ -1190,6 +1366,8 @@ class EventsRepositoryTest {
             "10000000-0000-4000-8000-000000000099"
         private const val EXTERNAL_CHAT_UUID =
             "20000000-0000-4000-8000-000000000002"
+        private const val EXTERNAL_OPERATION_UUID =
+            "50000000-0000-4000-8000-000000000005"
         private const val EXTERNAL_PROJECT_UUID =
             "30000000-0000-4000-8000-000000000003"
         private const val PROJECTION_STREAM_UUID =

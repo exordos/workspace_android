@@ -33,6 +33,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.EpochRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.EventsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalAccountResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalChatResponse
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalOperationResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageReaction
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
@@ -42,6 +43,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.canonicalExternalIntegrationUuid
 import ru.genesiscorporation.workspace.beta.data.remote.dto.validateExternalAccountResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.validateExternalChatResponse
+import ru.genesiscorporation.workspace.beta.data.remote.dto.validateExternalOperationResponse
 import java.net.URI
 import java.time.Instant
 import java.time.OffsetDateTime
@@ -76,6 +78,8 @@ class EventsRepository(
         mutableMapOf<String, ExternalProjectionRevision>()
     private val externalChatRevisions =
         mutableMapOf<String, ExternalProjectionRevision>()
+    private val externalOperationRevisions =
+        mutableMapOf<String, ExternalProjectionRevision>()
     private val _externalAccounts =
         MutableStateFlow<List<ExternalAccountResponse>>(emptyList())
     val externalAccounts: StateFlow<List<ExternalAccountResponse>> =
@@ -84,7 +88,12 @@ class EventsRepository(
         MutableStateFlow<Map<String, List<ExternalChatResponse>>>(emptyMap())
     val externalChats:
         StateFlow<Map<String, List<ExternalChatResponse>>> =
-        _externalChats.asStateFlow()
+            _externalChats.asStateFlow()
+    private val _externalOperations =
+        MutableStateFlow<Map<String, List<ExternalOperationResponse>>>(emptyMap())
+    val externalOperations:
+        StateFlow<Map<String, List<ExternalOperationResponse>>> =
+            _externalOperations.asStateFlow()
 
     fun setAppForeground(foreground: Boolean) {
         _appForeground.value = foreground
@@ -138,8 +147,10 @@ class EventsRepository(
         synchronized(externalProjectionLock) {
             externalAccountRevisions.clear()
             externalChatRevisions.clear()
+            externalOperationRevisions.clear()
             _externalAccounts.value = emptyList()
             _externalChats.value = emptyMap()
+            _externalOperations.value = emptyMap()
         }
     }
 
@@ -157,6 +168,15 @@ class EventsRepository(
     ) {
         applyExternalChatSnapshot(
             response = validateExternalChatResponse(response),
+            deleted = false,
+        )
+    }
+
+    internal fun mergeExternalOperationSnapshot(
+        response: ExternalOperationResponse,
+    ) {
+        applyExternalOperationSnapshot(
+            response = validateExternalOperationResponse(response),
             deleted = false,
         )
     }
@@ -204,6 +224,31 @@ class EventsRepository(
             .forEach(::removeExternalChatSnapshot)
     }
 
+    internal fun reconcileExternalOperationSnapshots(
+        externalAccountUuid: String,
+        responses: List<ExternalOperationResponse>,
+        baselineRevisions: Map<String, Int>,
+    ) {
+        val canonicalAccountUuid =
+            canonicalExternalIntegrationUuid(externalAccountUuid)
+        val validated = responses.map {
+            validateExternalOperationResponse(
+                response = it,
+                expectedExternalAccountUuid = canonicalAccountUuid,
+            )
+        }
+        validated.forEach(::mergeExternalOperationSnapshot)
+        val authoritativeUuids = validated
+            .mapTo(mutableSetOf(), ExternalOperationResponse::uuid)
+        _externalOperations.value[canonicalAccountUuid]
+            .orEmpty()
+            .filter { current ->
+                current.uuid !in authoritativeUuids &&
+                    baselineRevisions[current.uuid] == current.revision
+            }
+            .forEach(::removeExternalOperationSnapshot)
+    }
+
     internal fun removeExternalAccountSnapshot(
         response: ExternalAccountResponse,
     ) {
@@ -218,6 +263,15 @@ class EventsRepository(
     ) {
         applyExternalChatSnapshot(
             response = validateExternalChatResponse(response),
+            deleted = true,
+        )
+    }
+
+    internal fun removeExternalOperationSnapshot(
+        response: ExternalOperationResponse,
+    ) {
+        applyExternalOperationSnapshot(
+            response = validateExternalOperationResponse(response),
             deleted = true,
         )
     }
@@ -249,6 +303,9 @@ class EventsRepository(
                             it.projectionStreamUuid
                         }
                     chatsByAccount - response.uuid
+                }
+                _externalOperations.update { operationsByAccount ->
+                    operationsByAccount - response.uuid
                 }
                 _streams.value
                     .filter {
@@ -306,6 +363,46 @@ class EventsRepository(
             }
         }
         projectionStreamToRemove?.let(::removeStream)
+    }
+
+    private fun applyExternalOperationSnapshot(
+        response: ExternalOperationResponse,
+        deleted: Boolean,
+    ) {
+        synchronized(externalProjectionLock) {
+            val accountRevision =
+                externalAccountRevisions[response.externalAccountUuid]
+            if (accountRevision?.deleted == true) return
+            if (
+                !recordExternalProjectionRevision(
+                    revisions = externalOperationRevisions,
+                    uuid = response.uuid,
+                    revision = response.revision,
+                    deleted = deleted,
+                )
+            ) {
+                return
+            }
+            _externalOperations.update { operationsByAccount ->
+                val current =
+                    operationsByAccount[response.externalAccountUuid]
+                        .orEmpty()
+                        .filterNot { it.uuid == response.uuid }
+                if (deleted) {
+                    if (current.isEmpty()) {
+                        operationsByAccount - response.externalAccountUuid
+                    } else {
+                        operationsByAccount + (
+                            response.externalAccountUuid to current
+                        )
+                    }
+                } else {
+                    operationsByAccount + (
+                        response.externalAccountUuid to (current + response)
+                    )
+                }
+            }
+        }
     }
 
     private fun recordExternalProjectionRevision(
@@ -1509,6 +1606,8 @@ class EventsRepository(
             "message_reaction" -> didReceiveReactionEvent(payload, action)
             "external_account" -> didReceiveExternalAccountEvent(payload, action)
             "external_chat" -> didReceiveExternalChatEvent(payload, action)
+            "external_operation" ->
+                didReceiveExternalOperationEvent(payload, action)
             else -> Log.d(
                 "WebSocket",
                 "Ignored unsupported event type: " +
@@ -1667,6 +1766,32 @@ class EventsRepository(
             return
         }
         applyExternalChatSnapshot(
+            response = response,
+            deleted = action == "deleted",
+        )
+    }
+
+    fun didReceiveExternalOperationEvent(payload: String, action: String) {
+        val event = decodeExternalSnapshotEvent(
+            payload = payload,
+            objectType = "external_operation",
+            action = action,
+        ) ?: return
+        val response = runCatching {
+            validateExternalOperationResponse(
+                response = json.decodeFromString<ExternalOperationResponse>(
+                    event.snapshot.toString(),
+                ),
+                expectedUuid = event.uuid,
+            )
+        }.getOrElse { error ->
+            logRealtimeWarning(
+                message = "Ignored malformed external operation event",
+                error = error,
+            )
+            return
+        }
+        applyExternalOperationSnapshot(
             response = response,
             deleted = action == "deleted",
         )

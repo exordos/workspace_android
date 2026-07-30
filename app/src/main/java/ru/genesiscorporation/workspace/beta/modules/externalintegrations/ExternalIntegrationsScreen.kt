@@ -4,8 +4,8 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
-import android.net.Uri
 import android.view.WindowManager
+import androidx.core.net.toUri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -55,6 +55,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.data.WorkspaceAccount
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalAccountResponse
@@ -64,6 +69,9 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalChatResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalChatStatus
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalChatType
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalHistoryDepth
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalOperationReconciliationReason
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalOperationResponse
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ExternalOperationStatus
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.net.URI
 
@@ -74,6 +82,8 @@ fun ExternalIntegrationsScreen(
 ) {
     val accounts by viewModel.accounts.collectAsStateWithLifecycle()
     val chatsByAccount by viewModel.chats.collectAsStateWithLifecycle()
+    val operationsByAccount by
+        viewModel.operations.collectAsStateWithLifecycle()
     val activeAccount by viewModel.activeAccount.collectAsStateWithLifecycle()
     val loadStatus by viewModel.loadStatus.collectAsStateWithLifecycle()
     val activeAction by viewModel.activeAction.collectAsStateWithLifecycle()
@@ -94,6 +104,12 @@ fun ExternalIntegrationsScreen(
         mutableStateOf<String?>(null)
     }
     var deselectChatUuid by rememberSaveable {
+        mutableStateOf<String?>(null)
+    }
+    var retryOperationUuid by rememberSaveable {
+        mutableStateOf<String?>(null)
+    }
+    var discardOperationUuid by rememberSaveable {
         mutableStateOf<String?>(null)
     }
     var query by rememberSaveable { mutableStateOf("") }
@@ -121,6 +137,29 @@ fun ExternalIntegrationsScreen(
                         it.displayName
                     },
                 )
+        }
+    }
+
+    val visibleOperations = remember(operationsByAccount, accounts) {
+        val accountUuids = accounts.mapTo(mutableSetOf()) { it.uuid }
+        operationsByAccount
+            .filterKeys { it in accountUuids }
+            .values
+            .flatten()
+            .sortedWith(
+                compareBy<ExternalOperationResponse>(
+                    ::externalOperationSortRank,
+                ).thenByDescending {
+                    it.updatedAt.orEmpty()
+                },
+            )
+    }
+    val chatCatalogAccounts = remember(accounts) {
+        accounts.filter {
+            externalCapabilityAvailable(
+                capabilities = it.capabilities,
+                name = EXTERNAL_CHAT_CATALOG_CAPABILITY,
+            )
         }
     }
 
@@ -227,96 +266,149 @@ fun ExternalIntegrationsScreen(
                         },
                     )
                 }
-                item(key = "chats-heading") {
-                    ExternalSectionHeading(
-                        title = "Чаты Zulip",
-                        subtitle = if (
-                            accounts.singleOrNull()
-                                ?.settings
-                                ?.selectionMode ==
-                            ExternalAccountSelectionMode.ALL
-                        ) {
-                            "Новые чаты синхронизируются автоматически."
-                        } else {
-                            "Выберите, какие чаты появятся в Workspace."
-                        },
-                    )
-                }
-                item(key = "search") {
-                    OutlinedTextField(
-                        value = query,
-                        onValueChange = { query = it.take(MAX_SEARCH_CHARS) },
-                        label = { Text("Поиск чатов") },
-                        singleLine = true,
-                        enabled = !busy,
-                        leadingIcon = {
-                            Icon(
-                                painter = painterResource(R.drawable.ic_search),
-                                contentDescription = null,
-                            )
-                        },
-                        trailingIcon = if (query.isNotEmpty()) {
-                            {
-                                IconButton(onClick = { query = "" }) {
-                                    Icon(
-                                        painter = painterResource(
-                                            R.drawable.ic_close_small,
-                                        ),
-                                        contentDescription = "Очистить поиск",
-                                    )
+                if (chatCatalogAccounts.isEmpty()) {
+                    item(key = "chats-unavailable") {
+                        ExternalChatsUnavailableCard()
+                    }
+                } else {
+                    item(key = "chats-heading") {
+                        ExternalSectionHeading(
+                            title = "Чаты Zulip",
+                            subtitle = if (
+                                chatCatalogAccounts.singleOrNull()
+                                    ?.settings
+                                    ?.selectionMode ==
+                                ExternalAccountSelectionMode.ALL
+                            ) {
+                                "Новые чаты синхронизируются автоматически."
+                            } else {
+                                "Выберите, какие чаты появятся в Workspace."
+                            },
+                        )
+                    }
+                    item(key = "search") {
+                        OutlinedTextField(
+                            value = query,
+                            onValueChange = {
+                                query = it.take(MAX_SEARCH_CHARS)
+                            },
+                            label = { Text("Поиск чатов") },
+                            singleLine = true,
+                            enabled = !busy,
+                            leadingIcon = {
+                                Icon(
+                                    painter = painterResource(
+                                        R.drawable.ic_search,
+                                    ),
+                                    contentDescription = null,
+                                )
+                            },
+                            trailingIcon = if (query.isNotEmpty()) {
+                                {
+                                    IconButton(onClick = { query = "" }) {
+                                        Icon(
+                                            painter = painterResource(
+                                                R.drawable.ic_close_small,
+                                            ),
+                                            contentDescription =
+                                                "Очистить поиск",
+                                        )
+                                    }
                                 }
+                            } else {
+                                null
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+
+                    chatCatalogAccounts.forEach { account ->
+                        val visibleChats =
+                            visibleChatsByAccount[account.uuid].orEmpty()
+                        if (visibleChats.isEmpty()) {
+                            item(key = "chats-empty-${account.uuid}") {
+                                ExternalChatsEmptyCard(
+                                    searching = query.isNotBlank(),
+                                    preparing = !account.liveReady,
+                                )
                             }
                         } else {
-                            null
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                            items(
+                                items = visibleChats,
+                                key = ExternalChatResponse::uuid,
+                            ) { chat ->
+                                ExternalChatCard(
+                                    account = account,
+                                    chat = chat,
+                                    workspaceAccount = activeAccount,
+                                    busy = busy,
+                                    automatic =
+                                        account.settings.selectionMode ==
+                                            ExternalAccountSelectionMode.ALL,
+                                    onSelect = {
+                                        viewModel.selectChat(chat)
+                                    },
+                                    onDeselect = {
+                                        deselectChatUuid = chat.uuid
+                                    },
+                                    onMoveHere = {
+                                        viewModel.moveChatHere(chat)
+                                    },
+                                    onExternalOpenError = {
+                                        platformError =
+                                            "Не удалось открыть исходный чат в браузере."
+                                    },
+                                )
+                            }
+                        }
+                    }
                 }
-
-                accounts.forEach { account ->
-                    val visibleChats =
-                        visibleChatsByAccount[account.uuid].orEmpty()
-                    if (visibleChats.isEmpty()) {
-                        item(key = "chats-empty-${account.uuid}") {
-                            ExternalChatsEmptyCard(
-                                searching = query.isNotBlank(),
-                                preparing = !account.liveReady,
-                            )
-                        }
-                    } else {
-                        items(
-                            items = visibleChats,
-                            key = ExternalChatResponse::uuid,
-                        ) { chat ->
-                            ExternalChatCard(
-                                account = account,
-                                chat = chat,
-                                workspaceAccount = activeAccount,
-                                busy = busy,
-                                automatic =
-                                    account.settings.selectionMode ==
-                                        ExternalAccountSelectionMode.ALL,
-                                onSelect = {
-                                    viewModel.selectChat(chat)
-                                },
-                                onDeselect = {
-                                    deselectChatUuid = chat.uuid
-                                },
-                                onMoveHere = {
-                                    viewModel.moveChatHere(chat)
-                                },
-                                onExternalOpenError = {
-                                    platformError =
-                                        "Не удалось открыть исходный чат в браузере."
-                                },
-                            )
-                        }
+                if (visibleOperations.isNotEmpty()) {
+                    item(key = "operations-heading") {
+                        ExternalSectionHeading(
+                            title = "Операции интеграции",
+                            subtitle =
+                                "Восстановление незавершённых действий и безопасное удаление очереди.",
+                        )
+                    }
+                    items(
+                        items = visibleOperations,
+                        key = ExternalOperationResponse::uuid,
+                    ) { operation ->
+                        val providerOrigin = accounts
+                            .firstOrNull {
+                                it.uuid == operation.externalAccountUuid
+                            }
+                            ?.settings
+                            ?.serverUrl
+                            .orEmpty()
+                        ExternalOperationCard(
+                            operation = operation,
+                            providerOrigin = providerOrigin,
+                            busy = busy,
+                            onRetry = {
+                                if (operation.retryRequiresConfirmation) {
+                                    retryOperationUuid = operation.uuid
+                                } else {
+                                    viewModel.retryOperation(
+                                        operation = operation,
+                                        confirmDuplicateRisk = false,
+                                    )
+                                }
+                            },
+                            onDiscard = {
+                                discardOperationUuid = operation.uuid
+                            },
+                            onExternalOpenError = {
+                                platformError =
+                                    "Не удалось открыть исходную операцию в браузере."
+                            },
+                        )
                     }
                 }
             }
         }
     }
-
     if (connectOpen) {
         ExternalAccountCredentialDialog(
             title = "Подключить Zulip",
@@ -452,6 +544,85 @@ fun ExternalIntegrationsScreen(
             },
         )
     }
+
+    val retryOperationCandidate = operationsByAccount.values
+        .flatten()
+        .firstOrNull { it.uuid == retryOperationUuid }
+    LaunchedEffect(
+        retryOperationUuid,
+        retryOperationCandidate?.canRetry,
+        retryOperationCandidate?.retryRequiresConfirmation,
+    ) {
+        if (
+            retryOperationUuid != null &&
+            (
+                retryOperationCandidate?.canRetry != true ||
+                    retryOperationCandidate.retryRequiresConfirmation != true
+                )
+        ) {
+            retryOperationUuid = null
+        }
+    }
+    val pendingRetryOperation = retryOperationCandidate
+        ?.takeIf {
+            it.canRetry && it.retryRequiresConfirmation
+        }
+    if (pendingRetryOperation != null) {
+        ExternalConfirmationDialog(
+            title = "Повторить с риском дубликата?",
+            text =
+                "Провайдер мог выполнить исходное действие без подтверждения. Повтор может создать дубликат.",
+            confirmLabel = "Всё равно повторить",
+            destructive = true,
+            busy = activeAction ==
+                ExternalIntegrationAction.RETRY_OPERATION,
+            onDismiss = { retryOperationUuid = null },
+            onConfirm = {
+                if (
+                    viewModel.retryOperation(
+                        operation = pendingRetryOperation,
+                        confirmDuplicateRisk = true,
+                    )
+                ) {
+                    retryOperationUuid = null
+                }
+            },
+        )
+    }
+
+    val discardOperationCandidate = operationsByAccount.values
+        .flatten()
+        .firstOrNull { it.uuid == discardOperationUuid }
+    LaunchedEffect(
+        discardOperationUuid,
+        discardOperationCandidate?.canDiscard,
+    ) {
+        if (
+            discardOperationUuid != null &&
+            discardOperationCandidate?.canDiscard != true
+        ) {
+            discardOperationUuid = null
+        }
+    }
+    val pendingDiscardOperation =
+        discardOperationCandidate?.takeIf(ExternalOperationResponse::canDiscard)
+    if (pendingDiscardOperation != null) {
+        ExternalConfirmationDialog(
+            title = "Удалить операцию из очереди?",
+            text =
+                "Workspace прекратит отслеживать и повторять эту операцию. Уже выполненное действие у провайдера не отменится.",
+            confirmLabel = "Удалить из очереди",
+            destructive = true,
+            busy = activeAction ==
+                ExternalIntegrationAction.DISCARD_OPERATION,
+            onDismiss = { discardOperationUuid = null },
+            onConfirm = {
+                if (viewModel.discardOperation(pendingDiscardOperation)) {
+                    discardOperationUuid = null
+                }
+            },
+        )
+    }
 }
 
 @Composable
@@ -469,6 +640,34 @@ private fun ExternalIntegrationsUnavailableCard() {
             lineHeight = 20.sp,
             modifier = Modifier.padding(18.dp),
         )
+    }
+}
+
+@Composable
+private fun ExternalChatsUnavailableCard() {
+    val colors = LocalWorkspaceColorsPalette.current
+    Surface(
+        color = colors.cardBackgroundBase,
+        shape = RoundedCornerShape(14.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            Text(
+                text = "Каталог внешних чатов недоступен",
+                color = colors.textHeaders,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text =
+                    "Текущий провайдер не разрешает просмотр каталога. Недоступные действия скрыты.",
+                color = colors.textAdditional50,
+                fontSize = 13.sp,
+                lineHeight = 18.sp,
+            )
+        }
     }
 }
 
@@ -774,6 +973,17 @@ private fun ExternalAccountCard(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            externalCapabilityUnavailableReasons(account.capabilities)
+                .forEach { reason ->
+                    Text(
+                        text = reason,
+                        color = colors.indicatorRed,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             HorizontalDivider(
                 color = colors.textAdditional30.copy(alpha = 0.35f),
             )
@@ -911,6 +1121,17 @@ private fun ExternalChatCard(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            externalCapabilityUnavailableReasons(chat.capabilities)
+                .forEach { reason ->
+                    Text(
+                        text = reason,
+                        color = colors.indicatorRed,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             if (chat.transitionPending) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(
@@ -939,7 +1160,7 @@ private fun ExternalChatCard(
                             context.startActivity(
                                 Intent(
                                     Intent.ACTION_VIEW,
-                                    Uri.parse(safeUrl),
+                                    safeUrl.toUri(),
                                 ),
                             )
                         }.onFailure {
@@ -984,6 +1205,137 @@ private fun ExternalChatCard(
                     ) {
                         Text("Убрать из Workspace")
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExternalOperationCard(
+    operation: ExternalOperationResponse,
+    providerOrigin: String,
+    busy: Boolean,
+    onRetry: () -> Unit,
+    onDiscard: () -> Unit,
+    onExternalOpenError: () -> Unit,
+) {
+    val colors = LocalWorkspaceColorsPalette.current
+    val context = LocalContext.current
+    val originalUrl = remember(operation.originalUrl, providerOrigin) {
+        safeExternalChatUrl(
+            candidate = operation.originalUrl,
+            providerOrigin = providerOrigin,
+        )
+    }
+    Surface(
+        color = colors.cardBackgroundBase,
+        shape = RoundedCornerShape(12.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = externalOperationActionLabel(operation.action),
+                        color = colors.textHeaders,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text =
+                            "Попытка ${operation.attempt} · ${operation.targetType}",
+                        color = colors.textAdditional50,
+                        fontSize = 12.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                ExternalStatusBadge(
+                    text = externalOperationStatusLabel(operation.status),
+                    color = externalOperationStatusColor(operation.status),
+                )
+            }
+            if (
+                operation.status ==
+                ExternalOperationStatus.MANUAL_RECONCILIATION_REQUIRED
+            ) {
+                Surface(
+                    color = colors.indicatorRed.copy(alpha = 0.12f),
+                    shape = RoundedCornerShape(8.dp),
+                ) {
+                    Text(
+                        text =
+                            "Нужна ручная проверка: ${externalReconciliationReasonLabel(operation.reconciliationReason)}",
+                        color = colors.indicatorRed,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp,
+                        modifier = Modifier.padding(10.dp),
+                    )
+                }
+            }
+            operation.safeError?.takeIf(String::isNotBlank)?.let {
+                Text(
+                    text = it,
+                    color = colors.indicatorRed,
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp,
+                    maxLines = 4,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            originalUrl?.let { safeUrl ->
+                TextButton(
+                    onClick = {
+                        runCatching {
+                            context.startActivity(
+                                Intent(
+                                    Intent.ACTION_VIEW,
+                                    safeUrl.toUri(),
+                                ),
+                            )
+                        }.onFailure {
+                            onExternalOpenError()
+                        }
+                    },
+                    enabled = !busy,
+                    contentPadding = PaddingValues(horizontal = 0.dp),
+                ) {
+                    Text("Открыть у провайдера")
+                }
+            }
+            if (operation.canRetry) {
+                OutlinedButton(
+                    onClick = onRetry,
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        if (operation.retryRequiresConfirmation) {
+                            "Проверить и повторить"
+                        } else {
+                            "Повторить операцию"
+                        },
+                    )
+                }
+            }
+            if (operation.canDiscard) {
+                TextButton(
+                    onClick = onDiscard,
+                    enabled = !busy,
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = colors.indicatorRed,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Удалить из очереди")
                 }
             }
         }
@@ -1520,8 +1872,149 @@ private fun externalHistoryDepthLabel(depth: ExternalHistoryDepth): String =
         ExternalHistoryDepth.ALL -> "Вся доступная история"
     }
 
+internal fun externalCapabilityAvailable(
+    capabilities: JsonObject,
+    name: String,
+): Boolean = runCatching {
+    capabilities[name]
+        ?.jsonObject
+        ?.get("available")
+        ?.jsonPrimitive
+        ?.booleanOrNull == true
+}.getOrDefault(false)
+
+internal fun externalCapabilityUnavailableReasons(
+    capabilities: JsonObject,
+): List<String> = capabilities.entries
+    .sortedBy { it.key }
+    .mapNotNull { (name, descriptor) ->
+        val unavailable = runCatching {
+            descriptor.jsonObject["available"]
+                ?.jsonPrimitive
+                ?.booleanOrNull == false
+        }.getOrDefault(false)
+        if (!unavailable) return@mapNotNull null
+        val message = runCatching {
+            val messageValue = descriptor.jsonObject["unavailable_reason"]
+                ?.jsonObject
+                ?.get("message")
+                ?.jsonPrimitive
+            messageValue
+                ?.takeIf { it.isString }
+                ?.contentOrNull
+                ?.trim()
+                ?.takeIf(String::isNotBlank)
+        }.getOrNull()
+        (message ?: externalCapabilityLabel(name))
+            .take(MAX_CAPABILITY_REASON_CHARS)
+    }
+    .distinct()
+    .take(MAX_VISIBLE_CAPABILITY_REASONS)
+
+private fun externalCapabilityLabel(name: String): String = when (name) {
+    EXTERNAL_CHAT_CATALOG_CAPABILITY ->
+        "Каталог внешних чатов недоступен"
+
+    "messenger.message.send" ->
+        "Отправка сообщений провайдеру недоступна"
+
+    "messenger.message.edit" ->
+        "Редактирование сообщений провайдера недоступно"
+
+    "messenger.message.delete" ->
+        "Удаление сообщений провайдера недоступно"
+
+    "messenger.message.read" ->
+        "Синхронизация прочтения недоступна"
+
+    "messenger.reaction.write" ->
+        "Изменение реакций у провайдера недоступно"
+
+    "messenger.file.transfer" ->
+        "Передача файлов провайдеру недоступна"
+
+    else -> name.take(MAX_CAPABILITY_REASON_CHARS)
+}
+
+internal fun externalOperationSortRank(
+    operation: ExternalOperationResponse,
+): Int = when (operation.status) {
+    ExternalOperationStatus.MANUAL_RECONCILIATION_REQUIRED -> 0
+    ExternalOperationStatus.FAILED -> 1
+    ExternalOperationStatus.RUNNING -> 2
+    ExternalOperationStatus.QUEUED -> 3
+    ExternalOperationStatus.SUCCEEDED -> 4
+    ExternalOperationStatus.DISCARDED -> 5
+}
+
+internal fun externalOperationStatusLabel(
+    status: ExternalOperationStatus,
+): String = when (status) {
+    ExternalOperationStatus.QUEUED -> "В очереди"
+    ExternalOperationStatus.RUNNING -> "Выполняется"
+    ExternalOperationStatus.SUCCEEDED -> "Выполнено"
+    ExternalOperationStatus.FAILED -> "Ошибка"
+    ExternalOperationStatus.MANUAL_RECONCILIATION_REQUIRED ->
+        "Нужна проверка"
+
+    ExternalOperationStatus.DISCARDED -> "Удалено"
+}
+
+@Composable
+private fun externalOperationStatusColor(
+    status: ExternalOperationStatus,
+): Color {
+    val colors = LocalWorkspaceColorsPalette.current
+    return when (status) {
+        ExternalOperationStatus.SUCCEEDED -> colors.indicatorGreen
+        ExternalOperationStatus.RUNNING,
+        ExternalOperationStatus.QUEUED,
+        -> colors.indicatorBlue
+
+        ExternalOperationStatus.FAILED,
+        ExternalOperationStatus.MANUAL_RECONCILIATION_REQUIRED,
+        -> colors.indicatorOrange
+
+        ExternalOperationStatus.DISCARDED -> colors.indicatorGrey
+    }
+}
+
+private fun externalOperationActionLabel(action: String): String =
+    when (action) {
+        "message.send" -> "Отправка сообщения"
+        "message.edit" -> "Редактирование сообщения"
+        "message.delete" -> "Удаление сообщения"
+        "message.read" -> "Синхронизация прочтения"
+        "reaction.add" -> "Добавление реакции"
+        "reaction.remove" -> "Удаление реакции"
+        "stream.rename" -> "Переименование канала"
+        "topic.rename" -> "Переименование темы"
+        "topic.move" -> "Перенос темы"
+        "file.upload" -> "Передача файла"
+        else -> action
+    }
+
+private fun externalReconciliationReasonLabel(
+    reason: ExternalOperationReconciliationReason?,
+): String = when (reason) {
+    ExternalOperationReconciliationReason.PROVIDER_HISTORY_UNAVAILABLE ->
+        "история провайдера недоступна"
+
+    ExternalOperationReconciliationReason.NO_MATCH_AFTER_AUTO_RESEND ->
+        "после автоматического повтора подтверждение не найдено"
+
+    ExternalOperationReconciliationReason.UNSAFE_PROVIDER_STATE ->
+        "состояние провайдера нельзя определить безопасно"
+
+    null -> "проверьте результат у провайдера"
+}
+
 private const val MAX_SEARCH_CHARS = 256
 private const val MAX_SERVER_URL_CHARS = 2_048
 private const val MAX_EMAIL_CHARS = 320
 private const val MAX_API_KEY_CHARS = 4_096
 private const val MAX_EXTERNAL_LINK_CHARS = 4_096
+private const val MAX_CAPABILITY_REASON_CHARS = 512
+private const val MAX_VISIBLE_CAPABILITY_REASONS = 8
+private const val EXTERNAL_CHAT_CATALOG_CAPABILITY =
+    "messenger.chat_catalog"
