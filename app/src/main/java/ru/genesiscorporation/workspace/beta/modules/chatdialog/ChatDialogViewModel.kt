@@ -222,6 +222,7 @@ class ChatDialogViewModel(
     private var remoteDraftSyncJob: Job? = null
     private var draftUpdatedAt: String? = null
     private var nextOlderPageMarker: String? = null
+    private var contextWindowAnchorUuid: String? = focusMessageUuid
     private var olderMessagesJob: Job? = null
     private var refreshHistoryBeforeOlderRetry = false
     private var nextNewerPageMarker: String? = null
@@ -2799,10 +2800,90 @@ class ChatDialogViewModel(
 
     private suspend fun loadInitialMessages(): Boolean =
         focusMessageUuid
-            ?.let { loadMessageWindowAround(it) }
-            ?: loadLatestMessages()
+            ?.let { loadMessageWindowAround(it, focusAnchor = true) }
+            ?: loadFirstUnreadWindowOrLatest()
 
-    private suspend fun loadMessageWindowAround(requestedUuid: String): Boolean {
+    private suspend fun loadFirstUnreadWindowOrLatest(): Boolean {
+        _isLoading.value = true
+        val (unreadResponse, latestResponse) = try {
+            coroutineScope {
+                val unread = async {
+                    client.performRequest(
+                        MessagesRequest(
+                            streamId = chatId,
+                            topicId = topicUuid,
+                            pageLimit = 1,
+                            sortDirection = MessageSortDirection.ASCENDING,
+                            read = false,
+                            isOwn = false,
+                        ),
+                    )
+                }
+                val latest = async {
+                    client.performRequest(
+                        MessagesRequest(
+                            streamId = chatId,
+                            topicId = topicUuid,
+                            pageLimit = MESSAGE_HISTORY_PAGE_SIZE,
+                            sortDirection = MessageSortDirection.DESCENDING,
+                        ),
+                    )
+                }
+                unread.await() to latest.await()
+            }
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (exception: Exception) {
+            _actionError.value =
+                "Не удалось определить первое непрочитанное сообщение"
+            return loadLatestMessages()
+        }
+        return when (unreadResponse) {
+            is ApiResult.Success -> {
+                val state = validateFirstUnreadPage(
+                    messages = unreadResponse.value,
+                    expectedStreamUuid = chatId,
+                    expectedTopicUuid = topicUuid,
+                )
+                when {
+                    state.error != null -> {
+                        _actionError.value = state.error
+                        loadLatestMessages(preloadedResponse = latestResponse)
+                    }
+
+                    state.message == null -> loadLatestMessages(
+                        preloadedResponse = latestResponse,
+                    )
+                    latestResponse is ApiResult.Success &&
+                        latestResponse.value.any {
+                            it.uuid == state.message.uuid
+                        } -> loadLatestMessages(
+                        preloadedResponse = latestResponse,
+                    )
+
+                    else -> loadMessageWindowAround(
+                        requestedUuid = state.message.uuid,
+                        focusAnchor = false,
+                    )
+                }
+            }
+
+            is ApiResult.Error -> {
+                _actionError.value = unreadResponse.error.message
+                    ?.takeIf(String::isNotBlank)
+                    ?.let {
+                        "Не удалось определить первое непрочитанное сообщение: $it"
+                    }
+                    ?: "Не удалось определить первое непрочитанное сообщение"
+                loadLatestMessages(preloadedResponse = latestResponse)
+            }
+        }
+    }
+
+    private suspend fun loadMessageWindowAround(
+        requestedUuid: String,
+        focusAnchor: Boolean,
+    ): Boolean {
         _isLoading.value = true
         _loadError.value = null
         _olderMessagesError.value = null
@@ -2860,13 +2941,16 @@ class ChatDialogViewModel(
         // This keeps a slow page request from leaving a valid message link on
         // an unrelated latest-history loading screen.
         repo.replaceStreamTopicMessages(chatId, topicUuid, listOf(anchor))
+        contextWindowAnchorUuid = anchor.uuid
         nextOlderPageMarker = anchor.uuid
         nextNewerPageMarker = anchor.uuid
         _hasOlderMessages.value = true
         _hasNewerMessages.value = true
         _loadingOlderMessages.value = true
         _loadingNewerMessages.value = true
-        requestMessageFocus(anchor.uuid)
+        if (focusAnchor) {
+            requestMessageFocus(anchor.uuid)
+        }
         fun finishInitialContextLoading() {
             _loadingOlderMessages.value = false
             _loadingNewerMessages.value = false
@@ -3029,8 +3113,11 @@ class ChatDialogViewModel(
                                 "Чат открыт, но сообщение для пересылки недоступно"
                         }
                 }
-            // Re-apply focus after status-row and context layout changes.
-            requestMessageFocus(anchor.uuid)
+            // Re-apply exact-route focus after status-row and context layout
+            // changes. First-unread windows use the marker instead.
+            if (focusAnchor) {
+                requestMessageFocus(anchor.uuid)
+            }
             _isLoading.value = false
             return true
         } finally {
@@ -3038,9 +3125,13 @@ class ChatDialogViewModel(
         }
     }
 
-    suspend fun loadLatestMessages(resolveMessageFocus: Boolean = true): Boolean {
+    suspend fun loadLatestMessages(
+        resolveMessageFocus: Boolean = true,
+        preloadedResponse: ApiResult<List<MessageResponse>, ApiError>? = null,
+    ): Boolean {
         _isLoading.value = true
         _loadError.value = null
+        contextWindowAnchorUuid = null
         nextNewerPageMarker = null
         _hasNewerMessages.value = false
         _newerMessagesError.value = null
@@ -3051,7 +3142,8 @@ class ChatDialogViewModel(
             pageLimit = MESSAGE_HISTORY_PAGE_SIZE,
             sortDirection = MessageSortDirection.DESCENDING,
         )
-        val messagesResponse = client.performRequest(messagesRequest)
+        val messagesResponse =
+            preloadedResponse ?: client.performRequest(messagesRequest)
         return when(messagesResponse) {
             is ApiResult.Success -> {
                 val latestPageMessages = messagesResponse.value.filter {
@@ -3214,7 +3306,7 @@ class ChatDialogViewModel(
         if (_loadingOlderMessages.value) return false
         _olderMessagesError.value = null
         if (refreshHistoryBeforeOlderRetry) {
-            focusMessageUuid?.let { anchorUuid ->
+            contextWindowAnchorUuid?.let { anchorUuid ->
                 refreshHistoryBeforeOlderRetry = false
                 nextOlderPageMarker = anchorUuid
                 _hasOlderMessages.value = true
@@ -3273,7 +3365,10 @@ class ChatDialogViewModel(
                             "$chatId.$topicUuid"
                         ]?.singleOrNull { it.uuid == marker }
                         val pageState =
-                            if (focusMessageUuid != null && boundary != null) {
+                            if (
+                                contextWindowAnchorUuid != null &&
+                                boundary != null
+                            ) {
                                 validateMessageWindowPageState(
                                     messages = pageMessages,
                                     nextMarkerHeader =
@@ -3332,7 +3427,7 @@ class ChatDialogViewModel(
 
     fun loadNewerMessages(): Boolean {
         if (
-            focusMessageUuid == null ||
+            contextWindowAnchorUuid == null ||
             !_hasNewerMessages.value ||
             _loadingNewerMessages.value ||
             _newerMessagesError.value != null ||
@@ -3344,11 +3439,16 @@ class ChatDialogViewModel(
     }
 
     fun retryNewerMessages(): Boolean {
-        if (_loadingNewerMessages.value || focusMessageUuid == null) return false
+        if (
+            _loadingNewerMessages.value ||
+            contextWindowAnchorUuid == null
+        ) {
+            return false
+        }
         _newerMessagesError.value = null
         if (refreshHistoryBeforeNewerRetry) {
             refreshHistoryBeforeNewerRetry = false
-            nextNewerPageMarker = focusMessageUuid
+            nextNewerPageMarker = contextWindowAnchorUuid
             _hasNewerMessages.value = true
         }
         if (!_hasNewerMessages.value) return false
@@ -3769,6 +3869,36 @@ internal fun validateMessageWindowPageState(
         baseState
     } else {
         malformedMessagePageState()
+    }
+}
+
+internal data class FirstUnreadPageState(
+    val message: MessageResponse? = null,
+    val error: String? = null,
+)
+
+internal fun validateFirstUnreadPage(
+    messages: List<MessageResponse>,
+    expectedStreamUuid: String,
+    expectedTopicUuid: String,
+): FirstUnreadPageState {
+    if (messages.isEmpty()) return FirstUnreadPageState()
+    val message = messages.singleOrNull()
+        ?: return FirstUnreadPageState(
+            error = "Сервер вернул некорректный список непрочитанных сообщений",
+        )
+    val valid =
+        message.streamUuid == expectedStreamUuid &&
+            message.topicUuid == expectedTopicUuid &&
+            !message.read &&
+            !message.isOwn &&
+            messagePosition(message) != null
+    return if (valid) {
+        FirstUnreadPageState(message = message)
+    } else {
+        FirstUnreadPageState(
+            error = "Сервер вернул некорректное первое непрочитанное сообщение",
+        )
     }
 }
 

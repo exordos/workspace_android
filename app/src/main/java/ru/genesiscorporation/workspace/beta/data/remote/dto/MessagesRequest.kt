@@ -14,6 +14,8 @@ data class MessagesRequest(
     val pageLimit: Int? = null,
     val pageMarker: String? = null,
     val sortDirection: MessageSortDirection? = null,
+    val read: Boolean? = null,
+    val isOwn: Boolean? = null,
     val starred: Boolean? = null,
 ): ApiRequest<MessagesRequestData, List<MessageResponse>, ApiError> {
     init {
@@ -44,6 +46,8 @@ data class MessagesRequest(
         pageMarker = pageMarker?.let(::parseCanonicalMessagePageMarker),
         sortKey = sortDirection?.let { "created_at" },
         sortDirection = sortDirection?.wireValue,
+        read = read,
+        isOwn = isOwn,
         starred = starred,
     )
 }
@@ -84,6 +88,8 @@ data class MessagesRequestData(
     @SerialName("page_marker") val pageMarker: String?,
     @SerialName("sort_key") val sortKey: String?,
     @SerialName("sort_dir") val sortDirection: String?,
+    val read: Boolean?,
+    @SerialName("is_own") val isOwn: Boolean?,
     val starred: Boolean?,
 )
 

@@ -64,6 +64,27 @@ class MessagesRequestContractTest {
 
     @OptIn(ExperimentalSerializationApi::class)
     @Test
+    fun `first unread lookup uses the exact incoming unread filter`() {
+        val request = MessagesRequest(
+            streamId = STREAM_UUID,
+            topicId = TOPIC_UUID,
+            pageLimit = 1,
+            sortDirection = MessageSortDirection.ASCENDING,
+            read = false,
+            isOwn = false,
+        )
+
+        val params = Properties.encodeToStringMap(request.data)
+        assertEquals(STREAM_UUID, params["stream_uuid"])
+        assertEquals(TOPIC_UUID, params["topic_uuid"])
+        assertEquals("1", params["page_limit"])
+        assertEquals("asc", params["sort_dir"])
+        assertEquals("false", params["read"])
+        assertEquals("false", params["is_own"])
+    }
+
+    @OptIn(ExperimentalSerializationApi::class)
+    @Test
     fun `older message page sends a canonical continuation marker`() {
         val request = MessagesRequest(
             streamId = STREAM_UUID,

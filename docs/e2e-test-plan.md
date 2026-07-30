@@ -340,13 +340,16 @@ MSG-HIST-008 edit-in-old-history remain fault/interaction automation work;
 merely disabling radios is not counted as proof because an already resolved
 in-app route can reuse retained runtime state.
 
-Current unread coverage: MSG-UNREAD-003–007 have focused request/model/repository
-tests, including composite-boundary selection, full and batch realtime frames,
-duplicate delivery and stale-page regression. Physical acceptance in a
-naturally unread sandbox conversation is required before marking
-MSG-UNREAD-001–009 passed. MSG-UNREAD-008 controlled post-gesture faults,
-MSG-UNREAD-010 exact off-page first-unread loading and MSG-UNREAD-011 explicit
-short-chat completion remain implementation/automation work.
+Current unread coverage: MSG-UNREAD-003–007 and 010 have focused
+request/model/repository tests, including the strict earliest-unread filter,
+candidate scope validation, composite-boundary selection, full and batch
+realtime frames, duplicate delivery and stale-page regression. Latest and
+earliest-unread requests run concurrently; an unread already in the latest page
+reuses that response, while an off-page unread uses the strict bidirectional
+context loader. Physical acceptance in a naturally unread sandbox conversation
+is required before marking MSG-UNREAD-001–010 passed. MSG-UNREAD-008 controlled
+post-gesture faults and MSG-UNREAD-011 explicit short-chat completion remain
+implementation/automation work.
 
 ### Current history acceptance coverage
 

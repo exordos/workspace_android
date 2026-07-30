@@ -194,6 +194,45 @@ class MessagePaginationTest {
     }
 
     @Test
+    fun `first unread page accepts only one exact incoming unread row`() {
+        val unread = message(OLDEST_UUID, read = false)
+
+        assertEquals(
+            unread,
+            validateFirstUnreadPage(
+                messages = listOf(unread),
+                expectedStreamUuid = STREAM_UUID,
+                expectedTopicUuid = TOPIC_UUID,
+            ).message,
+        )
+        assertEquals(
+            null,
+            validateFirstUnreadPage(
+                messages = emptyList(),
+                expectedStreamUuid = STREAM_UUID,
+                expectedTopicUuid = TOPIC_UUID,
+            ).error,
+        )
+        listOf(
+            listOf(unread, message(NEWER_UUID, read = false)),
+            listOf(unread.copy(streamUuid = "foreign-stream")),
+            listOf(unread.copy(topicUuid = "foreign-topic")),
+            listOf(unread.copy(read = true)),
+            listOf(unread.copy(isOwn = true)),
+            listOf(unread.copy(uuid = "not-a-uuid")),
+            listOf(unread.copy(createdAt = "not-a-time")),
+        ).forEach { rejected ->
+            assertTrue(
+                validateFirstUnreadPage(
+                    messages = rejected,
+                    expectedStreamUuid = STREAM_UUID,
+                    expectedTopicUuid = TOPIC_UUID,
+                ).error != null,
+            )
+        }
+    }
+
+    @Test
     fun `read through confirmation requires the exact readable scope`() {
         val confirmed = message(ANCHOR_UUID, read = true)
 
