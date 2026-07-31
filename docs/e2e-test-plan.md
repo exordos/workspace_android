@@ -593,6 +593,8 @@ acceptance.
 | MSG-ACT-005 | Delete an edit/quote source | Successful deletion clears only matching edit/quote references and restores any suspended ordinary draft |
 | MSG-ACT-006 | External-provider or non-owned message | Edit/delete are hidden until provider capability and preflight data prove the operation is supported |
 | MSG-ACT-007 | Copy text from a text/image/file/call message | The exact source Markdown is written once to Android's plain-text clipboard, marked sensitive on supported Android versions, and a polite visible success/failure result with functional Close appears; blank payloads expose no copy action |
+| MSG-ACT-008 | Quick or searched emoji reaction | Six labeled quick reactions plus the complete bundled Unicode catalog are selectable from text/image/file/call messages; search accepts glyphs and normalized aliases, an empty result is explicit, server-canonical names render as glyphs, and add/remove immediately reconcile the exact own-reaction/count projection |
+| MSG-ACT-009 | Reaction race, malformed response, account switch or failure | Per-owner message/emoji single-flight blocks duplicate mutations; a concurrent authoritative count wins over stale local completion; mismatched UUID/user/message/control data fail closed; late foreign-owner results are discarded and network/server errors remain visible |
 
 Current MSG-ACT-007 coverage: an exact two-case foreground clipboard
 instrumentation run passed on the Android 14 Pixel, including exact text,
@@ -607,6 +609,24 @@ auto-dismissed the success card after the accessibility-adjusted timeout.
 Its success text passed light/dark contrast checks (5.69:1 and 6.80:1).
 Image/file/call menu
 sampling and an injected missing-clipboard-service failure remain pending.
+
+Current MSG-ACT-008/009 automated coverage includes deduplicated catalog
+construction, alias/glyph search, Unicode/server-name display, stale-count
+reconciliation, overflow/invalid-input rejection, strict response UUID/owner
+validation, and a production-catalog Compose run through empty search and
+selection. Repository tests additionally cover realtime create/update/delete
+count projection and prove that the server echo of an optimistic own mutation
+confirms rather than doubles the count.
+
+Physical-device acceptance passed in the dedicated sandbox for both the quick
+thumbs-up path and a searched `test_tube` selection: add/remove appeared
+immediately, the canonical server shortcode always rendered as its Unicode
+glyph with count `1`, the own chip exposed selected semantics, delayed server
+confirmation preserved the projection, and reopening the topic after removal
+showed no residual reaction. The complete picker, its search query and result
+survived portrait → landscape → portrait and remained usable. Its light and
+dark surfaces were inspected without light-on-light text. The sandbox was left
+clean.
 
 ### Forwarding
 

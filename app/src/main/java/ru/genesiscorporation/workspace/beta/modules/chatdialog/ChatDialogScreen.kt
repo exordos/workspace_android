@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,6 +24,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
@@ -56,8 +58,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.TextStyle
@@ -85,6 +91,8 @@ import ru.genesiscorporation.workspace.beta.ui.EnhancedMarkdown
 import ru.genesiscorporation.workspace.beta.ui.LocalWorkspaceMentionCatalog
 import ru.genesiscorporation.workspace.beta.ui.WorkspaceMentionCandidate
 import ru.genesiscorporation.workspace.beta.ui.WorkspaceMentionCatalog
+import ru.genesiscorporation.workspace.beta.ui.WorkspaceEmojiShortcodeCatalog
+import ru.genesiscorporation.workspace.beta.ui.workspaceReactionDisplayText
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.net.URL
 import java.time.Duration
@@ -102,7 +110,29 @@ fun ChatDialogScreen(
     viewModel: ChatDialogViewModel,
     navController: NavHostController,
 ) {
+    val applicationContext = LocalContext.current.applicationContext
+    val reactionEmojiResolver = remember(applicationContext) {
+        WorkspaceEmojiShortcodeCatalog.resolver(applicationContext)
+    }
+    val reactionAliasesByGlyph = remember(applicationContext) {
+        WorkspaceEmojiShortcodeCatalog
+            .pickerEntries(applicationContext)
+            .associate { entry -> entry.glyph to entry.aliases.toSet() }
+    }
     val streamTopicMessages by viewModel.streamTopicMessages.collectAsStateWithLifecycle()
+    val reactionCountOverrides by
+        viewModel.repo.messageReactionOverrides
+            .collectAsStateWithLifecycle()
+    val userReactions by
+        viewModel.repo.userReactions.collectAsStateWithLifecycle()
+    val myReactionNamesByMessage = remember(userReactions) {
+        userReactions
+            .groupBy(
+                keySelector = { it.messageUuid },
+                valueTransform = { it.emojiName },
+            )
+            .mapValues { (_, names) -> names.toSet() }
+    }
     val isLoading by viewModel.isLoading.collectAsState()
     val loadError by viewModel.loadError.collectAsState()
     val actionError by viewModel.actionError.collectAsState()
@@ -131,6 +161,8 @@ fun ChatDialogScreen(
     val topicUnreadCount by viewModel.topicUnreadCount.collectAsStateWithLifecycle()
     val forwardDialogState by
         viewModel.forwardDialogState.collectAsStateWithLifecycle()
+    val reactionPickerMessageUuid by
+        viewModel.reactionPickerMessageUuid.collectAsStateWithLifecycle()
     val users by viewModel.repo.users.collectAsStateWithLifecycle()
     val mentionCandidates = remember(users) {
         users.map { user ->
@@ -205,6 +237,24 @@ fun ChatDialogScreen(
         loadingNewerMessages || newerMessagesError != null || hasNewerMessages
     val historyTopItemOffset = if (showOlderHistoryStatus) 1 else 0
     val lastMessageListIndex = messages.lastIndex + historyTopItemOffset
+
+    LaunchedEffect(reactionCountOverrides, lastMessageListIndex) {
+        if (
+            reactionCountOverrides.isEmpty() ||
+            lastMessageListIndex < 0
+        ) {
+            return@LaunchedEffect
+        }
+        val lastVisibleIndex =
+            listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index
+        val wasAtConversationEnd =
+            lastVisibleIndex == null ||
+                lastVisibleIndex >= lastMessageListIndex
+        if (wasAtConversationEnd) {
+            delay(32)
+            listState.scrollToItem(lastMessageListIndex)
+        }
+    }
 
     LaunchedEffect(viewModel, navController) {
         viewModel.openSourceMessageEvents.collect { event ->
@@ -619,6 +669,18 @@ fun ChatDialogScreen(
                                         item = message,
                                         viewModel = viewModel,
                                         navController = navController,
+                                        myReactionEmojiNames =
+                                            myReactionNamesByMessage[
+                                                message.uuid
+                                            ].orEmpty(),
+                                        reactionEmojiResolver =
+                                            reactionEmojiResolver,
+                                        reactionAliasesByGlyph =
+                                            reactionAliasesByGlyph,
+                                        reactionCounts =
+                                            reactionCountOverrides[
+                                                message.uuid
+                                            ] ?: message.reactions,
                                         outboxEntry = outboxEntries.firstOrNull {
                                             it.localMessageUuid == message.uuid
                                         },
@@ -793,6 +855,21 @@ fun ChatDialogScreen(
             )
         }
     }
+    MessageReactionPicker(
+        open = reactionPickerMessageUuid != null,
+        onDismiss = viewModel::closeMessageReactionPicker,
+        onReaction = { reaction ->
+            reactionPickerMessageUuid?.let { messageUuid ->
+                viewModel.onMessageReactionTap(
+                    messageUuid = messageUuid,
+                    emojiName = reaction.emojiName,
+                    equivalentEmojiNames =
+                        reaction.equivalentEmojiNames,
+                )
+            }
+            viewModel.closeMessageReactionPicker()
+        },
+    )
 }
 
 @Composable
@@ -1139,6 +1216,10 @@ fun ChatMessage(
     item: MessageResponse,
     viewModel: ChatDialogViewModel,
     navController: NavHostController,
+    myReactionEmojiNames: Set<String>,
+    reactionEmojiResolver: (String) -> String?,
+    reactionAliasesByGlyph: Map<String, Set<String>>,
+    reactionCounts: Map<String, Int>,
     outboxEntry: PersistedOutboxEntry? = null,
     isVerifyingOutbox: Boolean = false,
     onImageLoad: () -> Unit,
@@ -1209,16 +1290,45 @@ fun ChatMessage(
                 TextMessageView(item, viewModel, navController)
         }
 
-        if (outboxEntry == null && item.reactions.isNotEmpty()) {
+        if (outboxEntry == null && reactionCounts.isNotEmpty()) {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
-                modifier = Modifier.padding(
-                    start = if (!item.isOwn && !viewModel.isDirectMessages) 44.dp else 0.dp,
-                    top = 3.dp,
-                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(
+                        start =
+                            if (
+                                !item.isOwn &&
+                                !viewModel.isDirectMessages
+                            ) {
+                                44.dp
+                            } else {
+                                0.dp
+                            },
+                        top = 3.dp,
+                    ),
             ) {
-                item.reactions.forEach { (emoji, count) ->
-                    val selected = viewModel.hasMyReaction(emoji, item.uuid)
+                reactionCounts
+                    .toSortedMap()
+                    .forEach { (emojiName, count) ->
+                    val equivalentEmojiNames =
+                        reactionEmojiResolver(emojiName)
+                            ?.let(reactionAliasesByGlyph::get)
+                            .orEmpty() + emojiName
+                    val selected =
+                        equivalentEmojiNames.any(
+                            myReactionEmojiNames::contains,
+                        )
+                    val displayEmoji = workspaceReactionDisplayText(
+                        emojiName,
+                        reactionEmojiResolver,
+                    )
+                    val reactionContentDescription = stringResource(
+                        R.string.message_reaction_count_description,
+                        displayEmoji,
+                        count,
+                    )
                     Row(
                         modifier = Modifier
                             .border(
@@ -1230,22 +1340,29 @@ fun ChatMessage(
                                 if (selected) colors.primary.copy(alpha = 0.16f) else colors.surface,
                                 CircleShape,
                             )
-                            .clickable {
-                                viewModel.onMessageReactionTap(item.uuid, emoji)
+                            .clickable(role = Role.Button) {
+                                viewModel.onMessageReactionTap(
+                                    item.uuid,
+                                    emojiName,
+                                    equivalentEmojiNames,
+                                )
                             }
-                            .heightIn(min = 44.dp)
+                            .heightIn(min = 48.dp)
+                            .semantics {
+                                this.selected = selected
+                                contentDescription =
+                                    reactionContentDescription
+                            }
                             .padding(horizontal = 7.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(text = emoji, fontSize = 16.sp)
-                        if (count > 1) {
-                            Text(
-                                text = count.toString(),
-                                color = colors.textAdditional50,
-                                fontSize = 12.sp,
-                                modifier = Modifier.padding(start = 3.dp),
-                            )
-                        }
+                        Text(text = displayEmoji, fontSize = 16.sp)
+                        Text(
+                            text = count.toString(),
+                            color = colors.textAdditional50,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(start = 3.dp),
+                        )
                     }
                 }
             }

@@ -13,4 +13,21 @@
     <string name="markdown_spoiler_hide">Hide</string>
     <string name="markdown_spoiler_hidden_state">Content hidden</string>
     <string name="markdown_spoiler_shown_state">Content shown</string>
+    <string name="message_reaction_more">More reactions</string>
+    <string name="message_reaction_heart">Reaction: heart</string>
+    <string name="message_reaction_like">Reaction: like</string>
+    <string name="message_reaction_laughter">Reaction: laughter</string>
+    <string name="message_reaction_surprise">Reaction: surprise</string>
+    <string name="message_reaction_sadness">Reaction: sadness</string>
+    <string name="message_reaction_applause">Reaction: applause</string>
+    <string name="message_reaction_count_description">Reaction %1$s, votes: %2$d</string>
+    <string name="reaction_picker_pane_title">Reaction picker</string>
+    <string name="reaction_picker_title">Choose a reaction</string>
+    <string name="reaction_picker_close">Close</string>
+    <string name="reaction_picker_search_label">Search emoji</string>
+    <string name="reaction_picker_search_hint">For example, smile or 👍</string>
+    <string name="reaction_picker_load_failed">Could not load the emoji catalog</string>
+    <string name="reaction_picker_retry">Retry</string>
+    <string name="reaction_picker_empty">Nothing found</string>
+    <string name="reaction_picker_item_description">Reaction %1$s, :%2$s:</string>
 </resources>

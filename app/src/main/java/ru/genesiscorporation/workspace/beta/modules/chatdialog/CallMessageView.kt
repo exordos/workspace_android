@@ -129,9 +129,18 @@ fun CallMessageView(
                 expanded = menuExpanded,
                 item = item,
                 onDismiss = { menuExpanded = false },
-                onReaction = { emoji ->
-                    viewModel.onMessageReactionTap(item.uuid, emoji)
+                onReaction = { reaction ->
+                    viewModel.onMessageReactionTap(
+                        messageUuid = item.uuid,
+                        emojiName = reaction.emojiName,
+                        equivalentEmojiNames =
+                            reaction.equivalentEmojiNames,
+                    )
                     menuExpanded = false
+                },
+                onOpenReactionPicker = {
+                    menuExpanded = false
+                    viewModel.openMessageReactionPicker(item.uuid)
                 },
                 onEdit = {
                     viewModel.onEditMessageClicked(item)

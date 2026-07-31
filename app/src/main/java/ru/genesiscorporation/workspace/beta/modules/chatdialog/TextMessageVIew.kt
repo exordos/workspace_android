@@ -1,5 +1,6 @@
 package ru.genesiscorporation.workspace.beta.modules.chatdialog
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -36,6 +37,8 @@ import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -106,9 +109,18 @@ fun TextMessageView(
                 expanded = menuExpanded,
                 item = item,
                 onDismiss = { menuExpanded = false },
-                onReaction = { emoji ->
-                    viewModel.onMessageReactionTap(item.uuid, emoji)
+                onReaction = { reaction ->
+                    viewModel.onMessageReactionTap(
+                        messageUuid = item.uuid,
+                        emojiName = reaction.emojiName,
+                        equivalentEmojiNames =
+                            reaction.equivalentEmojiNames,
+                    )
                     menuExpanded = false
+                },
+                onOpenReactionPicker = {
+                    menuExpanded = false
+                    viewModel.openMessageReactionPicker(item.uuid)
                 },
                 onEdit = {
                     viewModel.onEditMessageClicked(item)
@@ -260,7 +272,8 @@ internal fun MessageActionsMenu(
     expanded: Boolean,
     item: MessageResponse,
     onDismiss: () -> Unit,
-    onReaction: (String) -> Unit,
+    onReaction: (WorkspaceReactionSelection) -> Unit,
+    onOpenReactionPicker: () -> Unit,
     onEdit: () -> Unit,
     isDeleting: Boolean,
     onDelete: () -> Unit,
@@ -273,20 +286,48 @@ internal fun MessageActionsMenu(
         expanded = expanded,
         onDismissRequest = onDismiss,
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 8.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
         ) {
-            listOf("👍", "❤️", "😂", "😮", "😢").forEach { emoji ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+            ) {
+                QUICK_REACTIONS.take(4).forEach { reaction ->
+                    QuickReactionButton(
+                        reaction = reaction,
+                        enabled = !isDeleting,
+                        onReaction = onReaction,
+                    )
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                QUICK_REACTIONS.drop(4).forEach { reaction ->
+                    QuickReactionButton(
+                        reaction = reaction,
+                        enabled = !isDeleting,
+                        onReaction = onReaction,
+                    )
+                }
                 TextButton(
-                    onClick = { onReaction(emoji) },
+                    onClick = {
+                        onDismiss()
+                        onOpenReactionPicker()
+                    },
                     enabled = !isDeleting,
-                    contentPadding = PaddingValues(0.dp),
-                    modifier = Modifier.size(44.dp),
+                    modifier = Modifier.size(
+                        width = 104.dp,
+                        height = 48.dp,
+                    ),
+                    contentPadding = PaddingValues(horizontal = 8.dp),
                 ) {
-                    Text(text = emoji, fontSize = 20.sp)
+                    Text(stringResource(R.string.message_reaction_more))
                 }
             }
         }
@@ -357,6 +398,80 @@ internal fun MessageActionsMenu(
         )
     }
 }
+
+@Composable
+private fun QuickReactionButton(
+    reaction: QuickReaction,
+    enabled: Boolean,
+    onReaction: (WorkspaceReactionSelection) -> Unit,
+) {
+    val description = stringResource(reaction.descriptionRes)
+    TextButton(
+        onClick = {
+            onReaction(
+                WorkspaceReactionSelection(
+                    emojiName = reaction.emojiName,
+                    equivalentEmojiNames = reaction.aliases,
+                ),
+            )
+        },
+        enabled = enabled,
+        contentPadding = PaddingValues(0.dp),
+        modifier = Modifier
+            .size(48.dp)
+            .semantics {
+                contentDescription = description
+            },
+    ) {
+        Text(text = reaction.glyph, fontSize = 20.sp)
+    }
+}
+
+private data class QuickReaction(
+    val glyph: String,
+    val emojiName: String,
+    val aliases: Set<String>,
+    @param:StringRes val descriptionRes: Int,
+)
+
+private val QUICK_REACTIONS = listOf(
+    QuickReaction(
+        glyph = "❤️",
+        emojiName = "heart",
+        aliases = setOf("heart", "red_heart"),
+        descriptionRes = R.string.message_reaction_heart,
+    ),
+    QuickReaction(
+        glyph = "👍",
+        emojiName = "thumbs_up",
+        aliases = setOf("+1", "thumbs_up", "thumbsup", "yes"),
+        descriptionRes = R.string.message_reaction_like,
+    ),
+    QuickReaction(
+        glyph = "😂",
+        emojiName = "joy",
+        aliases = setOf("joy", "lmao", "tears_of_joy"),
+        descriptionRes = R.string.message_reaction_laughter,
+    ),
+    QuickReaction(
+        glyph = "😮",
+        emojiName = "open_mouth",
+        aliases = setOf("face_with_open_mouth", "open_mouth"),
+        descriptionRes = R.string.message_reaction_surprise,
+    ),
+    QuickReaction(
+        glyph = "😢",
+        emojiName = "cry",
+        aliases = setOf("cry", "crying_face"),
+        descriptionRes = R.string.message_reaction_sadness,
+    ),
+    QuickReaction(
+        glyph = "👏",
+        emojiName = "clap",
+        aliases = setOf("clap", "clapping_hands"),
+        descriptionRes = R.string.message_reaction_applause,
+    ),
+)
 
 internal fun canMutateNativeMessage(item: MessageResponse): Boolean =
         item.isOwn &&

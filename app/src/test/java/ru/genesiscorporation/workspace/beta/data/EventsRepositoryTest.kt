@@ -12,6 +12,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderItem
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
+import ru.genesiscorporation.workspace.beta.data.remote.dto.DeletedMessageReaction
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageReaction
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponsePayload
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ProviderReference
@@ -883,17 +885,125 @@ class EventsRepositoryTest {
         val repository = EventsRepository()
         repository.currentUser = UserResponseData(
             username = "cassi",
-            uuid = USER_UUID,
+            uuid = VALID_USER_UUID,
             status = "online",
             avatar = "",
+        )
+        repository.addStreamTopicMessages(
+            VALID_STREAM_UUID,
+            VALID_TOPIC_UUID,
+            listOf(validReactionTargetMessage()),
         )
 
         repository.processTextFrame(reactionEvent(epoch = 1, action = "created"))
         repository.processTextFrame(reactionEvent(epoch = 2, action = "updated"))
         assertEquals(1, repository.userReactions.value.size)
+        assertEquals(
+            1,
+            repository.messageReactionCounts(
+                VALID_MESSAGE_UUID,
+            )["thumbs_up"],
+        )
 
         repository.processTextFrame(reactionEvent(epoch = 3, action = "deleted"))
         assertTrue(repository.userReactions.value.isEmpty())
+        assertTrue(
+            repository.messageReactionCounts(VALID_MESSAGE_UUID).isEmpty(),
+        )
+    }
+
+    @Test
+    fun `reaction realtime echo confirms optimistic count without doubling`() {
+        val repository = EventsRepository()
+        repository.currentUser = UserResponseData(
+            username = "cassi",
+            uuid = VALID_USER_UUID,
+            status = "online",
+            avatar = "",
+        )
+        repository.addStreamTopicMessages(
+            VALID_STREAM_UUID,
+            VALID_TOPIC_UUID,
+            listOf(validReactionTargetMessage()),
+        )
+        val reaction = MessageReaction(
+            uuid = VALID_REACTION_UUID,
+            userUuid = VALID_USER_UUID,
+            emojiName = "thumbs_up",
+            messageUuid = VALID_MESSAGE_UUID,
+        )
+        repository.addReaction(reaction)
+        repository.reconcileMessageReactionCount(
+            ownerKey = VALID_OWNER_KEY,
+            messageUuid = VALID_MESSAGE_UUID,
+            emojiName = "thumbs_up",
+            baselineCount = 0,
+            delta = 1,
+        )
+
+        repository.processTextFrame(
+            reactionEvent(epoch = 1, action = "created"),
+            ownerKey = VALID_OWNER_KEY,
+        )
+
+        assertEquals(
+            1,
+            repository.messageReactionCounts(
+                VALID_MESSAGE_UUID,
+            )["thumbs_up"],
+        )
+        assertTrue(repository.messageReactionOverrides.value.isEmpty())
+
+        repository.deleteReaction(
+            DeletedMessageReaction(
+                uuid = VALID_REACTION_UUID,
+                userUuid = VALID_USER_UUID,
+            ),
+        )
+        repository.reconcileMessageReactionCount(
+            ownerKey = VALID_OWNER_KEY,
+            messageUuid = VALID_MESSAGE_UUID,
+            emojiName = "thumbs_up",
+            baselineCount = 1,
+            delta = -1,
+        )
+        repository.processTextFrame(
+            reactionEvent(epoch = 2, action = "deleted"),
+            ownerKey = VALID_OWNER_KEY,
+        )
+
+        assertTrue(
+            repository.messageReactionCounts(VALID_MESSAGE_UUID).isEmpty(),
+        )
+        assertTrue(repository.messageReactionOverrides.value.isEmpty())
+    }
+
+    @Test
+    fun `another user realtime reaction updates count without selecting it`() {
+        val repository = EventsRepository()
+        repository.currentUser = UserResponseData(
+            username = "cassi",
+            uuid = OTHER_VALID_USER_UUID,
+            status = "online",
+            avatar = "",
+        )
+        repository.addStreamTopicMessages(
+            VALID_STREAM_UUID,
+            VALID_TOPIC_UUID,
+            listOf(validReactionTargetMessage()),
+        )
+
+        repository.processTextFrame(
+            reactionEvent(epoch = 1, action = "created"),
+        )
+
+        assertTrue(repository.userReactions.value.isEmpty())
+        assertEquals(
+            1,
+            repository.messageReactionCounts(
+                VALID_MESSAGE_UUID,
+            )["thumbs_up"],
+        )
     }
 
     @Test
@@ -1614,18 +1724,20 @@ class EventsRepositoryTest {
             """
                 {
                   "kind": "message_reaction.deleted",
-                  "uuid": "$REACTION_UUID",
-                  "user_uuid": "$USER_UUID"
+                  "uuid": "$VALID_REACTION_UUID",
+                  "user_uuid": "$VALID_USER_UUID",
+                  "emoji_name": "thumbs_up",
+                  "message_uuid": "$VALID_MESSAGE_UUID"
                 }
             """.trimIndent()
         } else {
             """
                 {
                   "kind": "message_reaction.$action",
-                  "uuid": "$REACTION_UUID",
-                  "user_uuid": "$USER_UUID",
+                  "uuid": "$VALID_REACTION_UUID",
+                  "user_uuid": "$VALID_USER_UUID",
                   "emoji_name": "thumbs_up",
-                  "message_uuid": "$MESSAGE_UUID"
+                  "message_uuid": "$VALID_MESSAGE_UUID"
                 }
             """.trimIndent()
         }
@@ -1791,6 +1903,14 @@ class EventsRepositoryTest {
         reactions = emptyMap(),
     )
 
+    private fun validReactionTargetMessage(): MessageResponse =
+        message(VALID_MESSAGE_UUID, "reaction target").copy(
+            streamUuid = VALID_STREAM_UUID,
+            topicUuid = VALID_TOPIC_UUID,
+            userUuid = VALID_USER_UUID,
+            authorUuid = VALID_USER_UUID,
+        )
+
     private fun topic(
         lastMessageUuid: String?,
         lastMessage: MessageResponse? = null,
@@ -1871,6 +1991,10 @@ class EventsRepositoryTest {
             "33000000-0000-4000-8000-000000000003"
         private const val VALID_MESSAGE_UUID =
             "44000000-0000-4000-8000-000000000004"
+        private const val VALID_REACTION_UUID =
+            "55000000-0000-4000-8000-000000000005"
+        private const val OTHER_VALID_USER_UUID =
+            "66000000-0000-4000-8000-000000000006"
         private const val EXTERNAL_ACCOUNT_UUID =
             "10000000-0000-4000-8000-000000000001"
         private const val OTHER_EXTERNAL_ACCOUNT_UUID =

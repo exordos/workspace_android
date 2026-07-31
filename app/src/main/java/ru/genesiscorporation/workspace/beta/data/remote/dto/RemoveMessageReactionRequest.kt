@@ -19,5 +19,7 @@ class RemoveMessageReactionRequest(
 @Serializable
 data class DeletedMessageReaction(
     val uuid: String,
-    @SerialName("user_uuid") val userUuid: String
+    @SerialName("user_uuid") val userUuid: String,
+    @SerialName("emoji_name") val emojiName: String? = null,
+    @SerialName("message_uuid") val messageUuid: String? = null,
 )

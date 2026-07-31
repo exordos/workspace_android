@@ -53,6 +53,7 @@ import ru.genesiscorporation.workspace.beta.data.deleteOwnedIncomingAttachment
 import ru.genesiscorporation.workspace.beta.data.isOwnedIncomingAttachment
 import ru.genesiscorporation.workspace.beta.data.normalizeConversationPaginationState
 import ru.genesiscorporation.workspace.beta.data.unknownConversationPaginationState
+import ru.genesiscorporation.workspace.beta.data.validatedMessageReactionCounts
 import ru.genesiscorporation.workspace.beta.data.remote.ApiError
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.ApiErrorKind
@@ -72,6 +73,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageSortDirection
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesByIdsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.DEFAULT_MESSAGE_PAGE_SIZE
+import ru.genesiscorporation.workspace.beta.data.remote.dto.DeletedMessageReaction
 import ru.genesiscorporation.workspace.beta.data.remote.dto.RemoveMessageReactionRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.SendMessageRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
@@ -84,6 +86,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.UsersRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.canonicalDraftUuid
 import ru.genesiscorporation.workspace.beta.data.remote.dto.parseCanonicalMessageUuid
 import ru.genesiscorporation.workspace.beta.data.remote.dto.parseDraftConflictBody
+import ru.genesiscorporation.workspace.beta.data.remote.dto.validateAddMessageReactionResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.validateDraftResponse
 import ru.genesiscorporation.workspace.beta.modules.chatchannels.isDirectProviderChat
 import ru.genesiscorporation.workspace.beta.ui.copyPlainWorkspaceText
@@ -221,6 +224,9 @@ class ChatDialogViewModel(
     val downloadingAttachmentUuid: StateFlow<String?> = _downloadingAttachmentUuid
     private val _forwardDialogState = MutableStateFlow<ForwardDialogState?>(null)
     internal val forwardDialogState: StateFlow<ForwardDialogState?> = _forwardDialogState
+    private val _reactionPickerMessageUuid = MutableStateFlow<String?>(null)
+    internal val reactionPickerMessageUuid: StateFlow<String?> =
+        _reactionPickerMessageUuid
     private val _forwardQuoteResolutions =
         MutableStateFlow<Map<String, ForwardQuoteResolution>>(emptyMap())
     internal val forwardQuoteResolutions:
@@ -1783,10 +1789,6 @@ class ChatDialogViewModel(
         _quotedMessage.value = null
         pendingQuotedMessageUuid = null
         composerChanged()
-    }
-
-    fun hasMyReaction(reaction: String, messageUuid: String): Boolean {
-        return  !repo.userReactions.value.none { it.emojiName == reaction && it.messageUuid == messageUuid }
     }
 
     fun onSendClicked(context: Context) {
@@ -4626,38 +4628,175 @@ class ChatDialogViewModel(
         )
     }
 
-    fun onMessageReactionTap(messageUuid: String, emoji: String) {
+    fun onMessageReactionTap(
+        messageUuid: String,
+        emojiName: String,
+        equivalentEmojiNames: Set<String> = setOf(emojiName),
+    ) {
+        val requestedEmojiName = emojiName
+            .trim()
+            .takeIf {
+                it.length in 1..MAX_MESSAGE_REACTION_NAME_CHARS &&
+                    it.none(Char::isISOControl)
+            }
+            ?: run {
+                _actionError.value = "Не удалось определить реакцию"
+                return
+            }
+        val normalizedEquivalentNames =
+            (equivalentEmojiNames + requestedEmojiName)
+                .asSequence()
+                .map(String::trim)
+                .filter {
+                    it.length in 1..MAX_MESSAGE_REACTION_NAME_CHARS &&
+                        it.none(Char::isISOControl)
+                }
+                .toSet()
+        val operationIdentity =
+            normalizedEquivalentNames
+                .sorted()
+                .joinToString(separator = "\u0001")
         viewModelScope.launch {
-            withReactionOperation(messageUuid, emoji) {
+            val credentials = userViewModel.repo.activeCredentialSnapshot()
+            val ownerKey = credentials.ownerKey
+                ?.takeIf(String::isNotBlank)
+                ?: run {
+                    _actionError.value =
+                        "Активная учётная запись недоступна"
+                    return@launch
+                }
+            val currentUserUuid = credentials.userId
+                ?.takeIf(String::isNotBlank)
+                ?: run {
+                    _actionError.value =
+                        "Не удалось определить текущего пользователя"
+                    return@launch
+            }
+            val conversationOwner = ensureConversationOwnerKey()
+            if (conversationOwner != ownerKey) {
+                _actionError.value =
+                    "Чат относится к другой активной учётной записи"
+                return@launch
+            }
+            if (!userViewModel.repo.isActiveCredentialOwner(ownerKey)) {
+                _actionError.value =
+                    "Активная учётная запись изменилась"
+                return@launch
+            }
+            withReactionOperation(
+                ownerKey = ownerKey,
+                messageUuid = messageUuid,
+                reactionIdentity = operationIdentity,
+            ) {
+                _actionError.value = null
                 val reaction = repo.userReactions.value.firstOrNull {
-                    it.emojiName == emoji && it.messageUuid == messageUuid
+                    it.emojiName in normalizedEquivalentNames &&
+                        it.messageUuid == messageUuid
                 }
                 if (reaction != null) {
+                    val baselineCount =
+                        repo.messageReactionCounts(messageUuid)
+                            .get(reaction.emojiName)
+                            ?: 0
                     val removeReactionResponse =
                         client.performRequest(
                             RemoveMessageReactionRequest(reaction.uuid),
+                            expectedOwnerKey = ownerKey,
                         )
                     when (removeReactionResponse) {
-                        is ApiResult.Success -> Unit
+                        is ApiResult.Success -> {
+                            if (
+                                !userViewModel.repo
+                                    .isActiveCredentialOwner(ownerKey)
+                            ) {
+                                return@withReactionOperation
+                            }
+                            repo.deleteReaction(
+                                DeletedMessageReaction(
+                                    uuid = reaction.uuid,
+                                    userUuid = reaction.userUuid,
+                                ),
+                            )
+                            repo.reconcileMessageReactionCount(
+                                ownerKey = ownerKey,
+                                messageUuid = messageUuid,
+                                emojiName = reaction.emojiName,
+                                baselineCount = baselineCount,
+                                delta = -1,
+                            )
+                            scheduleMessageReactionConfirmation(
+                                ownerKey = ownerKey,
+                                messageUuid = messageUuid,
+                            )
+                        }
 
                         is ApiResult.Error -> {
-                            _actionError.value =
-                                removeReactionResponse.error.message
-                                    ?: "Не удалось удалить реакцию"
+                            if (
+                                userViewModel.repo
+                                    .isActiveCredentialOwner(ownerKey)
+                            ) {
+                                _actionError.value =
+                                    removeReactionResponse.error.message
+                                        ?: "Не удалось удалить реакцию"
+                            }
                         }
                     }
                 } else {
+                    val baselineReactions =
+                        repo.messageReactionCounts(messageUuid)
                     val addReactionResponse =
                         client.performRequest(
-                            AddMessageReactionRequest(messageUuid, emoji),
+                            AddMessageReactionRequest(
+                                messageUuid,
+                                requestedEmojiName,
+                            ),
+                            expectedOwnerKey = ownerKey,
                         )
                     when (addReactionResponse) {
-                        is ApiResult.Success -> Unit
+                        is ApiResult.Success -> {
+                            if (
+                                !userViewModel.repo
+                                    .isActiveCredentialOwner(ownerKey)
+                            ) {
+                                return@withReactionOperation
+                            }
+                            val addedReaction =
+                                validateAddMessageReactionResponse(
+                                    response = addReactionResponse.value,
+                                    requestedMessageUuid = messageUuid,
+                                    expectedUserUuid = currentUserUuid,
+                                )
+                            if (addedReaction == null) {
+                                _actionError.value =
+                                    "Сервер вернул некорректную реакцию"
+                                return@withReactionOperation
+                            }
+                            repo.addReaction(addedReaction)
+                            repo.reconcileMessageReactionCount(
+                                ownerKey = ownerKey,
+                                messageUuid = messageUuid,
+                                emojiName = addedReaction.emojiName,
+                                baselineCount =
+                                    baselineReactions[
+                                        addedReaction.emojiName
+                                    ] ?: 0,
+                                delta = 1,
+                            )
+                            scheduleMessageReactionConfirmation(
+                                ownerKey = ownerKey,
+                                messageUuid = messageUuid,
+                            )
+                        }
 
                         is ApiResult.Error -> {
-                            _actionError.value =
-                                addReactionResponse.error.message
-                                    ?: "Не удалось добавить реакцию"
+                            if (
+                                userViewModel.repo
+                                    .isActiveCredentialOwner(ownerKey)
+                            ) {
+                                _actionError.value =
+                                    addReactionResponse.error.message
+                                        ?: "Не удалось добавить реакцию"
+                            }
                         }
                     }
                 }
@@ -4665,12 +4804,80 @@ class ChatDialogViewModel(
         }
     }
 
-    private suspend fun withReactionOperation(
+    fun openMessageReactionPicker(messageUuid: String) {
+        val canonicalUuid = parseCanonicalMessageUuid(messageUuid)
+        val messageIsLoaded =
+            canonicalUuid != null &&
+                streamTopicMessages.value["$chatId.$topicUuid"]
+                    .orEmpty()
+                    .any {
+                        parseCanonicalMessageUuid(it.uuid) ==
+                            canonicalUuid
+                    }
+        if (!messageIsLoaded) {
+            _actionError.value =
+                "Не удалось открыть реакции для этого сообщения"
+            return
+        }
+        _actionError.value = null
+        _reactionPickerMessageUuid.value = canonicalUuid
+    }
+
+    fun closeMessageReactionPicker() {
+        _reactionPickerMessageUuid.value = null
+    }
+
+    private fun scheduleMessageReactionConfirmation(
+        ownerKey: String,
         messageUuid: String,
-        emoji: String,
+    ) {
+        viewModelScope.launch {
+            for (retryDelayMillis in REACTION_CONFIRMATION_RETRY_DELAYS) {
+                delay(retryDelayMillis)
+                if (
+                    !userViewModel.repo
+                        .isActiveCredentialOwner(ownerKey)
+                ) {
+                    return@launch
+                }
+                val response = client.performRequest(
+                    MessageRequest(messageUuid),
+                    expectedOwnerKey = ownerKey,
+                )
+                if (response !is ApiResult.Success) continue
+                val message = response.value
+                val confirmedCounts =
+                    validatedMessageReactionCounts(message.reactions)
+                        ?: return@launch
+                if (
+                    message.uuid != messageUuid ||
+                    message.streamUuid != chatId ||
+                    message.topicUuid != topicUuid ||
+                    !userViewModel.repo
+                        .isActiveCredentialOwner(ownerKey)
+                ) {
+                    return@launch
+                }
+                if (
+                    repo.applyConfirmedMessageReactionCounts(
+                        ownerKey = ownerKey,
+                        messageUuid = messageUuid,
+                        reactions = confirmedCounts,
+                    )
+                ) {
+                    return@launch
+                }
+            }
+        }
+    }
+
+    private suspend fun withReactionOperation(
+        ownerKey: String,
+        messageUuid: String,
+        reactionIdentity: String,
         operation: suspend () -> Unit,
     ) {
-        val key = "$messageUuid\u0000$emoji"
+        val key = "$ownerKey\u0000$messageUuid\u0000$reactionIdentity"
         val accepted = reactionOperationsMutex.withLock {
             reactionOperations.add(key)
         }
@@ -4910,6 +5117,9 @@ internal fun malformedMessagePageState() = MessagePageState(
 )
 
 private const val MESSAGE_HISTORY_PAGE_SIZE = DEFAULT_MESSAGE_PAGE_SIZE
+private const val MAX_MESSAGE_REACTION_NAME_CHARS = 128
+private val REACTION_CONFIRMATION_RETRY_DELAYS =
+    listOf(750L, 2_000L, 5_000L)
 
 internal fun messageSortInstant(createdAt: String): Instant =
     runCatching { OffsetDateTime.parse(createdAt).toInstant() }

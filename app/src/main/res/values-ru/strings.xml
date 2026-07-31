@@ -12,4 +12,21 @@
     <string name="markdown_spoiler_hide">Скрыть</string>
     <string name="markdown_spoiler_hidden_state">Содержимое скрыто</string>
     <string name="markdown_spoiler_shown_state">Содержимое показано</string>
+    <string name="message_reaction_more">Ещё реакции</string>
+    <string name="message_reaction_heart">Реакция: сердце</string>
+    <string name="message_reaction_like">Реакция: нравится</string>
+    <string name="message_reaction_laughter">Реакция: смех</string>
+    <string name="message_reaction_surprise">Реакция: удивление</string>
+    <string name="message_reaction_sadness">Реакция: грусть</string>
+    <string name="message_reaction_applause">Реакция: аплодисменты</string>
+    <string name="message_reaction_count_description">Реакция %1$s, голосов: %2$d</string>
+    <string name="reaction_picker_pane_title">Выбор реакции</string>
+    <string name="reaction_picker_title">Выберите реакцию</string>
+    <string name="reaction_picker_close">Закрыть</string>
+    <string name="reaction_picker_search_label">Поиск emoji</string>
+    <string name="reaction_picker_search_hint">Например, smile или 👍</string>
+    <string name="reaction_picker_load_failed">Не удалось загрузить каталог emoji</string>
+    <string name="reaction_picker_retry">Повторить</string>
+    <string name="reaction_picker_empty">Ничего не найдено</string>
+    <string name="reaction_picker_item_description">Реакция %1$s, :%2$s:</string>
 </resources>

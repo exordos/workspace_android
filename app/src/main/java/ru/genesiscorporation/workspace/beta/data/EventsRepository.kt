@@ -47,6 +47,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamBindingRespons
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.canonicalExternalIntegrationUuid
+import ru.genesiscorporation.workspace.beta.data.remote.dto.parseCanonicalMessageUuid
 import ru.genesiscorporation.workspace.beta.data.remote.dto.validateExternalAccountResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.validateExternalChatResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.validateExternalOperationResponse
@@ -108,6 +109,10 @@ class EventsRepository(
     val realtimeRecoveryVersion: StateFlow<Long> =
         _realtimeRecoveryVersion.asStateFlow()
     private val externalProjectionLock = Any()
+    private val reactionProjectionLock = Any()
+    private val reactionTargetsByUuid =
+        LinkedHashMap<String, ReactionTarget>()
+    private val deletedReactionUuids = LinkedHashSet<String>()
     private val externalAccountRevisions =
         mutableMapOf<String, ExternalProjectionRevision>()
     private val externalChatRevisions =
@@ -254,6 +259,8 @@ class EventsRepository(
         _conversationPagination.value = emptyMap()
         _messagesPool.value = emptyList()
         _userReactions.value = emptyList()
+        _messageReactionOverrides.value = emptyMap()
+        clearReactionEventIdentityState()
         synchronized(catalogProjectionLock) {
             _streamTopics.value = emptyMap()
             _streams.value = emptyList()
@@ -373,6 +380,8 @@ class EventsRepository(
         _conversationPagination.value = emptyMap()
         _messagesPool.value = emptyList()
         _userReactions.value = emptyList()
+        _messageReactionOverrides.value = emptyMap()
+        clearReactionEventIdentityState()
         synchronized(catalogProjectionLock) {
             _streamTopics.value = emptyMap()
             _streams.value = emptyList()
@@ -906,6 +915,129 @@ class EventsRepository(
         }
     }
 
+    private val _messageReactionOverrides =
+        MutableStateFlow<Map<String, Map<String, Int>>>(emptyMap())
+    val messageReactionOverrides:
+        StateFlow<Map<String, Map<String, Int>>> =
+        _messageReactionOverrides.asStateFlow()
+
+    fun messageReactionCounts(messageUuid: String): Map<String, Int> =
+        _messageReactionOverrides.value[messageUuid]
+            ?: streamTopicMessages.value.values
+                .asSequence()
+                .flatten()
+                .firstOrNull { it.uuid == messageUuid }
+                ?.reactions
+                ?.toMap()
+            ?: messagesPool.value
+                .firstOrNull { it.uuid == messageUuid }
+                ?.reactions
+                ?.toMap()
+            ?: emptyMap()
+
+    fun reconcileMessageReactionCount(
+        ownerKey: String,
+        messageUuid: String,
+        emojiName: String,
+        baselineCount: Int,
+        delta: Int,
+    ) {
+        val sourceMessage =
+            _streamTopicMessages.value.values
+                .asSequence()
+                .flatten()
+                .firstOrNull { it.uuid == messageUuid }
+                ?: _messagesPool.value
+                    .firstOrNull { it.uuid == messageUuid }
+                ?: return
+        val authoritativeReactions = reconcileMessageReactionCounts(
+            current = sourceMessage.reactions,
+            emojiName = emojiName,
+            baselineCount = baselineCount,
+            delta = delta,
+        )
+        _messageReactionOverrides.update { current ->
+            val updated = LinkedHashMap(current)
+            updated.remove(messageUuid)
+            updated[messageUuid] = authoritativeReactions
+            while (updated.size > MAX_REACTION_COUNT_OVERRIDES) {
+                updated.remove(updated.keys.first())
+            }
+            updated
+        }
+        var updatedMessage: MessageResponse? = null
+        fun synchronize(message: MessageResponse): MessageResponse {
+            if (message.uuid != messageUuid) return message
+            if (message.reactions == authoritativeReactions) {
+                updatedMessage = updatedMessage ?: message
+                return message
+            }
+            return message.copy(reactions = authoritativeReactions).also {
+                it.user = message.user
+                updatedMessage = updatedMessage ?: it
+            }
+        }
+
+        _streamTopicMessages.update { current ->
+            current.mapValues { (_, messages) ->
+                messages.map(::synchronize)
+            }
+        }
+        _messagesPool.update { current ->
+            current.map(::synchronize)
+        }
+        updatedMessage?.let { message ->
+            emitMessageProjectionEvent(
+                ownerKey,
+                MessageProjectionEvent.Upsert(message),
+            )
+        }
+    }
+
+    fun applyConfirmedMessageReactionCounts(
+        ownerKey: String?,
+        messageUuid: String,
+        reactions: Map<String, Int>,
+    ): Boolean {
+        var updatedMessage: MessageResponse? = null
+        var found = false
+        fun confirm(message: MessageResponse): MessageResponse {
+            if (message.uuid != messageUuid) return message
+            found = true
+            if (message.reactions == reactions) {
+                updatedMessage = updatedMessage ?: message
+                return message
+            }
+            return message.copy(reactions = reactions).also {
+                it.user = message.user
+                updatedMessage = updatedMessage ?: it
+            }
+        }
+        _streamTopicMessages.update { current ->
+            current.mapValues { (_, messages) ->
+                messages.map(::confirm)
+            }
+        }
+        _messagesPool.update { current ->
+            current.map(::confirm)
+        }
+        if (!found) return false
+        _messageReactionOverrides.update { current ->
+            current - messageUuid
+        }
+        updatedMessage?.let { message ->
+            ownerKey
+                ?.takeIf(String::isNotBlank)
+                ?.let { validOwnerKey ->
+                    emitMessageProjectionEvent(
+                        validOwnerKey,
+                        MessageProjectionEvent.Upsert(message),
+                    )
+                }
+        }
+        return true
+    }
+
     fun replaceMessage(messageUuid: String, replacement: MessageResponse) {
         val key = "${replacement.streamUuid}.${replacement.topicUuid}"
         var confirmedMessage = replacement
@@ -1260,12 +1392,27 @@ class EventsRepository(
     val userReactions: StateFlow<List<MessageReaction>> = _userReactions.asStateFlow()
 
     fun setInitialMessageReactions(newList: List<MessageReaction>) {
+        synchronized(reactionProjectionLock) {
+            newList.forEach { reaction ->
+                reaction.validTargetOrNull()?.let { target ->
+                    deletedReactionUuids.remove(reaction.uuid)
+                    reactionTargetsByUuid[reaction.uuid] = target
+                }
+            }
+            trimReactionEventIdentityState()
+        }
         _userReactions.update {
             newList
         }
     }
 
     fun addReaction(reaction: MessageReaction) {
+        if (reaction.validTargetOrNull() == null) return
+        upsertReactionIdentity(reaction)
+        addCurrentUserReaction(reaction)
+    }
+
+    private fun addCurrentUserReaction(reaction: MessageReaction) {
         val user = currentUser
         if (user != null) {
             if (reaction.userUuid == user.uuid) {
@@ -1277,11 +1424,75 @@ class EventsRepository(
     }
 
     fun deleteReaction(reaction: DeletedMessageReaction) {
+        if (!reaction.hasValidIdentity()) return
+        markReactionDeleted(reaction)
+        deleteCurrentUserReaction(reaction)
+    }
+
+    private fun deleteCurrentUserReaction(
+        reaction: DeletedMessageReaction,
+    ) {
         val reactionToDelete = _userReactions.value.firstOrNull { it.uuid == reaction.uuid && it.userUuid == reaction.userUuid }
         if (reactionToDelete != null) {
             _userReactions.update { current ->
                 current.filterNot { it == reactionToDelete }
             }
+        }
+    }
+
+    private fun upsertReactionIdentity(
+        reaction: MessageReaction,
+    ): ReactionTarget? {
+        val target = reaction.validTargetOrNull() ?: return null
+        return synchronized(reactionProjectionLock) {
+            deletedReactionUuids.remove(reaction.uuid)
+            val previous = reactionTargetsByUuid.put(
+                reaction.uuid,
+                target,
+            )
+            trimReactionEventIdentityState()
+            previous
+        }
+    }
+
+    private fun markReactionDeleted(
+        reaction: DeletedMessageReaction,
+    ): DeletedReactionIdentity {
+        val payloadTarget = reaction.validTargetOrNull()
+        return synchronized(reactionProjectionLock) {
+            val storedTarget = reactionTargetsByUuid.remove(reaction.uuid)
+            val firstDeletion = deletedReactionUuids.add(reaction.uuid)
+            trimReactionEventIdentityState()
+            DeletedReactionIdentity(
+                target = storedTarget ?: payloadTarget,
+                firstDeletion = firstDeletion,
+            )
+        }
+    }
+
+    private fun clearReactionEventIdentityState() {
+        synchronized(reactionProjectionLock) {
+            reactionTargetsByUuid.clear()
+            deletedReactionUuids.clear()
+        }
+    }
+
+    private fun trimReactionEventIdentityState() {
+        while (
+            reactionTargetsByUuid.size >
+            MAX_TRACKED_REALTIME_REACTION_IDENTITIES
+        ) {
+            reactionTargetsByUuid.remove(
+                reactionTargetsByUuid.keys.first(),
+            )
+        }
+        while (
+            deletedReactionUuids.size >
+            MAX_TRACKED_REALTIME_REACTION_IDENTITIES
+        ) {
+            deletedReactionUuids.remove(
+                deletedReactionUuids.first(),
+            )
         }
     }
 
@@ -2085,7 +2296,8 @@ class EventsRepository(
             "stream_binding" -> didReceiveStreamBindingEvent(payload, action)
             "stream" -> didReceiveStreamEvent(payload, action)
             "topic" -> didReceiveTopicEvent(payload, action)
-            "message_reaction" -> didReceiveReactionEvent(payload, action)
+            "message_reaction" ->
+                didReceiveReactionEvent(payload, action, ownerKey)
             "external_account" -> didReceiveExternalAccountEvent(payload, action)
             "external_chat" -> didReceiveExternalChatEvent(payload, action)
             "external_operation" ->
@@ -2252,17 +2464,113 @@ class EventsRepository(
         }
     }
 
-    fun didReceiveReactionEvent(payload: String, action: String) {
-        when(action) {
+    fun didReceiveReactionEvent(
+        payload: String,
+        action: String,
+        ownerKey: String? = null,
+    ) {
+        when (action) {
             "created", "updated" -> {
                 val reaction = json.decodeFromString<MessageReaction>(payload)
-                addReaction(reaction)
+                val target = reaction.validTargetOrNull()
+                if (target == null) {
+                    logRealtimeWarning(
+                        "Ignored malformed message reaction event",
+                    )
+                    return
+                }
+                val previousTarget = upsertReactionIdentity(reaction)
+                addCurrentUserReaction(reaction)
+                when {
+                    previousTarget == null ->
+                        applyRealtimeReactionDelta(
+                            ownerKey = ownerKey,
+                            target = target,
+                            delta = 1,
+                        )
+
+                    previousTarget != target -> {
+                        applyRealtimeReactionDelta(
+                            ownerKey = ownerKey,
+                            target = previousTarget,
+                            delta = -1,
+                        )
+                        applyRealtimeReactionDelta(
+                            ownerKey = ownerKey,
+                            target = target,
+                            delta = 1,
+                        )
+                    }
+
+                    else ->
+                        confirmRealtimeReactionProjection(
+                            ownerKey = ownerKey,
+                            target = target,
+                        )
+                }
             }
             "deleted" -> {
-                val reaction = json.decodeFromString<DeletedMessageReaction>(payload)
-                deleteReaction(reaction)
+                val reaction =
+                    json.decodeFromString<DeletedMessageReaction>(payload)
+                if (!reaction.hasValidIdentity()) {
+                    logRealtimeWarning(
+                        "Ignored malformed message reaction deletion",
+                    )
+                    return
+                }
+                val deletedIdentity = markReactionDeleted(reaction)
+                deleteCurrentUserReaction(reaction)
+                val target = deletedIdentity.target
+                if (target == null) {
+                    logRealtimeWarning(
+                        "Ignored unresolvable message reaction deletion",
+                    )
+                    return
+                }
+                if (deletedIdentity.firstDeletion) {
+                    applyRealtimeReactionDelta(
+                        ownerKey = ownerKey,
+                        target = target,
+                        delta = -1,
+                    )
+                } else {
+                    confirmRealtimeReactionProjection(
+                        ownerKey = ownerKey,
+                        target = target,
+                    )
+                }
             }
         }
+    }
+
+    private fun applyRealtimeReactionDelta(
+        ownerKey: String?,
+        target: ReactionTarget,
+        delta: Int,
+    ) {
+        val current = messageReactionCounts(target.messageUuid)
+        val next = reconcileMessageReactionCounts(
+            current = current,
+            emojiName = target.emojiName,
+            baselineCount = current[target.emojiName] ?: 0,
+            delta = delta,
+        )
+        applyConfirmedMessageReactionCounts(
+            ownerKey = ownerKey,
+            messageUuid = target.messageUuid,
+            reactions = next,
+        )
+    }
+
+    private fun confirmRealtimeReactionProjection(
+        ownerKey: String?,
+        target: ReactionTarget,
+    ) {
+        applyConfirmedMessageReactionCounts(
+            ownerKey = ownerKey,
+            messageUuid = target.messageUuid,
+            reactions = messageReactionCounts(target.messageUuid),
+        )
     }
 
     fun didReceiveExternalAccountEvent(payload: String, action: String) {
@@ -2541,6 +2849,66 @@ private const val INITIAL_REALTIME_RETRY_DELAY_MILLIS = 1_000L
 private const val MAX_REALTIME_RETRY_DELAY_MILLIS = 30_000L
 private const val STABLE_REALTIME_CONNECTION_MILLIS = 60_000L
 private const val MESSAGE_PROJECTION_EVENT_BUFFER_CAPACITY = 64
+private const val MAX_REACTION_COUNT_OVERRIDES = 256
+private const val MAX_TRACKED_REALTIME_REACTION_IDENTITIES = 4_096
+private const val MAX_REALTIME_REACTION_NAME_CHARS = 128
+
+private data class ReactionTarget(
+    val messageUuid: String,
+    val emojiName: String,
+)
+
+private data class DeletedReactionIdentity(
+    val target: ReactionTarget?,
+    val firstDeletion: Boolean,
+)
+
+private fun MessageReaction.validTargetOrNull(): ReactionTarget? {
+    if (
+        parseCanonicalMessageUuid(uuid) == null ||
+        parseCanonicalMessageUuid(userUuid) == null
+    ) {
+        return null
+    }
+    val canonicalMessageUuid =
+        parseCanonicalMessageUuid(messageUuid) ?: return null
+    val validEmojiName =
+        emojiName
+            .trim()
+            .takeIf {
+                it.length in 1..MAX_REALTIME_REACTION_NAME_CHARS &&
+                    it.none(Char::isISOControl)
+            }
+            ?: return null
+    return ReactionTarget(
+        messageUuid = canonicalMessageUuid,
+        emojiName = validEmojiName,
+    )
+}
+
+private fun DeletedMessageReaction.hasValidIdentity(): Boolean =
+    parseCanonicalMessageUuid(uuid) != null &&
+        parseCanonicalMessageUuid(userUuid) != null
+
+private fun DeletedMessageReaction.validTargetOrNull(): ReactionTarget? {
+    if (!hasValidIdentity()) return null
+    val canonicalMessageUuid =
+        messageUuid
+            ?.let(::parseCanonicalMessageUuid)
+            ?: return null
+    val validEmojiName =
+        emojiName
+            ?.trim()
+            ?.takeIf {
+                it.length in 1..MAX_REALTIME_REACTION_NAME_CHARS &&
+                    it.none(Char::isISOControl)
+            }
+            ?: return null
+    return ReactionTarget(
+        messageUuid = canonicalMessageUuid,
+        emojiName = validEmojiName,
+    )
+}
 
 @Serializable
 data class PongMessage(

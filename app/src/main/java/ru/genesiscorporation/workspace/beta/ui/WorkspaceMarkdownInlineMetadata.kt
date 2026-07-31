@@ -381,10 +381,24 @@ internal object WorkspaceEmojiShortcodeCatalog {
     @Volatile
     private var cachedEntries: Map<String, String>? = null
 
+    @Volatile
+    private var cachedPickerEntries: List<WorkspaceEmojiPickerEntry>? = null
+
     fun resolver(context: Context): (String) -> String? {
         val entries = entries(context.applicationContext)
         return { rawShortcode ->
             entries[normalizeEmojiShortcode(rawShortcode)]
+        }
+    }
+
+    fun pickerEntries(context: Context): List<WorkspaceEmojiPickerEntry> {
+        cachedPickerEntries?.let { return it }
+        return synchronized(this) {
+            cachedPickerEntries ?: buildWorkspaceEmojiPickerEntries(
+                entries(context.applicationContext),
+            ).also { parsed ->
+                if (parsed.isNotEmpty()) cachedPickerEntries = parsed
+            }
         }
     }
 
@@ -396,7 +410,9 @@ internal object WorkspaceEmojiShortcodeCatalog {
                     .openRawResource(R.raw.workspace_emoji_shortcodes_v17)
                     .bufferedReader(Charsets.UTF_8)
                     .let(::parseWorkspaceEmojiCatalog)
-            }.getOrDefault(emptyMap()).also { cachedEntries = it }
+            }.getOrDefault(emptyMap()).also { parsed ->
+                if (parsed.isNotEmpty()) cachedEntries = parsed
+            }
         }
     }
 }

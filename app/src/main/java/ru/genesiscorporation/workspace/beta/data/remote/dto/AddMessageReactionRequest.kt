@@ -30,3 +30,37 @@ data class AddMessageReactionResponse(
     @SerialName("emoji_name") val emojiName: String,
     @SerialName("message_uuid") val messageUuid: String,
 )
+
+internal fun validateAddMessageReactionResponse(
+    response: AddMessageReactionResponse,
+    requestedMessageUuid: String,
+    expectedUserUuid: String,
+): MessageReaction? {
+    val reactionUuid = parseCanonicalMessageUuid(response.uuid)
+        ?: return null
+    val messageUuid = parseCanonicalMessageUuid(response.messageUuid)
+        ?: return null
+    val userUuid = parseCanonicalMessageUuid(response.userUuid)
+        ?: return null
+    if (
+        messageUuid != parseCanonicalMessageUuid(requestedMessageUuid) ||
+        userUuid != parseCanonicalMessageUuid(expectedUserUuid)
+    ) {
+        return null
+    }
+    val emojiName = response.emojiName
+        .trim()
+        .takeIf {
+            it.length in 1..MAX_REACTION_EMOJI_NAME_CHARS &&
+                it.none(Char::isISOControl)
+        }
+        ?: return null
+    return MessageReaction(
+        uuid = reactionUuid,
+        userUuid = userUuid,
+        emojiName = emojiName,
+        messageUuid = messageUuid,
+    )
+}
+
+private const val MAX_REACTION_EMOJI_NAME_CHARS = 128
