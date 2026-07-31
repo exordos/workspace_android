@@ -43,6 +43,7 @@ import ru.genesiscorporation.workspace.beta.modules.chatdialog.ForwardMarkdownSe
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.ForwardQuoteResolution
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.WorkspaceQuoteReference
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.parseForwardMarkdown
+import ru.genesiscorporation.workspace.beta.modules.chatdialog.parseWorkspaceConversationReferenceUrn
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.parseWorkspaceQuoteUrn
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.net.URI
@@ -472,7 +473,22 @@ private fun handleWorkspaceLink(
     navController: NavHostController?,
     viewModel: ChatDialogViewModel?,
 ) {
+    val conversationReference =
+        parseWorkspaceConversationReferenceUrn(url)
     when {
+        conversationReference != null -> {
+            viewModel?.openWorkspaceConversationReference(
+                conversationReference,
+            )
+        }
+
+        url.trim().startsWith("urn:stream:", ignoreCase = true) ||
+            url.trim().startsWith("urn:topic:", ignoreCase = true) -> {
+            viewModel?.reportActionError(
+                "Повреждённая ссылка на чат или топик",
+            )
+        }
+
         url.startsWith("urn:user:") -> {
             val userId = url.removePrefix("urn:user:")
             val user = viewModel?.getUser(userId)

@@ -227,6 +227,10 @@ class ChatDialogViewModel(
     private val openSourceMessageChannel =
         Channel<OpenSourceMessageEvent>(Channel.BUFFERED)
     val openSourceMessageEvents = openSourceMessageChannel.receiveAsFlow()
+    private val openWorkspaceConversationChannel =
+        Channel<OpenWorkspaceConversationEvent>(Channel.BUFFERED)
+    internal val openWorkspaceConversationEvents =
+        openWorkspaceConversationChannel.receiveAsFlow()
     private var conversationOwnerKey: String? = null
     private var pendingEditingMessageUuid: String? = null
     private var pendingQuotedMessageUuid: String? = null
@@ -255,6 +259,7 @@ class ChatDialogViewModel(
     private var durableReadBoundary: PersistedReadBoundary? = null
     private var forwardCatalogJob: Job? = null
     private var forwardTopicLoadJob: Job? = null
+    private var workspaceConversationReferenceJob: Job? = null
     private var forwardSelectionGeneration = 0L
     private var forwardDeliveryAttempt: ForwardDeliveryAttempt? = null
     private var initialForwardRequestHandled = false
@@ -1252,6 +1257,264 @@ class ChatDialogViewModel(
                 ),
             )
         }
+    }
+
+    internal fun openWorkspaceConversationReference(
+        reference: WorkspaceConversationReference,
+    ) {
+        if (workspaceConversationReferenceJob?.isActive == true) return
+        _actionError.value = null
+        workspaceConversationReferenceJob = viewModelScope.launch {
+            try {
+                val ownerKey = userViewModel.repo
+                    .activeCredentialSnapshot()
+                    .ownerKey
+                    ?.takeIf(String::isNotBlank)
+                if (ownerKey == null) {
+                    _actionError.value =
+                        "Не удалось определить активную учётную запись"
+                    return@launch
+                }
+                val event = when (reference) {
+                    is WorkspaceConversationReference.StreamReference ->
+                        resolveWorkspaceStreamReference(
+                            reference = reference,
+                            ownerKey = ownerKey,
+                        )
+
+                    is WorkspaceConversationReference.TopicReference ->
+                        resolveWorkspaceTopicReference(
+                            reference = reference,
+                            ownerKey = ownerKey,
+                        )
+                } ?: return@launch
+                if (!referenceOwnerIsActive(ownerKey)) return@launch
+                openWorkspaceConversationChannel.send(event)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (exception: Exception) {
+                _actionError.value =
+                    "Не удалось открыть ссылку на чат или топик"
+            } finally {
+                workspaceConversationReferenceJob = null
+            }
+        }
+    }
+
+    private suspend fun resolveWorkspaceStreamReference(
+        reference: WorkspaceConversationReference.StreamReference,
+        ownerKey: String,
+    ): OpenWorkspaceConversationEvent? {
+        val stream = resolveWorkspaceReferenceStream(
+            streamUuid = reference.streamUuid,
+            ownerKey = ownerKey,
+        ) ?: return null
+        if (!stream.isDirectProviderChat()) {
+            return buildOpenWorkspaceConversationEvent(
+                stream = stream,
+                topic = null,
+            )
+        }
+        val topic = resolveWorkspaceReferenceDefaultTopic(
+            stream = stream,
+            ownerKey = ownerKey,
+        ) ?: return null
+        return buildOpenWorkspaceConversationEvent(
+            stream = stream,
+            topic = topic,
+        )
+    }
+
+    private suspend fun resolveWorkspaceTopicReference(
+        reference: WorkspaceConversationReference.TopicReference,
+        ownerKey: String,
+    ): OpenWorkspaceConversationEvent? {
+        val topic = resolveWorkspaceReferenceTopic(
+            reference = reference,
+            ownerKey = ownerKey,
+        ) ?: return null
+        val stream = resolveWorkspaceReferenceStream(
+            streamUuid = topic.streamUuid,
+            ownerKey = ownerKey,
+        ) ?: return null
+        return buildOpenWorkspaceConversationEvent(
+            stream = stream,
+            topic = topic,
+        ) ?: run {
+            _actionError.value =
+                "Ссылка указывает на топик из другого чата"
+            null
+        }
+    }
+
+    private suspend fun resolveWorkspaceReferenceStream(
+        streamUuid: String,
+        ownerKey: String,
+    ): Stream? {
+        val cachedMatches = repo.streams.value
+            .filter { it.uuid == streamUuid }
+        if (cachedMatches.size > 1) {
+            _actionError.value =
+                "Каталог содержит противоречивую ссылку на чат"
+            return null
+        }
+        selectWorkspaceReferenceStream(
+            streamUuid = streamUuid,
+            streams = cachedMatches,
+        )?.let { return it }
+        if (cachedMatches.isNotEmpty()) {
+            _actionError.value =
+                "Чат по ссылке архивирован или недоступен"
+            return null
+        }
+        if (!referenceOwnerIsActive(ownerKey)) return null
+        val response = client.performRequest(StreamsRequest())
+        if (!referenceOwnerIsActive(ownerKey)) return null
+        return when (response) {
+            is ApiResult.Success -> {
+                val matches = response.value
+                    .filter { it.uuid == streamUuid }
+                val selected = selectWorkspaceReferenceStream(
+                    streamUuid = streamUuid,
+                    streams = matches,
+                )
+                when {
+                    matches.size > 1 -> {
+                        _actionError.value =
+                            "Сервер вернул противоречивый список чатов"
+                        null
+                    }
+
+                    matches.isEmpty() -> {
+                        _actionError.value =
+                            "Чат по ссылке недоступен или был удалён"
+                        null
+                    }
+
+                    selected == null -> {
+                        _actionError.value =
+                            "Чат по ссылке архивирован или недоступен"
+                        null
+                    }
+
+                    else -> selected
+                }
+            }
+
+            is ApiResult.Error -> {
+                _actionError.value = response.error.message
+                    ?: "Не удалось обновить список чатов"
+                null
+            }
+        }
+    }
+
+    private suspend fun resolveWorkspaceReferenceTopic(
+        reference: WorkspaceConversationReference.TopicReference,
+        ownerKey: String,
+    ): TopicsResponseData? {
+        val cachedTopics = if (reference.streamUuid == null) {
+            repo.streamTopics.value.values.flatten()
+        } else {
+            repo.streamTopics.value[reference.streamUuid].orEmpty()
+        }
+        val cachedMatches = cachedTopics.filter { topic ->
+            topic.uuid == reference.topicUuid &&
+                (
+                    reference.streamUuid == null ||
+                        topic.streamUuid == reference.streamUuid
+                )
+        }
+        if (cachedMatches.size > 1) {
+            _actionError.value =
+                "Каталог содержит противоречивую ссылку на топик"
+            return null
+        }
+        selectWorkspaceReferenceTopic(
+            reference = reference,
+            topics = cachedMatches,
+        )?.let { return it }
+        if (!referenceOwnerIsActive(ownerKey)) return null
+        val response = client.performRequest(
+            TopicsRequest(reference.streamUuid),
+        )
+        if (!referenceOwnerIsActive(ownerKey)) return null
+        return when (response) {
+            is ApiResult.Success -> {
+                val matches = response.value.filter { topic ->
+                    topic.uuid == reference.topicUuid &&
+                        (
+                            reference.streamUuid == null ||
+                                topic.streamUuid == reference.streamUuid
+                            )
+                }
+                val selected = selectWorkspaceReferenceTopic(
+                    reference = reference,
+                    topics = matches,
+                )
+                when {
+                    matches.size > 1 -> {
+                        _actionError.value =
+                            "Сервер вернул противоречивый список топиков"
+                        null
+                    }
+
+                    matches.isEmpty() -> {
+                        _actionError.value =
+                            "Топик по ссылке недоступен или был удалён"
+                        null
+                    }
+
+                    else -> selected
+                }
+            }
+
+            is ApiResult.Error -> {
+                _actionError.value = response.error.message
+                    ?: "Не удалось обновить список топиков"
+                null
+            }
+        }
+    }
+
+    private suspend fun resolveWorkspaceReferenceDefaultTopic(
+        stream: Stream,
+        ownerKey: String,
+    ): TopicsResponseData? {
+        selectWorkspaceReferenceDefaultTopic(
+            stream = stream,
+            topics = repo.streamTopics.value[stream.uuid].orEmpty(),
+        )?.let { return it }
+        if (!referenceOwnerIsActive(ownerKey)) return null
+        val response = client.performRequest(TopicsRequest(stream.uuid))
+        if (!referenceOwnerIsActive(ownerKey)) return null
+        return when (response) {
+            is ApiResult.Success ->
+                selectWorkspaceReferenceDefaultTopic(
+                    stream = stream,
+                    topics = response.value,
+                ) ?: run {
+                    _actionError.value =
+                        "У личного чата по ссылке нет доступного основного топика"
+                    null
+                }
+
+            is ApiResult.Error -> {
+                _actionError.value = response.error.message
+                    ?: "Не удалось загрузить основной топик чата"
+                null
+            }
+        }
+    }
+
+    private suspend fun referenceOwnerIsActive(ownerKey: String): Boolean {
+        val active =
+            userViewModel.repo.isActiveCredentialOwner(ownerKey)
+        if (!active) {
+            _actionError.value =
+                "Аккаунт изменился; откройте ссылку заново"
+        }
+        return active
     }
 
     private suspend fun resolveForwardSourceStream(streamUuid: String): Stream? {

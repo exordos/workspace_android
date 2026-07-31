@@ -186,6 +186,18 @@ fun ChatDialogScreen(
         }
     }
 
+    LaunchedEffect(viewModel, navController) {
+        viewModel.openWorkspaceConversationEvents.collect { event ->
+            when (event) {
+                is OpenWorkspaceConversationEvent.Dialog ->
+                    navController.navigate(event.route)
+
+                is OpenWorkspaceConversationEvent.TopicList ->
+                    navController.navigate(event.route)
+            }
+        }
+    }
+
     fun captureAndStoreHistoryViewportAnchor(unstableBoundaryUuid: String?) {
         pendingHistoryViewportAnchor = listState.captureHistoryViewportAnchor(
             unstableBoundaryUuid = unstableBoundaryUuid,

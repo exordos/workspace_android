@@ -366,6 +366,9 @@ unsupported.
 | MSG-RICH-001 | Tap `[label](urn:url:https://host/path?query#fragment)` or its HTTP equivalent | The exact embedded HTTP(S) target, including query and fragment, opens through a browsable platform intent without Workspace credentials or authenticated-origin reuse |
 | MSG-RICH-002 | Render empty, malformed, whitespace-containing, nested, credentialed, `javascript`, `data`, `file`, or scheme-relative URL URNs | No external activity launches; the tap fails closed through the existing visible unsafe-link error, and the raw URN is never treated as a local/deep link |
 | MSG-RICH-003 | Render ordinary HTTP(S)/mailto links and URL-URN-looking text inside inline or fenced code | Existing safe-link behavior remains unchanged, while code remains inert text rather than a clickable target |
+| MSG-RICH-004 | Tap `[channel](urn:stream:<uuid>)` for a regular or direct stream | A unique active regular stream opens its exact UUID topic catalog; a direct/provider stream resolves its authoritative default topic and opens the real dialog instead of fabricating a route |
+| MSG-RICH-005 | Tap `[topic](urn:topic:<topic-uuid>)` or `[topic](urn:topic:<stream-uuid>:<topic-uuid>)` | The unique exact topic and its authoritative stream open by UUID even when labels collide; the optional stream scope must match and direct-chat technical topic names stay hidden |
+| MSG-RICH-006 | Tap malformed, missing, archived, duplicated, cross-stream, offline-uncached or account-switch-raced stream/topic URNs | No guessed or cross-account route opens; one owner-fenced lookup either produces the exact destination or a visible dismissible error, and repeated taps cannot start concurrent lookups |
 
 Current physical coverage: MSG-HIST-001/002, 009–014, 016 and the latest-window
 path of 017 passed on the USB Android 14 Pixel using the sandbox topic's
@@ -402,6 +405,16 @@ exact `example.com/cassi-mobile?stage=url-urn#pixel` target; a representative
 unsafe-link error/Close action; and the same syntax inside inline code remained
 inert text. The focused unit matrix covers every remaining unsafe class listed
 by MSG-RICH-002 plus ordinary HTTP(S)/mailto compatibility.
+MSG-RICH-004–006 have focused parser, unique-selection and route-construction
+coverage for regular/direct streams, scoped/unscoped topics, duplicate UUIDs,
+archived streams, cross-stream topics and malformed references. Physical
+sandbox acceptance passed for a regular stream topic-list route, unscoped and
+scoped exact-topic routes, a missing scoped topic and a malformed topic URN;
+all five messages were created only in the dedicated sandbox topic. The
+missing and malformed references kept Workspace foregrounded, preserved the
+current conversation and exposed a functional visible error/Close action.
+Direct/provider navigation, owner-switch cancellation and controlled offline
+uncached catalog cases remain pending.
 
 ### Current history acceptance coverage
 
