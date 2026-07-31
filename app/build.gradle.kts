@@ -93,6 +93,7 @@ dependencies {
     implementation(libs.coil.gif)
     implementation(libs.coil.network)
     implementation(libs.compose.markdown)
+    implementation(libs.commonmark)
     implementation(libs.androidx.app.compat)
     implementation(libs.androidx.compose.foundation.layout)
     implementation(libs.androidx.compose.ui.text)

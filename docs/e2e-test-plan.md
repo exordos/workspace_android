@@ -372,6 +372,7 @@ unsupported.
 | MSG-RICH-007 | Tap `[person](urn:user:<uuid>)` with and without a warm user catalog | The unique authoritative user opens the exact profile UUID; missing optional profile fields remain empty, a cold catalog uses one owner-fenced refresh, and duplicate labels cannot redirect the route |
 | MSG-RICH-008 | Tap `[message](urn:message:<uuid>)` for a same-topic, off-page or cross-topic message | The canonical detail response must match the requested UUID and contain canonical stream/topic UUIDs; the client resolves their exact active catalog rows and opens a focused message route that loads the anchor plus bidirectional context |
 | MSG-RICH-009 | Tap malformed, missing, response-mismatched or account-switch-raced user/message URNs | No local/external or guessed route opens; one single-flight owner-fenced lookup keeps the current conversation usable and exposes a visible dismissible error |
+| MSG-RICH-010 | Render ordered/unordered lists, blockquotes, inline code and fenced code in light/dark themes and with TalkBack | Visual structure matches the maintained desktop CommonMark contract; code foreground/background and every message text pair meet WCAG AA; the shared bounded structure model preserves list/quote/code meaning for accessibility without turning code into links or duplicating message actions |
 
 Current physical coverage: MSG-HIST-001/002, 009–014, 016 and the latest-window
 path of 017 passed on the USB Android 14 Pixel using the sandbox topic's
@@ -427,6 +428,17 @@ message reference opened a focused route and positioned the known target in
 the viewport; both invalid references kept the current conversation usable and
 exposed a functional visible error/Close action. Off-page/cross-topic message,
 cold missing-user catalog and account-switch failure acceptance remain pending.
+MSG-RICH-010 has focused structural-model coverage for plain/inline Markdown,
+nested quotes, ordered and unordered lists, fenced/indented code, CRLF,
+language-label bounds and oversized input. A physical sandbox message containing
+bold text, inline code, an ordered list, a blockquote and a fenced TypeScript
+block rendered with distinct structure in both dark and light mode; code and
+body text remained readable against their own/embedded surfaces. The renderer
+uses that same bounded model to expose list/quote/code state to TalkBack while
+retaining the established link-capable TextView. An exact two-case Compose
+instrumentation run on the Android 14 Pixel confirmed the localized structural
+state is present for rich blocks, the real rendered message text remains
+visible, and plain/inline-only Markdown receives no fabricated block state.
 
 ### Current history acceptance coverage
 

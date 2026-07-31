@@ -23,10 +23,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -37,6 +39,7 @@ import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import dev.jeziellago.compose.markdowntext.MarkdownText
+import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.ChatDialogViewModel
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.ForwardMarkdownSegment
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.ForwardQuoteResolution
@@ -447,6 +450,19 @@ private fun WorkspaceMarkdownText(
     onLinkClicked: (String) -> Unit,
 ) {
     val colors = LocalWorkspaceColorsPalette.current
+    val structure = remember(markdown) {
+        analyzeWorkspaceMarkdownStructure(markdown)
+    }
+    val accessibilityLabels = WorkspaceMarkdownAccessibilityLabels(
+        quote = stringResource(R.string.markdown_structure_quote),
+        orderedList = stringResource(R.string.markdown_structure_ordered_list),
+        bulletList = stringResource(R.string.markdown_structure_bullet_list),
+        codeBlock = stringResource(R.string.markdown_structure_code_block),
+        longMessage = stringResource(R.string.markdown_structure_long_message),
+    )
+    val structureDescription = remember(structure, accessibilityLabels) {
+        structure.accessibilityDescription(accessibilityLabels)
+    }
     key(
         colors.markdownCodeBackground,
         colors.markdownCodeText,
@@ -456,6 +472,15 @@ private fun WorkspaceMarkdownText(
     ) {
         MarkdownText(
             markdown = markdown,
+            modifier = Modifier.then(
+                if (structureDescription == null) {
+                    Modifier
+                } else {
+                    Modifier.semantics {
+                        stateDescription = structureDescription
+                    }
+                },
+            ),
             style = style,
             syntaxHighlightColor = colors.markdownCodeBackground,
             syntaxHighlightTextColor = colors.markdownCodeText,

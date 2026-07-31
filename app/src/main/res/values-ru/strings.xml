@@ -2,4 +2,9 @@
     <string name="realtime_connecting">Подключаемся к обновлениям…</string>
     <string name="realtime_recovering">Связь с обновлениями прервана. Показаны последние доступные данные.</string>
     <string name="realtime_retry_now">Повторить сейчас</string>
+    <string name="markdown_structure_quote">Цитата</string>
+    <string name="markdown_structure_ordered_list">Нумерованный список</string>
+    <string name="markdown_structure_bullet_list">Маркированный список</string>
+    <string name="markdown_structure_code_block">Блок кода</string>
+    <string name="markdown_structure_long_message">Длинное сообщение</string>
 </resources>

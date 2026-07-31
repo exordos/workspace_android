@@ -22,6 +22,9 @@ coroutinesPlayServices = "1.10.2"
 material3 = "1.4.0"
 coil = "3.4.0"
 composeMarkdown = "0.7.1"
+# Keep the renderer model binary-aligned with compose-markdown/Markwon 4.6.2.
+#noinspection NewerVersionAvailable
+commonmark = "0.13.0"
 appCompat = "1.1.0"
 foundationLayout = "1.11.2"
 uiText = "1.11.2"
@@ -69,6 +72,7 @@ coil-compose = { group = "io.coil-kt.coil3", name = "coil-compose", version.ref 
 coil-network = { group = "io.coil-kt.coil3", name = "coil-network-ktor3", version.ref = "coil" }
 coil-gif = { group = "io.coil-kt.coil3", name = "coil-gif", version.ref = "coil" }
 compose-markdown = { group = "com.github.jeziellago", name = "compose-markdown", version.ref = "composeMarkdown" }
+commonmark = { group = "com.atlassian.commonmark", name = "commonmark", version.ref = "commonmark" }
 androidx-app-compat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appCompat" }
 androidx-compose-foundation-layout = { group = "androidx.compose.foundation", name = "foundation-layout", version.ref = "foundationLayout" }
 androidx-compose-ui-text = { group = "androidx.compose.ui", name = "ui-text", version.ref = "uiText" }
