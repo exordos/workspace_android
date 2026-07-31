@@ -8,4 +8,9 @@
     <string name="markdown_structure_bullet_list">Bulleted list</string>
     <string name="markdown_structure_code_block">Code block</string>
     <string name="markdown_structure_long_message">Long message</string>
+    <string name="markdown_spoiler_default_header">Spoiler</string>
+    <string name="markdown_spoiler_show">Show spoiler</string>
+    <string name="markdown_spoiler_hide">Hide</string>
+    <string name="markdown_spoiler_hidden_state">Content hidden</string>
+    <string name="markdown_spoiler_shown_state">Content shown</string>
 </resources>

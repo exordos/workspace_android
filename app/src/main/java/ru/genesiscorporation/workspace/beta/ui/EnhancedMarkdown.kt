@@ -1,11 +1,13 @@
 package ru.genesiscorporation.workspace.beta.ui
 
-import android.content.Intent
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -18,7 +20,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
@@ -98,6 +105,56 @@ private fun LegacyEnhancedMarkdown(
     navController: NavHostController?,
     viewModel: ChatDialogViewModel?,
 ) {
+    val blockSegments = remember(markdown) {
+        parseWorkspaceBlockSpoilers(markdown)
+    }
+    if (blockSegments.any { it is WorkspaceBlockSpoilerSegment.Spoiler }) {
+        Column(modifier = modifier.fillMaxWidth()) {
+            blockSegments.forEach { segment ->
+                when (segment) {
+                    is WorkspaceBlockSpoilerSegment.Text -> {
+                        if (segment.markdown.isNotEmpty()) {
+                            LegacyEnhancedMarkdownCore(
+                                markdown = segment.markdown,
+                                style = style,
+                                navController = navController,
+                                viewModel = viewModel,
+                            )
+                        }
+                    }
+
+                    is WorkspaceBlockSpoilerSegment.Spoiler -> {
+                        key(segment.id, segment.header, segment.bodyMarkdown) {
+                            WorkspaceSpoilerBlock(
+                                segment = segment,
+                                style = style,
+                                navController = navController,
+                                viewModel = viewModel,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        return
+    }
+    LegacyEnhancedMarkdownCore(
+        markdown = markdown,
+        modifier = modifier,
+        style = style,
+        navController = navController,
+        viewModel = viewModel,
+    )
+}
+
+@Composable
+private fun LegacyEnhancedMarkdownCore(
+    markdown: String,
+    modifier: Modifier = Modifier,
+    style: TextStyle,
+    navController: NavHostController?,
+    viewModel: ChatDialogViewModel?,
+) {
     val context = LocalContext.current
     if (MarkdownParser.hasQuotes(markdown)) {
         val nodes = remember(markdown) { MarkdownParser.parse(markdown) }
@@ -117,6 +174,81 @@ private fun LegacyEnhancedMarkdown(
                 handleWorkspaceLink(url, context, viewModel)
             }
         )
+    }
+}
+
+@Composable
+private fun WorkspaceSpoilerBlock(
+    segment: WorkspaceBlockSpoilerSegment.Spoiler,
+    style: TextStyle,
+    navController: NavHostController?,
+    viewModel: ChatDialogViewModel?,
+) {
+    val colors = LocalWorkspaceColorsPalette.current
+    val defaultHeader = stringResource(R.string.markdown_spoiler_default_header)
+    val showLabel = stringResource(R.string.markdown_spoiler_show)
+    val hideLabel = stringResource(R.string.markdown_spoiler_hide)
+    val hiddenState = stringResource(R.string.markdown_spoiler_hidden_state)
+    val shownState = stringResource(R.string.markdown_spoiler_shown_state)
+    var revealed by rememberSaveable(
+        segment.id,
+        segment.header,
+        segment.bodyMarkdown,
+    ) {
+        mutableStateOf(false)
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+            .background(
+                color = colors.infoCardBackground,
+                shape = RoundedCornerShape(7.dp),
+            ),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp)
+                .clickable { revealed = !revealed }
+                .semantics {
+                    role = Role.Button
+                    stateDescription = if (revealed) shownState else hiddenState
+                }
+                .padding(horizontal = 12.dp, vertical = 9.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = segment.header ?: defaultHeader,
+                color = style.color,
+                fontSize = style.fontSize,
+                lineHeight = style.lineHeight,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = if (revealed) hideLabel else showLabel,
+                color = colors.primary,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(start = 12.dp),
+            )
+        }
+        if (revealed && segment.bodyMarkdown.isNotEmpty()) {
+            EnhancedMarkdown(
+                markdown = segment.bodyMarkdown,
+                modifier = Modifier.padding(
+                    start = 12.dp,
+                    end = 12.dp,
+                    bottom = 10.dp,
+                ),
+                style = style,
+                navController = navController,
+                viewModel = viewModel,
+            )
+        }
     }
 }
 
@@ -367,16 +499,14 @@ private fun MessageNodes(
     navController: NavHostController?,
     viewModel: ChatDialogViewModel?
 ) {
-    val context = LocalContext.current
     Column(modifier = modifier.fillMaxWidth()) {
         nodes.forEach { node ->
             when (node) {
-                is QouteNode.Text -> WorkspaceMarkdownText(
+                is QouteNode.Text -> EnhancedMarkdown(
                     markdown = node.content,
                     style = style,
-                    onLinkClicked = { url ->
-                        handleWorkspaceLink(url, context, viewModel)
-                    }
+                    navController = navController,
+                    viewModel = viewModel,
                 )
                 is QouteNode.Quote -> ZulipQuoteBlock(
                     quote = node,
@@ -450,8 +580,37 @@ private fun WorkspaceMarkdownText(
     onLinkClicked: (String) -> Unit,
 ) {
     val colors = LocalWorkspaceColorsPalette.current
-    val structure = remember(markdown) {
-        analyzeWorkspaceMarkdownStructure(markdown)
+    val showSpoilerLabel = stringResource(R.string.markdown_spoiler_show)
+    val hideSpoilerLabel = stringResource(R.string.markdown_spoiler_hide)
+    val inlineSpoilers = remember(markdown) {
+        parseWorkspaceInlineSpoilers(markdown)
+    }
+    var revealedSpoilerIds by rememberSaveable(markdown) {
+        mutableStateOf("")
+    }
+    val revealedIds = remember(revealedSpoilerIds) {
+        revealedSpoilerIds
+            .split(',')
+            .mapNotNull(String::toIntOrNull)
+            .toSet()
+    }
+    val currentInlineSpoilers by rememberUpdatedState(inlineSpoilers)
+    val currentRevealedIds by rememberUpdatedState(revealedIds)
+    val currentOnLinkClicked by rememberUpdatedState(onLinkClicked)
+    val renderedMarkdown = remember(
+        inlineSpoilers,
+        revealedIds,
+        showSpoilerLabel,
+        hideSpoilerLabel,
+    ) {
+        inlineSpoilers.render(
+            revealedIds = revealedIds,
+            showLabel = showSpoilerLabel,
+            hideLabel = hideSpoilerLabel,
+        )
+    }
+    val structure = remember(renderedMarkdown) {
+        analyzeWorkspaceMarkdownStructure(renderedMarkdown)
     }
     val accessibilityLabels = WorkspaceMarkdownAccessibilityLabels(
         quote = stringResource(R.string.markdown_structure_quote),
@@ -471,7 +630,7 @@ private fun WorkspaceMarkdownText(
         style.lineHeight,
     ) {
         MarkdownText(
-            markdown = markdown,
+            markdown = renderedMarkdown,
             modifier = Modifier.then(
                 if (structureDescription == null) {
                     Modifier
@@ -484,7 +643,24 @@ private fun WorkspaceMarkdownText(
             style = style,
             syntaxHighlightColor = colors.markdownCodeBackground,
             syntaxHighlightTextColor = colors.markdownCodeText,
-            onLinkClicked = onLinkClicked,
+            onLinkClicked = { url ->
+                val spoilerId = parseWorkspaceInlineSpoilerUrn(url)
+                if (
+                    spoilerId != null &&
+                    spoilerId in currentInlineSpoilers.spoilerIds
+                ) {
+                    val updatedIds = if (spoilerId in currentRevealedIds) {
+                        currentRevealedIds - spoilerId
+                    } else {
+                        currentRevealedIds + spoilerId
+                    }
+                    revealedSpoilerIds = updatedIds
+                        .sorted()
+                        .joinToString(separator = ",")
+                } else {
+                    currentOnLinkClicked(url)
+                }
+            },
         )
     }
 }

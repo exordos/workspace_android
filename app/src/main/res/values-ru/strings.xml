@@ -7,4 +7,9 @@
     <string name="markdown_structure_bullet_list">Маркированный список</string>
     <string name="markdown_structure_code_block">Блок кода</string>
     <string name="markdown_structure_long_message">Длинное сообщение</string>
+    <string name="markdown_spoiler_default_header">Спойлер</string>
+    <string name="markdown_spoiler_show">Показать спойлер</string>
+    <string name="markdown_spoiler_hide">Скрыть</string>
+    <string name="markdown_spoiler_hidden_state">Содержимое скрыто</string>
+    <string name="markdown_spoiler_shown_state">Содержимое показано</string>
 </resources>

@@ -373,6 +373,7 @@ unsupported.
 | MSG-RICH-008 | Tap `[message](urn:message:<uuid>)` for a same-topic, off-page or cross-topic message | The canonical detail response must match the requested UUID and contain canonical stream/topic UUIDs; the client resolves their exact active catalog rows and opens a focused message route that loads the anchor plus bidirectional context |
 | MSG-RICH-009 | Tap malformed, missing, response-mismatched or account-switch-raced user/message URNs | No local/external or guessed route opens; one single-flight owner-fenced lookup keeps the current conversation usable and exposes a visible dismissible error |
 | MSG-RICH-010 | Render ordered/unordered lists, blockquotes, inline code and fenced code in light/dark themes and with TalkBack | Visual structure matches the maintained desktop CommonMark contract; code foreground/background and every message text pair meet WCAG AA; the shared bounded structure model preserves list/quote/code meaning for accessibility without turning code into links or duplicating message actions |
+| MSG-RICH-011 | Render `||inline spoiler||` and fenced `spoiler` blocks, reveal and hide them, rotate, and change theme | Secrets are absent from the initial rendered/accessibility text; every visible spoiler control is functional, localized and exposes hidden/shown state; inline reveal/hide stays inside the message; block reveal/hide and both reveal states survive recreation; spoiler-like text inside inline/fenced code, link destinations, empty/unmatched delimiters and unclosed fences stays inert |
 
 Current physical coverage: MSG-HIST-001/002, 009–014, 016 and the latest-window
 path of 017 passed on the USB Android 14 Pixel using the sandbox topic's
@@ -439,6 +440,18 @@ retaining the established link-capable TextView. An exact two-case Compose
 instrumentation run on the Android 14 Pixel confirmed the localized structural
 state is present for rich blocks, the real rendered message text remains
 visible, and plain/inline-only Markdown receives no fabricated block state.
+MSG-RICH-011 has focused parser coverage for multiple inline spoilers, escaped
+labels, strict bounded internal actions, matching backtick/tilde block fences,
+default/custom headers, ordinary fenced-code isolation and malformed syntax.
+An exact five-case Compose instrumentation run on the same Pixel confirmed the
+localized block hidden/shown state, nested quote/spoiler composition, real
+block and inline reveal/hide taps, and inline-link interception. A message sent
+only in the dedicated sandbox proved that inline and block secrets are
+initially absent, inline reveal and block
+reveal/hide work, and the revealed inline plus block state survives
+portrait-to-landscape recreation. The block was hidden again in landscape;
+portrait restoration preserved that independent state. Both light and dark
+surfaces remained readable, and no crash, ANR, Room or SQLite failure appeared.
 
 ### Current history acceptance coverage
 
