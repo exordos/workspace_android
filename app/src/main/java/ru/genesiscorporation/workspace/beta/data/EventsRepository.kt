@@ -770,6 +770,39 @@ class EventsRepository(
             .orEmpty()
         val boundary = messages.singleOrNull { it.uuid == boundaryUuid }
             ?: return emptyList()
+        return markStreamTopicMessagesReadThroughBoundary(
+            streamUuid = streamUuid,
+            topicUuid = topicUuid,
+            boundary = boundary,
+        )
+    }
+
+    fun markStreamTopicMessagesReadThrough(
+        streamUuid: String,
+        topicUuid: String,
+        boundary: MessageResponse,
+    ): List<String> {
+        if (
+            !boundary.read ||
+            boundary.streamUuid != streamUuid ||
+            boundary.topicUuid != topicUuid
+        ) {
+            return emptyList()
+        }
+        return markStreamTopicMessagesReadThroughBoundary(
+            streamUuid = streamUuid,
+            topicUuid = topicUuid,
+            boundary = boundary,
+        )
+    }
+
+    private fun markStreamTopicMessagesReadThroughBoundary(
+        streamUuid: String,
+        topicUuid: String,
+        boundary: MessageResponse,
+    ): List<String> {
+        val messages = _streamTopicMessages.value["$streamUuid.$topicUuid"]
+            .orEmpty()
         val boundaryPosition = repositoryMessagePosition(boundary)
             ?: return emptyList()
         val messageUuids = messages.mapNotNull { message ->

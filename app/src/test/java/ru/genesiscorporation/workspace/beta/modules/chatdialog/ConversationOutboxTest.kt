@@ -1,6 +1,7 @@
 package ru.genesiscorporation.workspace.beta.modules.chatdialog
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import ru.genesiscorporation.workspace.beta.data.PersistedAttachment
@@ -8,6 +9,7 @@ import ru.genesiscorporation.workspace.beta.data.PersistedConversationState
 import ru.genesiscorporation.workspace.beta.data.PersistedConversationRoute
 import ru.genesiscorporation.workspace.beta.data.PersistedOutboxEntry
 import ru.genesiscorporation.workspace.beta.data.PersistedOutboxStatus
+import ru.genesiscorporation.workspace.beta.data.PersistedReadBoundary
 import ru.genesiscorporation.workspace.beta.data.PersistedDraftSyncStatus
 import ru.genesiscorporation.workspace.beta.data.PersistedServerDraftState
 import ru.genesiscorporation.workspace.beta.data.remote.ApiError
@@ -208,6 +210,10 @@ class ConversationOutboxTest {
                     outbox(),
                     outbox(localUuid = "not-a-local-entry"),
                 ),
+                pendingReadBoundary = readBoundary(
+                    uuid = READ_BOUNDARY_UUID.uppercase(),
+                    createdAt = "2026-07-30T13:00:00+03:00",
+                ),
             ),
         )
 
@@ -219,6 +225,45 @@ class ConversationOutboxTest {
             listOf("local-message"),
             sanitized.outbox.map(PersistedOutboxEntry::localMessageUuid),
         )
+        assertEquals(
+            readBoundary(),
+            sanitized.pendingReadBoundary,
+        )
+    }
+
+    @Test
+    fun `invalid persisted read boundary is discarded`() {
+        val sanitized = sanitizePersistedConversationState(
+            PersistedConversationState(
+                pendingReadBoundary = readBoundary(
+                    uuid = "not-a-canonical-message-uuid",
+                ),
+            ),
+        )
+
+        assertEquals(null, sanitized.pendingReadBoundary)
+        assertFalse(sanitized.hasConversationWork())
+    }
+
+    @Test
+    fun `persisted read boundary requires a valid timestamp`() {
+        val sanitized = sanitizePersistedConversationState(
+            PersistedConversationState(
+                pendingReadBoundary = readBoundary(createdAt = "not-a-time"),
+            ),
+        )
+
+        assertEquals(null, sanitized.pendingReadBoundary)
+        assertFalse(sanitized.hasConversationWork())
+    }
+
+    @Test
+    fun `read retry without a draft remains durable conversation work`() {
+        val state = PersistedConversationState(
+            pendingReadBoundary = readBoundary(),
+        )
+
+        assertTrue(state.hasConversationWork())
     }
 
     @Test
@@ -294,6 +339,7 @@ class ConversationOutboxTest {
             draftStorageSlot = slot,
             draftText = "secondary draft",
             outbox = listOf(outbox(localUuid = "local-new")),
+            pendingReadBoundary = readBoundary(),
         )
 
         val plan = planConversationStateStorage(secondary, base)
@@ -301,11 +347,16 @@ class ConversationOutboxTest {
         assertEquals(slot, plan.selectedState.draftStorageSlot)
         assertEquals("secondary draft", plan.selectedState.draftText)
         assertTrue(plan.selectedState.outbox.isEmpty())
+        assertEquals(null, plan.selectedState.pendingReadBoundary)
         assertEquals(null, plan.baseState?.draftStorageSlot)
         assertEquals("base draft", plan.baseState?.draftText)
         assertEquals(
             listOf("local-new"),
             plan.baseState?.outbox?.map(PersistedOutboxEntry::localMessageUuid),
+        )
+        assertEquals(
+            readBoundary(),
+            plan.baseState?.pendingReadBoundary,
         )
     }
 
@@ -357,4 +408,17 @@ class ConversationOutboxTest {
         topicName = "Topic",
         isDirectMessages = false,
     )
+
+    private fun readBoundary(
+        uuid: String = READ_BOUNDARY_UUID,
+        createdAt: String = "2026-07-30T10:00:00Z",
+    ) = PersistedReadBoundary(
+        messageUuid = uuid,
+        createdAt = createdAt,
+    )
+
+    private companion object {
+        const val READ_BOUNDARY_UUID =
+            "33333333-3333-4333-8333-333333333333"
+    }
 }

@@ -508,6 +508,86 @@ class EventsRepositoryTest {
     }
 
     @Test
+    fun `restored read boundary can confirm a loaded prefix outside its window`() {
+        val repository = EventsRepository()
+        val firstUuid = "10000000-0000-4000-8000-000000000001"
+        val secondUuid = "20000000-0000-4000-8000-000000000002"
+        val boundaryUuid = "30000000-0000-4000-8000-000000000003"
+        val loaded = listOf(
+            message(firstUuid, "first").copy(
+                read = false,
+                createdAt = "2026-07-31T08:00:00Z",
+            ),
+            message(secondUuid, "second").copy(
+                read = false,
+                createdAt = "2026-07-31T08:00:01Z",
+            ),
+        )
+        val confirmedBoundary = message(boundaryUuid, "not loaded").copy(
+            read = true,
+            createdAt = "2026-07-31T08:00:02Z",
+        )
+        repository.setInitialStreams(
+            listOf(
+                stream(
+                    defaultTopicUuid = TOPIC_UUID,
+                    notificationMode = "all_messages",
+                ).copy(unreadCount = 3),
+            ),
+        )
+        repository.addStreamTopics(
+            STREAM_UUID,
+            listOf(
+                topic(lastMessageUuid = boundaryUuid).copy(unreadCount = 3),
+            ),
+        )
+        repository.addStreamTopicMessages(
+            STREAM_UUID,
+            TOPIC_UUID,
+            loaded,
+        )
+
+        assertTrue(
+            repository.markStreamTopicMessagesReadThrough(
+                STREAM_UUID,
+                TOPIC_UUID,
+                confirmedBoundary.copy(topicUuid = "foreign-topic"),
+            ).isEmpty(),
+        )
+        assertTrue(
+            repository.markStreamTopicMessagesReadThrough(
+                STREAM_UUID,
+                TOPIC_UUID,
+                confirmedBoundary.copy(read = false),
+            ).isEmpty(),
+        )
+        assertTrue(
+            repository.streamTopicMessages.value.getValue(TOPIC_KEY)
+                .none(MessageResponse::read),
+        )
+
+        val marked = repository.markStreamTopicMessagesReadThrough(
+            STREAM_UUID,
+            TOPIC_UUID,
+            confirmedBoundary,
+        )
+
+        assertEquals(listOf(firstUuid, secondUuid), marked)
+        assertTrue(
+            repository.streamTopicMessages.value.getValue(TOPIC_KEY)
+                .all(MessageResponse::read),
+        )
+        assertEquals(
+            1,
+            repository.streamTopics.value
+                .getValue(STREAM_UUID)
+                .single()
+                .unreadCount,
+        )
+        assertEquals(1, repository.streams.value.single().unreadCount)
+    }
+
+    @Test
     fun `bulk read realtime event updates loaded rows and projections once`() {
         val repository = EventsRepository()
         val firstUuid = "40000000-0000-4000-8000-000000000004"

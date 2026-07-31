@@ -51,6 +51,10 @@ class SecureConversationStateStoreInstrumentedTest {
                     status = PersistedOutboxStatus.UNCERTAIN,
                 ),
             ),
+            pendingReadBoundary = PersistedReadBoundary(
+                messageUuid = READ_BOUNDARY_SENTINEL,
+                createdAt = "2026-07-30T10:00:00Z",
+            ),
         )
 
         store.write(ACCOUNT_A, STREAM, TOPIC, state)
@@ -68,6 +72,7 @@ class SecureConversationStateStoreInstrumentedTest {
         assertFalse(persistedValues.contains(DRAFT_SENTINEL))
         assertFalse(persistedValues.contains(OUTBOX_SENTINEL))
         assertFalse(persistedValues.contains(ROUTE_SENTINEL))
+        assertFalse(persistedValues.contains(READ_BOUNDARY_SENTINEL))
         assertFalse(persistedValues.contains(ACCOUNT_A))
 
         store.clearAccount(ACCOUNT_A)
@@ -221,6 +226,8 @@ class SecureConversationStateStoreInstrumentedTest {
         const val DRAFT_SENTINEL = "draft-plaintext-sentinel"
         const val OUTBOX_SENTINEL = "outbox-plaintext-sentinel"
         const val ROUTE_SENTINEL = "route-plaintext-sentinel"
+        const val READ_BOUNDARY_SENTINEL =
+            "33333333-3333-4333-8333-333333333333"
         const val DRAFT_SLOT_A = "11111111-1111-4111-8111-111111111111"
         const val DRAFT_SLOT_B = "22222222-2222-4222-8222-222222222222"
     }

@@ -8,11 +8,13 @@ import ru.genesiscorporation.workspace.beta.data.PersistedDraftConflict
 import ru.genesiscorporation.workspace.beta.data.PersistedDraftSyncStatus
 import ru.genesiscorporation.workspace.beta.data.PersistedOutboxEntry
 import ru.genesiscorporation.workspace.beta.data.PersistedOutboxStatus
+import ru.genesiscorporation.workspace.beta.data.PersistedReadBoundary
 import ru.genesiscorporation.workspace.beta.data.PersistedServerDraftState
 import ru.genesiscorporation.workspace.beta.data.remote.ApiError
 import ru.genesiscorporation.workspace.beta.data.remote.ApiErrorKind
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.canonicalDraftUuid
+import ru.genesiscorporation.workspace.beta.data.remote.dto.parseCanonicalMessageUuid
 import ru.genesiscorporation.workspace.beta.data.remote.dto.requireStrongDraftEntityTag
 import java.time.Duration
 import java.time.Instant
@@ -43,9 +45,13 @@ internal fun planConversationStateStorage(
         route = existingBaseState?.route ?: activeState.route,
         draftStorageSlot = null,
         outbox = activeState.outbox,
+        pendingReadBoundary = activeState.pendingReadBoundary,
     )
     return ConversationStateStoragePlan(
-        selectedState = activeState.copy(outbox = emptyList()),
+        selectedState = activeState.copy(
+            outbox = emptyList(),
+            pendingReadBoundary = null,
+        ),
         baseState = base,
     )
 }
@@ -57,6 +63,7 @@ internal fun PersistedConversationState.hasConversationWork(): Boolean =
         attachments.isNotEmpty() ||
         suspendedDraft != null ||
         outbox.isNotEmpty() ||
+        pendingReadBoundary != null ||
         serverDraft != null
 
 internal fun sanitizePersistedConversationState(
@@ -124,12 +131,27 @@ internal fun sanitizePersistedConversationState(
                         ?.take(PERSISTED_ERROR_CHARS),
                 )
             },
+        pendingReadBoundary = state.pendingReadBoundary
+            ?.let(::sanitizeReadBoundary),
         draftUpdatedAt = state.draftUpdatedAt
             ?.takeIf(::isValidDraftTimestamp),
         serverDraft = state.serverDraft?.let(::sanitizeServerDraftState),
         lastIncomingShareRequestId = state.lastIncomingShareRequestId
             ?.takeIf(::isReasonableIdentifier),
     )
+
+private fun sanitizeReadBoundary(
+    boundary: PersistedReadBoundary,
+): PersistedReadBoundary? {
+    val messageUuid = parseCanonicalMessageUuid(boundary.messageUuid)
+        ?: return null
+    val createdAt = parseOutboxInstant(boundary.createdAt)
+        ?: return null
+    return PersistedReadBoundary(
+        messageUuid = messageUuid,
+        createdAt = createdAt.toString(),
+    )
+}
 
 private fun sanitizeServerDraftState(
     state: PersistedServerDraftState,

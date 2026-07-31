@@ -8,6 +8,7 @@ import org.junit.Test
 import ru.genesiscorporation.workspace.beta.data.PersistedConversationRoute
 import ru.genesiscorporation.workspace.beta.data.PersistedConversationState
 import ru.genesiscorporation.workspace.beta.data.PersistedDraftSyncStatus
+import ru.genesiscorporation.workspace.beta.data.PersistedReadBoundary
 import ru.genesiscorporation.workspace.beta.data.PersistedServerDraftState
 import ru.genesiscorporation.workspace.beta.data.remote.dto.DraftPayload
 import ru.genesiscorporation.workspace.beta.data.remote.dto.DraftResponse
@@ -158,6 +159,20 @@ class DraftsModelTest {
                 ),
             ).size,
         )
+    }
+
+    @Test
+    fun `read retry survives draft cleanup without becoming a draft row`() {
+        val readOnlyState = localState(content = "").copy(
+            draftUpdatedAt = null,
+            pendingReadBoundary = PersistedReadBoundary(
+                messageUuid = "77777777-7777-4777-8777-777777777777",
+                createdAt = "2026-07-30T10:00:00Z",
+            ),
+        )
+
+        assertTrue(readOnlyState.hasRetainedConversationWork())
+        assertTrue(mergeDraftItems(emptyList(), listOf(readOnlyState)).isEmpty())
     }
 
     @Test

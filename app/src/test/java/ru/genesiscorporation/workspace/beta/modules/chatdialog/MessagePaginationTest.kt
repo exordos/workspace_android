@@ -5,6 +5,9 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import ru.genesiscorporation.workspace.beta.data.MessageProjectionEvent
+import ru.genesiscorporation.workspace.beta.data.OwnedMessageProjectionEvent
+import ru.genesiscorporation.workspace.beta.data.PersistedReadBoundary
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponsePayload
 
@@ -286,6 +289,7 @@ class MessagePaginationTest {
             confirmed.copy(streamUuid = "foreign-stream"),
             confirmed.copy(topicUuid = "foreign-topic"),
             confirmed.copy(read = false),
+            confirmed.copy(createdAt = "not-a-time"),
         ).forEach { rejected ->
             assertFalse(
                 isConfirmedReadThrough(
@@ -296,6 +300,85 @@ class MessagePaginationTest {
                 ),
             )
         }
+    }
+
+    @Test
+    fun `durable read boundaries coalesce by timestamp and uuid off window`() {
+        val older = readBoundary(
+            uuid = NEWEST_UUID,
+            createdAt = "2026-07-30T00:00:00Z",
+        )
+        val newer = readBoundary(
+            uuid = OLDEST_UUID,
+            createdAt = "2026-07-30T00:00:01Z",
+        )
+        val sameTimeHigherUuid = readBoundary(
+            uuid = NEWER_UUID,
+            createdAt = newer.createdAt,
+        )
+
+        assertEquals(newer, newestReadBoundary(older, newer))
+        assertEquals(newer, newestReadBoundary(newer, older))
+        assertEquals(
+            sameTimeHigherUuid,
+            newestReadBoundary(newer, sameTimeHigherUuid),
+        )
+        assertEquals(newer, newestReadBoundary(null, newer))
+    }
+
+    @Test
+    fun `only exact owner realtime evidence clears a durable read boundary`() {
+        val boundary = readBoundary(
+            uuid = ANCHOR_UUID,
+            createdAt = "2026-07-30T00:00:00Z",
+        )
+        val batch = ownedProjection(
+            MessageProjectionEvent.Read(listOf(ANCHOR_UUID)),
+        )
+        val full = ownedProjection(
+            MessageProjectionEvent.Upsert(
+                message(ANCHOR_UUID, read = true),
+            ),
+        )
+
+        assertTrue(
+            batch.confirmsReadBoundary(
+                OWNER_KEY,
+                STREAM_UUID,
+                TOPIC_UUID,
+                boundary,
+            ),
+        )
+        assertTrue(
+            full.confirmsReadBoundary(
+                OWNER_KEY,
+                STREAM_UUID,
+                TOPIC_UUID,
+                boundary,
+            ),
+        )
+        assertFalse(
+            batch.copy(ownerKey = "other-owner").confirmsReadBoundary(
+                OWNER_KEY,
+                STREAM_UUID,
+                TOPIC_UUID,
+                boundary,
+            ),
+        )
+        assertFalse(
+            full.copy(
+                event = MessageProjectionEvent.Upsert(
+                    message(ANCHOR_UUID, read = true).copy(
+                        topicUuid = "other-topic",
+                    ),
+                ),
+            ).confirmsReadBoundary(
+                OWNER_KEY,
+                STREAM_UUID,
+                TOPIC_UUID,
+                boundary,
+            ),
+        )
     }
 
     private fun message(
@@ -317,7 +400,24 @@ class MessagePaginationTest {
         read = read,
     )
 
+    private fun readBoundary(
+        uuid: String,
+        createdAt: String,
+    ) = PersistedReadBoundary(
+        messageUuid = uuid,
+        createdAt = createdAt,
+    )
+
+    private fun ownedProjection(
+        event: MessageProjectionEvent,
+    ) = OwnedMessageProjectionEvent(
+        ownerKey = OWNER_KEY,
+        sequence = 1,
+        event = event,
+    )
+
     private companion object {
+        const val OWNER_KEY = "owner"
         const val STREAM_UUID = "11111111-1111-4111-8111-111111111111"
         const val TOPIC_UUID = "22222222-2222-4222-8222-222222222222"
         const val USER_UUID = "33333333-3333-4333-8333-333333333333"

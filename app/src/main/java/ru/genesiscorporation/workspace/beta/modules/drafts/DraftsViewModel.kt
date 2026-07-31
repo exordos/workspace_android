@@ -831,13 +831,14 @@ private fun clearDraftFields(
         serverDraft = null,
     )
 
-private fun PersistedConversationState.hasRetainedConversationWork(): Boolean =
+internal fun PersistedConversationState.hasRetainedConversationWork(): Boolean =
     draftText.isNotEmpty() ||
         editingMessageUuid != null ||
         quotedMessageUuid != null ||
         attachments.isNotEmpty() ||
         suspendedDraft != null ||
         outbox.isNotEmpty() ||
+        pendingReadBoundary != null ||
         serverDraft != null
 
 private fun nowTimestamp(): String =

@@ -96,6 +96,12 @@ data class PersistedServerDraftState(
 )
 
 @Serializable
+data class PersistedReadBoundary(
+    val messageUuid: String,
+    val createdAt: String,
+)
+
+@Serializable
 data class PersistedConversationState(
     val route: PersistedConversationRoute? = null,
     val draftStorageSlot: String? = null,
@@ -105,6 +111,7 @@ data class PersistedConversationState(
     val attachments: List<PersistedAttachment> = emptyList(),
     val suspendedDraft: PersistedComposerDraft? = null,
     val outbox: List<PersistedOutboxEntry> = emptyList(),
+    val pendingReadBoundary: PersistedReadBoundary? = null,
     val draftUpdatedAt: String? = null,
     val serverDraft: PersistedServerDraftState? = null,
     val lastIncomingShareRequestId: String? = null,

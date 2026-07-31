@@ -362,6 +362,7 @@ unsupported.
 | MSG-UNREAD-009 | Rotate before and after crossing the unread marker | The saved marker/gesture state does not cause eager read, duplicate read requests, a jump to latest, or a marker attached to an already-read row |
 | MSG-UNREAD-010 | The first unread predates the bounded latest page | The client fetches and anchors the exact server-first unread window instead of silently treating the latest loaded unread as globally first |
 | MSG-UNREAD-011 | All unread rows fit without a scrollable drag | Gesture-free read is allowed only while resumed, with no newer page pending, the fully loaded newest edge visible, and every authoritative unread row at least 50% visible; any missing condition preserves unread |
+| MSG-UNREAD-012 | Kill the process after a viewport read is durably queued but before an exact response is accepted | The newest canonical boundary is encrypted under the exact account/stream/topic before POST; a storage failure prevents the mutation. Cold restart never auto-retries the ambiguous request and exposes functional Retry/Close: Retry uses the retained boundary even when it is outside the loaded window, while Close durably discards it. Exact REST/realtime confirmation clears it, newer visible boundaries coalesce without regression, draft cleanup cannot delete it, and another account or conversation cannot observe or replay it |
 
 Current physical coverage: MSG-HIST-001/002, 009–014, 016 and the latest-window
 path of 017 passed on the USB Android 14 Pixel using the sandbox topic's
@@ -373,16 +374,20 @@ MSG-HIST-008 edit-in-old-history remain fault/interaction automation work;
 merely disabling radios is not counted as proof because an already resolved
 in-app route can reuse retained runtime state.
 
-Current unread coverage: MSG-UNREAD-003–007 and 010–011 have focused
+Current unread coverage: MSG-UNREAD-003–007 and 010–012 have focused
 request/model/repository tests, including the strict earliest-unread filter,
 candidate scope validation, composite-boundary selection, full and batch
 realtime frames, duplicate delivery, stale-page regression and the complete
-visible-tail decision matrix. Latest and
+visible-tail decision matrix. The retained read intent has encrypted
+account/conversation round-trip coverage, malformed-boundary rejection,
+secondary-draft sharing, read-only retention and an unloaded confirmed-boundary
+repository test. Latest and
 earliest-unread requests run concurrently; an unread already in the latest page
 reuses that response, while an off-page unread uses the strict bidirectional
 context loader. Physical acceptance in a naturally unread sandbox conversation
-is required before marking MSG-UNREAD-001–011 passed. Controlled post-request
-offline/timeout/5xx Retry and process-death persistence remain automation work.
+is required before marking MSG-UNREAD-001–012 passed. Controlled post-request
+offline/timeout/5xx Retry, process kill, storage failure and another-client
+confirmation remain physical automation work.
 
 ### Current history acceptance coverage
 
@@ -722,7 +727,10 @@ an unapplied cursor durable.
 
 The Room snapshot is a read cache, not a second outbox or mutation queue. It is
 hydrated before realtime startup, merges below newer REST/realtime/local state,
-and is replaced only while the same credential owner remains active.
+and is replaced only while the same credential owner remains active. Pending
+send and read intents live in the separate encrypted owner/conversation state;
+they are never inferred from, duplicated into or automatically replayed from
+the Room snapshot.
 
 | ID | Scenario | Main assertions | Current coverage |
 | --- | --- | --- | --- |
@@ -743,6 +751,7 @@ and is replaced only while the same credential owner remains active.
 | OFFLINE-015 | Authoritative empty timeline versus missing cache | An empty successful Feed/Starred response is encrypted as metadata with zero rows and restores as content-ready empty; an account/kind never cached returns no projection and still attempts REST | Store instrumentation and physical offline empty Starred acceptance passed |
 | OFFLINE-016 | Authoritative Inbox marker versus missing cache | A successful catalog write is followed by an encrypted owner-scoped zero-row Inbox marker; cached rows or confirmed empty remain usable on a cold failed refresh, while a missing/corrupt marker never fabricates an empty Inbox | Store instrumentation and repository/UI-model coverage; physical non-empty cold-offline restore/Retry passed with one marker and zero duplicate message rows; physical authoritative-empty injection pending |
 | OFFLINE-017 | Upgrade schema v3 to v4 and restore conversation pagination | Existing catalog/history/timeline rows survive; the new exact-owner stream/topic pagination table starts empty. Subsequent snapshots atomically retain at most 100 encrypted page-state rows matching retained conversations; cross-owner/replayed/corrupt/incomplete metadata cannot hide a missing history side | Sequential migration, normalization unit and exact store instrumentation passed on an Android 14 Pixel; cold-offline latest continuation/Retry passed, while context and injected-corruption device paths remain pending |
+| OFFLINE-018 | Process stops around `read_up_to` or its local persistence | The canonical newest boundary is committed to separate encrypted account/conversation state before network mutation; process restart exposes a user decision instead of replaying it. A failed local write blocks POST, exact server/realtime confirmation clears the intent, Close discards it durably, and draft lifecycle operations preserve the read-only state | Focused state/repository/unit coverage plus exact encrypted-store instrumentation passed on an Android 14 Pixel; physical process-kill, storage-fault and cross-client confirmation pending |
 
 Current verified coverage: the exact owner-scoped instrumentation class passes
 encrypted round-trip, account separation, ciphertext replay rejection,
@@ -752,7 +761,10 @@ empty state, 500-row retention, damaged-row isolation and cross-owner/kind
 replay rejection. It also covers the zero-row Inbox success marker without
 storing duplicate message rows. Schema-v4 coverage adds encrypted
 conversation mode/anchor/marker round-trip and degrades a damaged message
-window to conservative bidirectional continuation. Exact migrations preserve schema-v1 history,
+window to conservative bidirectional continuation. The same physical store
+suite now verifies that the composite pending-read boundary round-trips under
+the exact account/conversation key and is absent from plaintext preferences.
+Exact migrations preserve schema-v1 history,
 add the three schema-v2 catalog tables and then add the schema-v3 timeline
 tables plus the schema-v4 pagination table. Repository
 tests prove cache-under-current merging, an

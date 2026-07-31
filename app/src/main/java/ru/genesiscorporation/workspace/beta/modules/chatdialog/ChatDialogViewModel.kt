@@ -37,6 +37,8 @@ import ru.genesiscorporation.workspace.beta.data.ConversationPaginationState
 import ru.genesiscorporation.workspace.beta.data.ConversationStateStore
 import ru.genesiscorporation.workspace.beta.data.ConversationWindowMode
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
+import ru.genesiscorporation.workspace.beta.data.MessageProjectionEvent
+import ru.genesiscorporation.workspace.beta.data.OwnedMessageProjectionEvent
 import ru.genesiscorporation.workspace.beta.data.PersistedAttachment
 import ru.genesiscorporation.workspace.beta.data.PersistedComposerDraft
 import ru.genesiscorporation.workspace.beta.data.PersistedConversationRoute
@@ -44,6 +46,7 @@ import ru.genesiscorporation.workspace.beta.data.PersistedConversationState
 import ru.genesiscorporation.workspace.beta.data.PersistedDraftSyncStatus
 import ru.genesiscorporation.workspace.beta.data.PersistedOutboxEntry
 import ru.genesiscorporation.workspace.beta.data.PersistedOutboxStatus
+import ru.genesiscorporation.workspace.beta.data.PersistedReadBoundary
 import ru.genesiscorporation.workspace.beta.data.PersistedServerDraftState
 import ru.genesiscorporation.workspace.beta.data.deleteOwnedIncomingAttachment
 import ru.genesiscorporation.workspace.beta.data.isOwnedIncomingAttachment
@@ -246,8 +249,10 @@ class ChatDialogViewModel(
     private var newerMessagesJob: Job? = null
     private var refreshHistoryBeforeNewerRetry = false
     private var readMessagesJob: Job? = null
-    private var pendingReadBoundaryUuid: String? = null
-    private var failedReadBoundaryUuid: String? = null
+    private var activeReadBoundary: PersistedReadBoundary? = null
+    private var pendingReadBoundary: PersistedReadBoundary? = null
+    private var failedReadBoundary: PersistedReadBoundary? = null
+    private var durableReadBoundary: PersistedReadBoundary? = null
     private var forwardCatalogJob: Job? = null
     private var forwardTopicLoadJob: Job? = null
     private var forwardSelectionGeneration = 0L
@@ -1917,6 +1922,11 @@ class ChatDialogViewModel(
             ?.outbox
             .orEmpty()
             .map(::interruptedOutboxEntry)
+        baseState?.pendingReadBoundary?.let { boundary ->
+            durableReadBoundary = boundary
+            failedReadBoundary = boundary
+            _readError.value = RESTORED_READ_RETRY_MESSAGE
+        }
         _outboxEntries.value = restoredOutbox
         _draftSyncState.value = restored.serverDraft
         draftUpdatedAt = restored.draftUpdatedAt
@@ -2042,6 +2052,7 @@ class ChatDialogViewModel(
             attachments = persistedAttachments(),
             suspendedDraft = suspendedDraft,
             outbox = outbox,
+            pendingReadBoundary = durableReadBoundary,
             draftUpdatedAt = draftUpdatedAt,
             serverDraft = _draftSyncState.value,
         )
@@ -2731,6 +2742,8 @@ class ChatDialogViewModel(
         const val DRAFT_PERSISTENCE_DEBOUNCE_MILLIS = 350L
         const val REMOTE_DRAFT_SYNC_DEBOUNCE_MILLIS = 1_000L
         const val MAX_DRAFT_DELETE_CONFLICT_RETRIES = 2
+        const val RESTORED_READ_RETRY_MESSAGE =
+            "Приложение было перезапущено до подтверждения прочтения"
         val REMOTE_DRAFT_RETRY_DELAYS_MILLIS =
             longArrayOf(1_000L, 2_000L, 5_000L, 15_000L, 60_000L)
     }
@@ -2790,6 +2803,10 @@ class ChatDialogViewModel(
             try {
                 messagesLoaded = loadInitialMessages()
                 if (messagesLoaded) {
+                    clearConfirmedDurableReadIntent(
+                        streamTopicMessages.value["$chatId.$topicUuid"]
+                            .orEmpty(),
+                    )
                     finalizeRestoredComposerReferences()
                 }
             } catch (cancellation: CancellationException) {
@@ -2819,6 +2836,32 @@ class ChatDialogViewModel(
                 .collectLatest {
                     loadLatestMessages(resolveMessageFocus = false)
                 }
+        }
+        viewModelScope.launch {
+            repo.streamTopicMessages.collectLatest { messagesByConversation ->
+                clearConfirmedDurableReadIntent(
+                    messagesByConversation["$chatId.$topicUuid"].orEmpty(),
+                )
+            }
+        }
+        viewModelScope.launch {
+            repo.messageProjectionEvents.collectLatest { event ->
+                val ownerKey = conversationOwnerKey ?: return@collectLatest
+                val retainedBoundary =
+                    durableReadBoundary ?: return@collectLatest
+                if (
+                    event.confirmsReadBoundary(
+                        expectedOwnerKey = ownerKey,
+                        expectedStreamUuid = chatId,
+                        expectedTopicUuid = topicUuid,
+                        boundary = retainedBoundary,
+                    )
+                ) {
+                    clearConfirmedDurableReadIntent(
+                        retainedBoundary.messageUuid,
+                    )
+                }
+            }
         }
     }
 
@@ -3910,34 +3953,57 @@ class ChatDialogViewModel(
             messages = messages,
             visibleMessageUuids = visibleMessageUuids,
         ) ?: return
-        pendingReadBoundaryUuid = newestMessageUuid(
-            messages = messages,
-            firstUuid = pendingReadBoundaryUuid,
-            secondUuid = target.uuid,
+        val targetBoundary = target.persistedReadBoundary() ?: return
+        durableReadBoundary = newestReadBoundary(
+            first = durableReadBoundary,
+            second = targetBoundary,
         )
+        pendingReadBoundary = newestReadBoundary(
+            first = pendingReadBoundary,
+            second = targetBoundary,
+        )
+        if (readMessagesJob?.isActive == true) {
+            viewModelScope.launch {
+                persistConversationStateSafely(
+                    failureMessage =
+                        "Не удалось сохранить очередь отметки прочтения",
+                )
+            }
+        }
         startPendingReadRequest()
     }
 
     private fun startPendingReadRequest() {
         if (readMessagesJob?.isActive == true) return
-        val requestedUuid = pendingReadBoundaryUuid ?: return
-        pendingReadBoundaryUuid = null
+        val requestedBoundary = pendingReadBoundary ?: return
+        val requestedUuid = requestedBoundary.messageUuid
+        pendingReadBoundary = null
+        activeReadBoundary = requestedBoundary
+        failedReadBoundary = null
+        _readError.value = null
         readMessagesJob = viewModelScope.launch {
             try {
-                val currentTarget = streamTopicMessages.value[
+                val loadedTarget = streamTopicMessages.value[
                     "$chatId.$topicUuid"
-                ].orEmpty().singleOrNull {
-                    it.uuid == requestedUuid && !it.read && !it.isOwn
-                } ?: return@launch
+                ].orEmpty().singleOrNull { it.uuid == requestedUuid }
+                if (loadedTarget?.read == true || loadedTarget?.isOwn == true) {
+                    if (durableReadBoundary == requestedBoundary) {
+                        durableReadBoundary = null
+                    }
+                    return@launch
+                }
+                if (!persistReadIntentBeforeMutation(requestedBoundary)) {
+                    return@launch
+                }
                 when (
                     val response = client.performRequest(
-                        MarkMessagesReadRequest(currentTarget.uuid),
+                        MarkMessagesReadRequest(requestedUuid),
                     )
                 ) {
                     is ApiResult.Success -> {
                         val confirmed = response.value
                         if (isConfirmedReadThrough(
-                                expectedMessageUuid = currentTarget.uuid,
+                                expectedMessageUuid = requestedUuid,
                                 expectedStreamUuid = chatId,
                                 expectedTopicUuid = topicUuid,
                                 confirmed = confirmed,
@@ -3946,57 +4012,169 @@ class ChatDialogViewModel(
                             repo.markStreamTopicMessagesReadThrough(
                                 streamUuid = chatId,
                                 topicUuid = topicUuid,
-                                boundaryUuid = currentTarget.uuid,
+                                boundary = confirmed,
                             )
-                            failedReadBoundaryUuid = null
+                            if (durableReadBoundary == requestedBoundary) {
+                                durableReadBoundary = null
+                            }
+                            failedReadBoundary = null
                             _readError.value = null
                         } else {
-                            failedReadBoundaryUuid = currentTarget.uuid
-                            _readError.value =
-                                "Сервер не подтвердил прочтение сообщений"
+                            recordReadFailure(
+                                requestedBoundary,
+                                "Сервер не подтвердил прочтение сообщений",
+                            )
                         }
                     }
 
                     is ApiResult.Error -> {
-                        failedReadBoundaryUuid = currentTarget.uuid
-                        _readError.value = response.error.message
-                            ?.takeIf(String::isNotBlank)
-                            ?.let { "Не удалось отметить сообщения прочитанными: $it" }
-                            ?: "Не удалось отметить сообщения прочитанными"
+                        recordReadFailure(
+                            requestedBoundary,
+                            response.error.message
+                                ?.takeIf(String::isNotBlank)
+                                ?.let {
+                                    "Не удалось отметить сообщения " +
+                                        "прочитанными: $it"
+                                }
+                                ?: "Не удалось отметить сообщения " +
+                                    "прочитанными",
+                        )
                     }
                 }
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (exception: Exception) {
-                failedReadBoundaryUuid = requestedUuid
-                _readError.value =
-                    "Не удалось отметить сообщения прочитанными"
+                recordReadFailure(
+                    requestedBoundary,
+                    "Не удалось отметить сообщения прочитанными",
+                )
             } finally {
+                activeReadBoundary = null
                 readMessagesJob = null
-                if (pendingReadBoundaryUuid != null) {
+                persistConversationStateSafely(
+                    failureMessage =
+                        "Не удалось сохранить состояние отметки прочтения",
+                )
+                if (pendingReadBoundary != null) {
                     startPendingReadRequest()
                 }
             }
         }
     }
 
+    private suspend fun persistReadIntentBeforeMutation(
+        requestedBoundary: PersistedReadBoundary,
+    ): Boolean {
+        val ownerKey = ensureConversationOwnerKey()
+        if (
+            ownerKey == null ||
+            !userViewModel.repo.isActiveCredentialOwner(ownerKey)
+        ) {
+            recordReadFailure(
+                requestedBoundary,
+                "Не удалось определить учётную запись для отметки прочтения",
+            )
+            return false
+        }
+        return try {
+            conversationPersistenceMutex.withLock {
+                persistStateAndSharedOutbox(
+                    ownerKey = ownerKey,
+                    state = currentPersistedConversationState(),
+                )
+            }
+            true
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (exception: Exception) {
+            recordReadFailure(
+                requestedBoundary,
+                "Не удалось безопасно сохранить отметку прочтения",
+            )
+            false
+        }
+    }
+
+    private fun recordReadFailure(
+        requestedBoundary: PersistedReadBoundary,
+        message: String,
+    ) {
+        val loadedBoundary = streamTopicMessages.value[
+            "$chatId.$topicUuid"
+        ].orEmpty().singleOrNull {
+            it.uuid == requestedBoundary.messageUuid
+        }
+        if (loadedBoundary?.read == true || loadedBoundary?.isOwn == true) {
+            if (durableReadBoundary == requestedBoundary) {
+                durableReadBoundary = null
+            }
+            failedReadBoundary = null
+            _readError.value = null
+            return
+        }
+        failedReadBoundary =
+            durableReadBoundary ?: requestedBoundary
+        _readError.value = message
+    }
+
     fun retryReadMessages() {
-        val failedUuid = failedReadBoundaryUuid ?: return
-        failedReadBoundaryUuid = null
+        val failed = failedReadBoundary
+            ?: durableReadBoundary
+            ?: return
+        failedReadBoundary = null
         _readError.value = null
-        val messages = streamTopicMessages.value["$chatId.$topicUuid"]
-            .orEmpty()
-        pendingReadBoundaryUuid = newestMessageUuid(
-            messages = messages,
-            firstUuid = pendingReadBoundaryUuid,
-            secondUuid = failedUuid,
+        pendingReadBoundary = newestReadBoundary(
+            first = pendingReadBoundary,
+            second = failed,
         )
         startPendingReadRequest()
     }
 
     fun clearReadError() {
-        failedReadBoundaryUuid = null
+        failedReadBoundary = null
+        pendingReadBoundary = null
+        durableReadBoundary = activeReadBoundary
         _readError.value = null
+        viewModelScope.launch {
+            persistConversationStateSafely(
+                failureMessage =
+                    "Не удалось очистить сохранённую отметку прочтения",
+            )
+        }
+    }
+
+    private suspend fun clearConfirmedDurableReadIntent(
+        messages: List<MessageResponse>,
+    ) {
+        val retainedBoundary = durableReadBoundary ?: return
+        val boundary = messages.singleOrNull {
+            it.uuid == retainedBoundary.messageUuid
+        }
+            ?: return
+        if (!boundary.read && !boundary.isOwn) return
+        clearConfirmedDurableReadIntent(retainedBoundary.messageUuid)
+    }
+
+    private suspend fun clearConfirmedDurableReadIntent(
+        messageUuid: String,
+    ) {
+        val ownerKey = conversationOwnerKey ?: return
+        if (!userViewModel.repo.isActiveCredentialOwner(ownerKey)) return
+        val retainedBoundary = durableReadBoundary
+            ?.takeIf { it.messageUuid == messageUuid }
+            ?: return
+        if (pendingReadBoundary == retainedBoundary) {
+            pendingReadBoundary = null
+        }
+        if (failedReadBoundary == retainedBoundary) {
+            failedReadBoundary = null
+        }
+        durableReadBoundary = null
+        _readError.value = null
+        persistConversationStateSafely(
+            failureMessage =
+                "Не удалось очистить подтверждённую отметку прочтения",
+        )
     }
 
     fun onMessageReactionTap(messageUuid: String, emoji: String) {
@@ -4198,25 +4376,58 @@ internal fun isConfirmedReadThrough(
     confirmed.uuid == expectedMessageUuid &&
         confirmed.streamUuid == expectedStreamUuid &&
         confirmed.topicUuid == expectedTopicUuid &&
-        confirmed.read
+        confirmed.read &&
+        messagePosition(confirmed) != null
 
-private fun newestMessageUuid(
-    messages: List<MessageResponse>,
-    firstUuid: String?,
-    secondUuid: String,
-): String {
-    val candidates = setOfNotNull(firstUuid, secondUuid)
-    return messages
-        .asSequence()
-        .filter { it.uuid in candidates }
-        .mapNotNull { message ->
-            messagePosition(message)?.let { message.uuid to it }
-        }
-        .maxWithOrNull { left, right ->
-            compareMessagePositions(left.second, right.second)
-        }
-        ?.first
-        ?: secondUuid
+internal fun OwnedMessageProjectionEvent.confirmsReadBoundary(
+    expectedOwnerKey: String,
+    expectedStreamUuid: String,
+    expectedTopicUuid: String,
+    boundary: PersistedReadBoundary,
+): Boolean {
+    if (ownerKey != expectedOwnerKey) return false
+    return when (val projection = event) {
+        is MessageProjectionEvent.Read ->
+            boundary.messageUuid in projection.messageUuids
+
+        is MessageProjectionEvent.Upsert ->
+            projection.message.uuid == boundary.messageUuid &&
+                projection.message.streamUuid == expectedStreamUuid &&
+                projection.message.topicUuid == expectedTopicUuid &&
+                projection.message.read
+
+        is MessageProjectionEvent.Deleted -> false
+    }
+}
+
+internal fun newestReadBoundary(
+    first: PersistedReadBoundary?,
+    second: PersistedReadBoundary,
+): PersistedReadBoundary {
+    val firstPosition = first?.readBoundaryPosition() ?: return second
+    val secondPosition = second.readBoundaryPosition() ?: return first
+    return if (
+        compareMessagePositions(firstPosition, secondPosition) >= 0
+    ) {
+        first
+    } else {
+        second
+    }
+}
+
+private fun MessageResponse.persistedReadBoundary(): PersistedReadBoundary? =
+    messagePosition(this)?.let { position ->
+        PersistedReadBoundary(
+            messageUuid = position.uuid,
+            createdAt = position.createdAt.toString(),
+        )
+    }
+
+private fun PersistedReadBoundary.readBoundaryPosition(): MessagePosition? {
+    val createdAt = runCatching { Instant.parse(createdAt) }.getOrNull()
+        ?: return null
+    val uuid = parseCanonicalMessageUuid(messageUuid) ?: return null
+    return MessagePosition(createdAt = createdAt, uuid = uuid)
 }
 
 private data class MessagePosition(
