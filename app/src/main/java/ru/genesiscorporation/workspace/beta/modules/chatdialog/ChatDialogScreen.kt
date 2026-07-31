@@ -51,10 +51,14 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalAccessibilityManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
@@ -65,8 +69,9 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation.NavHostController
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
 import org.jitsi.meet.sdk.JitsiMeetActivity
 import org.jitsi.meet.sdk.JitsiMeetConferenceOptions
 import ru.genesiscorporation.workspace.beta.R
@@ -101,6 +106,15 @@ fun ChatDialogScreen(
     val isLoading by viewModel.isLoading.collectAsState()
     val loadError by viewModel.loadError.collectAsState()
     val actionError by viewModel.actionError.collectAsState()
+    val actionNotice by viewModel.actionNotice.collectAsState()
+    val accessibilityManager = LocalAccessibilityManager.current
+    val actionNoticeMillis =
+        accessibilityManager?.calculateRecommendedTimeoutMillis(
+            originalTimeoutMillis = ACTION_NOTICE_MILLIS,
+            containsIcons = false,
+            containsText = true,
+            containsControls = true,
+        ) ?: ACTION_NOTICE_MILLIS
     val readError by viewModel.readError.collectAsStateWithLifecycle()
     val focusedMessageUuid by viewModel.focusedMessageUuid.collectAsState()
     val outboxEntries by viewModel.outboxEntries.collectAsStateWithLifecycle()
@@ -138,6 +152,11 @@ fun ChatDialogScreen(
                 Lifecycle.State.RESUMED,
             ),
         )
+    }
+    LaunchedEffect(actionNotice?.eventId, actionNoticeMillis) {
+        val eventId = actionNotice?.eventId ?: return@LaunchedEffect
+        delay(actionNoticeMillis)
+        viewModel.clearActionNoticeIfCurrent(eventId)
     }
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, _ ->
@@ -689,6 +708,33 @@ fun ChatDialogScreen(
                     }
                 }
             }
+            actionNotice?.let { notice ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                        .background(
+                            LocalWorkspaceColorsPalette.current.infoCardBackground,
+                            RoundedCornerShape(8.dp),
+                        )
+                        .padding(start = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = notice.message,
+                        color = LocalWorkspaceColorsPalette.current.messageAccentGreen,
+                        fontSize = 12.sp,
+                        modifier = Modifier
+                            .weight(1f)
+                            .semantics {
+                                liveRegion = LiveRegionMode.Polite
+                            },
+                    )
+                    TextButton(onClick = viewModel::clearActionNotice) {
+                        Text("Закрыть")
+                    }
+                }
+            }
             readError?.let { error ->
                 Column(
                     modifier = Modifier
@@ -930,6 +976,7 @@ private fun MessageHistoryStatus(
 }
 
 private const val HISTORY_LOAD_TRIGGER_INDEX = 2
+private const val ACTION_NOTICE_MILLIS = 4_000L
 private const val HISTORY_ANCHOR_CORRECTION_FRAMES = 2
 
 internal fun shouldPositionConversationAtLatest(

@@ -1,7 +1,5 @@
 package ru.genesiscorporation.workspace.beta.modules.chatuserinfo
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -65,6 +63,7 @@ import ru.genesiscorporation.workspace.beta.modules.chatchannels.messagePreview
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.FullscreenZoomableImage
 import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.UnreadBadge
+import ru.genesiscorporation.workspace.beta.ui.copyPlainWorkspaceText
 import ru.genesiscorporation.workspace.beta.ui.rememberWorkspaceAvatarImageRequest
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import ru.genesiscorporation.workspace.beta.ui.theme.NavigationFontFamily
@@ -866,17 +865,7 @@ internal fun copyPlainProfileText(
     context: Context,
     label: String,
     value: String,
-): Boolean {
-    if (value.isBlank()) return false
-    val clipboard = context.getSystemService(ClipboardManager::class.java)
-        ?: return false
-    return runCatching {
-        clipboard.setPrimaryClip(
-            ClipData.newPlainText(label.take(PROFILE_COPY_LABEL_CHARS), value),
-        )
-    }.isSuccess
-}
+): Boolean = copyPlainWorkspaceText(context, label, value)
 
 private const val PROFILE_COPY_FEEDBACK_MILLIS = 2_000L
-private const val PROFILE_COPY_LABEL_CHARS = 64
 private const val PROFILE_PROVIDER_LABEL_CHARS = 32

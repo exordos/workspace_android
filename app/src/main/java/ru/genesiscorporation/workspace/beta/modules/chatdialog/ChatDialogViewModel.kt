@@ -86,6 +86,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.parseCanonicalMessag
 import ru.genesiscorporation.workspace.beta.data.remote.dto.parseDraftConflictBody
 import ru.genesiscorporation.workspace.beta.data.remote.dto.validateDraftResponse
 import ru.genesiscorporation.workspace.beta.modules.chatchannels.isDirectProviderChat
+import ru.genesiscorporation.workspace.beta.ui.copyPlainWorkspaceText
 import java.time.OffsetDateTime
 import java.time.Instant
 import java.time.format.DateTimeFormatter
@@ -95,6 +96,11 @@ import kotlin.collections.filter
 
 data class CallLaunchEvent(
     val roomName: String,
+)
+
+data class ChatActionNotice(
+    val eventId: Long,
+    val message: String,
 )
 
 data class OpenSourceMessageEvent(
@@ -164,6 +170,9 @@ class ChatDialogViewModel(
     val loadError: StateFlow<String?> = _loadError
     private val _actionError = MutableStateFlow<String?>(null)
     val actionError: StateFlow<String?> = _actionError
+    private val _actionNotice = MutableStateFlow<ChatActionNotice?>(null)
+    val actionNotice: StateFlow<ChatActionNotice?> = _actionNotice
+    private var nextActionNoticeEventId = 0L
     private val _readError = MutableStateFlow<String?>(null)
     val readError: StateFlow<String?> = _readError
     private val _sending = MutableStateFlow(false)
@@ -4285,6 +4294,37 @@ class ChatDialogViewModel(
 
     fun clearActionError() {
         _actionError.value = null
+    }
+
+    fun copyMessageText(
+        context: Context,
+        message: MessageResponse,
+    ) {
+        val copied = copyPlainWorkspaceText(
+            context = context,
+            label = "Workspace message",
+            value = message.payload.content,
+        )
+        if (copied) {
+            _actionError.value = null
+            _actionNotice.value = ChatActionNotice(
+                eventId = ++nextActionNoticeEventId,
+                message = "Текст сообщения скопирован",
+            )
+        } else {
+            _actionNotice.value = null
+            _actionError.value = "Не удалось скопировать текст сообщения"
+        }
+    }
+
+    fun clearActionNotice() {
+        _actionNotice.value = null
+    }
+
+    fun clearActionNoticeIfCurrent(eventId: Long) {
+        if (_actionNotice.value?.eventId == eventId) {
+            _actionNotice.value = null
+        }
     }
 
     fun retryDraftSync() {

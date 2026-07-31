@@ -150,6 +150,10 @@ fun AttachmentMessageView(
                     viewModel.deleteMessage(item)
                     menuExpanded = false
                 },
+                onCopy = {
+                    viewModel.copyMessageText(context, item)
+                    menuExpanded = false
+                },
                 onQuote = {
                     viewModel.onQuoteMessageClicked(item)
                     menuExpanded = false

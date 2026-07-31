@@ -592,6 +592,21 @@ acceptance.
 | MSG-ACT-004 | Offline/timeout/server delete failure | Message remains locally and on the server; actionable error clears without losing the row; explicit online retry may succeed |
 | MSG-ACT-005 | Delete an edit/quote source | Successful deletion clears only matching edit/quote references and restores any suspended ordinary draft |
 | MSG-ACT-006 | External-provider or non-owned message | Edit/delete are hidden until provider capability and preflight data prove the operation is supported |
+| MSG-ACT-007 | Copy text from a text/image/file/call message | The exact source Markdown is written once to Android's plain-text clipboard, marked sensitive on supported Android versions, and a polite visible success/failure result with functional Close appears; blank payloads expose no copy action |
+
+Current MSG-ACT-007 coverage: an exact two-case foreground clipboard
+instrumentation run passed on the Android 14 Pixel, including exact text,
+bounded label, blank rejection and the sensitive-content flag. In the
+dedicated sandbox, long-pressing the rich metadata message exposed the
+functional copy action; pasting into the composer reproduced the exact
+unrendered Markdown (emoji shortcode, display mention, canonical UUID mention
+and inline code), the system clipboard preview hid sensitive content, and the
+visible success card's Close action worked. The temporary composer text and
+clipboard were cleared without sending a message. The final build also
+auto-dismissed the success card after the accessibility-adjusted timeout.
+Its success text passed light/dark contrast checks (5.69:1 and 6.80:1).
+Image/file/call menu
+sampling and an injected missing-clipboard-service failure remain pending.
 
 ### Forwarding
 

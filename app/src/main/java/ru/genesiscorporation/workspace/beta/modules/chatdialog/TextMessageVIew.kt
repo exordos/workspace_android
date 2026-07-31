@@ -31,6 +31,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Color
@@ -57,6 +58,7 @@ fun TextMessageView(
     navController: NavHostController,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
+    val context = LocalContext.current
     val deletingMessages by
         viewModel.deletingMessageUuids.collectAsStateWithLifecycle()
     val colors = LocalWorkspaceColorsPalette.current
@@ -115,6 +117,10 @@ fun TextMessageView(
                 isDeleting = item.uuid in deletingMessages,
                 onDelete = {
                     viewModel.deleteMessage(item)
+                    menuExpanded = false
+                },
+                onCopy = {
+                    viewModel.copyMessageText(context, item)
                     menuExpanded = false
                 },
                 onQuote = {
@@ -258,6 +264,7 @@ internal fun MessageActionsMenu(
     onEdit: () -> Unit,
     isDeleting: Boolean,
     onDelete: () -> Unit,
+    onCopy: () -> Unit,
     onQuote: () -> Unit,
     onForward: () -> Unit,
 ) {
@@ -298,6 +305,13 @@ internal fun MessageActionsMenu(
                     onDismiss()
                     confirmDelete = true
                 },
+                enabled = !isDeleting,
+            )
+        }
+        if (item.payload.content.isNotBlank()) {
+            DropdownMenuItem(
+                text = { Text("Копировать текст") },
+                onClick = onCopy,
                 enabled = !isDeleting,
             )
         }

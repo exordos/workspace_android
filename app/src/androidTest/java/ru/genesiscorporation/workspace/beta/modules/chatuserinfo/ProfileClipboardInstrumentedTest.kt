@@ -1,7 +1,9 @@
 package ru.genesiscorporation.workspace.beta.modules.chatuserinfo
 
+import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.Build
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
@@ -34,6 +36,14 @@ class ProfileClipboardInstrumentedTest {
                     value,
                     clip?.getItemAt(0)?.coerceToText(context)?.toString(),
                 )
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    assertTrue(
+                        clip?.description
+                            ?.extras
+                            ?.getBoolean(ClipDescription.EXTRA_IS_SENSITIVE)
+                            ?: false,
+                    )
+                }
             } finally {
                 clipboard.clearPrimaryClip()
             }
