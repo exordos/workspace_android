@@ -28,6 +28,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -35,6 +38,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
@@ -58,7 +62,11 @@ fun SendMessageView(viewModel: ChatDialogViewModel) {
     val conversationStateReady by
         viewModel.conversationStateReady.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
     val colors = LocalWorkspaceColorsPalette.current
+    var composerMode by rememberSaveable {
+        mutableStateOf(ComposerMode.WRITE)
+    }
     val hasSendableContent = if (viewModel.editingMessage != null) {
         if (replySession.tabs.isEmpty()) {
             messageText.isNotBlank()
@@ -134,6 +142,15 @@ fun SendMessageView(viewModel: ChatDialogViewModel) {
                 onClearAll = viewModel::clearQuotedMessage,
             )
         }
+        ComposerModeTabs(
+            mode = composerMode,
+            onModeChange = { nextMode ->
+                composerMode = nextMode
+                if (nextMode == ComposerMode.PREVIEW) {
+                    focusManager.clearFocus()
+                }
+            },
+        )
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -168,37 +185,52 @@ fun SendMessageView(viewModel: ChatDialogViewModel) {
                         ),
                     )
                 }
-                BasicTextField(
-                    value = messageText,
-                    onValueChange = viewModel::onMessageChange,
-                    enabled = conversationStateReady,
-                    textStyle = TextStyle(
-                        color = colors.textHeaders,
-                        fontSize = 14.sp,
-                        lineHeight = 18.sp,
-                    ),
-                    cursorBrush = SolidColor(colors.primary),
-                    maxLines = 4,
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(horizontal = 8.dp, vertical = 7.dp),
-                    decorationBox = { innerTextField ->
-                        Box(contentAlignment = Alignment.CenterStart) {
-                            if (messageText.isEmpty()) {
-                                Text(
-                                    text = stringResource(
-                                        R.string.message_composer_placeholder,
-                                    ),
-                                    color = colors.textAdditional30,
-                                    fontSize = 14.sp,
-                                )
+                if (composerMode == ComposerMode.WRITE) {
+                    BasicTextField(
+                        value = messageText,
+                        onValueChange = viewModel::onMessageChange,
+                        enabled = conversationStateReady,
+                        textStyle = TextStyle(
+                            color = colors.textHeaders,
+                            fontSize = 14.sp,
+                            lineHeight = 18.sp,
+                        ),
+                        cursorBrush = SolidColor(colors.primary),
+                        maxLines = 4,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 8.dp, vertical = 7.dp),
+                        decorationBox = { innerTextField ->
+                            Box(contentAlignment = Alignment.CenterStart) {
+                                if (messageText.isEmpty()) {
+                                    Text(
+                                        text = stringResource(
+                                            R.string.message_composer_placeholder,
+                                        ),
+                                        color = colors.textAdditional30,
+                                        fontSize = 14.sp,
+                                    )
+                                }
+                                innerTextField()
                             }
-                            innerTextField()
-                        }
-                    },
-                )
+                        },
+                    )
+                } else {
+                    ComposerMarkdownPreview(
+                        markdown = buildComposerPreviewMarkdown(
+                            messageText = messageText,
+                            replySession = replySession,
+                        ),
+                        hasAttachments = attachments.isNotEmpty(),
+                        viewModel = viewModel,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
                 Button(
-                    onClick = { viewModel.onSendClicked(context) },
+                    onClick = {
+                        viewModel.onSendClicked(context)
+                        composerMode = ComposerMode.WRITE
+                    },
                     enabled = canSend,
                     modifier = Modifier.size(44.dp),
                     shape = CircleShape,
@@ -282,7 +314,10 @@ private fun SelectedAttachmentPreview(
         ) {
             Icon(
                 painter = painterResource(R.drawable.ic_close_small),
-                contentDescription = "Удалить ${attachment.fileName}",
+                contentDescription = stringResource(
+                    R.string.message_composer_remove_attachment,
+                    attachment.fileName,
+                ),
                 tint = Color.White,
                 modifier = Modifier
                     .size(28.dp)

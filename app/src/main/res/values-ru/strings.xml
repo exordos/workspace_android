@@ -64,7 +64,13 @@
     </plurals>
     <string name="workspace_reply_clear_all">Очистить все ответы</string>
     <string name="message_composer_editing">Редактирование</string>
+    <string name="message_composer_write">Написать</string>
+    <string name="message_composer_preview">Предпросмотр</string>
+    <string name="message_composer_preview_region">Предпросмотр сообщения</string>
+    <string name="message_composer_preview_empty">Пока нечего показывать</string>
+    <string name="message_composer_preview_attachments_only">Выбранные вложения показаны выше; текста сообщения пока нет</string>
     <string name="message_composer_attach_files">Прикрепить файлы</string>
+    <string name="message_composer_remove_attachment">Удалить %1$s</string>
     <string name="message_composer_placeholder">Сообщение…</string>
     <string name="message_composer_send">Отправить</string>
     <string name="message_composer_save">Сохранить</string>

@@ -63,7 +63,13 @@
     </plurals>
     <string name="workspace_reply_clear_all">Clear all replies</string>
     <string name="message_composer_editing">Editing</string>
+    <string name="message_composer_write">Write</string>
+    <string name="message_composer_preview">Preview</string>
+    <string name="message_composer_preview_region">Message preview</string>
+    <string name="message_composer_preview_empty">Nothing to preview yet</string>
+    <string name="message_composer_preview_attachments_only">Selected attachments are shown above; there is no message text yet</string>
     <string name="message_composer_attach_files">Attach files</string>
+    <string name="message_composer_remove_attachment">Remove %1$s</string>
     <string name="message_composer_placeholder">Message…</string>
     <string name="message_composer_send">Send</string>
     <string name="message_composer_save">Save</string>

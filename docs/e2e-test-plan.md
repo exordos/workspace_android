@@ -573,6 +573,33 @@ acceptance.
   continuation beyond those retained rows and non-conversation projections
   still require persisted cursors/entities.
 
+### Composer preview
+
+The maintained desktop client exposes a real local Workspace Markdown preview.
+Android keeps the same outgoing-body contract and uses the production message
+renderer instead of a second simplified preview grammar. Switching modes is a
+local UI operation: it must never create, update or delete a server resource.
+
+| ID | Scenario | Main assertions |
+| --- | --- | --- |
+| MSG-COMP-001 | Switch Write → Preview → Write | The exact draft stays unchanged, the keyboard/focus leaves the hidden editor, and returning to Write restores an editable field without a network mutation |
+| MSG-COMP-002 | Preview rich Markdown | The production renderer shows the same bounded body syntax used by sent messages, including lists, quotes, code, spoilers, Unicode emoji and canonical mention/reference behavior |
+| MSG-COMP-003 | Preview one or several replies | Preview receives the full canonical outgoing body, not only the active answer; every `[author](urn:quote:<uuid>)` section appears in visible tab order |
+| MSG-COMP-004 | Empty or attachments-only draft | Empty preview has a localized honest state; selected image/document cards remain visible and removable above the preview, with no fake uploaded attachment URN |
+| MSG-COMP-005 | Rotation, background or theme change | Selected mode and exact draft survive Activity recreation; the renderer rebuilds with readable light/dark tokens and no light-on-light text |
+| MSG-COMP-006 | Send or save from Preview | The existing send/edit handler receives the unchanged outgoing snapshot once and the UI returns to Write; rejected/ambiguous delivery follows the durable outbox contract |
+| MSG-COMP-007 | TalkBack and touch | Write/Preview expose selected tab semantics and 48 dp targets; the preview is a localized polite live region while rendered links and references retain their real actions |
+| MSG-COMP-008 | Process death and account/conversation switch | The encrypted draft/reply state restores under its exact owner and slot; the presentation-only mode may restore only with the same saved Activity or defaults to Write on a fresh cold launch, and cannot leak into another conversation |
+
+Current automated coverage proves exact plain and ordered multi-reply outgoing
+Markdown plus locale-independent mode/selected/preview-region Compose
+semantics. Physical Android 14 acceptance in the dedicated sandbox rendered
+bold Markdown and a Unicode emoji, retained the unsent draft and Preview mode
+through portrait → landscape → portrait, showed the localized empty state,
+and passed visual inspection in light and dark themes. Send was deliberately
+not invoked, no server message was created, and the draft was cleared before
+leaving the sandbox.
+
 ### Message actions
 
 - Edit own message, edit a reply, cancel edit, conflict with remote edit.
