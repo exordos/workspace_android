@@ -211,9 +211,19 @@ class ProfileViewModel(
     }
 
     fun logout() {
+        val ownerKey = activeAccountId.value ?: run {
+            _actionError.value = "Не удалось определить текущий аккаунт"
+            return
+        }
         runAccountOperation {
-            pushDeviceRegistrationManager.deleteRegistration()
-            userViewModel.removeActiveAccountAndWait()
+            if (!pushDeviceRegistrationManager.deleteRegistration(ownerKey)) {
+                if (activeAccountId.value == ownerKey) {
+                    _actionError.value =
+                        "Не удалось отключить уведомления. Проверьте сеть и повторите выход."
+                }
+                return@runAccountOperation
+            }
+            userViewModel.removeActiveAccountIfOwnerAndWait(ownerKey)
         }
     }
 

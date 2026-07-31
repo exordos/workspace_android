@@ -11,6 +11,8 @@ import android.util.Log
 import androidx.annotation.RawRes
 import kotlinx.coroutines.flow.first
 import ru.genesiscorporation.workspace.beta.R
+import ru.genesiscorporation.workspace.beta.data.navigation.canonicalWorkspaceBaseUrl
+import ru.genesiscorporation.workspace.beta.data.navigation.canonicalWorkspaceRealmUrl
 
 internal data class WorkspaceNotificationChannelSpec(
     val id: String,
@@ -66,6 +68,23 @@ internal suspend fun resolveWorkspaceNotificationSound(
     return preferencesForAccount(accountId).notificationSound
 }
 
+internal suspend fun resolveWorkspaceNotificationSoundForRealm(
+    realmUrl: String,
+    accounts: suspend () -> List<WorkspaceAccount>,
+    preferencesForAccount: suspend (String) -> WorkspaceUiPreferences,
+): WorkspaceNotificationSound {
+    val canonicalRealmUrl =
+        canonicalWorkspaceRealmUrl(realmUrl)
+            ?: return WorkspaceNotificationSound.DEFAULT
+    val matchingAccount = accounts()
+        .filter { account ->
+            canonicalWorkspaceBaseUrl(account.baseUrl) == canonicalRealmUrl
+        }
+        .singleOrNull()
+        ?: return WorkspaceNotificationSound.DEFAULT
+    return preferencesForAccount(matchingAccount.accountId).notificationSound
+}
+
 suspend fun resolveActiveWorkspaceNotificationSound(
     context: Context,
 ): WorkspaceNotificationSound {
@@ -76,6 +95,22 @@ suspend fun resolveActiveWorkspaceNotificationSound(
         activeAccountId = {
             accountRepository.activeAccountIdFlow.first()
         },
+        preferencesForAccount = { accountId ->
+            preferencesRepository.preferencesFlow(accountId).first()
+        },
+    )
+}
+
+suspend fun resolveWorkspaceNotificationSoundForRealm(
+    context: Context,
+    realmUrl: String,
+): WorkspaceNotificationSound {
+    val appContext = context.applicationContext
+    val accountRepository = ApiKeyRepository(appContext)
+    val preferencesRepository = WorkspaceUiPreferencesRepository(appContext)
+    return resolveWorkspaceNotificationSoundForRealm(
+        realmUrl = realmUrl,
+        accounts = { accountRepository.accountsFlow.first() },
         preferencesForAccount = { accountId ->
             preferencesRepository.preferencesFlow(accountId).first()
         },

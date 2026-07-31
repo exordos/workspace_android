@@ -205,7 +205,7 @@ Compose semantics traversal on every supported role and account.
 | ID | Interaction | Handler and effect | Failure/recovery | Acceptance |
 | --- | --- | --- | --- | --- |
 | PLAT-A01 | Notification permission prompt | Android permission launcher; denial dialog can open the app notification settings or be dismissed | Denial keeps app usable and both follow-up actions are functional | Push suite |
-| PLAT-A02 | Push notification tap | Unique immutable intent opens exact deep-link route | Invalid/stale targets fail closed | Push/deep-link suite |
+| PLAT-A02 | Push notification tap | Realm-scoped immutable intent activates the unique matching saved account and opens the exact provider/message route; same-realm ambiguity exposes a real account chooser | Missing/unsafe realm, invalid/stale targets and an unavailable selected account fail closed; connect/dismiss/each account row are functional and pending identifiers survive recreation | PUSH-009–013 |
 | PLAT-A03 | Incoming-call decline | Clears exact call surface | No external failure | Calls suite |
 | PLAT-A04 | Incoming-call accept | Validates same-host HTTPS room, clears surface, launches Jitsi | Invalid calls are dismissed before rendering | Calls suite |
 | PLAT-A05 | HTTPS Workspace stream/topic/message link | Parses the desktop route, selects the exact saved server/project, waits for catalog readiness, and opens/focuses the target | Unsafe routes fail closed; unavailable targets produce an inline recoverable error | NAV-001/003/006 + physical Pixel |

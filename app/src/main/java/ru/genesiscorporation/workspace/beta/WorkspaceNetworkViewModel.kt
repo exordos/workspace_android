@@ -73,6 +73,7 @@ class WorkspaceNetworkViewModel(
         tokenProvider = FirebasePushRegistrationTokenProvider(),
         identityProvider = TinkPushDeviceIdentityStore(appContext),
         remoteDataSource = WorkspacePushDeviceRemoteDataSource(apiClient),
+        isOwnerActive = userViewModel.repo::isActiveCredentialOwner,
     )
 
     init {

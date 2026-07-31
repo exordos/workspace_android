@@ -14,7 +14,7 @@ data class WorkspaceDeepLink(
         account.projectId.equals(projectId, ignoreCase = true) &&
             (
                 baseUrl == null ||
-                    canonicalBaseUrl(account.baseUrl) == baseUrl
+                    canonicalWorkspaceBaseUrl(account.baseUrl) == baseUrl
             )
 }
 
@@ -43,7 +43,7 @@ fun parseWorkspaceDeepLink(value: String?): WorkspaceDeepLink? {
     }
     val baseUrl: String? = when {
         uri.scheme.equals("https", ignoreCase = true) ->
-            canonicalBaseUrl(uri) ?: return null
+            canonicalWorkspaceBaseUrl(uri) ?: return null
 
         uri.scheme.equals(CUSTOM_SCHEME, ignoreCase = true) ->
             if (
@@ -107,12 +107,27 @@ fun parseWorkspaceDeepLink(value: String?): WorkspaceDeepLink? {
     )
 }
 
-private fun canonicalBaseUrl(value: String): String? =
+fun canonicalWorkspaceBaseUrl(value: String): String? =
     runCatching { URI(value) }
         .getOrNull()
-        ?.let(::canonicalBaseUrl)
+        ?.let(::canonicalWorkspaceBaseUrl)
 
-private fun canonicalBaseUrl(uri: URI): String? {
+fun canonicalWorkspaceRealmUrl(value: String): String? {
+    val uri = runCatching { URI(value) }.getOrNull() ?: return null
+    if (
+        uri.rawQuery != null ||
+        uri.rawFragment != null ||
+        (
+            !uri.rawPath.isNullOrEmpty() &&
+                uri.rawPath != "/"
+        )
+    ) {
+        return null
+    }
+    return canonicalWorkspaceBaseUrl(uri)
+}
+
+private fun canonicalWorkspaceBaseUrl(uri: URI): String? {
     if (
         !uri.scheme.equals("https", ignoreCase = true) ||
         uri.host.isNullOrBlank() ||

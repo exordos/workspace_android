@@ -9,6 +9,7 @@ import com.google.crypto.tink.hybrid.HybridConfig
 import com.google.crypto.tink.integration.android.AndroidKeysetManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import ru.genesiscorporation.workspace.beta.data.workspaceStorageKey
 import java.security.GeneralSecurityException
 import java.util.UUID
 import kotlin.io.encoding.Base64
@@ -21,39 +22,68 @@ data class PushDeviceIdentity(
 )
 
 interface PushDeviceIdentityProvider {
-    suspend fun getOrCreateIdentity(): PushDeviceIdentity
-    suspend fun getOrCreateRegistrationUuid(): String
+    suspend fun getOrCreateIdentity(ownerKey: String): PushDeviceIdentity
+    suspend fun getOrCreateRegistrationUuid(ownerKey: String): String
+    suspend fun legacyRegistrationUuid(): String?
 }
 
 class TinkPushDeviceIdentityStore(
     context: Context,
+    storageNamespace: String = "",
 ) : PushDeviceIdentityProvider {
+    init {
+        require(STORAGE_NAMESPACE_PATTERN.matches(storageNamespace)) {
+            "Invalid push identity storage namespace"
+        }
+    }
+
     private val appContext = context.applicationContext
+    private val preferencesFile = "$PREFERENCES_FILE$storageNamespace"
+    private val keysetName = "$KEYSET_NAME$storageNamespace"
+    private val masterKeyAlias = "$MASTER_KEY_ALIAS$storageNamespace"
     private val preferences = appContext.getSharedPreferences(
-        PREFERENCES_FILE,
+        preferencesFile,
         Context.MODE_PRIVATE,
     )
     private val lock = Any()
 
-    override suspend fun getOrCreateIdentity(): PushDeviceIdentity =
+    override suspend fun getOrCreateIdentity(ownerKey: String): PushDeviceIdentity =
         withContext(Dispatchers.IO) {
+            require(ownerKey.isNotBlank()) {
+                "Push registration owner must not be blank"
+            }
             synchronized(lock) {
-                loadOrCreateIdentity()
+                loadOrCreateIdentity(ownerKey)
             }
         }
 
-    override suspend fun getOrCreateRegistrationUuid(): String =
+    override suspend fun getOrCreateRegistrationUuid(ownerKey: String): String =
+        withContext(Dispatchers.IO) {
+            require(ownerKey.isNotBlank()) {
+                "Push registration owner must not be blank"
+            }
+            synchronized(lock) {
+                getOrCreateUuid(registrationUuidKey(ownerKey))
+            }
+        }
+
+    override suspend fun legacyRegistrationUuid(): String? =
         withContext(Dispatchers.IO) {
             synchronized(lock) {
-                getOrCreateUuid(REGISTRATION_UUID)
+                preferences.getString(LEGACY_REGISTRATION_UUID, null)
+                    ?.let { stored ->
+                        runCatching { UUID.fromString(stored) }
+                            .getOrNull()
+                            ?.toString()
+                    }
             }
         }
 
     @OptIn(ExperimentalEncodingApi::class)
     @AccessesPartialKey
-    private fun loadOrCreateIdentity(): PushDeviceIdentity {
+    private fun loadOrCreateIdentity(ownerKey: String): PushDeviceIdentity {
         HybridConfig.register()
-        val keysetAlreadyExists = preferences.contains(KEYSET_NAME)
+        val keysetAlreadyExists = preferences.contains(keysetName)
         val parameters = HpkeParameters.builder()
             .setVariant(HpkeParameters.Variant.NO_PREFIX)
             .setKemId(HpkeParameters.KemId.DHKEM_X25519_HKDF_SHA256)
@@ -61,14 +91,14 @@ class TinkPushDeviceIdentityStore(
             .setAeadId(HpkeParameters.AeadId.AES_256_GCM)
             .build()
         val manager = AndroidKeysetManager.Builder()
-            .withSharedPref(appContext, KEYSET_NAME, PREFERENCES_FILE)
+            .withSharedPref(appContext, keysetName, preferencesFile)
             .withKeyTemplate(KeyTemplate.createFrom(parameters))
-            .withMasterKeyUri("$ANDROID_KEYSTORE_URI_PREFIX$MASTER_KEY_ALIAS")
+            .withMasterKeyUri("$ANDROID_KEYSTORE_URI_PREFIX$masterKeyAlias")
             .build()
 
         if (!manager.isUsingKeystore) {
             preferences.edit()
-                .remove(KEYSET_NAME)
+                .remove(keysetName)
                 .remove(KEY_UUID)
                 .commit()
             throw GeneralSecurityException(
@@ -104,11 +134,14 @@ class TinkPushDeviceIdentityStore(
             }
         }
         return PushDeviceIdentity(
-            registrationUuid = getOrCreateUuid(REGISTRATION_UUID),
+            registrationUuid = getOrCreateUuid(registrationUuidKey(ownerKey)),
             keyUuid = keyUuid,
             publicKey = Base64.UrlSafe.encode(publicKeyBytes).trimEnd('='),
         )
     }
+
+    private fun registrationUuidKey(ownerKey: String): String =
+        "$REGISTRATION_UUID_PREFIX${workspaceStorageKey(ownerKey)}"
 
     private fun getOrCreateUuid(key: String): String {
         preferences.getString(key, null)?.let { stored ->
@@ -124,10 +157,12 @@ class TinkPushDeviceIdentityStore(
     companion object {
         const val PREFERENCES_FILE = "workspace_push_device"
         private const val KEYSET_NAME = "hpke_keyset"
-        private const val REGISTRATION_UUID = "registration_uuid"
+        private const val LEGACY_REGISTRATION_UUID = "registration_uuid"
+        private const val REGISTRATION_UUID_PREFIX = "registration_uuid_"
         private const val KEY_UUID = "key_uuid"
         private const val MASTER_KEY_ALIAS = "workspace_push_hpke_master_key"
         private const val ANDROID_KEYSTORE_URI_PREFIX = "android-keystore://"
         private const val X25519_PUBLIC_KEY_BYTES = 32
+        private val STORAGE_NAMESPACE_PATTERN = Regex("""(?:|_[a-z0-9_]{1,48})""")
     }
 }

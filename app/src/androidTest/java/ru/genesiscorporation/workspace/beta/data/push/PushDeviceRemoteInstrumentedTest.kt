@@ -54,14 +54,20 @@ class PushDeviceRemoteInstrumentedTest {
                 override suspend fun currentToken() =
                     "android-instrumented-${UUID.randomUUID()}"
             },
-            identityProvider = TinkPushDeviceIdentityStore(context),
+            identityProvider = TinkPushDeviceIdentityStore(
+                context,
+                "_remote_instrumented_test",
+            ),
             remoteDataSource = WorkspacePushDeviceRemoteDataSource(apiClient),
+            isOwnerActive = repository::isActiveCredentialOwner,
         )
+        val ownerKey = checkNotNull(repository.activeCredentialSnapshot().ownerKey)
 
         try {
-            assertTrue(manager.registerCurrentTokenWithRetry())
+            assertTrue(manager.registerCurrentTokenWithRetry(ownerKey))
         } finally {
-            assertTrue(manager.deleteRegistration())
+            assertTrue(manager.deleteRegistration(ownerKey))
+            assertTrue(manager.deleteRegistration(ownerKey))
             httpClient.close()
         }
     }

@@ -710,18 +710,31 @@ and final server state.
 
 ## Push and notification scenarios
 
-- Android 13+ permission accepted, denied, denied permanently, and granted later.
-- After denial, both `Open notification settings` and `Not now` remain
-  functional and do not block messenger navigation.
-- Token unavailable, token rotates, registration PUT repeats, logout DELETE
-  repeats, and reinstall creates a new encrypted identity.
-- Foreground, background, force-stopped, and device-reboot delivery.
-- Notification modes: all, mentions only, muted.
-- Notification grouping by account/conversation and correct badge totals.
-- Tap, dismiss, reply/action if supported, stale/deleted target, and logged-out
-  target.
-- Encrypted payload success and invalid key/ciphertext/version.
-- No message content appears on lock screen when privacy settings forbid it.
+| ID | Scenario | Expected result | Current coverage |
+| --- | --- | --- | --- |
+| PUSH-001 | Android 13+ permission accepted, denied, denied permanently, then granted in Settings | Messenger stays usable; Open settings and Not now are real actions; delivery starts only after grant | UI/source covered; physical permission reset matrix pending |
+| PUSH-002 | First login and repeated app start for account A | One stable A registration UUID and one Keystore-wrapped HPKE public identity are PUT with the exact backend algorithm; repeats replace instead of duplicate | Unit contract + exact identity instrumentation + authenticated physical remote PUT/delete passed |
+| PUSH-003 | Save/switch to account B | B receives a distinct stable registration UUID; A remains registered; neither owner can update/delete the other's UUID | Unit owner/UUID fence; two-account backend/FCM delivery pending |
+| PUSH-004 | Account changes while token/key preparation or PUT is in flight | Old-owner work is cancelled/fenced before a remote mutation; the new owner alone can finish | Unit verifier/source; delayed backend injection pending |
+| PUSH-005 | FCM token rotates while A or B is active | Only the exact active credential owner is updated; selecting another retained account immediately refreshes that account with the current token; no stale-owner retry lands | Unit/source; real FCM rotation and inactive-account delivery window pending |
+| PUSH-006 | Upgrade from the former installation-global registration UUID | Each active owner attempts an idempotent owned DELETE for the legacy UUID before using its new scoped UUID; a different owner cannot delete it | Unit legacy cleanup; upgrade-on-device/backend pending |
+| PUSH-007 | Logout succeeds online | Exact owner's registration DELETE succeeds before local account/cache removal; missing registration is idempotent success; sibling registrations and data remain | Unit/source + physical idempotent double-DELETE passed; two-account logout pending |
+| PUSH-008 | Logout DELETE times out/fails | Account and credentials remain, error is readable, controls unlock, Retry repeats the same owner UUID; no orphaned push target is silently accepted | Source; injected network/5xx pending |
+| PUSH-009 | Push for a uniquely saved inactive realm | Notification uses that owner's sound, a realm-scoped ID/group and private public version; tap switches to the unique account before resolving the provider target | Unit routing/sound/source; real inactive-account FCM pending |
+| PUSH-010 | Two saved accounts share the same realm URL | Tap presents a functional account chooser; no provider ID is resolved until the user explicitly selects a matching account | Pure selector unit + UI source; physical chooser pending |
+| PUSH-011 | Missing, HTTP, credential-bearing or malformed `realm_url`, invalid kind/IDs/topic | Payload fails closed without notification or navigation; no active account is guessed | Parser unit |
+| PUSH-012 | Same message ID from two realms, multiple messages in one conversation, remove event | Realm-scoped IDs do not overwrite cross-realm rows; conversation group keys are stable; remove cancels only the realm/message pair | Unit/source; system tray inspection pending |
+| PUSH-013 | Rotate/recreate while an unopened notification target or account chooser is pending | Content-free realm/chat/message identifiers restore once; no duplicate route or destructive action is replayed | Saved-state source; physical rotation/process death pending |
+| PUSH-014 | Foreground, background, force-stopped and rebooted delivery under Default/Subtle/Digital/Glass/Pulse/None | Exactly one notification uses the resolved owner's channel; None remains silent; tap remains exact | Channels tested separately; real FCM matrix pending |
+| PUSH-015 | Lock screen is public/private and message contains long or styled text | Public version says only Workspace/New message; private body is bounded; notification extras contain no author/message content | Source; physical lock-screen inspection pending |
+| PUSH-016 | Encrypted payload valid, wrong key, corrupt ciphertext, replay or unsupported version | Valid envelope decrypts only with its registered key; every invalid envelope fails closed without plaintext fallback | BLOCKED: backend/desktop explicitly do not yet define/consume the delivery envelope; do not invent a mobile-only contract |
+
+Current physical-device gate: the ignored local `google-services.json` is a
+non-production build stub and cannot obtain an FCM token. Real delivery,
+rotation, process-state, reboot, channel and lock-screen acceptance therefore
+remain `BLOCKED`, not passed. Resume them only with a valid brand-matched
+Firebase configuration supplied through the team's secret build channel; never
+commit that file or its credentials.
 
 ## Calls
 

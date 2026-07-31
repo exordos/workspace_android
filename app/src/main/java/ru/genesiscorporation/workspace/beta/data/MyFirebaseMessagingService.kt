@@ -16,6 +16,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import ru.genesiscorporation.workspace.beta.MainActivity
 import ru.genesiscorporation.workspace.beta.R
+import ru.genesiscorporation.workspace.beta.data.navigation.canonicalWorkspaceRealmUrl
 import ru.genesiscorporation.workspace.beta.data.push.PushNavigationRequest
 import ru.genesiscorporation.workspace.beta.data.push.PushTokenUpdates
 
@@ -23,10 +24,20 @@ class MyFirebaseMessagingService: FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
         when (message.data["kind"]) {
             "remove_notification_message" -> {
+                val realmUrl = message.data["realm_url"]
+                    ?.let(::canonicalWorkspaceRealmUrl)
+                    ?: return
                 message.data["message_ids"]
                     ?.split(',')
                     ?.mapNotNull { it.trim().toIntOrNull()?.takeIf { id -> id > 0 } }
-                    ?.forEach(::cancelNotification)
+                    ?.forEach { workspaceMessageId ->
+                        cancelNotification(
+                            PushNavigationRequest.notificationId(
+                                realmUrl,
+                                workspaceMessageId,
+                            ),
+                        )
+                    }
             }
 
             "private_chat_message",
@@ -51,11 +62,13 @@ class MyFirebaseMessagingService: FirebaseMessagingService() {
                 }
                 val body = if (isStream) "$senderName: $content" else content
                 showNotification(
-                    notificationId = navigationRequest.workspaceMessageId,
+                    notificationId = navigationRequest.notificationId(),
                     title = title.take(MAX_NOTIFICATION_TITLE_LENGTH),
                     body = body.take(MAX_NOTIFICATION_BODY_LENGTH),
                     navigationRequest = navigationRequest,
-                    sound = currentNotificationSound(),
+                    sound = notificationSoundForRealm(
+                        navigationRequest.realmUrl,
+                    ),
                 )
             }
 
@@ -72,6 +85,10 @@ class MyFirebaseMessagingService: FirebaseMessagingService() {
     ) {
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(
+                PushNavigationRequest.EXTRA_REALM_URL,
+                navigationRequest.realmUrl,
+            )
             putExtra(
                 PushNavigationRequest.EXTRA_PROVIDER_CHAT_KEY,
                 navigationRequest.providerChatKey,
@@ -124,6 +141,7 @@ class MyFirebaseMessagingService: FirebaseMessagingService() {
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setPublicVersion(publicNotification)
+            .setGroup(navigationRequest.notificationGroupKey())
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .build()
         if (
@@ -138,15 +156,20 @@ class MyFirebaseMessagingService: FirebaseMessagingService() {
         notificationManager.notify(notificationId, notification)
     }
 
-    private fun currentNotificationSound(): WorkspaceNotificationSound =
+    private fun notificationSoundForRealm(
+        realmUrl: String,
+    ): WorkspaceNotificationSound =
         runCatching {
             runBlocking(Dispatchers.IO) {
-                resolveActiveWorkspaceNotificationSound(applicationContext)
+                resolveWorkspaceNotificationSoundForRealm(
+                    applicationContext,
+                    realmUrl,
+                )
             }
         }.onFailure { exception ->
             Log.w(
                 TAG,
-                "Could not read the active notification sound; using the default",
+                "Could not read the notification owner sound; using the default",
                 exception,
             )
         }.getOrDefault(WorkspaceNotificationSound.DEFAULT)

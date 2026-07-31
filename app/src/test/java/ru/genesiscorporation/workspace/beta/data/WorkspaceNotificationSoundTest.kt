@@ -56,4 +56,60 @@ class WorkspaceNotificationSoundTest {
             )
             assertEquals("account-b", requestedOwner)
         }
+
+    @Test
+    fun `push sound is scoped by realm and ambiguous realms use default`() =
+        runBlocking {
+            val first = account("account-a", "https://one.example")
+            val second = account("account-b", "https://two.example/")
+            val preferences = mapOf(
+                first.accountId to WorkspaceNotificationSound.GLASS,
+                second.accountId to WorkspaceNotificationSound.PULSE,
+            )
+            val resolve: suspend (
+                String,
+                List<WorkspaceAccount>,
+            ) -> WorkspaceNotificationSound = { realm, accounts ->
+                resolveWorkspaceNotificationSoundForRealm(
+                    realmUrl = realm,
+                    accounts = { accounts },
+                    preferencesForAccount = { owner ->
+                        WorkspaceUiPreferences(
+                            notificationSound = checkNotNull(preferences[owner]),
+                        )
+                    },
+                )
+            }
+
+            assertEquals(
+                WorkspaceNotificationSound.PULSE,
+                resolve("https://TWO.example", listOf(first, second)),
+            )
+            assertEquals(
+                WorkspaceNotificationSound.DEFAULT,
+                resolve("https://missing.example", listOf(first, second)),
+            )
+            assertEquals(
+                WorkspaceNotificationSound.DEFAULT,
+                resolve(
+                    "https://one.example",
+                    listOf(
+                        first,
+                        first.copy(accountId = "account-a-2"),
+                    ),
+                ),
+            )
+        }
+
+    private fun account(
+        accountId: String,
+        baseUrl: String,
+    ) = WorkspaceAccount(
+        accountId = accountId,
+        baseUrl = baseUrl,
+        projectId = "$accountId-project",
+        projectName = accountId,
+        userId = "$accountId-user",
+        login = accountId,
+    )
 }

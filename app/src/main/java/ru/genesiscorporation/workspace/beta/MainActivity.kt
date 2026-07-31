@@ -133,6 +133,7 @@ import ru.genesiscorporation.workspace.beta.data.EventsRepository
 import ru.genesiscorporation.workspace.beta.data.ConversationStateStore
 import ru.genesiscorporation.workspace.beta.data.push.PushDeviceRegistrationManager
 import ru.genesiscorporation.workspace.beta.data.push.PushNavigationRequest
+import ru.genesiscorporation.workspace.beta.data.push.resolvePushAccountTarget
 import ru.genesiscorporation.workspace.beta.ui.IncomingCall
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
@@ -171,9 +172,17 @@ class MainActivity : ComponentActivity() {
             pendingIncomingShare = incomingShare
             pendingPushNavigation = null
             pendingDeepLink = null
-        } else if (savedInstanceState == null) {
-            pendingPushNavigation = intent.pushNavigationRequest()
-            pendingDeepLink = intent.workspaceDeepLink()
+        } else {
+            pendingPushNavigation =
+                savedInstanceState?.pushNavigationRequest()
+                    ?: if (savedInstanceState == null) {
+                        intent.pushNavigationRequest()
+                    } else {
+                        null
+                    }
+            if (savedInstanceState == null) {
+                pendingDeepLink = intent.workspaceDeepLink()
+            }
         }
         enableEdgeToEdge()
         setContent {
@@ -232,21 +241,55 @@ class MainActivity : ComponentActivity() {
         pendingIncomingShare?.requestId?.let { requestId ->
             outState.putString(SAVED_INCOMING_SHARE_REQUEST_ID, requestId)
         }
+        pendingPushNavigation?.let { request ->
+            outState.putString(SAVED_PUSH_REALM_URL, request.realmUrl)
+            outState.putString(
+                SAVED_PUSH_PROVIDER_CHAT_KEY,
+                request.providerChatKey,
+            )
+            request.topicName?.let { topicName ->
+                outState.putString(SAVED_PUSH_TOPIC_NAME, topicName)
+            }
+            outState.putInt(
+                SAVED_PUSH_WORKSPACE_MESSAGE_ID,
+                request.workspaceMessageId,
+            )
+        }
         super.onSaveInstanceState(outState)
     }
 }
 
 private const val SAVED_INCOMING_SHARE_REQUEST_ID =
     "workspace.saved_incoming_share_request_id"
+private const val SAVED_PUSH_REALM_URL =
+    "workspace.saved_push_realm_url"
+private const val SAVED_PUSH_PROVIDER_CHAT_KEY =
+    "workspace.saved_push_provider_chat_key"
+private const val SAVED_PUSH_TOPIC_NAME =
+    "workspace.saved_push_topic_name"
+private const val SAVED_PUSH_WORKSPACE_MESSAGE_ID =
+    "workspace.saved_push_workspace_message_id"
 
 private fun Intent.pushNavigationRequest(): PushNavigationRequest? =
     PushNavigationRequest.fromIntentFields(
+        realmUrl = getStringExtra(PushNavigationRequest.EXTRA_REALM_URL),
         providerChatKey = getStringExtra(
             PushNavigationRequest.EXTRA_PROVIDER_CHAT_KEY,
         ),
         topicName = getStringExtra(PushNavigationRequest.EXTRA_TOPIC_NAME),
         workspaceMessageId = getIntExtra(
             PushNavigationRequest.EXTRA_WORKSPACE_MESSAGE_ID,
+            -1,
+        ),
+    )
+
+private fun Bundle.pushNavigationRequest(): PushNavigationRequest? =
+    PushNavigationRequest.fromIntentFields(
+        realmUrl = getString(SAVED_PUSH_REALM_URL),
+        providerChatKey = getString(SAVED_PUSH_PROVIDER_CHAT_KEY),
+        topicName = getString(SAVED_PUSH_TOPIC_NAME),
+        workspaceMessageId = getInt(
+            SAVED_PUSH_WORKSPACE_MESSAGE_ID,
             -1,
         ),
     )
@@ -332,6 +375,7 @@ fun ApplicationSwitcher(
     val isAccessTokenLoaded by user.isAccessTokenLoaded.collectAsState()
     val initializationError by user.initializationError.collectAsState()
     val deepLink = pendingDeepLink
+    val pushRequest = pendingPushNavigation
     val uiPreferencesReady =
         accessToken == null ||
             (activeAccountId != null && uiPreferencesOwnerKey == activeAccountId)
@@ -344,23 +388,61 @@ fun ApplicationSwitcher(
         )
     }
     val workspaceViewModel: WorkspaceViewModel = viewModel(factory = workspaceViewModelFactory)
-    val matchingAccounts = deepLink
+    val deepLinkMatchingAccounts = deepLink
         ?.let { link -> accounts.filter(link::matches) }
         .orEmpty()
-    val automaticTarget = matchingAccounts.singleOrNull()
-    var automaticSwitchFailed by remember(deepLink) {
+    val automaticDeepLinkTarget = deepLinkMatchingAccounts.singleOrNull()
+    var automaticDeepLinkSwitchFailed by remember(deepLink) {
         mutableStateOf(false)
     }
     val isSwitchingForDeepLink =
         deepLink != null &&
-            automaticTarget != null &&
-            !automaticSwitchFailed &&
-            activeAccountId != automaticTarget.accountId
+            automaticDeepLinkTarget != null &&
+            !automaticDeepLinkSwitchFailed &&
+            activeAccountId != automaticDeepLinkTarget.accountId
 
-    LaunchedEffect(deepLink, automaticTarget?.accountId, activeAccountId) {
+    LaunchedEffect(
+        deepLink,
+        automaticDeepLinkTarget?.accountId,
+        activeAccountId,
+    ) {
         if (isSwitchingForDeepLink) {
-            automaticSwitchFailed =
-                !user.switchAccountAndWait(automaticTarget.accountId)
+            automaticDeepLinkSwitchFailed =
+                !user.switchAccountAndWait(automaticDeepLinkTarget.accountId)
+        }
+    }
+    val pushMatchingAccounts = pushRequest
+        ?.let { request -> accounts.filter(request::matches) }
+        .orEmpty()
+    var selectedPushAccountId by remember(pushRequest) {
+        mutableStateOf<String?>(null)
+    }
+    var automaticPushSwitchFailed by remember(pushRequest) {
+        mutableStateOf(false)
+    }
+    val pushTarget = pushRequest?.let { request ->
+        resolvePushAccountTarget(
+            request = request,
+            accounts = accounts,
+            selectedAccountId = selectedPushAccountId,
+        )
+    }
+    val isSwitchingForPush =
+        pushRequest != null &&
+            pushTarget != null &&
+            !automaticPushSwitchFailed &&
+            activeAccountId != pushTarget.accountId
+    val pushReady =
+        pushRequest == null ||
+            (
+                pushTarget != null &&
+                    activeAccountId == pushTarget.accountId
+            )
+
+    LaunchedEffect(pushRequest, pushTarget?.accountId, activeAccountId) {
+        if (isSwitchingForPush) {
+            automaticPushSwitchFailed =
+                !user.switchAccountAndWait(pushTarget.accountId)
         }
     }
     if (!isAccessTokenLoaded) {
@@ -398,7 +480,7 @@ fun ApplicationSwitcher(
         } else {
             DeepLinkAccountScreen(
                 deepLink = deepLink,
-                matchingAccounts = matchingAccounts,
+                matchingAccounts = deepLinkMatchingAccounts,
                 onAccountSelected = user::switchAccountAndWait,
                 onConnectAccount = {
                     user.beginAddAccountAndWait()
@@ -407,6 +489,28 @@ fun ApplicationSwitcher(
                     }
                 },
                 onOpenCurrentAccount = onDeepLinkHandled,
+            )
+        }
+    } else if (pushRequest != null && !pushReady) {
+        if (isSwitchingForPush) {
+            FullScreenProgress()
+        } else {
+            PushAccountScreen(
+                pushRequest = pushRequest,
+                matchingAccounts = pushMatchingAccounts,
+                onAccountSelected = { accountId ->
+                    val switched = user.switchAccountAndWait(accountId)
+                    if (switched) {
+                        selectedPushAccountId = accountId
+                        automaticPushSwitchFailed = false
+                    }
+                    switched
+                },
+                onConnectAccount = {
+                    user.beginAddAccountAndWait()
+                    user.addBaseUrlAndWait(pushRequest.realmUrl)
+                },
+                onDismissNotification = onPushNavigationHandled,
             )
         }
     } else {
@@ -429,6 +533,45 @@ fun ApplicationSwitcher(
 }
 
 @Composable
+private fun PushAccountScreen(
+    pushRequest: PushNavigationRequest,
+    matchingAccounts: List<WorkspaceAccount>,
+    onAccountSelected: suspend (String) -> Boolean,
+    onConnectAccount: suspend () -> Unit,
+    onDismissNotification: () -> Unit,
+) {
+    AccountDecisionScreen(
+        stateKey = pushRequest,
+        title = if (matchingAccounts.isEmpty()) {
+            "Нужен другой аккаунт"
+        } else {
+            "Выберите аккаунт уведомления"
+        },
+        description = if (matchingAccounts.isEmpty()) {
+            "Уведомление пришло из ${pushRequest.realmUrl}. " +
+                "Подключите аккаунт этого сервера, чтобы открыть чат."
+        } else {
+            "На этом сервере сохранено несколько аккаунтов. " +
+                "Выберите нужный, чтобы не открыть похожий чат " +
+                "в другой организации."
+        },
+        matchingAccounts = matchingAccounts,
+        accountLabel = { account ->
+            "${account.projectName} · " +
+                (
+                    account.displayName
+                        ?: account.login.ifBlank { account.userId }
+                )
+        },
+        onAccountSelected = onAccountSelected,
+        connectLabel = "Подключить аккаунт",
+        onConnectAccount = onConnectAccount,
+        dismissLabel = "Закрыть уведомление",
+        onDismiss = onDismissNotification,
+    )
+}
+
+@Composable
 private fun FullScreenProgress() {
     Box(
         modifier = Modifier
@@ -448,10 +591,49 @@ private fun DeepLinkAccountScreen(
     onConnectAccount: suspend () -> Unit,
     onOpenCurrentAccount: () -> Unit,
 ) {
+    AccountDecisionScreen(
+        stateKey = deepLink,
+        title = if (matchingAccounts.isEmpty()) {
+            "Нужна другая организация"
+        } else {
+            "Выберите аккаунт"
+        },
+        description = if (matchingAccounts.isEmpty()) {
+            "Ссылка ведёт в ${deepLink.organizationId}. " +
+                "Подключите эту организацию, чтобы открыть нужный чат."
+        } else {
+            "Ссылка доступна в нескольких сохранённых аккаунтах."
+        },
+        matchingAccounts = matchingAccounts,
+        accountLabel = { account ->
+            account.displayName
+                ?: account.login.ifBlank { account.projectName }
+        },
+        onAccountSelected = onAccountSelected,
+        connectLabel = "Подключить организацию",
+        onConnectAccount = onConnectAccount,
+        dismissLabel = "Открыть текущий аккаунт",
+        onDismiss = onOpenCurrentAccount,
+    )
+}
+
+@Composable
+private fun AccountDecisionScreen(
+    stateKey: Any,
+    title: String,
+    description: String,
+    matchingAccounts: List<WorkspaceAccount>,
+    accountLabel: (WorkspaceAccount) -> String,
+    onAccountSelected: suspend (String) -> Boolean,
+    connectLabel: String,
+    onConnectAccount: suspend () -> Unit,
+    dismissLabel: String,
+    onDismiss: () -> Unit,
+) {
     val colors = LocalWorkspaceColorsPalette.current
     val scope = rememberCoroutineScope()
-    var operationInProgress by remember(deepLink) { mutableStateOf(false) }
-    var actionError by remember(deepLink) { mutableStateOf<String?>(null) }
+    var operationInProgress by remember(stateKey) { mutableStateOf(false) }
+    var actionError by remember(stateKey) { mutableStateOf<String?>(null) }
 
     Box(
         modifier = Modifier
@@ -467,22 +649,14 @@ private fun DeepLinkAccountScreen(
             verticalArrangement = Arrangement.Center,
         ) {
             Text(
-                text = if (matchingAccounts.isEmpty()) {
-                    "Нужна другая организация"
-                } else {
-                    "Выберите аккаунт"
-                },
+                text = title,
                 color = colors.textHeaders,
                 fontSize = 24.sp,
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(Modifier.height(10.dp))
             Text(
-                text = if (matchingAccounts.isEmpty()) {
-                    "Ссылка ведёт в ${deepLink.organizationId}. Подключите эту организацию, чтобы открыть нужный чат."
-                } else {
-                    "Ссылка доступна в нескольких сохранённых аккаунтах."
-                },
+                text = description,
                 color = colors.textAdditional50,
                 fontSize = 15.sp,
             )
@@ -514,10 +688,7 @@ private fun DeepLinkAccountScreen(
                     enabled = !operationInProgress,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text(
-                        account.displayName
-                            ?: account.login.ifBlank { account.projectName },
-                    )
+                    Text(accountLabel(account))
                 }
                 Spacer(Modifier.height(8.dp))
             }
@@ -538,16 +709,16 @@ private fun DeepLinkAccountScreen(
                     enabled = !operationInProgress,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text("Подключить организацию")
+                    Text(connectLabel)
                 }
                 Spacer(Modifier.height(8.dp))
             }
             OutlinedButton(
-                onClick = onOpenCurrentAccount,
+                onClick = onDismiss,
                 enabled = !operationInProgress,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text("Открыть текущий аккаунт")
+                Text(dismissLabel)
             }
         }
         if (operationInProgress) {

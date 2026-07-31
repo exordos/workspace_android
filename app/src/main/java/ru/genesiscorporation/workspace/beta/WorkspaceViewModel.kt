@@ -70,15 +70,28 @@ class WorkspaceViewModel(
             }
                 .distinctUntilChanged()
                 .collectLatest { runtime ->
-                if (runtime.authenticated) {
-                    pushDeviceRegistrationManager.registerCurrentTokenWithRetry()
+                if (
+                    runtime.authenticated &&
+                    !runtime.ownerKey.isNullOrBlank()
+                ) {
+                    pushDeviceRegistrationManager
+                        .registerCurrentTokenWithRetry(runtime.ownerKey)
+                } else {
+                    pushDeviceRegistrationManager.deactivate()
                 }
             }
         }
         viewModelScope.launch {
             PushTokenUpdates.tokens.collectLatest { token ->
-                if (client.userViewModel.accessToken.value != null) {
-                    pushDeviceRegistrationManager.registerTokenWithRetry(token)
+                val ownerKey =
+                    client.userViewModel.activeAccountId.value
+                        ?: client.userViewModel.baseUrl.value
+                if (
+                    client.userViewModel.accessToken.value != null &&
+                    !ownerKey.isNullOrBlank()
+                ) {
+                    pushDeviceRegistrationManager
+                        .registerTokenWithRetry(ownerKey, token)
                 }
             }
         }
