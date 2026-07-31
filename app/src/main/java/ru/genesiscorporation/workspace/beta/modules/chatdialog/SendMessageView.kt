@@ -27,13 +27,17 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
@@ -41,7 +45,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -64,8 +70,30 @@ fun SendMessageView(viewModel: ChatDialogViewModel) {
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     val colors = LocalWorkspaceColorsPalette.current
+    val editorFocusRequester = remember { FocusRequester() }
+    val defaultLinkText = stringResource(
+        R.string.message_composer_link_text,
+    )
     var composerMode by rememberSaveable {
         mutableStateOf(ComposerMode.WRITE)
+    }
+    var editorValue by rememberSaveable(
+        stateSaver = TextFieldValue.Saver,
+    ) {
+        mutableStateOf(
+            TextFieldValue(
+                text = messageText,
+                selection = TextRange(messageText.length),
+            ),
+        )
+    }
+    LaunchedEffect(messageText) {
+        if (messageText != editorValue.text) {
+            editorValue = TextFieldValue(
+                text = messageText,
+                selection = TextRange(messageText.length),
+            )
+        }
     }
     val hasSendableContent = if (viewModel.editingMessage != null) {
         if (replySession.tabs.isEmpty()) {
@@ -148,9 +176,29 @@ fun SendMessageView(viewModel: ChatDialogViewModel) {
                 composerMode = nextMode
                 if (nextMode == ComposerMode.PREVIEW) {
                     focusManager.clearFocus()
+                } else {
+                    editorFocusRequester.requestFocus()
                 }
             },
         )
+        if (composerMode == ComposerMode.WRITE) {
+            ComposerFormattingToolbar(
+                enabled = conversationStateReady,
+                onAction = { action ->
+                    val formatted = applyComposerFormatting(
+                        value = editorValue,
+                        action = action,
+                        linkText = defaultLinkText,
+                    )
+                    viewModel.onMessageChange(formatted.text)
+                    editorValue = reconcileComposerEditorValue(
+                        candidate = formatted,
+                        acceptedText = viewModel.messageText.value,
+                    )
+                    editorFocusRequester.requestFocus()
+                },
+            )
+        }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -187,8 +235,14 @@ fun SendMessageView(viewModel: ChatDialogViewModel) {
                 }
                 if (composerMode == ComposerMode.WRITE) {
                     BasicTextField(
-                        value = messageText,
-                        onValueChange = viewModel::onMessageChange,
+                        value = editorValue,
+                        onValueChange = { updated ->
+                            viewModel.onMessageChange(updated.text)
+                            editorValue = reconcileComposerEditorValue(
+                                candidate = updated,
+                                acceptedText = viewModel.messageText.value,
+                            )
+                        },
                         enabled = conversationStateReady,
                         textStyle = TextStyle(
                             color = colors.textHeaders,
@@ -199,10 +253,11 @@ fun SendMessageView(viewModel: ChatDialogViewModel) {
                         maxLines = 4,
                         modifier = Modifier
                             .weight(1f)
-                            .padding(horizontal = 8.dp, vertical = 7.dp),
+                            .padding(horizontal = 8.dp, vertical = 7.dp)
+                            .focusRequester(editorFocusRequester),
                         decorationBox = { innerTextField ->
                             Box(contentAlignment = Alignment.CenterStart) {
-                                if (messageText.isEmpty()) {
+                                if (editorValue.text.isEmpty()) {
                                     Text(
                                         text = stringResource(
                                             R.string.message_composer_placeholder,

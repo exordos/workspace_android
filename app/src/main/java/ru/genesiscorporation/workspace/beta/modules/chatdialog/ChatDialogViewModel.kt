@@ -315,11 +315,13 @@ class ChatDialogViewModel(
                 boundedText,
             )
             _replySession.value = updated
-            if (updated.activeTab?.answer?.length != boundedText.length) {
+            val acceptedAnswer = updated.activeTab?.answer.orEmpty()
+            if (acceptedAnswer != boundedText) {
+                _messageText.value = acceptedAnswer
                 _actionError.value =
                     "Суммарный текст ответов и выбранных фрагментов " +
-                    "не может быть длиннее " +
-                    "$MAX_WORKSPACE_REPLY_INPUT_CHARS символов"
+                        "не может быть длиннее " +
+                        "$MAX_WORKSPACE_REPLY_INPUT_CHARS символов"
             }
         }
         if (newText.length > MAX_MESSAGE_CHARS) {

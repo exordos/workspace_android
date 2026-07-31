@@ -590,15 +590,30 @@ local UI operation: it must never create, update or delete a server resource.
 | MSG-COMP-006 | Send or save from Preview | The existing send/edit handler receives the unchanged outgoing snapshot once and the UI returns to Write; rejected/ambiguous delivery follows the durable outbox contract |
 | MSG-COMP-007 | TalkBack and touch | Write/Preview expose selected tab semantics and 48 dp targets; the preview is a localized polite live region while rendered links and references retain their real actions |
 | MSG-COMP-008 | Process death and account/conversation switch | The encrypted draft/reply state restores under its exact owner and slot; the presentation-only mode may restore only with the same saved Activity or defaults to Write on a fresh cold launch, and cannot leak into another conversation |
+| MSG-COMP-009 | Apply bold, italic, strikethrough, inline code or spoiler to a selection | The exact selected range is wrapped with the desktop marker and the cursor collapses after the inserted syntax; no text outside the range changes |
+| MSG-COMP-010 | Apply an inline action with an empty selection | A paired marker is inserted at the exact cursor and the cursor remains between the pair, ready for immediate typing |
+| MSG-COMP-011 | Quote or list one or several lines | Quote/bullet prefixes every selected line; numbered list uses stable one-based indices; an empty selection inserts only the first prefix |
+| MSG-COMP-012 | Insert a code block | Selected text is fenced with newlines; an empty selection creates two fences and positions the cursor on the blank body line |
+| MSG-COMP-013 | Insert a link | Selected text or the localized fallback becomes the label and only the placeholder `https://` is selected, even when the label itself contains `https://` |
+| MSG-COMP-014 | Scroll and invoke the formatting toolbar | All ten localized actions are reachable in one horizontal row, use 48 dp targets, retain selection when tapped, refocus the editor and expose no unsupported AI/schedule/snippet control |
+| MSG-COMP-015 | Formatting at the 40,000-character or aggregate multi-reply bound | ViewModel acceptance is authoritative; the visible editor reconciles to the accepted text and clamped selection instead of displaying unsendable overflow |
+| MSG-COMP-016 | Format, rotate, switch Preview/Write and change theme | Exact Markdown and selection-safe draft state survive recreation, Preview renders the result, and enabled glyphs remain readable without looking disabled in light or dark mode |
 
 Current automated coverage proves exact plain and ordered multi-reply outgoing
-Markdown plus locale-independent mode/selected/preview-region Compose
-semantics. Physical Android 14 acceptance in the dedicated sandbox rendered
-bold Markdown and a Unicode emoji, retained the unsent draft and Preview mode
-through portrait → landscape → portrait, showed the localized empty state,
-and passed visual inspection in light and dark themes. Send was deliberately
-not invoked, no server message was created, and the draft was cleared before
-leaving the sandbox.
+Markdown; every desktop formatting mutation has selection/cursor unit coverage,
+including localized and URL-containing link labels plus bounded-state
+reconciliation. Locale-independent Compose tests cover mode/selected/preview
+semantics and horizontal scrolling from the first to the last functional
+toolbar action.
+
+Physical Android 14 acceptance in the dedicated sandbox rendered bold Markdown
+and a Unicode emoji, wrapped one selected token as
+`**CASSI_FORMAT**`, inserted `[текст ссылки](https://)` through the
+horizontally scrolled Link action, and rendered the formatted result in
+Preview. The exact unsent draft survived portrait → landscape → portrait;
+empty state, light/dark themes and enabled-action readability were visually
+inspected. Send was deliberately not invoked, no server message was created,
+and the draft was cleared before leaving the sandbox.
 
 ### Message actions
 
