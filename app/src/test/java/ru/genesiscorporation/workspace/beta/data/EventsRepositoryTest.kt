@@ -973,6 +973,52 @@ class EventsRepositoryTest {
     }
 
     @Test
+    fun `inbox catalog compare and set preserves realtime changes`() {
+        val repository = EventsRepository()
+        val initialStream = stream(
+            defaultTopicUuid = TOPIC_UUID,
+            notificationMode = "all_messages",
+        ).copy(name = "Initial")
+        val initialTopic = topic(lastMessageUuid = null, name = "Initial")
+        repository.setInitialStreams(listOf(initialStream))
+        repository.addStreamTopics(STREAM_UUID, listOf(initialTopic))
+        val staleReference = repository.inboxCatalogReference()
+
+        val realtimeTopic = initialTopic.copy(
+            name = "Realtime",
+            updatedAt = "2026-07-31T11:00:00Z",
+        )
+        repository.updateTopic(realtimeTopic)
+
+        assertFalse(
+            repository.applyInboxCatalogIfUnchanged(
+                expected = staleReference,
+                streams = listOf(initialStream.copy(name = "Stale REST")),
+                topics = emptyList(),
+            ),
+        )
+        assertEquals("Initial", repository.streams.value.single().name)
+        assertEquals(
+            "Realtime",
+            repository.streamTopics.value[STREAM_UUID]?.single()?.name,
+        )
+
+        val currentReference = repository.inboxCatalogReference()
+        assertTrue(
+            repository.applyInboxCatalogIfUnchanged(
+                expected = currentReference,
+                streams = listOf(initialStream.copy(name = "Current REST")),
+                topics = emptyList(),
+            ),
+        )
+        assertEquals("Current REST", repository.streams.value.single().name)
+        assertEquals(
+            emptyList<TopicsResponseData>(),
+            repository.streamTopics.value[STREAM_UUID],
+        )
+    }
+
+    @Test
     fun `external account revisions reject rollback and tombstone resurrection`() {
         val repository = EventsRepository()
 

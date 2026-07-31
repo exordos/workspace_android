@@ -38,6 +38,13 @@ enum class WorkspaceTimelineKind(
 ) {
     FEED("feed"),
     STARRED("starred"),
+    /**
+     * Zero-row owner-bound marker for an Inbox catalog that completed
+     * successfully. Inbox rows themselves remain in the encrypted workspace
+     * catalog tables; this marker distinguishes authoritative empty from an
+     * account that has never synchronized Inbox.
+     */
+    INBOX("inbox"),
 }
 
 data class WorkspaceTimelineSnapshot(
@@ -628,15 +635,19 @@ class RoomWorkspaceSnapshotStore internal constructor(
         snapshot: WorkspaceTimelineSnapshot,
         cachedAtMillis: Long,
     ): EncodedTimelineRows {
-        val canonicalMessages = snapshot.messages
-            .asSequence()
-            .filter { message ->
-                !message.uuid.startsWith(LOCAL_MESSAGE_UUID_PREFIX) &&
-                    isValidTimelineMessage(message, kind)
-            }
-            .distinctBy(MessageResponse::uuid)
-            .sortedWith(TIMELINE_MESSAGE_COMPARATOR)
-            .toList()
+        val canonicalMessages = if (kind == WorkspaceTimelineKind.INBOX) {
+            emptyList()
+        } else {
+            snapshot.messages
+                .asSequence()
+                .filter { message ->
+                    !message.uuid.startsWith(LOCAL_MESSAGE_UUID_PREFIX) &&
+                        isValidTimelineMessage(message, kind)
+                }
+                .distinctBy(MessageResponse::uuid)
+                .sortedWith(TIMELINE_MESSAGE_COMPARATOR)
+                .toList()
+        }
         val retainedMessages = canonicalMessages.takeLast(MAX_TIMELINE_MESSAGES)
         val sourceWasTrimmed =
             retainedMessages.size < canonicalMessages.size
@@ -740,6 +751,10 @@ class RoomWorkspaceSnapshotStore internal constructor(
             ),
         )?.takeIf { cached ->
             cached.kind == kind.wireValue &&
+                (
+                    kind != WorkspaceTimelineKind.INBOX ||
+                        cached.messageCount == 0
+                ) &&
                 cached.messageCount in 0..MAX_TIMELINE_MESSAGES &&
                 cached.firstMessageUuid?.let(::isCanonicalUuid) != false &&
                 cached.lastMessageUuid?.let(::isCanonicalUuid) != false &&
@@ -959,7 +974,8 @@ private fun isValidTimelineMessage(
     message: MessageResponse,
     kind: WorkspaceTimelineKind,
 ): Boolean =
-    isCanonicalUuid(message.uuid) &&
+    kind != WorkspaceTimelineKind.INBOX &&
+        isCanonicalUuid(message.uuid) &&
         isCanonicalUuid(message.streamUuid) &&
         isCanonicalUuid(message.topicUuid) &&
         isCanonicalUuid(message.userUuid) &&

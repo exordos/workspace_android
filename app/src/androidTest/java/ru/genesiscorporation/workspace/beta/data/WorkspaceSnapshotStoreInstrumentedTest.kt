@@ -304,6 +304,14 @@ class WorkspaceSnapshotStoreInstrumentedTest {
                 WorkspaceTimelineKind.STARRED,
                 WorkspaceTimelineSnapshot(),
             )
+            store.writeTimeline(
+                ACCOUNT_A,
+                WorkspaceTimelineKind.INBOX,
+                WorkspaceTimelineSnapshot(
+                    messages = listOf(message),
+                    nextPageMarker = message.uuid,
+                ),
+            )
 
             assertEquals(
                 WorkspaceTimelineSnapshot(
@@ -315,6 +323,18 @@ class WorkspaceSnapshotStoreInstrumentedTest {
             assertEquals(
                 WorkspaceTimelineSnapshot(),
                 store.readTimeline(ACCOUNT_A, WorkspaceTimelineKind.STARRED),
+            )
+            assertEquals(
+                WorkspaceTimelineSnapshot(),
+                store.readTimeline(ACCOUNT_A, WorkspaceTimelineKind.INBOX),
+            )
+            assertTrue(
+                dao.readTimeline(
+                    ownerKeyHash = ownerHash(ACCOUNT_A),
+                    kind = WorkspaceTimelineKind.INBOX.wireValue,
+                    messageLimit = MAX_TIMELINE_MESSAGES,
+                    maxEncryptedBytes = MAX_ENCRYPTED_PAYLOAD_BYTES,
+                ).messages.isEmpty(),
             )
             assertEquals(
                 null,
@@ -344,6 +364,10 @@ class WorkspaceSnapshotStoreInstrumentedTest {
             assertEquals(
                 null,
                 store.readTimeline(ACCOUNT_A, WorkspaceTimelineKind.STARRED),
+            )
+            assertEquals(
+                null,
+                store.readTimeline(ACCOUNT_A, WorkspaceTimelineKind.INBOX),
             )
         }
 

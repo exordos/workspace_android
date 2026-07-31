@@ -87,7 +87,7 @@ outcome. A screen is not complete merely because it matches a design.
 | Main navigation | Messenger, inbox/home, calendar, mail, profile, services | Partial | Adaptive bottom navigation with stable back-stack restoration |
 | Chat catalog | Direct chats, channels, topics, unread counts, folders | Partial: bounded encrypted Room snapshots restore the active account's streams/topics, full folders/items, users and stream bindings before network startup, retain them through a cold offline launch, label them stale through the global recovery banner, and reconcile newer REST/realtime rows without rollback; schema-v1→v2 migration and physical in-place cold-start acceptance passed | Add controlled corrupt-row, account-switch, storage-pressure and cursor-expiry E2E; persist pagination/sync metadata |
 | Search | Global modal, chat/message navigation | Partial: catalog/user search is functional; the maintained desktop explicitly hides its unfinished global-message-search action and the backend marks message search unsupported | Keep the unsupported global control hidden; implement it only after the desktop/backend contract becomes real |
-| Inbox | Unread direct messages and channels grouped by conversation | Partial: real all-stream/all-topic projection, direct/channel sections, exact UUID routes, stream fallback, loading/empty/error/retry, account-owner fence and realtime-race retry are implemented | Complete physical cross-client read convergence, offline/rotation/accessibility and controlled delayed-response/account-switch fault E2E |
+| Inbox | Unread direct messages and channels grouped by conversation | Partial: real all-stream/all-topic projection, direct/channel sections, exact UUID routes, stream fallback, loading/empty/error/retry, account-owner fence and atomic realtime-race retry are implemented; the encrypted owner-scoped catalog plus an independent success marker now restore cached rows or an authoritative empty Inbox after a cold offline start, with non-empty physical Pixel restore/Retry accepted | Complete physical authoritative-empty and cross-client read convergence, plus controlled delayed-response/account-switch fault E2E |
 | Feed | Cross-conversation chronological feed and forwarding | Partial: the real global messages endpoint, newest-first keyset pages, chronological rendering, stable prepend anchor, exact-message navigation, refresh/error/retry and verified forwarding are implemented; an owner-scoped encrypted Room projection now restores 500 messages plus the continuation marker and reconciles create/update/read/delete realtime deltas without stale REST rollback | Complete cold-offline/upgrade/realtime physical acceptance, controlled account/in-flight/injected-response faults and long-running accessibility acceptance |
 | Activity | Mentions, starred items, drafts | Partial: read-only Starred uses the real `starred=true` filter and the same encrypted owner-scoped timeline/realtime reconciliation; Drafts uses the real paginated server API with exact open/delete/retry/conflict actions and encrypted per-draft local state; mentions/reactions and star/unstar stay hidden as unsupported | Finish multi-draft physical/cross-client acceptance, controlled conflict/fault/process-death cases, and non-empty Starred navigation/pagination/realtime acceptance |
 | Folder management | Create, rename, delete, assign, pin, reorder/layout | Partial: current folder/folder-item endpoints now back create, rename, delete, assign, remove, pin and unpin; authoritative refresh follows every mutation | Add drag reorder/layout only when the desktop product contract exposes the same user action |
@@ -110,7 +110,7 @@ outcome. A screen is not complete merely because it matches a design.
 | Calls | Jitsi links, active-call guard, incoming call surface | Partial: a new room is opened only after its call-link message receives a valid server confirmation; ambiguous or failed delivery remains in outbox | Foreground/background call lifecycle, audio permission, interruption and reconnect handling |
 | Push | Encrypted device identity, register/rotate/delete token | Partial: one Keystore-wrapped HPKE key remains installation-stable while the server registration UUID is account-scoped; owner-fenced registration/switch/logout, legacy-registration cleanup, realm-scoped notification IDs/groups/sound, safe inactive-account switching, explicit same-realm account choice, private lock-screen content and pending-tap recreation are implemented | Complete real FCM foreground/background/force-stop/reboot delivery and token-rotation matrix; implement payload decryption only after the delivery envelope is specified by backend/desktop |
 | Realtime | REST catch-up, websocket, epoch cursor reset | Partial: one retained repository owns a foreground-scoped socket; its generation/version cursor is Keystore-encrypted and account-scoped, restored before reconnect, advanced only after an event is applied, and cleared with that account on logout; every foreground/process recovery first drains bounded strict-generation REST pages and only then opens the socket; 20-second protocol pings close a half-open transport within 40 seconds, inbound frames are capped at 2 MiB, and flapping connections back off; REST `410` or socket `4410` clears expired server projections, preserves local outbox rows, and forces authoritative snapshot reload; the global banner reports delayed connecting/backoff and exposes a real foreground-only retry; streams/topics/latest conversations/folders/users/bindings are durable, stream-binding events reconcile the shared projection, and delayed disk hydration cannot revive an authoritative empty list | Persist the remaining sync metadata and complete controlled lifecycle/process-kill/410/4410/half-open E2E |
-| Offline | Cache-first desktop state and outbox | Partial: encrypted drafts, realtime cursors and failed/ambiguous outgoing rows survive restart; owner-scoped AES-256-GCM Room snapshots restore bounded catalog/history/member data plus independent Feed/Starred projections and continuation markers before network success; schema-v1→v3 migration is non-destructive, stale/retry UX is global and REST/realtime reconciliation cannot roll back newer rows | Extend the strict persistence contract to Inbox and remaining conversation pagination/sync metadata; add backend idempotency and controlled corruption/storage-pressure/long-outage E2E |
+| Offline | Cache-first desktop state and outbox | Partial: encrypted drafts, realtime cursors and failed/ambiguous outgoing rows survive restart; owner-scoped AES-256-GCM Room snapshots restore bounded catalog/history/member data, Inbox success state, and independent Feed/Starred projections plus continuation markers before network success; schema-v1→v3 migration is non-destructive, stale/retry UX is global and REST/realtime reconciliation cannot roll back newer rows | Extend the strict persistence contract to remaining conversation pagination/sync metadata; add backend idempotency and controlled corruption/storage-pressure/long-outage E2E |
 | User profile | View profile, shared channels, status and contact fields | Partial: authoritative refresh/error/retry, exact status/contact fields, authenticated avatar preview, copyable identity values, bounded external-identity badge, binding-backed non-DM shared channels, and safe reuse/create of a personal chat are wired | Expose calls only after the maintained mobile call bridge has a real profile contract; keep desktop media counters absent until they have a real handler |
 | Personal profile | Avatar, name, timezone, status | Partial: authoritative self-profile refresh, status/away update and clear, bounded gallery preview/upload, and conditional avatar reset are wired; name/timezone controls stay hidden because the maintained desktop mutation is currently a no-op | Add a verified name/timezone backend contract, camera capture/crop, and complete upload/reset/account-switch fault acceptance |
 | Settings | Theme, language, sound, sorting, folder layout, idle timeout | Partial: account-scoped system/light/dark mode, six real notification-sound modes, standard/compact chat rows, personal-unread priority and unmuted-channel priority are persisted and applied; unknown/corrupt values fail to independent safe defaults | Finish resource-backed language, validated mobile folder presentation and lifecycle-enforced idle timeout; keep every unsupported control hidden |
@@ -183,8 +183,8 @@ Desktop-only mechanics are not copied literally:
   encrypted conversation store remains authoritative.
 - Room rows and their keyset are excluded from cloud backup and device transfer.
   Logout clears only the removed owner's rows.
-- Expand Room incrementally to reactions, Inbox, conversation pagination
-  cursors and remaining sync metadata under the same bounds and owner fence.
+- Expand Room incrementally to reactions, conversation pagination cursors and
+  remaining sync metadata under the same bounds and owner fence.
 - DataStore stores small non-secret preferences.
 - Keystore-backed encryption also protects refresh/access credentials, push
   identity material, drafts and outbox state. Push registration UUIDs are
@@ -317,14 +317,20 @@ Archived/read conversations are absent, direct messages and channels are
 separate, only unread topics are rows, stream-level unread fallback remains
 functional, and duplicate names navigate by exact UUID. Refresh is
 single-flight and owner-bound; malformed/duplicate/foreign catalog rows fail
-closed, and a catalog changed by realtime during the request is retried once
-rather than overwritten. The full 110-task unit/lint/APK/test-APK gate passes.
-On the physical Android 14 Pixel, online empty/refresh, offline error, restored
-connectivity Retry, portrait/landscape recreation, Back navigation, semantics
-labels and 48 dp controls pass without crash/ANR. A naturally unread sandbox
-conversation was not available, so physical row rendering/exact navigation and
-visible-desktop read convergence remain required before this slice is marked
-complete.
+closed, and a catalog changed by realtime during the request is atomically
+rejected and retried once rather than overwritten. The encrypted owner-scoped
+catalog is paired with a zero-row Inbox success marker, so a cold offline start
+can distinguish cached content or a successful empty result from a missing
+snapshot without duplicating data or changing the Room schema. The full
+110-task unit/lint/APK/test-APK gate passes.
+On the physical Android 14 Pixel, the current dedicated sandbox supplied five
+unread messages in two exact rows. Room v3 persisted 15 streams, 120 topics,
+one Inbox marker and no duplicate Inbox-message rows; a 1.194-second fully cold
+offline start restored both rows, kept a real Retry action and converged after
+network recovery without a loading flash, crash or ANR. Earlier empty,
+portrait/landscape, Back, semantics and 48 dp-control acceptance remains green.
+Exact row navigation/read convergence was deliberately not run because it
+would mutate the sandbox read state during this cache-only pass.
 
 The mobile Feed now mirrors the supported desktop data contract: one global
 `GET /messages/` request omits conversation filters, uses a bounded descending

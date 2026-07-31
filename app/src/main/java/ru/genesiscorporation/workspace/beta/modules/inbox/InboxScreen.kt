@@ -162,7 +162,10 @@ fun InboxScreen(
             )
         }
         val visibleError = syncState.error ?: actionError
-        if (visibleError != null && groups.isNotEmpty()) {
+        if (
+            visibleError != null &&
+            hasDisplayableInboxSnapshot(groups, syncState)
+        ) {
             InboxErrorBanner(
                 message = visibleError,
                 retry = syncState.error != null,
@@ -185,14 +188,21 @@ fun InboxScreen(
                 )
             }
 
-            syncState.refreshing || (!syncState.hasLoaded && syncState.error == null) -> {
+            (
+                syncState.refreshing &&
+                    !hasDisplayableInboxSnapshot(groups, syncState)
+            ) || (
+                !syncState.hasLoaded &&
+                    syncState.error == null
+            ) -> {
                 InboxStateCard(
                     message = "Загрузка входящих…",
                     loading = true,
                 )
             }
 
-            syncState.error != null -> {
+            syncState.error != null &&
+                !hasDisplayableInboxSnapshot(groups, syncState) -> {
                 InboxStateCard(
                     message = syncState.error.orEmpty(),
                     action = "Повторить",

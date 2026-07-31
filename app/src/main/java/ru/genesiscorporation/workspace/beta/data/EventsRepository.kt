@@ -77,6 +77,11 @@ data class OwnedMessageProjectionEvent(
     val event: MessageProjectionEvent,
 )
 
+data class InboxCatalogReference(
+    val streams: List<Stream>,
+    val topics: Map<String, List<TopicsResponseData>>,
+)
+
 class EventsRepository(
     private val cursorStore: RealtimeCursorStore =
         InMemoryRealtimeCursorStore(),
@@ -189,6 +194,24 @@ class EventsRepository(
     private var usersProjectionInitialized = false
     private var streamBindingsProjectionInitialized = false
 
+    private fun mutateStreams(
+        transform: (List<Stream>) -> List<Stream>,
+    ) {
+        synchronized(catalogProjectionLock) {
+            _streams.value = transform(_streams.value)
+        }
+    }
+
+    private fun mutateStreamTopics(
+        transform: (
+            Map<String, List<TopicsResponseData>>,
+        ) -> Map<String, List<TopicsResponseData>>,
+    ) {
+        synchronized(catalogProjectionLock) {
+            _streamTopics.value = transform(_streamTopics.value)
+        }
+    }
+
     private fun mutateFolders(
         transform: (List<FolderResponseData>) -> List<FolderResponseData>,
     ) {
@@ -228,11 +251,11 @@ class EventsRepository(
         jitsiServerUrl = ""
         resetRealtimeCursor()
         _streamTopicMessages.value = emptyMap()
-        _streamTopics.value = emptyMap()
         _messagesPool.value = emptyList()
         _userReactions.value = emptyList()
-        _streams.value = emptyList()
         synchronized(catalogProjectionLock) {
+            _streamTopics.value = emptyMap()
+            _streams.value = emptyList()
             foldersProjectionInitialized = false
             usersProjectionInitialized = false
             streamBindingsProjectionInitialized = false
@@ -249,34 +272,34 @@ class EventsRepository(
      * arrived while disk IO was in progress.
      */
     fun hydrateCachedSnapshot(snapshot: WorkspaceSnapshot) {
-        _streams.update { current ->
-            mergeStreams(
+        synchronized(catalogProjectionLock) {
+            _streams.value = mergeStreams(
                 cached = snapshot.streams,
-                current = current,
+                current = _streams.value,
             )
-        }
-        _streamTopics.update { current ->
-            val streamUuids =
-                (_streams.value.map(Stream::uuid) +
-                    snapshot.topicsByStream.keys)
-                    .toSet()
-            buildMap {
-                streamUuids.forEach { streamUuid ->
-                    val merged = LinkedHashMap<String, TopicsResponseData>()
-                    snapshot.topicsByStream[streamUuid]
-                        .orEmpty()
-                        .forEach { merged[it.uuid] = it }
-                    current[streamUuid].orEmpty().forEach { topic ->
-                        val cached = merged[topic.uuid]
-                        if (
-                            cached == null ||
-                            topicUpdatedAt(topic) >= topicUpdatedAt(cached)
-                        ) {
-                            merged[topic.uuid] = topic
+            _streamTopics.value = _streamTopics.value.let { current ->
+                val streamUuids =
+                    (_streams.value.map(Stream::uuid) +
+                        snapshot.topicsByStream.keys)
+                        .toSet()
+                buildMap {
+                    streamUuids.forEach { streamUuid ->
+                        val merged = LinkedHashMap<String, TopicsResponseData>()
+                        snapshot.topicsByStream[streamUuid]
+                            .orEmpty()
+                            .forEach { merged[it.uuid] = it }
+                        current[streamUuid].orEmpty().forEach { topic ->
+                            val cached = merged[topic.uuid]
+                            if (
+                                cached == null ||
+                                topicUpdatedAt(topic) >= topicUpdatedAt(cached)
+                            ) {
+                                merged[topic.uuid] = topic
+                            }
                         }
-                    }
-                    if (merged.isNotEmpty()) {
-                        put(streamUuid, merged.values.toList())
+                        if (merged.isNotEmpty()) {
+                            put(streamUuid, merged.values.toList())
+                        }
                     }
                 }
             }
@@ -317,14 +340,17 @@ class EventsRepository(
         }
     }
 
-    fun workspaceSnapshot(): WorkspaceSnapshot = WorkspaceSnapshot(
-        streams = _streams.value,
-        topicsByStream = _streamTopics.value,
-        messagesByConversation = _streamTopicMessages.value,
-        folders = _folders.value,
-        users = _users.value,
-        streamBindings = _streamBindings.value,
-    )
+    fun workspaceSnapshot(): WorkspaceSnapshot =
+        synchronized(catalogProjectionLock) {
+            WorkspaceSnapshot(
+                streams = _streams.value,
+                topicsByStream = _streamTopics.value,
+                messagesByConversation = _streamTopicMessages.value,
+                folders = _folders.value,
+                users = _users.value,
+                streamBindings = _streamBindings.value,
+            )
+        }
 
     private fun invalidateDerivedStateForExpiredCursor() {
         currentUser = null
@@ -335,11 +361,11 @@ class EventsRepository(
                 messages.filter { it.uuid.startsWith("local-") }
             }.filterValues(List<MessageResponse>::isNotEmpty)
         }
-        _streamTopics.value = emptyMap()
         _messagesPool.value = emptyList()
         _userReactions.value = emptyList()
-        _streams.value = emptyList()
         synchronized(catalogProjectionLock) {
+            _streamTopics.value = emptyMap()
+            _streams.value = emptyList()
             foldersProjectionInitialized = false
             usersProjectionInitialized = false
             streamBindingsProjectionInitialized = false
@@ -831,7 +857,7 @@ class EventsRepository(
     }
 
     private fun clearDeletedMessagePreviews(messageUuid: String) {
-        _streamTopics.update { current ->
+        mutateStreamTopics { current ->
             current.mapValues { (_, topics) ->
                 topics.map { topic ->
                     if (topic.lastMessageUuid == messageUuid) {
@@ -845,7 +871,7 @@ class EventsRepository(
                 }
             }
         }
-        _streams.update { current ->
+        mutateStreams { current ->
             current.map { stream ->
                 if (stream.lastMessageUuid == messageUuid) {
                     stream.copy(
@@ -918,7 +944,7 @@ class EventsRepository(
     val streamTopics: StateFlow<Map<String, List<TopicsResponseData>>> = _streamTopics.asStateFlow()
 
     fun addStreamTopics(streamUuid: String, topics: List<TopicsResponseData>) {
-        _streamTopics.update { current ->
+        mutateStreamTopics { current ->
             val merged = LinkedHashMap<String, TopicsResponseData>()
             current[streamUuid].orEmpty().forEach { merged[it.uuid] = it }
             topics.forEach { incoming ->
@@ -943,22 +969,66 @@ class EventsRepository(
         streamUuids: Set<String>,
         topics: List<TopicsResponseData>,
     ) {
-        _streamTopics.value = buildMap {
-            streamUuids.forEach { put(it, emptyList()) }
-            topics
-                .filter { it.streamUuid in streamUuids }
-                .groupBy(TopicsResponseData::streamUuid)
-                .forEach { (streamUuid, streamTopics) ->
-                    put(streamUuid, streamTopics)
-                }
+        mutateStreamTopics {
+            buildInboxTopics(
+                streamUuids = streamUuids,
+                topics = topics,
+            )
         }
+    }
+
+    /**
+     * Commits the two authoritative Inbox projections as one compare-and-set.
+     * Every stream/topic mutation participates in [catalogProjectionLock], so
+     * realtime activity after a REST request began makes this return false
+     * instead of being silently overwritten by the older response.
+     */
+    fun applyInboxCatalogIfUnchanged(
+        expected: InboxCatalogReference,
+        streams: List<Stream>,
+        topics: List<TopicsResponseData>,
+    ): Boolean = synchronized(catalogProjectionLock) {
+        if (
+            _streams.value !== expected.streams ||
+            _streamTopics.value !== expected.topics
+        ) {
+            false
+        } else {
+            _streams.value = streams
+            _streamTopics.value = buildInboxTopics(
+                streamUuids = streams.mapTo(mutableSetOf(), Stream::uuid),
+                topics = topics,
+            )
+            true
+        }
+    }
+
+    fun inboxCatalogReference(): InboxCatalogReference =
+        synchronized(catalogProjectionLock) {
+            InboxCatalogReference(
+                streams = _streams.value,
+                topics = _streamTopics.value,
+            )
+        }
+
+    private fun buildInboxTopics(
+        streamUuids: Set<String>,
+        topics: List<TopicsResponseData>,
+    ): Map<String, List<TopicsResponseData>> = buildMap {
+        streamUuids.forEach { put(it, emptyList()) }
+        topics
+            .filter { it.streamUuid in streamUuids }
+            .groupBy(TopicsResponseData::streamUuid)
+            .forEach { (streamUuid, streamTopics) ->
+                put(streamUuid, streamTopics)
+            }
     }
 
     private fun topicUpdatedAt(topic: TopicsResponseData): Instant =
         runCatching { OffsetDateTime.parse(topic.updatedAt).toInstant() }
             .getOrDefault(Instant.EPOCH)
     fun addTopicToStream(topic: TopicsResponseData) {
-        _streamTopics.update { current ->
+        mutateStreamTopics { current ->
             if (current[topic.streamUuid] != null) {
                 val existingTopics = current[topic.streamUuid].orEmpty()
                 current + (
@@ -976,8 +1046,10 @@ class EventsRepository(
         val updatedLastMessage = messagesPool.value
             .firstOrNull { it.uuid == updatedTopic.lastMessageUuid }
         var unreadDelta = 0
-        _streamTopics.update { current ->
-            val topics = current[updatedTopic.streamUuid] ?: return@update current
+        mutateStreamTopics { current ->
+            val topics =
+                current[updatedTopic.streamUuid]
+                    ?: return@mutateStreamTopics current
             val updatedTopics = topics.map { topic ->
                 if (topic.uuid == updatedTopic.uuid) {
                     unreadDelta = updatedTopic.unreadCount - topic.unreadCount
@@ -1000,7 +1072,7 @@ class EventsRepository(
                 }
             }
 
-            if (updatedTopics == topics) return@update current
+            if (updatedTopics == topics) return@mutateStreamTopics current
             current + (updatedTopic.streamUuid to updatedTopics)
         }
         if (unreadDelta != 0) {
@@ -1013,7 +1085,7 @@ class EventsRepository(
         delta: Int,
     ) {
         var projectedUnreadCount: Int? = null
-        _streams.update { current ->
+        mutateStreams { current ->
             current.map { stream ->
                 if (stream.uuid == streamUuid) {
                     val updatedCount = (stream.unreadCount + delta).coerceAtLeast(0)
@@ -1053,8 +1125,9 @@ class EventsRepository(
     ) {
         if (count <= 0) return
         var appliedDelta = 0
-        _streamTopics.update { current ->
-            val topics = current[streamUuid] ?: return@update current
+        mutateStreamTopics { current ->
+            val topics =
+                current[streamUuid] ?: return@mutateStreamTopics current
             val updatedTopics = topics.map { topic ->
                 if (topic.uuid == topicUuid) {
                     val updatedCount =
@@ -1210,7 +1283,7 @@ class EventsRepository(
 
     fun updateStream(updatedStream: Stream) {
         val message = messagesPool.value.firstOrNull { it.uuid == updatedStream.lastMessageUuid }
-        _streams.update { current ->
+        mutateStreams { current ->
             current.map { stream ->
                 if (stream.uuid == updatedStream.uuid) {
                     stream.copy(
@@ -1261,22 +1334,21 @@ class EventsRepository(
     }
 
     fun addStream(newStream: Stream) {
-        _streams.update { current ->
+        mutateStreams { current ->
             current.filterNot { it.uuid == newStream.uuid } + newStream
         }
     }
 
     fun setInitialStreams(newList: List<Stream>) {
-        _streams.update {
-            newList
-        }
+        mutateStreams { newList }
     }
 
     fun removeStream(streamUuid: String) {
-        _streams.update { current ->
-            current.filterNot { it.uuid == streamUuid }
+        synchronized(catalogProjectionLock) {
+            _streams.value =
+                _streams.value.filterNot { it.uuid == streamUuid }
+            _streamTopics.value = _streamTopics.value - streamUuid
         }
-        _streamTopics.update { current -> current - streamUuid }
         _streamTopicMessages.update { current ->
             current.filterKeys { key -> !key.startsWith("$streamUuid.") }
         }
@@ -1343,7 +1415,7 @@ class EventsRepository(
     }
 
     fun removeTopic(topicUuid: String) {
-        _streamTopics.update { current ->
+        mutateStreamTopics { current ->
             current.mapValues { (_, topics) ->
                 topics.filterNot { it.uuid == topicUuid }
             }

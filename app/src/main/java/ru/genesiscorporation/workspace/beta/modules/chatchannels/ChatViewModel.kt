@@ -9,6 +9,8 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.dropWhile
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.stateIn
@@ -22,6 +24,8 @@ import ru.genesiscorporation.workspace.beta.UserViewModel
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
 import ru.genesiscorporation.workspace.beta.data.ConversationStateStore
 import ru.genesiscorporation.workspace.beta.data.PersistedConversationState
+import ru.genesiscorporation.workspace.beta.data.WorkspaceTimelineKind
+import ru.genesiscorporation.workspace.beta.data.WorkspaceTimelineSnapshot
 import ru.genesiscorporation.workspace.beta.data.navigation.WorkspaceDeepLink
 import ru.genesiscorporation.workspace.beta.data.navigation.WorkspaceDeepLinkTarget
 import ru.genesiscorporation.workspace.beta.data.push.PushNavigationRequest
@@ -202,6 +206,17 @@ class ChatViewModel(
                     currentFolders.firstOrNull { it.uuid == selectedUuid }
                         ?: currentFolders.firstOrNull()
             }
+        }
+        viewModelScope.launch {
+            combine(
+                userViewModel.activeAccountId,
+                userViewModel.baseUrl,
+                userViewModel.accessToken,
+            ) { accountId, baseUrl, accessToken ->
+                if (accessToken == null) null else accountId ?: baseUrl
+            }
+                .distinctUntilChanged()
+                .collectLatest(::restoreInboxSnapshotAvailability)
         }
     }
 
@@ -712,28 +727,32 @@ class ChatViewModel(
 
     private suspend fun refreshInboxInternal() {
         if (!inboxRefreshMutex.tryLock()) return
-        val previousState = _inboxSyncState.value
-        _inboxSyncState.value = previousState.copy(
-            refreshing = true,
-            error = null,
-        )
         try {
             val ownerKey = userViewModel.repo
                 .activeCredentialSnapshot()
                 .ownerKey
                 ?.takeIf(String::isNotBlank)
             if (ownerKey == null) {
-                failInboxRefresh("Не удалось определить активную учётную запись")
+                _inboxSyncState.value = InboxSyncState(
+                    hasLoaded = true,
+                    error = "Не удалось определить активную учётную запись",
+                )
                 return
             }
+            val previousState = _inboxSyncState.value
+                .takeIf { it.ownerKey == ownerKey }
+                ?: InboxSyncState(ownerKey = ownerKey)
+            _inboxSyncState.value = previousState.copy(
+                refreshing = true,
+                error = null,
+            )
 
             repeat(INBOX_CATALOG_REFRESH_ATTEMPTS) { attempt ->
                 if (!userViewModel.repo.isActiveCredentialOwner(ownerKey)) {
                     failInboxRefresh("Учётная запись изменилась во время обновления")
                     return
                 }
-                val streamsBeforeRequest = repo.streams.value
-                val topicsBeforeRequest = repo.streamTopics.value
+                val catalogBeforeRequest = repo.inboxCatalogReference()
 
                 val streamsResponse = client.performRequest(StreamsRequest())
                 val refreshedStreams = when (streamsResponse) {
@@ -776,27 +795,6 @@ class ChatViewModel(
                     return
                 }
 
-                val catalogChangedDuringRequest =
-                    repo.streams.value !== streamsBeforeRequest ||
-                        repo.streamTopics.value !== topicsBeforeRequest
-                when (
-                    decideInboxCatalogApply(
-                        catalogChangedDuringRequest = catalogChangedDuringRequest,
-                        attempt = attempt,
-                        maxAttempts = INBOX_CATALOG_REFRESH_ATTEMPTS,
-                    )
-                ) {
-                    InboxCatalogApplyDecision.RETRY -> return@repeat
-                    InboxCatalogApplyDecision.FAIL_BUSY -> {
-                        failInboxRefresh(
-                            "Каталог продолжает обновляться. " +
-                                "Повторите через несколько секунд",
-                        )
-                        return
-                    }
-                    InboxCatalogApplyDecision.APPLY -> Unit
-                }
-
                 val messagesByUuid = repo.messagesPool.value
                     .associateBy(MessageResponse::uuid)
                 val streamsWithMessages = refreshedStreams.map { stream ->
@@ -816,16 +814,48 @@ class ChatViewModel(
                     return
                 }
 
-                repo.setInitialStreams(streamsWithMessages)
-                repo.replaceAllStreamTopics(
-                    streamUuids = streamsWithMessages.map(Stream::uuid).toSet(),
-                    topics = topicsWithMessages,
-                )
+                val catalogApplied =
+                    userViewModel.repo.withActiveCredentialOwner(ownerKey) {
+                        repo.applyInboxCatalogIfUnchanged(
+                            expected = catalogBeforeRequest,
+                            streams = streamsWithMessages,
+                            topics = topicsWithMessages,
+                        )
+                    } == true
+                if (
+                    !catalogApplied &&
+                    !userViewModel.repo.isActiveCredentialOwner(ownerKey)
+                ) {
+                    failInboxRefresh(
+                        "Учётная запись изменилась во время обновления",
+                    )
+                    return
+                }
+                when (
+                    decideInboxCatalogApply(
+                        catalogChangedDuringRequest = !catalogApplied,
+                        attempt = attempt,
+                        maxAttempts = INBOX_CATALOG_REFRESH_ATTEMPTS,
+                    )
+                ) {
+                    InboxCatalogApplyDecision.RETRY -> return@repeat
+                    InboxCatalogApplyDecision.FAIL_BUSY -> {
+                        failInboxRefresh(
+                            "Каталог продолжает обновляться. " +
+                                "Повторите через несколько секунд",
+                        )
+                        return
+                    }
+                    InboxCatalogApplyDecision.APPLY -> check(catalogApplied)
+                }
                 _inboxSyncState.value = InboxSyncState(
+                    ownerKey = ownerKey,
                     refreshing = false,
                     hasLoaded = true,
+                    hasUsableSnapshot = true,
                     error = null,
                 )
+                persistInboxSnapshot(ownerKey)
                 return
             }
         } catch (cancellation: CancellationException) {
@@ -835,6 +865,59 @@ class ChatViewModel(
         } finally {
             _inboxSyncState.value = _inboxSyncState.value.copy(refreshing = false)
             inboxRefreshMutex.unlock()
+        }
+    }
+
+    private suspend fun restoreInboxSnapshotAvailability(ownerKey: String?) {
+        if (ownerKey.isNullOrBlank()) {
+            _inboxSyncState.value = InboxSyncState()
+            return
+        }
+        val markerAvailable = try {
+            userViewModel.workspaceSnapshotStore.readTimeline(
+                ownerKey = ownerKey,
+                kind = WorkspaceTimelineKind.INBOX,
+            ) != null
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (_: Exception) {
+            false
+        }
+        userViewModel.repo.withActiveCredentialOwner(ownerKey) {
+            val current = _inboxSyncState.value
+            _inboxSyncState.value = if (current.ownerKey == ownerKey) {
+                current.copy(
+                    hasLoaded = current.hasLoaded || markerAvailable,
+                    hasUsableSnapshot =
+                        current.hasUsableSnapshot || markerAvailable,
+                )
+            } else {
+                InboxSyncState(
+                    ownerKey = ownerKey,
+                    hasLoaded = markerAvailable,
+                    hasUsableSnapshot = markerAvailable,
+                )
+            }
+        }
+    }
+
+    private suspend fun persistInboxSnapshot(ownerKey: String) {
+        try {
+            userViewModel.repo.withActiveCredentialOwner(ownerKey) {
+                userViewModel.workspaceSnapshotStore.write(
+                    ownerKey = ownerKey,
+                    snapshot = repo.workspaceSnapshot(),
+                )
+                userViewModel.workspaceSnapshotStore.writeTimeline(
+                    ownerKey = ownerKey,
+                    kind = WorkspaceTimelineKind.INBOX,
+                    snapshot = WorkspaceTimelineSnapshot(),
+                )
+            }
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (_: Exception) {
+            // A cache write failure never turns a valid online Inbox into error.
         }
     }
 

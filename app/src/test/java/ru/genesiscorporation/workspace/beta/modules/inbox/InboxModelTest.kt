@@ -1,6 +1,7 @@
 package ru.genesiscorporation.workspace.beta.modules.inbox
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ProviderReference
@@ -198,6 +199,29 @@ class InboxModelTest {
                 catalogChangedDuringRequest = true,
                 attempt = 1,
                 maxAttempts = 2,
+            ),
+        )
+    }
+
+    @Test
+    fun `authoritative empty snapshot remains displayable after offline refresh failure`() {
+        assertTrue(
+            hasDisplayableInboxSnapshot(
+                groups = emptyList(),
+                state = InboxSyncState(
+                    hasLoaded = true,
+                    hasUsableSnapshot = true,
+                    error = "offline",
+                ),
+            ),
+        )
+        assertFalse(
+            hasDisplayableInboxSnapshot(
+                groups = emptyList(),
+                state = InboxSyncState(
+                    hasLoaded = true,
+                    error = "offline",
+                ),
             ),
         )
     }

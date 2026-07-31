@@ -38,10 +38,17 @@ data class InboxGroup(
 )
 
 data class InboxSyncState(
+    val ownerKey: String? = null,
     val refreshing: Boolean = false,
     val hasLoaded: Boolean = false,
+    val hasUsableSnapshot: Boolean = false,
     val error: String? = null,
 )
+
+internal fun hasDisplayableInboxSnapshot(
+    groups: List<InboxGroup>,
+    state: InboxSyncState,
+): Boolean = groups.isNotEmpty() || state.hasUsableSnapshot
 
 internal enum class InboxCatalogApplyDecision {
     APPLY,

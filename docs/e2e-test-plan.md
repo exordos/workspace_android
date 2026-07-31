@@ -175,6 +175,7 @@ topic is never archived or used for destructive/read-state acceptance.
 | INBOX-010 | Cross-client read convergence | Opening an exact sandbox topic marks it read through the existing conversation path; the Android Inbox row and desktop Inbox converge without duplicates or stale badges |
 | INBOX-011 | Rotation/background/back-stack | Selected route, list position and one retained refresh survive portrait/landscape/background; Back returns to the prior chat catalog |
 | INBOX-012 | Accessibility and large catalog | All enabled actions have labels and at least 44 dp targets; TalkBack reads title/count/time; a large catalog scrolls without key collisions, ANR or excessive request fan-out |
+| INBOX-013 | Cold offline restart after non-empty or empty sync | The exact owner's encrypted catalog plus Inbox success marker restore content-ready unread rows or a truthful empty state before REST; an account never synced remains loading/error rather than claiming empty |
 
 ### Current Inbox acceptance coverage
 
@@ -184,18 +185,27 @@ topic is never archived or used for destructive/read-state acceptance.
 - Contract tests prove a per-stream request includes its exact UUID while the
   desktop-parity all-topics request omits the filter.
 - Repository tests prove an authoritative snapshot removes stale topic rows,
-  records streams with no topics and rejects foreign rows at the boundary.
+  records streams with no topics, rejects foreign rows at the boundary and
+  atomically refuses a REST catalog if realtime changed either projection.
 - The deterministic refresh decision matrix proves a concurrent realtime
   change is applied only after a clean retry and is never silently overwritten.
+- The owner-scoped Room catalog now records an independent zero-row Inbox
+  success marker after the catalog write. This distinguishes a successful
+  empty snapshot from an account that has never synced without duplicating
+  catalog rows or changing the schema.
 - The full 110-task unit/lint/APK/test-APK gate passes. On the physical Android
-  14 Pixel, the online empty state, explicit refresh, offline network error,
-  restored-connectivity Retry, portrait/landscape recreation, Back route,
-  semantics labels and 48 dp header actions pass without crash or ANR.
-- A naturally unread sandbox conversation was not available under the required
-  primary account. Physical unread-card rendering, exact row navigation,
-  visible-desktop read convergence, controlled account-switch and delayed
-  response injection remain open; no production/task topic was mutated to
-  fabricate coverage.
+  14 Pixel, the online non-empty state reported five unread messages in two
+  exact rows from the dedicated sandbox stream. Room v3 held 15 streams,
+  120 topics, one Inbox marker and zero Inbox message rows. A 1.194-second
+  fully cold offline start restored both rows, exposed a real recoverable
+  network error/Retry, and converged after connectivity returned without
+  loading flash, crash or ANR. Earlier empty, rotation, Back, semantics and
+  48 dp header-action acceptance remains green.
+- Exact row navigation and visible-desktop read convergence remain open because
+  opening either available sandbox row would mutate its read state during this
+  cache-only pass. Controlled authoritative-empty, account-switch and delayed
+  response injection also remain open; the active task-reporting topic was not
+  opened or mutated.
 
 ## Feed scenarios
 
@@ -715,14 +725,17 @@ and is replaced only while the same credential owner remains active.
 | OFFLINE-013 | Upgrade an installed schema-v1 cache to schema v2 | Existing encrypted streams/topics/messages survive; empty folder/user/binding tables are added with exact indices; startup requires no destructive fallback | Exact migration instrumentation and physical in-place Pixel upgrade passed |
 | OFFLINE-014 | Upgrade schema v2 to v3 or directly v1 to v3 | Existing catalog/history/member rows survive; empty Feed/Starred tables and exact owner/kind/position index are created without destructive fallback | Exact sequential migration instrumentation defined; physical v2→v3 in-place acceptance pending |
 | OFFLINE-015 | Authoritative empty timeline versus missing cache | An empty successful Feed/Starred response is encrypted as metadata with zero rows and restores as content-ready empty; an account/kind never cached returns no projection and still attempts REST | Store instrumentation and physical offline empty Starred acceptance passed |
+| OFFLINE-016 | Authoritative Inbox marker versus missing cache | A successful catalog write is followed by an encrypted owner-scoped zero-row Inbox marker; cached rows or confirmed empty remain usable on a cold failed refresh, while a missing/corrupt marker never fabricates an empty Inbox | Store instrumentation and repository/UI-model coverage; physical non-empty cold-offline restore/Retry passed with one marker and zero duplicate message rows; physical authoritative-empty injection pending |
 
 Current verified coverage: the exact owner-scoped instrumentation class passes
 encrypted round-trip, account separation, ciphertext replay rejection,
 invalid/local/catalog-row exclusion, bounds and selective clear. The same
 class now covers independent encrypted Feed/Starred timelines, authoritative
 empty state, 500-row retention, damaged-row isolation and cross-owner/kind
-replay rejection. Exact migrations preserve schema-v1 history, add the three
-schema-v2 catalog tables and then add the schema-v3 timeline tables. Repository
+replay rejection. It also covers the zero-row Inbox success marker without
+storing duplicate message rows. Exact migrations preserve schema-v1 history,
+add the three schema-v2 catalog tables and then add the schema-v3 timeline
+tables. Repository
 tests prove cache-under-current merging, an
 authoritative-empty race fence, and realtime binding add/delete projection. On
 the physical Pixel, an installed schema-v1 cache upgraded in place, an online
