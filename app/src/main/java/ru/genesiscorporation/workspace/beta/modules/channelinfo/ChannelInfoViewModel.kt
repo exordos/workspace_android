@@ -41,7 +41,12 @@ class ChannelInfoViewModel(
     val client: WorkspaceAPIClient,
     val repo: EventsRepository,
 ) : ViewModel() {
-    private val bindings = MutableStateFlow<List<StreamBindingResponseData>?>(null)
+    private val bindings = MutableStateFlow<List<StreamBindingResponseData>?>(
+        repo.streamBindings.value
+            .filter { it.streamUuid == streamUuid }
+            .takeIf(List<StreamBindingResponseData>::isNotEmpty),
+    )
+    private val bindingsAuthoritative = MutableStateFlow(false)
     private val _muteInProgress = MutableStateFlow(false)
     val muteInProgress: StateFlow<Boolean> = _muteInProgress
     private val _actionError = MutableStateFlow<String?>(null)
@@ -73,8 +78,9 @@ class ChannelInfoViewModel(
     val availableUsers: StateFlow<List<UserResponseData>> = combine(
         repo.users,
         bindings,
-    ) { users, loadedBindings ->
-        if (loadedBindings == null) {
+        bindingsAuthoritative,
+    ) { users, loadedBindings, authoritative ->
+        if (loadedBindings == null || !authoritative) {
             return@combine emptyList()
         }
         val memberUserUuids = loadedBindings
@@ -149,6 +155,7 @@ class ChannelInfoViewModel(
             memberUserUuid = member.user.uuid,
             currentUserUuid = client.userViewModel.userId.value,
             ownerUuid = stream.value?.owner,
+            bindingsAuthoritative = bindingsAuthoritative.value,
         )
 
     fun addMembers(userUuids: Collection<String>): Long = launchMemberAction(
@@ -163,7 +170,7 @@ class ChannelInfoViewModel(
     ): Boolean {
         if (!memberActionMutex.tryLock()) return false
         val loadedBindings = bindings.value
-        if (loadedBindings == null) {
+        if (loadedBindings == null || !bindingsAuthoritative.value) {
             _actionError.value = "Сначала загрузите актуальный список участников"
             memberActionMutex.unlock()
             return false
@@ -190,13 +197,15 @@ class ChannelInfoViewModel(
                 )
             ) {
                 is ApiResult.Success -> {
-                    bindings.value = (
+                    val updatedBindings = (
                         bindings.value
                             .orEmpty()
                             .filterNot { existing ->
                                 response.value.any { it.uuid == existing.uuid }
                             } + response.value
                     )
+                    repo.replaceStreamBindings(streamUuid, updatedBindings)
+                    bindings.value = updatedBindings
                     true
                 }
 
@@ -238,9 +247,11 @@ class ChannelInfoViewModel(
                 )
             ) {
                 is ApiResult.Success -> {
-                    bindings.value = bindings.value
+                    val updatedBindings = bindings.value
                         .orEmpty()
                         .filterNot { it.uuid == member.bindingUuid }
+                    repo.replaceStreamBindings(streamUuid, updatedBindings)
+                    bindings.value = updatedBindings
                     if (member.user.uuid == client.userViewModel.userId.value) {
                         repo.removeStream(streamUuid)
                         _leftStream.value = true
@@ -281,18 +292,20 @@ class ChannelInfoViewModel(
         if (!memberActionMutex.tryLock()) return
         _memberActionInProgress.value = true
         try {
-            bindings.value = when (
+            when (
                 val response = client.performRequest(StreamBindingsRequest(streamUuid))
             ) {
                 is ApiResult.Success -> {
                     _memberLoadError.value = null
-                    response.value
+                    repo.replaceStreamBindings(streamUuid, response.value)
+                    bindings.value = response.value
+                    bindingsAuthoritative.value = true
                 }
 
                 is ApiResult.Error -> {
+                    bindingsAuthoritative.value = false
                     _memberLoadError.value = response.error.message
                         ?: "Не удалось загрузить участников"
-                    null
                 }
             }
         } finally {
@@ -338,8 +351,10 @@ internal fun canRemoveChannelMember(
     memberUserUuid: String,
     currentUserUuid: String?,
     ownerUuid: String?,
+    bindingsAuthoritative: Boolean = true,
 ): Boolean =
-    currentUserUuid != null &&
+    bindingsAuthoritative &&
+        currentUserUuid != null &&
         (
             memberUserUuid == currentUserUuid ||
                 ownerUuid == currentUserUuid

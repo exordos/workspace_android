@@ -141,7 +141,7 @@ class WorkspaceViewModel(
             launch {
                 var cacheContainsData =
                     cachedSnapshot?.hasPersistableData() == true
-                combine(
+                val conversationSnapshot = combine(
                     repo.streams,
                     repo.streamTopics,
                     repo.streamTopicMessages,
@@ -150,6 +150,18 @@ class WorkspaceViewModel(
                         streams = streams,
                         topicsByStream = topics,
                         messagesByConversation = messages,
+                    )
+                }
+                combine(
+                    conversationSnapshot,
+                    repo.folders,
+                    repo.users,
+                    repo.streamBindings,
+                ) { snapshot, folders, users, streamBindings ->
+                    snapshot.copy(
+                        folders = folders,
+                        users = users,
+                        streamBindings = streamBindings,
                     )
                 }
                     .debounce(SNAPSHOT_WRITE_DEBOUNCE_MILLIS)
@@ -189,7 +201,10 @@ private fun ru.genesiscorporation.workspace.beta.data.WorkspaceSnapshot
     .hasPersistableData(): Boolean =
     streams.isNotEmpty() ||
         topicsByStream.values.any { it.isNotEmpty() } ||
-        messagesByConversation.values.any { it.isNotEmpty() }
+        messagesByConversation.values.any { it.isNotEmpty() } ||
+        folders.isNotEmpty() ||
+        users.isNotEmpty() ||
+        streamBindings.isNotEmpty()
 
 private const val SNAPSHOT_TAG = "WorkspaceSnapshot"
 private const val SNAPSHOT_WRITE_DEBOUNCE_MILLIS = 750L

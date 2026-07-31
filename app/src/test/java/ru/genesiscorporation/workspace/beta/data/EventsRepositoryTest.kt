@@ -4,10 +4,13 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderItem
+import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponsePayload
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ProviderReference
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
+import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamBindingResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 
@@ -46,6 +49,15 @@ class EventsRepositoryTest {
                 message("local-pending", "outbox"),
             ),
         )
+        repository.setInitialFolders(
+            listOf(folder("Network folder")),
+        )
+        repository.setInitialUsers(
+            listOf(user("network-user")),
+        )
+        repository.setInitialStreamBindings(
+            listOf(binding(role = "owner")),
+        )
 
         repository.hydrateCachedSnapshot(
             WorkspaceSnapshot(
@@ -69,6 +81,9 @@ class EventsRepositoryTest {
                         message("cached-only", "offline history"),
                     ),
                 ),
+                folders = listOf(folder("Cached folder")),
+                users = listOf(user("cached-user")),
+                streamBindings = listOf(binding(role = "member")),
             ),
         )
 
@@ -89,11 +104,85 @@ class EventsRepositoryTest {
         assertTrue(messages.any { it.uuid == "cached-only" })
         assertTrue(messages.any { it.uuid == "local-pending" })
         assertEquals(
+            "Network folder",
+            repository.folders.value.single().title,
+        )
+        assertEquals(
+            "network-user",
+            repository.users.value.single().username,
+        )
+        assertEquals(
+            "owner",
+            repository.streamBindings.value.single().role,
+        )
+        assertEquals(
             messages.map(MessageResponse::uuid),
             repository.workspaceSnapshot()
                 .messagesByConversation
                 .getValue(TOPIC_KEY)
                 .map(MessageResponse::uuid),
+        )
+        assertEquals(
+            repository.folders.value,
+            repository.workspaceSnapshot().folders,
+        )
+        assertEquals(
+            repository.users.value,
+            repository.workspaceSnapshot().users,
+        )
+        assertEquals(
+            repository.streamBindings.value,
+            repository.workspaceSnapshot().streamBindings,
+        )
+    }
+
+    @Test
+    fun `authoritative empty catalog projections are not repopulated by cache`() {
+        val repository = EventsRepository()
+        repository.setInitialFolders(emptyList())
+        repository.setInitialUsers(emptyList())
+        repository.setInitialStreamBindings(emptyList())
+
+        repository.hydrateCachedSnapshot(
+            WorkspaceSnapshot(
+                folders = listOf(folder("Stale folder")),
+                users = listOf(user("stale-user")),
+                streamBindings = listOf(binding(role = "member")),
+            ),
+        )
+
+        assertTrue(repository.folders.value.isEmpty())
+        assertTrue(repository.users.value.isEmpty())
+        assertTrue(repository.streamBindings.value.isEmpty())
+    }
+
+    @Test
+    fun `account reset permits the next owner cache to hydrate`() {
+        val repository = EventsRepository()
+        repository.setInitialFolders(emptyList())
+        repository.setInitialUsers(emptyList())
+        repository.setInitialStreamBindings(emptyList())
+
+        repository.resetAccountState()
+        repository.hydrateCachedSnapshot(
+            WorkspaceSnapshot(
+                folders = listOf(folder("Next owner folder")),
+                users = listOf(user("next-owner")),
+                streamBindings = listOf(binding(role = "member")),
+            ),
+        )
+
+        assertEquals(
+            "Next owner folder",
+            repository.folders.value.single().title,
+        )
+        assertEquals(
+            "next-owner",
+            repository.users.value.single().username,
+        )
+        assertEquals(
+            "member",
+            repository.streamBindings.value.single().role,
         )
     }
 
@@ -195,6 +284,60 @@ class EventsRepositoryTest {
         assertEquals("generation", repository.epochGeneration)
         assertEquals(1, repository.streams.value.size)
         assertEquals(0L, repository.realtimeRecoveryVersion.value)
+    }
+
+    @Test
+    fun `stream binding realtime events update the cached membership projection`() {
+        val repository = EventsRepository()
+
+        repository.processTextFrame(
+            """
+            {
+              "schema_version": 1,
+              "epoch_version": 1,
+              "object_type": "stream_binding",
+              "action": "created",
+              "payload": {
+                "kind": "stream_bindings.created",
+                "uuid": "$STREAM_UUID",
+                "items": [
+                  {
+                    "uuid": "binding-1",
+                    "stream_uuid": "$STREAM_UUID",
+                    "user_uuid": "$USER_UUID",
+                    "who_uuid": "$USER_UUID",
+                    "role": "member",
+                    "notification_mode": "mentions_only"
+                  }
+                ]
+              }
+            }
+            """.trimIndent(),
+        )
+
+        assertEquals(
+            listOf("binding-1"),
+            repository.streamBindings.value.map { it.uuid },
+        )
+
+        repository.processTextFrame(
+            """
+            {
+              "schema_version": 1,
+              "epoch_version": 2,
+              "object_type": "stream_binding",
+              "action": "deleted",
+              "payload": {
+                "kind": "stream_binding.deleted",
+                "uuid": "binding-1",
+                "stream_uuid": "$STREAM_UUID",
+                "user_uuid": "$USER_UUID"
+              }
+            }
+            """.trimIndent(),
+        )
+
+        assertTrue(repository.streamBindings.value.isEmpty())
     }
 
     @Test
@@ -1436,6 +1579,38 @@ class EventsRepositoryTest {
         isPrivate = false,
         notificationMode = notificationMode,
         defaultTopicUuid = defaultTopicUuid,
+    )
+
+    private fun folder(title: String) = FolderResponseData(
+        uuid = "folder-1",
+        title = title,
+        unreadCount = 0,
+        systemType = "created",
+        creationDate = "2026-07-26T00:00:00Z",
+        items = listOf(
+            FolderItem(
+                uuid = "folder-item-1",
+                folderUuid = "folder-1",
+                streamUuid = STREAM_UUID,
+                chatType = "stream",
+                unreadCount = 0,
+            ),
+        ),
+    )
+
+    private fun user(username: String) = UserResponseData(
+        username = username,
+        uuid = USER_UUID,
+        status = "active",
+        avatar = "",
+    )
+
+    private fun binding(role: String) = StreamBindingResponseData(
+        uuid = "binding-1",
+        streamUuid = STREAM_UUID,
+        userUuid = USER_UUID,
+        whoUuid = USER_UUID,
+        role = role,
     )
 
     companion object {

@@ -40,6 +40,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageReaction
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
+import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamBindingResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.canonicalExternalIntegrationUuid
@@ -152,6 +153,39 @@ class EventsRepository(
     }
 
     var currentUser: UserResponseData? = null
+    private val catalogProjectionLock = Any()
+    private var foldersProjectionInitialized = false
+    private var usersProjectionInitialized = false
+    private var streamBindingsProjectionInitialized = false
+
+    private fun mutateFolders(
+        transform: (List<FolderResponseData>) -> List<FolderResponseData>,
+    ) {
+        synchronized(catalogProjectionLock) {
+            foldersProjectionInitialized = true
+            _folders.value = transform(_folders.value)
+        }
+    }
+
+    private fun mutateUsers(
+        transform: (List<UserResponseData>) -> List<UserResponseData>,
+    ) {
+        synchronized(catalogProjectionLock) {
+            usersProjectionInitialized = true
+            _users.value = transform(_users.value)
+        }
+    }
+
+    private fun mutateStreamBindings(
+        transform: (
+            List<StreamBindingResponseData>,
+        ) -> List<StreamBindingResponseData>,
+    ) {
+        synchronized(catalogProjectionLock) {
+            streamBindingsProjectionInitialized = true
+            _streamBindings.value = transform(_streamBindings.value)
+        }
+    }
 
     fun resetAccountState() {
         synchronized(realtimeControlLock) {
@@ -166,9 +200,15 @@ class EventsRepository(
         _streamTopics.value = emptyMap()
         _messagesPool.value = emptyList()
         _userReactions.value = emptyList()
-        _users.value = emptyList()
         _streams.value = emptyList()
-        _folders.value = emptyList()
+        synchronized(catalogProjectionLock) {
+            foldersProjectionInitialized = false
+            usersProjectionInitialized = false
+            streamBindingsProjectionInitialized = false
+            _folders.value = emptyList()
+            _users.value = emptyList()
+            _streamBindings.value = emptyList()
+        }
         clearExternalProjections()
     }
 
@@ -233,12 +273,26 @@ class EventsRepository(
                 incoming = current,
             )
         }
+        synchronized(catalogProjectionLock) {
+            if (!foldersProjectionInitialized) {
+                _folders.value = snapshot.folders
+            }
+            if (!usersProjectionInitialized) {
+                _users.value = snapshot.users
+            }
+            if (!streamBindingsProjectionInitialized) {
+                _streamBindings.value = snapshot.streamBindings
+            }
+        }
     }
 
     fun workspaceSnapshot(): WorkspaceSnapshot = WorkspaceSnapshot(
         streams = _streams.value,
         topicsByStream = _streamTopics.value,
         messagesByConversation = _streamTopicMessages.value,
+        folders = _folders.value,
+        users = _users.value,
+        streamBindings = _streamBindings.value,
     )
 
     private fun invalidateDerivedStateForExpiredCursor() {
@@ -253,9 +307,15 @@ class EventsRepository(
         _streamTopics.value = emptyMap()
         _messagesPool.value = emptyList()
         _userReactions.value = emptyList()
-        _users.value = emptyList()
         _streams.value = emptyList()
-        _folders.value = emptyList()
+        synchronized(catalogProjectionLock) {
+            foldersProjectionInitialized = false
+            usersProjectionInitialized = false
+            streamBindingsProjectionInitialized = false
+            _folders.value = emptyList()
+            _users.value = emptyList()
+            _streamBindings.value = emptyList()
+        }
         clearExternalProjections()
         _realtimeRecoveryVersion.update { it + 1L }
     }
@@ -934,7 +994,7 @@ class EventsRepository(
             }
         }
         val streamUnreadCount = projectedUnreadCount ?: return
-        _folders.update { current ->
+        mutateFolders { current ->
             current.map { folder ->
                 if (folder.items.none { it.streamUuid == streamUuid }) {
                     folder
@@ -1037,7 +1097,7 @@ class EventsRepository(
     val users: StateFlow<List<UserResponseData>> = _users.asStateFlow()
 
     fun updateUser(updatedUser: UserResponseData) {
-        _users.update { current ->
+        mutateUsers { current ->
             current.map { user ->
                 if (user.uuid == updatedUser.uuid) {
                     user.copy(
@@ -1057,20 +1117,60 @@ class EventsRepository(
     }
 
     fun addUser(newUser: UserResponseData) {
-        _users.update { current ->
+        mutateUsers { current ->
             current + newUser
         }
     }
 
     fun setInitialUsers(newList: List<UserResponseData>) {
-        _users.update {
+        mutateUsers {
             newList
         }
     }
 
     fun removeUser(userUuid: String) {
-        _users.update { current ->
+        mutateUsers { current ->
             current.filterNot { it.uuid == userUuid }
+        }
+        mutateStreamBindings { current ->
+            current.filterNot { it.userUuid == userUuid }
+        }
+    }
+
+    private val _streamBindings =
+        MutableStateFlow<List<StreamBindingResponseData>>(emptyList())
+    val streamBindings: StateFlow<List<StreamBindingResponseData>> =
+        _streamBindings.asStateFlow()
+
+    fun setInitialStreamBindings(
+        newList: List<StreamBindingResponseData>,
+    ) {
+        mutateStreamBindings { newList }
+    }
+
+    fun replaceStreamBindings(
+        streamUuid: String,
+        newList: List<StreamBindingResponseData>,
+    ) {
+        mutateStreamBindings { current ->
+            current.filterNot { it.streamUuid == streamUuid } +
+                newList.filter { it.streamUuid == streamUuid }
+        }
+    }
+
+    fun addStreamBindings(
+        newBindings: List<StreamBindingResponseData>,
+    ) {
+        if (newBindings.isEmpty()) return
+        val replacementUuids = newBindings.mapTo(mutableSetOf()) { it.uuid }
+        mutateStreamBindings { current ->
+            current.filterNot { it.uuid in replacementUuids } + newBindings
+        }
+    }
+
+    fun removeStreamBinding(bindingUuid: String) {
+        mutateStreamBindings { current ->
+            current.filterNot { it.uuid == bindingUuid }
         }
     }
 
@@ -1108,7 +1208,7 @@ class EventsRepository(
                 }
             }
         }
-        _folders.update { current ->
+        mutateFolders { current ->
             current.map { folder ->
                 if (folder.items.none { it.streamUuid == updatedStream.uuid }) {
                     folder
@@ -1149,7 +1249,10 @@ class EventsRepository(
         _streamTopicMessages.update { current ->
             current.filterKeys { key -> !key.startsWith("$streamUuid.") }
         }
-        _folders.update { current ->
+        mutateStreamBindings { current ->
+            current.filterNot { it.streamUuid == streamUuid }
+        }
+        mutateFolders { current ->
             current.map { folder ->
                 val remainingItems = folder.items.filterNot { it.streamUuid == streamUuid }
                 folder.copy(
@@ -1163,7 +1266,7 @@ class EventsRepository(
     private val _folders = MutableStateFlow<List<FolderResponseData>>(emptyList())
     val folders: StateFlow<List<FolderResponseData>> = _folders.asStateFlow()
     fun updateFolder(updatedFolder: FolderResponseData) {
-        _folders.update { current ->
+        mutateFolders { current ->
             current.map { folder ->
                 if (folder.uuid == updatedFolder.uuid) {
                     folder.copy(
@@ -1179,25 +1282,25 @@ class EventsRepository(
     }
 
     fun addFolder(newFolder: FolderResponseData) {
-        _folders.update { current ->
+        mutateFolders { current ->
             current.filterNot { it.uuid == newFolder.uuid } + newFolder
         }
     }
 
     fun setInitialFolders(newList: List<FolderResponseData>) {
-        _folders.update {
+        mutateFolders {
             newList
         }
     }
 
     fun removeFolder(folderUuid: String) {
-        _folders.update { current ->
+        mutateFolders { current ->
             current.filterNot { it.uuid == folderUuid }
         }
     }
 
     fun removeFolderItem(folderItemUuid: String) {
-        _folders.update { current ->
+        mutateFolders { current ->
             current.map { folder ->
                 val remainingItems = folder.items.filterNot { it.uuid == folderItemUuid }
                 folder.copy(
@@ -1756,6 +1859,7 @@ class EventsRepository(
             "user" -> didReceiveUserEvent(payload, action)
             "folder" -> didReceiveFolderEvent(payload, action)
             "folder_item" -> didReceiveFolderItemEvent(payload, action)
+            "stream_binding" -> didReceiveStreamBindingEvent(payload, action)
             "stream" -> didReceiveStreamEvent(payload, action)
             "topic" -> didReceiveTopicEvent(payload, action)
             "message_reaction" -> didReceiveReactionEvent(payload, action)
@@ -1858,6 +1962,32 @@ class EventsRepository(
     fun didReceiveFolderItemEvent(payload: String, action: String) {
         if (action == "deleted") {
             removeFolderItem(json.decodeFromString<DeletedObjectPayload>(payload).uuid)
+        }
+    }
+
+    fun didReceiveStreamBindingEvent(payload: String, action: String) {
+        when (action) {
+            "created" -> {
+                val event =
+                    json.decodeFromString<StreamBindingsCreatedPayload>(payload)
+                if (
+                    event.items.any { it.streamUuid != event.uuid } ||
+                    event.items.map(StreamBindingResponseData::uuid)
+                        .distinct()
+                        .size != event.items.size
+                ) {
+                    logRealtimeWarning(
+                        "Ignored malformed stream binding event",
+                    )
+                    return
+                }
+                addStreamBindings(event.items)
+            }
+            "deleted" -> {
+                val event =
+                    json.decodeFromString<DeletedStreamBindingPayload>(payload)
+                removeStreamBinding(event.uuid)
+            }
         }
     }
 
@@ -2054,6 +2184,17 @@ private data class ExternalSnapshotEventPayload(
     val kind: String,
     val uuid: String,
     val snapshot: JsonObject,
+)
+
+@Serializable
+private data class StreamBindingsCreatedPayload(
+    val uuid: String,
+    val items: List<StreamBindingResponseData>,
+)
+
+@Serializable
+private data class DeletedStreamBindingPayload(
+    val uuid: String,
 )
 
 enum class RealtimeConnectionState {

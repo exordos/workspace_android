@@ -1,0 +1,383 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 2,
+    "identityHash": "d03ccc3e753e476d6b9ded52b80e9bef",
+    "entities": [
+      {
+        "tableName": "cached_streams",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`owner_key_hash` TEXT NOT NULL, `uuid` TEXT NOT NULL, `position` INTEGER NOT NULL, `encrypted_payload` BLOB NOT NULL, `cached_at_millis` INTEGER NOT NULL, PRIMARY KEY(`owner_key_hash`, `uuid`))",
+        "fields": [
+          {
+            "fieldPath": "ownerKeyHash",
+            "columnName": "owner_key_hash",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "uuid",
+            "columnName": "uuid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "encryptedPayload",
+            "columnName": "encrypted_payload",
+            "affinity": "BLOB",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cachedAtMillis",
+            "columnName": "cached_at_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "owner_key_hash",
+            "uuid"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_cached_streams_owner_key_hash_position",
+            "unique": false,
+            "columnNames": [
+              "owner_key_hash",
+              "position"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_cached_streams_owner_key_hash_position` ON `${TABLE_NAME}` (`owner_key_hash`, `position`)"
+          }
+        ]
+      },
+      {
+        "tableName": "cached_topics",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`owner_key_hash` TEXT NOT NULL, `uuid` TEXT NOT NULL, `stream_uuid` TEXT NOT NULL, `position` INTEGER NOT NULL, `encrypted_payload` BLOB NOT NULL, `cached_at_millis` INTEGER NOT NULL, PRIMARY KEY(`owner_key_hash`, `uuid`))",
+        "fields": [
+          {
+            "fieldPath": "ownerKeyHash",
+            "columnName": "owner_key_hash",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "uuid",
+            "columnName": "uuid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "streamUuid",
+            "columnName": "stream_uuid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "encryptedPayload",
+            "columnName": "encrypted_payload",
+            "affinity": "BLOB",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cachedAtMillis",
+            "columnName": "cached_at_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "owner_key_hash",
+            "uuid"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_cached_topics_owner_key_hash_stream_uuid_position",
+            "unique": false,
+            "columnNames": [
+              "owner_key_hash",
+              "stream_uuid",
+              "position"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_cached_topics_owner_key_hash_stream_uuid_position` ON `${TABLE_NAME}` (`owner_key_hash`, `stream_uuid`, `position`)"
+          }
+        ]
+      },
+      {
+        "tableName": "cached_messages",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`owner_key_hash` TEXT NOT NULL, `uuid` TEXT NOT NULL, `stream_uuid` TEXT NOT NULL, `topic_uuid` TEXT NOT NULL, `position` INTEGER NOT NULL, `created_at_millis` INTEGER NOT NULL, `updated_at_millis` INTEGER NOT NULL, `encrypted_payload` BLOB NOT NULL, `cached_at_millis` INTEGER NOT NULL, PRIMARY KEY(`owner_key_hash`, `uuid`))",
+        "fields": [
+          {
+            "fieldPath": "ownerKeyHash",
+            "columnName": "owner_key_hash",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "uuid",
+            "columnName": "uuid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "streamUuid",
+            "columnName": "stream_uuid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "topicUuid",
+            "columnName": "topic_uuid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtMillis",
+            "columnName": "created_at_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtMillis",
+            "columnName": "updated_at_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "encryptedPayload",
+            "columnName": "encrypted_payload",
+            "affinity": "BLOB",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cachedAtMillis",
+            "columnName": "cached_at_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "owner_key_hash",
+            "uuid"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_cached_messages_owner_key_hash_stream_uuid_topic_uuid_position",
+            "unique": false,
+            "columnNames": [
+              "owner_key_hash",
+              "stream_uuid",
+              "topic_uuid",
+              "position"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_cached_messages_owner_key_hash_stream_uuid_topic_uuid_position` ON `${TABLE_NAME}` (`owner_key_hash`, `stream_uuid`, `topic_uuid`, `position`)"
+          }
+        ]
+      },
+      {
+        "tableName": "cached_folders",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`owner_key_hash` TEXT NOT NULL, `uuid` TEXT NOT NULL, `position` INTEGER NOT NULL, `encrypted_payload` BLOB NOT NULL, `cached_at_millis` INTEGER NOT NULL, PRIMARY KEY(`owner_key_hash`, `uuid`))",
+        "fields": [
+          {
+            "fieldPath": "ownerKeyHash",
+            "columnName": "owner_key_hash",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "uuid",
+            "columnName": "uuid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "encryptedPayload",
+            "columnName": "encrypted_payload",
+            "affinity": "BLOB",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cachedAtMillis",
+            "columnName": "cached_at_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "owner_key_hash",
+            "uuid"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_cached_folders_owner_key_hash_position",
+            "unique": false,
+            "columnNames": [
+              "owner_key_hash",
+              "position"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_cached_folders_owner_key_hash_position` ON `${TABLE_NAME}` (`owner_key_hash`, `position`)"
+          }
+        ]
+      },
+      {
+        "tableName": "cached_users",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`owner_key_hash` TEXT NOT NULL, `uuid` TEXT NOT NULL, `position` INTEGER NOT NULL, `encrypted_payload` BLOB NOT NULL, `cached_at_millis` INTEGER NOT NULL, PRIMARY KEY(`owner_key_hash`, `uuid`))",
+        "fields": [
+          {
+            "fieldPath": "ownerKeyHash",
+            "columnName": "owner_key_hash",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "uuid",
+            "columnName": "uuid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "encryptedPayload",
+            "columnName": "encrypted_payload",
+            "affinity": "BLOB",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cachedAtMillis",
+            "columnName": "cached_at_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "owner_key_hash",
+            "uuid"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_cached_users_owner_key_hash_position",
+            "unique": false,
+            "columnNames": [
+              "owner_key_hash",
+              "position"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_cached_users_owner_key_hash_position` ON `${TABLE_NAME}` (`owner_key_hash`, `position`)"
+          }
+        ]
+      },
+      {
+        "tableName": "cached_stream_bindings",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`owner_key_hash` TEXT NOT NULL, `uuid` TEXT NOT NULL, `stream_uuid` TEXT NOT NULL, `position` INTEGER NOT NULL, `encrypted_payload` BLOB NOT NULL, `cached_at_millis` INTEGER NOT NULL, PRIMARY KEY(`owner_key_hash`, `uuid`))",
+        "fields": [
+          {
+            "fieldPath": "ownerKeyHash",
+            "columnName": "owner_key_hash",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "uuid",
+            "columnName": "uuid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "streamUuid",
+            "columnName": "stream_uuid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "encryptedPayload",
+            "columnName": "encrypted_payload",
+            "affinity": "BLOB",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cachedAtMillis",
+            "columnName": "cached_at_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "owner_key_hash",
+            "uuid"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_cached_stream_bindings_owner_key_hash_stream_uuid_position",
+            "unique": false,
+            "columnNames": [
+              "owner_key_hash",
+              "stream_uuid",
+              "position"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_cached_stream_bindings_owner_key_hash_stream_uuid_position` ON `${TABLE_NAME}` (`owner_key_hash`, `stream_uuid`, `position`)"
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'd03ccc3e753e476d6b9ded52b80e9bef')"
+    ]
+  }
+}

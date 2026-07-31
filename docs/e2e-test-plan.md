@@ -680,28 +680,33 @@ and is replaced only while the same credential owner remains active.
 
 | ID | Scenario | Main assertions | Current coverage |
 | --- | --- | --- | --- |
-| OFFLINE-001 | Online sync followed by force-stop and radio-off cold launch | Cached stream/topic catalog appears with an explicit stale banner before any network success; no login flash, crash or blank primary screen | Physical Android 14 Pixel passed; 1.243 s cold catalog |
+| OFFLINE-001 | Online sync followed by force-stop and radio-off cold launch | Cached stream/topic/folder catalog, users and memberships appear with an explicit stale banner before any network success; no login flash, crash or blank primary screen | Physical Android 14 Pixel passed; schema-v2 database contained 15 streams, 3 folders, 42 users and 124 bindings before the cold launch |
 | OFFLINE-002 | Cold exact cached-topic `ew://` deep link | The exact saved account/stream/topic resolves from Room and opens bounded server history without waiting for catalog REST success | Physical Android 14 Pixel passed; 1.411 s exact sandbox route |
 | OFFLINE-003 | Offline general catalog navigation | Only retained real streams/topics/previews/unread data render; no fabricated destination or enabled inert control appears | Physical cached catalog and exact topic passed; broad row sampling pending |
 | OFFLINE-004 | Restore Wi-Fi/mobile data while cached chat is open | One catch-up/realtime recovery converges in place, hides the stale banner and retains the exact route without duplicate rows | Physical recovery passed; controlled request-count oracle pending |
-| OFFLINE-005 | Newer REST/realtime/local row races cached hydration | Current/newer state wins by UUID and timestamps; local `local-*` outbox rows survive and are never written into Room | Repository/unit coverage; delayed device injection pending |
+| OFFLINE-005 | Newer REST/realtime/local row races cached hydration | Current/newer state wins by UUID and timestamps; an authoritative empty folder/user/binding snapshot cannot be repopulated by a delayed disk read; local `local-*` outbox rows survive and are never written into Room | Repository/unit coverage, including the empty-snapshot race; delayed device injection pending |
 | OFFLINE-006 | Switch accounts during read or debounced write | Completion is owner-fenced; old rows never flash or write under the new owner | Source/repository coverage; delayed-I/O two-account instrumentation pending |
-| OFFLINE-007 | Logout one account | Only that owner's stream/topic/message rows are deleted before account removal; sibling account rows remain decryptable | Store instrumentation covers selective clear; two-account UI E2E pending |
-| OFFLINE-008 | Corrupt, moved, replayed, oversized or cross-scope row | AES-GCM associated-data validation and bounds reject only invalid rows; unrelated valid rows remain available | Exact instrumentation covers ciphertext replay, invalid/local exclusion and bounds; raw-DB device injection pending |
-| OFFLINE-009 | Cache bounds under a large account | At most 1,000 streams, 10,000 topics, 100 conversations, 100 messages/conversation and 5,000 messages/account persist; newest conversations/messages are retained deterministically | Source constants and store instrumentation; generated maximum-volume performance run pending |
+| OFFLINE-007 | Logout one account | Only that owner's stream/topic/message/folder/user/binding rows are deleted before account removal; sibling account rows remain decryptable | Store instrumentation covers selective clear across the complete schema; two-account UI E2E pending |
+| OFFLINE-008 | Corrupt, moved, replayed, oversized or cross-scope row | AES-GCM associated-data validation and bounds reject only invalid rows; invalid folder relationships, membership enums and cross-stream bindings cannot enter the projection; unrelated valid rows remain available | Exact instrumentation covers ciphertext replay, invalid/local/catalog exclusion and bounds; raw-DB device injection pending |
+| OFFLINE-009 | Cache bounds under a large account | At most 1,000 streams, 10,000 topics, 500 folders with 1,000 items each, 10,000 users, 50,000 bindings, 100 conversations, 100 messages/conversation and 5,000 messages/account persist; payload-specific byte caps and deterministic newest-message retention apply | Source constants and store instrumentation; generated maximum-volume performance run pending |
 | OFFLINE-010 | Rotation/background while fully offline | Route, catalog/history and one global stale surface survive recreation; no request, mutation or duplicate banner is created | Physical portrait/landscape/portrait passed; long background pending |
 | OFFLINE-011 | Cache database/keyset backup or device transfer | Room database and keyset are excluded; undecryptable transplanted data cannot render | Backup-rule source gate; emulator backup/restore acceptance pending |
 | OFFLINE-012 | Keystore/Room read or write failure | App remains usable online, logs no payload/credential, skips persistence for that runtime and never overwrites another owner | Fail-closed source path; injected Keystore/SQLite faults pending |
+| OFFLINE-013 | Upgrade an installed schema-v1 cache to schema v2 | Existing encrypted streams/topics/messages survive; empty folder/user/binding tables are added with exact indices; startup requires no destructive fallback | Exact migration instrumentation and physical in-place Pixel upgrade passed |
 
 Current verified coverage: the exact owner-scoped instrumentation class passes
 encrypted round-trip, account separation, ciphertext replay rejection,
-invalid/local-row exclusion, bounds and selective clear. Repository tests prove
-cache-under-current merging. On the physical Pixel, an online sandbox snapshot
-was persisted, both radios were disabled, the process was force-stopped, and
-both the general catalog and exact topic/history reopened cold. No stateful
-mutation was performed. Message text and the yellow stale banner have readable
-dark-theme contrast; the banner's **Retry now** is a real action, while an
-uncached quote source retains its own truthful, functional Retry.
+invalid/local/catalog-row exclusion, bounds and selective clear. The exact
+migration test preserves schema-v1 history while adding the three schema-v2
+catalog tables. Repository tests prove cache-under-current merging, an
+authoritative-empty race fence, and realtime binding add/delete projection. On
+the physical Pixel, an installed schema-v1 cache upgraded in place, an online
+snapshot populated 3 encrypted folders, 42 users and 124 bindings, both radios
+were disabled, the process was force-stopped, and the general catalog reopened
+cold. No stateful Workspace mutation was performed. Message text and the yellow
+stale banner have readable dark-theme contrast; the banner's **Retry now** is a
+real action, while an uncached quote source retains its own truthful,
+functional Retry.
 
 Use Android network controls and a controllable backend proxy for latency,
 disconnect, status-code, body-corruption, and reorder cases. Do not rely on

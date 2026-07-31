@@ -11,9 +11,13 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
+import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderItem
+import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
+import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamBindingResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
+import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.time.OffsetDateTime
@@ -23,6 +27,9 @@ data class WorkspaceSnapshot(
     val streams: List<Stream> = emptyList(),
     val topicsByStream: Map<String, List<TopicsResponseData>> = emptyMap(),
     val messagesByConversation: Map<String, List<MessageResponse>> = emptyMap(),
+    val folders: List<FolderResponseData> = emptyList(),
+    val users: List<UserResponseData> = emptyList(),
+    val streamBindings: List<StreamBindingResponseData> = emptyList(),
 )
 
 interface WorkspaceSnapshotStore {
@@ -83,6 +90,9 @@ class RoomWorkspaceSnapshotStore internal constructor(
                     streamLimit = MAX_STREAMS,
                     topicLimit = MAX_TOPICS,
                     messageLimit = MAX_MESSAGES_PER_ACCOUNT,
+                    folderLimit = MAX_FOLDERS,
+                    userLimit = MAX_USERS,
+                    streamBindingLimit = MAX_STREAM_BINDINGS,
                     maxEncryptedBytes = MAX_ENCRYPTED_PAYLOAD_BYTES,
                 ),
             )
@@ -110,6 +120,9 @@ class RoomWorkspaceSnapshotStore internal constructor(
                 streams = rows.streams,
                 topics = rows.topics,
                 messages = rows.messages,
+                folders = rows.folders,
+                users = rows.users,
+                streamBindings = rows.streamBindings,
             )
         }
     }
@@ -289,10 +302,102 @@ class RoomWorkspaceSnapshotStore internal constructor(
                 remainingMessages -= selected.size
             }
         }
+
+        val folders = snapshot.folders
+            .asSequence()
+            .mapNotNull { folder ->
+                validatedFolderOrNull(folder, streamUuids)
+            }
+            .distinctBy(FolderResponseData::uuid)
+            .take(MAX_FOLDERS)
+            .mapIndexedNotNull { index, folder ->
+                val plaintext = encodeBoundedOrNull(
+                    folder,
+                    MAX_CATALOG_PAYLOAD_BYTES,
+                ) ?: return@mapIndexedNotNull null
+                CachedFolderEntity(
+                    ownerKeyHash = ownerKeyHash,
+                    uuid = folder.uuid,
+                    position = index,
+                    encryptedPayload = cipher.encrypt(
+                        plaintext,
+                        associatedData(
+                            ownerKey = ownerKey,
+                            kind = SnapshotRowKind.FOLDER,
+                            uuid = folder.uuid,
+                            position = index,
+                        ),
+                    ),
+                    cachedAtMillis = cachedAtMillis,
+                )
+            }
+            .toList()
+
+        val users = snapshot.users
+            .asSequence()
+            .filter(::isValidCachedUser)
+            .distinctBy(UserResponseData::uuid)
+            .take(MAX_USERS)
+            .mapIndexedNotNull { index, user ->
+                val plaintext = encodeBoundedOrNull(
+                    user,
+                    MAX_USER_PAYLOAD_BYTES,
+                ) ?: return@mapIndexedNotNull null
+                CachedUserEntity(
+                    ownerKeyHash = ownerKeyHash,
+                    uuid = user.uuid,
+                    position = index,
+                    encryptedPayload = cipher.encrypt(
+                        plaintext,
+                        associatedData(
+                            ownerKey = ownerKey,
+                            kind = SnapshotRowKind.USER,
+                            uuid = user.uuid,
+                            position = index,
+                        ),
+                    ),
+                    cachedAtMillis = cachedAtMillis,
+                )
+            }
+            .toList()
+
+        val streamBindings = snapshot.streamBindings
+            .asSequence()
+            .filter { isValidCachedBinding(it, streamUuids) }
+            .distinctBy(StreamBindingResponseData::uuid)
+            .take(MAX_STREAM_BINDINGS)
+            .mapIndexedNotNull { index, binding ->
+                val plaintext = encodeBoundedOrNull(
+                    binding,
+                    MAX_STREAM_BINDING_PAYLOAD_BYTES,
+                ) ?: return@mapIndexedNotNull null
+                CachedStreamBindingEntity(
+                    ownerKeyHash = ownerKeyHash,
+                    uuid = binding.uuid,
+                    streamUuid = binding.streamUuid,
+                    position = index,
+                    encryptedPayload = cipher.encrypt(
+                        plaintext,
+                        associatedData(
+                            ownerKey = ownerKey,
+                            kind = SnapshotRowKind.STREAM_BINDING,
+                            uuid = binding.uuid,
+                            streamUuid = binding.streamUuid,
+                            position = index,
+                        ),
+                    ),
+                    cachedAtMillis = cachedAtMillis,
+                )
+            }
+            .toList()
+
         return CachedWorkspaceRows(
             streams = streams,
             topics = topics,
             messages = messages,
+            folders = folders,
+            users = users,
+            streamBindings = streamBindings,
         )
     }
 
@@ -366,12 +471,63 @@ class RoomWorkspaceSnapshotStore internal constructor(
             }
         }
 
+        val folders = rows.folders.mapNotNull { row ->
+            decodeRow<FolderResponseData>(
+                row.encryptedPayload,
+                MAX_CATALOG_PAYLOAD_BYTES,
+                associatedData(
+                    ownerKey = ownerKey,
+                    kind = SnapshotRowKind.FOLDER,
+                    uuid = row.uuid,
+                    position = row.position,
+                ),
+            )?.takeIf { it.uuid == row.uuid }
+                ?.let { validatedFolderOrNull(it, streamUuids) }
+        }
+
+        val users = rows.users.mapNotNull { row ->
+            decodeRow<UserResponseData>(
+                row.encryptedPayload,
+                MAX_USER_PAYLOAD_BYTES,
+                associatedData(
+                    ownerKey = ownerKey,
+                    kind = SnapshotRowKind.USER,
+                    uuid = row.uuid,
+                    position = row.position,
+                ),
+            )?.takeIf { user ->
+                user.uuid == row.uuid && isValidCachedUser(user)
+            }
+        }
+
+        val streamBindings = rows.streamBindings.mapNotNull { row ->
+            if (row.streamUuid !in streamUuids) return@mapNotNull null
+            decodeRow<StreamBindingResponseData>(
+                row.encryptedPayload,
+                MAX_STREAM_BINDING_PAYLOAD_BYTES,
+                associatedData(
+                    ownerKey = ownerKey,
+                    kind = SnapshotRowKind.STREAM_BINDING,
+                    uuid = row.uuid,
+                    streamUuid = row.streamUuid,
+                    position = row.position,
+                ),
+            )?.takeIf { binding ->
+                binding.uuid == row.uuid &&
+                    binding.streamUuid == row.streamUuid &&
+                    isValidCachedBinding(binding, streamUuids)
+            }
+        }
+
         return WorkspaceSnapshot(
             streams = streams,
             topicsByStream = topics.groupBy(TopicsResponseData::streamUuid),
             messagesByConversation = messages.groupBy {
                 conversationKey(it.streamUuid, it.topicUuid)
             },
+            folders = folders,
+            users = users,
+            streamBindings = streamBindings,
         )
     }
 
@@ -450,6 +606,81 @@ private fun parseTimestampMillis(value: String): Long? =
         OffsetDateTime.parse(value).toInstant().toEpochMilli()
     }.getOrNull()
 
+private fun validatedFolderOrNull(
+    folder: FolderResponseData,
+    streamUuids: Set<String>,
+): FolderResponseData? {
+    if (
+        !isCanonicalUuid(folder.uuid) ||
+        folder.title.isBlank() ||
+        folder.title.length > MAX_FOLDER_TITLE_LENGTH ||
+        folder.unreadCount < 0 ||
+        folder.systemType !in VALID_FOLDER_SYSTEM_TYPES ||
+        parseTimestampMillis(folder.creationDate) == null ||
+        folder.backgroundColorValue?.let {
+            it !in MIN_ARGB_COLOR_VALUE..MAX_ARGB_COLOR_VALUE
+        } == true
+    ) {
+        return null
+    }
+    val items = folder.items
+        .asSequence()
+        .filter { item ->
+            isValidFolderItem(
+                item = item,
+                parentFolderUuid = folder.uuid,
+                streamUuids = streamUuids,
+            )
+        }
+        .distinctBy(FolderItem::uuid)
+        .take(MAX_FOLDER_ITEMS_PER_FOLDER)
+        .toList()
+    return folder.copy(
+        unreadCount = items.sumOf(FolderItem::unreadCount),
+        items = items,
+    )
+}
+
+private fun isValidFolderItem(
+    item: FolderItem,
+    parentFolderUuid: String,
+    streamUuids: Set<String>,
+): Boolean =
+    isCanonicalUuid(item.uuid) &&
+        item.streamUuid in streamUuids &&
+        (
+            item.folderUuid == parentFolderUuid ||
+                item.folder == parentFolderUuid
+        ) &&
+        item.folderUuid?.let {
+            isCanonicalUuid(it) && it == parentFolderUuid
+        } != false &&
+        item.folder?.let {
+            isCanonicalUuid(it) && it == parentFolderUuid
+        } != false &&
+        item.chatType in VALID_FOLDER_CHAT_TYPES &&
+        item.unreadCount >= 0 &&
+        (
+            item.pinnedAt == null ||
+                parseTimestampMillis(item.pinnedAt) != null
+        )
+
+private fun isValidCachedUser(user: UserResponseData): Boolean =
+    isCanonicalUuid(user.uuid) &&
+        user.username.isNotBlank()
+
+private fun isValidCachedBinding(
+    binding: StreamBindingResponseData,
+    streamUuids: Set<String>,
+): Boolean =
+    isCanonicalUuid(binding.uuid) &&
+        binding.projectId?.let(::isCanonicalUuid) != false &&
+        binding.streamUuid in streamUuids &&
+        isCanonicalUuid(binding.userUuid) &&
+        isCanonicalUuid(binding.whoUuid) &&
+        binding.role in VALID_STREAM_BINDING_ROLES &&
+        binding.notificationMode in VALID_STREAM_NOTIFICATION_MODES
+
 private fun ownerKeyHash(ownerKey: String): String =
     Base64.encodeToString(
         MessageDigest.getInstance("SHA-256").digest(
@@ -484,6 +715,9 @@ private enum class SnapshotRowKind(
     STREAM("stream"),
     TOPIC("topic"),
     MESSAGE("message"),
+    FOLDER("folder"),
+    USER("user"),
+    STREAM_BINDING("stream_binding"),
 }
 
 private data class CachedConversation(
@@ -501,7 +735,30 @@ internal const val MAX_TOPICS = 10_000
 internal const val MAX_CACHED_CONVERSATIONS = 100
 internal const val MAX_MESSAGES_PER_CONVERSATION = 100
 internal const val MAX_MESSAGES_PER_ACCOUNT = 5_000
+internal const val MAX_FOLDERS = 500
+internal const val MAX_FOLDER_ITEMS_PER_FOLDER = MAX_STREAMS
+internal const val MAX_USERS = 10_000
+internal const val MAX_STREAM_BINDINGS = 50_000
 internal const val MAX_CATALOG_PAYLOAD_BYTES = 256 * 1_024
+internal const val MAX_USER_PAYLOAD_BYTES = 64 * 1_024
+internal const val MAX_STREAM_BINDING_PAYLOAD_BYTES = 16 * 1_024
 internal const val MAX_MESSAGE_PAYLOAD_BYTES = 1_024 * 1_024
 internal const val MAX_ENCRYPTED_PAYLOAD_BYTES =
     MAX_MESSAGE_PAYLOAD_BYTES + 4 * 1_024
+private const val MAX_FOLDER_TITLE_LENGTH = 64
+private const val MIN_ARGB_COLOR_VALUE = 0L
+private const val MAX_ARGB_COLOR_VALUE = 0xFFFF_FFFFL
+private val VALID_FOLDER_SYSTEM_TYPES = setOf(null, "all", "created")
+private val VALID_FOLDER_CHAT_TYPES = setOf("stream", "group", "private")
+private val VALID_STREAM_BINDING_ROLES = setOf(
+    "guest",
+    "member",
+    "moderator",
+    "administrator",
+    "owner",
+)
+private val VALID_STREAM_NOTIFICATION_MODES = setOf(
+    "mentions_only",
+    "muted",
+    "all_messages",
+)

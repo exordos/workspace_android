@@ -43,7 +43,10 @@ class ChatUserInfoViewModel(
     val client: WorkspaceAPIClient,
     val repo: EventsRepository,
 ) : ViewModel() {
-    private val bindings = MutableStateFlow<List<StreamBindingResponseData>?>(null)
+    private val bindings = MutableStateFlow<List<StreamBindingResponseData>?>(
+        repo.streamBindings.value
+            .takeIf(List<StreamBindingResponseData>::isNotEmpty),
+    )
     private val refreshRequestId = AtomicLong(0L)
 
     private val _profileLoading = MutableStateFlow(false)
@@ -52,7 +55,9 @@ class ChatUserInfoViewModel(
         resolveTargetUser(userId, repo.users.value) != null,
     )
     val profileLoaded = _profileLoaded.asStateFlow()
-    private val _sharedChannelsLoaded = MutableStateFlow(false)
+    private val _sharedChannelsLoaded = MutableStateFlow(
+        bindings.value != null && repo.streams.value.isNotEmpty(),
+    )
     val sharedChannelsLoaded = _sharedChannelsLoaded.asStateFlow()
     private val _profileError = MutableStateFlow<String?>(null)
     val profileError = _profileError.asStateFlow()
@@ -165,6 +170,7 @@ class ChatUserInfoViewModel(
                 }
                 when (val loadedBindings = results.bindings) {
                     is ApiResult.Success -> {
+                        repo.setInitialStreamBindings(loadedBindings.value)
                         bindings.value = loadedBindings.value
                         if (streamsLoaded) {
                             _sharedChannelsLoaded.value = true

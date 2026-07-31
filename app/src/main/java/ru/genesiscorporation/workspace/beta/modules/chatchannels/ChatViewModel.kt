@@ -48,6 +48,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.RenameTopicRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ServerSettingsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
+import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamBindingsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ToggleTopicDoneRequest
@@ -193,6 +194,14 @@ class ChatViewModel(
                 .collectLatest {
                     loadServerSettings()
                 }
+        }
+        viewModelScope.launch {
+            repo.folders.collectLatest { currentFolders ->
+                val selectedUuid = _currentlySelectedFolder.value?.uuid
+                _currentlySelectedFolder.value =
+                    currentFolders.firstOrNull { it.uuid == selectedUuid }
+                        ?: currentFolders.firstOrNull()
+            }
         }
     }
 
@@ -597,8 +606,11 @@ class ChatViewModel(
             }
 
             is ApiResult.Error -> {
-                _actionError.value =
+                _actionError.value = if (repo.folders.value.isEmpty()) {
                     "Папки временно недоступны; показаны все чаты"
+                } else {
+                    "Не удалось обновить папки; показаны сохранённые данные"
+                }
                 loadSubscribedChannels()
             }
         }
@@ -608,6 +620,7 @@ class ChatViewModel(
         val response = client.performRequest(StreamsRequest())
         when(response) {
             is ApiResult.Success -> {
+                refreshStreamBindings()
                 val messageIds = response.value.mapNotNull { it.lastMessageUuid }
                 if (!messageIds.isEmpty()) {
                     val messagesResponse = client.performRequest(MessagesByIdsRequest(messageIds))
@@ -638,6 +651,23 @@ class ChatViewModel(
                 _queryState.value = QueryState.Error(
                     response.error.message ?: "Не удалось загрузить чаты",
                 )
+            }
+        }
+    }
+
+    private fun refreshStreamBindings() {
+        val ownerKey = userViewModel.activeAccountId.value ?: return
+        viewModelScope.launch {
+            when (
+                val response =
+                    client.performRequest(StreamBindingsRequest())
+            ) {
+                is ApiResult.Success -> {
+                    userViewModel.repo.withActiveCredentialOwner(ownerKey) {
+                        repo.setInitialStreamBindings(response.value)
+                    }
+                }
+                is ApiResult.Error -> Unit
             }
         }
     }
