@@ -363,6 +363,9 @@ unsupported.
 | MSG-UNREAD-010 | The first unread predates the bounded latest page | The client fetches and anchors the exact server-first unread window instead of silently treating the latest loaded unread as globally first |
 | MSG-UNREAD-011 | All unread rows fit without a scrollable drag | Gesture-free read is allowed only while resumed, with no newer page pending, the fully loaded newest edge visible, and every authoritative unread row at least 50% visible; any missing condition preserves unread |
 | MSG-UNREAD-012 | Kill the process after a viewport read is durably queued but before an exact response is accepted | The newest canonical boundary is encrypted under the exact account/stream/topic before POST; a storage failure prevents the mutation. Cold restart never auto-retries the ambiguous request and exposes functional Retry/Close: Retry uses the retained boundary even when it is outside the loaded window, while Close durably discards it. Exact REST/realtime confirmation clears it, newer visible boundaries coalesce without regression, draft cleanup cannot delete it, and another account or conversation cannot observe or replay it |
+| MSG-RICH-001 | Tap `[label](urn:url:https://host/path?query#fragment)` or its HTTP equivalent | The exact embedded HTTP(S) target, including query and fragment, opens through a browsable platform intent without Workspace credentials or authenticated-origin reuse |
+| MSG-RICH-002 | Render empty, malformed, whitespace-containing, nested, credentialed, `javascript`, `data`, `file`, or scheme-relative URL URNs | No external activity launches; the tap fails closed through the existing visible unsafe-link error, and the raw URN is never treated as a local/deep link |
+| MSG-RICH-003 | Render ordinary HTTP(S)/mailto links and URL-URN-looking text inside inline or fenced code | Existing safe-link behavior remains unchanged, while code remains inert text rather than a clickable target |
 
 Current physical coverage: MSG-HIST-001/002, 009–014, 016 and the latest-window
 path of 017 passed on the USB Android 14 Pixel using the sandbox topic's
@@ -388,6 +391,17 @@ context loader. Physical acceptance in a naturally unread sandbox conversation
 is required before marking MSG-UNREAD-001–012 passed. Controlled post-request
 offline/timeout/5xx Retry, process kill, storage failure and another-client
 confirmation remain physical automation work.
+
+Current rich-link coverage: strict URL-URN normalization, exact query/fragment
+retention, case-insensitive prefix handling, ordinary-link compatibility and
+malformed/credentialed/unsafe rejection have focused unit coverage.
+MSG-RICH-001–003 passed on the physical Android 14 Pixel using messages sent
+only in the dedicated sandbox topic: the canonical URL-URN opened Chrome at the
+exact `example.com/cassi-mobile?stage=url-urn#pixel` target; a representative
+`javascript:` URL-URN kept Workspace foregrounded and exposed the functional
+unsafe-link error/Close action; and the same syntax inside inline code remained
+inert text. The focused unit matrix covers every remaining unsafe class listed
+by MSG-RICH-002 plus ordinary HTTP(S)/mailto compatibility.
 
 ### Current history acceptance coverage
 

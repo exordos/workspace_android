@@ -33,6 +33,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import dev.jeziellago.compose.markdowntext.MarkdownText
@@ -519,8 +520,38 @@ private fun handleWorkspaceLink(
 }
 
 internal fun safeExternalUri(value: String): Uri? {
-    if (!isSafeExternalLink(value)) return null
-    return runCatching { Uri.parse(value.trim()) }.getOrNull()
+    val target = normalizeSafeExternalLink(value) ?: return null
+    return runCatching { target.toUri() }.getOrNull()
+}
+
+internal fun normalizeSafeExternalLink(value: String): String? {
+    val normalized = value.trim()
+    val target = if (
+        normalized.startsWith(WORKSPACE_URL_URN_PREFIX, ignoreCase = true)
+    ) {
+        parseWorkspaceUrlUrn(normalized) ?: return null
+    } else {
+        normalized
+    }
+    return target.takeIf(::isSafeExternalLink)
+}
+
+internal fun parseWorkspaceUrlUrn(value: String): String? {
+    val normalized = value.trim()
+    if (!normalized.startsWith(WORKSPACE_URL_URN_PREFIX, ignoreCase = true)) {
+        return null
+    }
+    val target = normalized.substring(WORKSPACE_URL_URN_PREFIX.length)
+    if (target.isEmpty() || target.any(Char::isWhitespace)) return null
+    val uri = runCatching { URI(target) }.getOrNull() ?: return null
+    if (
+        uri.scheme?.lowercase() !in setOf("http", "https") ||
+        uri.host.isNullOrBlank() ||
+        uri.userInfo != null
+    ) {
+        return null
+    }
+    return target
 }
 
 internal fun isSafeExternalLink(value: String): Boolean {
@@ -531,3 +562,5 @@ internal fun isSafeExternalLink(value: String): Boolean {
         else -> false
     }
 }
+
+private const val WORKSPACE_URL_URN_PREFIX = "urn:url:"
