@@ -4,6 +4,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -23,6 +25,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -44,9 +47,12 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
@@ -63,7 +69,8 @@ import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 fun SendMessageView(viewModel: ChatDialogViewModel) {
     val messageText by viewModel.messageText.collectAsStateWithLifecycle()
     val attachments by viewModel.attachments.collectAsStateWithLifecycle()
-    val uploadStatus by viewModel.uploadStatus.collectAsStateWithLifecycle()
+    val uploadingAttachmentUri by
+        viewModel.uploadingAttachmentUri.collectAsStateWithLifecycle()
     val editingMessageBackupText by
         viewModel.editingMessageBackupText.collectAsStateWithLifecycle()
     val replySession by viewModel.replySession.collectAsStateWithLifecycle()
@@ -150,12 +157,17 @@ fun SendMessageView(viewModel: ChatDialogViewModel) {
         if (attachments.isNotEmpty()) {
             LazyRow(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 5.dp),
+                    .fillMaxWidth(),
+                contentPadding = PaddingValues(
+                    horizontal = 12.dp,
+                    vertical = 4.dp,
+                ),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 items(attachments, key = { it.uri.toString() }) { attachment ->
                     SelectedAttachmentPreview(
                         attachment = attachment,
+                        uploading = uploadingAttachmentUri == attachment.uri,
                         enabled = !sending,
                         onRemove = {
                             viewModel.removeAttachment(context, attachment.uri)
@@ -163,14 +175,6 @@ fun SendMessageView(viewModel: ChatDialogViewModel) {
                     )
                 }
             }
-        }
-        uploadStatus?.let { status ->
-            Text(
-                text = status,
-                color = colors.textAdditional50,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-            )
         }
         if (editingMessageBackupText != null) {
             ComposerContext(
@@ -407,17 +411,23 @@ fun SendMessageView(viewModel: ChatDialogViewModel) {
 }
 
 @Composable
-private fun SelectedAttachmentPreview(
+internal fun SelectedAttachmentPreview(
     attachment: SelectedLocalAttachment,
+    uploading: Boolean,
     enabled: Boolean,
     onRemove: () -> Unit,
 ) {
     val colors = LocalWorkspaceColorsPalette.current
+    val uploadingDescription = stringResource(
+        R.string.message_composer_attachment_uploading,
+        attachment.fileName,
+    )
     Box(
         modifier = Modifier
-            .padding(end = 8.dp)
-            .size(96.dp)
-            .clip(RoundedCornerShape(9.dp))
+            .width(144.dp)
+            .height(101.dp)
+            .testTag(SELECTED_ATTACHMENT_PREVIEW_TAG)
+            .clip(RoundedCornerShape(4.dp))
             .background(colors.background),
     ) {
         if (attachment.contentType.startsWith("image/")) {
@@ -450,12 +460,31 @@ private fun SelectedAttachmentPreview(
                 )
             }
         }
+        if (uploading) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(colors.background.copy(alpha = 0.45f))
+                    .semantics {
+                        contentDescription = uploadingDescription
+                        liveRegion = LiveRegionMode.Polite
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(32.dp),
+                    color = colors.iconBase,
+                    strokeWidth = 2.dp,
+                )
+            }
+        }
         Box(
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .size(44.dp)
+                .size(48.dp)
+                .testTag(SELECTED_ATTACHMENT_REMOVE_TAG)
                 .clickable(
-                    enabled = enabled,
+                    enabled = enabled && !uploading,
                     onClick = onRemove,
                 ),
             contentAlignment = Alignment.Center,
@@ -468,13 +497,18 @@ private fun SelectedAttachmentPreview(
                 ),
                 tint = Color.White,
                 modifier = Modifier
-                    .size(28.dp)
-                    .background(Color.Black.copy(alpha = 0.55f), CircleShape)
-                    .padding(5.dp),
+                    .size(20.dp)
+                    .background(colors.iconBase, CircleShape)
+                    .padding(4.dp),
             )
         }
     }
 }
+
+internal const val SELECTED_ATTACHMENT_PREVIEW_TAG =
+    "selected-attachment-preview"
+internal const val SELECTED_ATTACHMENT_REMOVE_TAG =
+    "selected-attachment-remove"
 
 @Composable
 private fun ComposerContext(

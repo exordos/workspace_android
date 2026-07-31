@@ -47,6 +47,11 @@ not on a personal physical device.
   sandbox fixture instead of creating persistent debris.
 - Read-only rendering, navigation, and contrast checks may use a real
   conversation, but must not alter its lifecycle state.
+- Run every Android network mutation and attachment-send acceptance only in the
+  dedicated sandbox stream, never in a work or task-reporting stream.
+- Use only synthetic fixtures created for the run or openly licensed public
+  samples. Never select, transmit, or retain personal files already present on
+  the physical device.
 
 ## Global pass criteria
 

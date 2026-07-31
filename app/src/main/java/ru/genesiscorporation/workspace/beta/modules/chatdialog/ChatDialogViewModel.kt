@@ -232,8 +232,8 @@ class ChatDialogViewModel(
     val newerMessagesError: StateFlow<String?> = _newerMessagesError
     private val _conversationStateReady = MutableStateFlow(false)
     val conversationStateReady: StateFlow<Boolean> = _conversationStateReady
-    private val _uploadStatus = MutableStateFlow<String?>(null)
-    val uploadStatus: StateFlow<String?> = _uploadStatus
+    private val _uploadingAttachmentUri = MutableStateFlow<Uri?>(null)
+    val uploadingAttachmentUri: StateFlow<Uri?> = _uploadingAttachmentUri
     private val _downloadingAttachmentUuid = MutableStateFlow<String?>(null)
     val downloadingAttachmentUuid: StateFlow<String?> = _downloadingAttachmentUuid
     private val _forwardDialogState = MutableStateFlow<ForwardDialogState?>(null)
@@ -2095,7 +2095,6 @@ class ChatDialogViewModel(
                 _actionError.value =
                     "Не удалось сохранить сообщение в очередь отправки"
             } finally {
-                _uploadStatus.value = null
                 _sending.value = false
             }
         }
@@ -2142,39 +2141,40 @@ class ChatDialogViewModel(
                 "Сообщение с цитатой длиннее $MAX_MESSAGE_CHARS символов"
             return null
         }
-        if (snapshot.attachments.isNotEmpty()) {
-            val links = mutableListOf<String>()
-            for ((index, attachment) in snapshot.attachments.withIndex()) {
-                _uploadStatus.value =
-                    "Загрузка ${index + 1} из ${snapshot.attachments.size}: " +
-                    attachment.fileName
-                when (
-                    val response = client.uploadFile(
-                        context,
-                        attachment.uri,
-                        chatId,
-                    )
-                ) {
-                    is ApiResult.Success -> links += buildWorkspaceAttachmentMarkdown(
-                        response.value.copy(
-                            contentType = response.value.contentType
-                                .ifBlank { attachment.contentType },
-                            sizeBytes = response.value.sizeBytes
-                                ?: attachment.sizeBytes,
-                        ),
-                    )
+        try {
+            if (snapshot.attachments.isNotEmpty()) {
+                val links = mutableListOf<String>()
+                for (attachment in snapshot.attachments) {
+                    _uploadingAttachmentUri.value = attachment.uri
+                    when (
+                        val response = client.uploadFile(
+                            context,
+                            attachment.uri,
+                            chatId,
+                        )
+                    ) {
+                        is ApiResult.Success -> links += buildWorkspaceAttachmentMarkdown(
+                            response.value.copy(
+                                contentType = response.value.contentType
+                                    .ifBlank { attachment.contentType },
+                                sizeBytes = response.value.sizeBytes
+                                    ?: attachment.sizeBytes,
+                            ),
+                        )
 
-                    is ApiResult.Error -> {
-                        _actionError.value = response.error.message
-                            ?: "Не удалось загрузить файл"
-                        return null
+                        is ApiResult.Error -> {
+                            _actionError.value = response.error.message
+                                ?: "Не удалось загрузить файл"
+                            return null
+                        }
                     }
                 }
+                if (content.isNotBlank()) content += "\n"
+                content += links.joinToString("\n")
             }
-            if (content.isNotBlank()) content += "\n"
-            content += links.joinToString("\n")
+        } finally {
+            _uploadingAttachmentUri.value = null
         }
-        _uploadStatus.value = null
         if (content.length > MAX_MESSAGE_CHARS) {
             _actionError.value =
                 "Сообщение с вложениями длиннее $MAX_MESSAGE_CHARS символов"
