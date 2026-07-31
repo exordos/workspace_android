@@ -25,6 +25,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -58,6 +59,9 @@ import ru.genesiscorporation.workspace.beta.modules.chatdialog.parseWorkspaceQuo
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.net.URI
 
+internal val LocalWorkspaceMentionCatalog =
+    staticCompositionLocalOf<WorkspaceMentionCatalog?> { null }
+
 @Composable
 fun EnhancedMarkdown(
     markdown: String,
@@ -65,6 +69,48 @@ fun EnhancedMarkdown(
     style: TextStyle,
     navController: NavHostController?,
     viewModel: ChatDialogViewModel?
+) {
+    val context = LocalContext.current
+    val providedMentionCatalog = LocalWorkspaceMentionCatalog.current
+    val mentionCatalog = providedMentionCatalog ?: remember(viewModel) {
+        WorkspaceMentionCatalog.from(
+            viewModel
+                ?.repo
+                ?.users
+                ?.value
+                .orEmpty()
+                .map { user ->
+                    WorkspaceMentionCandidate(
+                        userUuid = user.uuid,
+                        displayText = user.displayableName(),
+                        username = user.username,
+                    )
+                },
+        )
+    }
+    val emojiResolver = remember(context.applicationContext) {
+        WorkspaceEmojiShortcodeCatalog.resolver(context.applicationContext)
+    }
+    EnhancedMarkdownContent(
+        markdown = markdown,
+        modifier = modifier,
+        style = style,
+        navController = navController,
+        viewModel = viewModel,
+        mentionCatalog = mentionCatalog,
+        emojiResolver = emojiResolver,
+    )
+}
+
+@Composable
+private fun EnhancedMarkdownContent(
+    markdown: String,
+    modifier: Modifier = Modifier,
+    style: TextStyle,
+    navController: NavHostController?,
+    viewModel: ChatDialogViewModel?,
+    mentionCatalog: WorkspaceMentionCatalog,
+    emojiResolver: (String) -> String?,
 ) {
     val forwardSegments = remember(markdown) { parseForwardMarkdown(markdown) }
     if (forwardSegments.any { it is ForwardMarkdownSegment.Quote }) {
@@ -76,12 +122,16 @@ fun EnhancedMarkdown(
                         style = style,
                         navController = navController,
                         viewModel = viewModel,
+                        mentionCatalog = mentionCatalog,
+                        emojiResolver = emojiResolver,
                     )
 
                     is ForwardMarkdownSegment.Quote -> WorkspaceForwardQuoteBlock(
                         reference = segment.reference,
                         style = style,
                         viewModel = viewModel,
+                        mentionCatalog = mentionCatalog,
+                        emojiResolver = emojiResolver,
                     )
                 }
             }
@@ -93,6 +143,8 @@ fun EnhancedMarkdown(
             style = style,
             navController = navController,
             viewModel = viewModel,
+            mentionCatalog = mentionCatalog,
+            emojiResolver = emojiResolver,
         )
     }
 }
@@ -104,6 +156,8 @@ private fun LegacyEnhancedMarkdown(
     style: TextStyle,
     navController: NavHostController?,
     viewModel: ChatDialogViewModel?,
+    mentionCatalog: WorkspaceMentionCatalog,
+    emojiResolver: (String) -> String?,
 ) {
     val blockSegments = remember(markdown) {
         parseWorkspaceBlockSpoilers(markdown)
@@ -119,6 +173,8 @@ private fun LegacyEnhancedMarkdown(
                                 style = style,
                                 navController = navController,
                                 viewModel = viewModel,
+                                mentionCatalog = mentionCatalog,
+                                emojiResolver = emojiResolver,
                             )
                         }
                     }
@@ -130,6 +186,8 @@ private fun LegacyEnhancedMarkdown(
                                 style = style,
                                 navController = navController,
                                 viewModel = viewModel,
+                                mentionCatalog = mentionCatalog,
+                                emojiResolver = emojiResolver,
                             )
                         }
                     }
@@ -144,6 +202,8 @@ private fun LegacyEnhancedMarkdown(
         style = style,
         navController = navController,
         viewModel = viewModel,
+        mentionCatalog = mentionCatalog,
+        emojiResolver = emojiResolver,
     )
 }
 
@@ -154,6 +214,8 @@ private fun LegacyEnhancedMarkdownCore(
     style: TextStyle,
     navController: NavHostController?,
     viewModel: ChatDialogViewModel?,
+    mentionCatalog: WorkspaceMentionCatalog,
+    emojiResolver: (String) -> String?,
 ) {
     val context = LocalContext.current
     if (MarkdownParser.hasQuotes(markdown)) {
@@ -163,8 +225,10 @@ private fun LegacyEnhancedMarkdownCore(
             modifier = modifier,
             style = style,
             depth = 0,
-            navController,
-            viewModel
+            navController = navController,
+            viewModel = viewModel,
+            mentionCatalog = mentionCatalog,
+            emojiResolver = emojiResolver,
         )
     } else {
         WorkspaceMarkdownText(
@@ -172,7 +236,9 @@ private fun LegacyEnhancedMarkdownCore(
             style = style,
             onLinkClicked = { url ->
                 handleWorkspaceLink(url, context, viewModel)
-            }
+            },
+            mentionCatalog = mentionCatalog,
+            emojiResolver = emojiResolver,
         )
     }
 }
@@ -183,6 +249,8 @@ private fun WorkspaceSpoilerBlock(
     style: TextStyle,
     navController: NavHostController?,
     viewModel: ChatDialogViewModel?,
+    mentionCatalog: WorkspaceMentionCatalog,
+    emojiResolver: (String) -> String?,
 ) {
     val colors = LocalWorkspaceColorsPalette.current
     val defaultHeader = stringResource(R.string.markdown_spoiler_default_header)
@@ -237,7 +305,7 @@ private fun WorkspaceSpoilerBlock(
             )
         }
         if (revealed && segment.bodyMarkdown.isNotEmpty()) {
-            EnhancedMarkdown(
+            EnhancedMarkdownContent(
                 markdown = segment.bodyMarkdown,
                 modifier = Modifier.padding(
                     start = 12.dp,
@@ -247,6 +315,8 @@ private fun WorkspaceSpoilerBlock(
                 style = style,
                 navController = navController,
                 viewModel = viewModel,
+                mentionCatalog = mentionCatalog,
+                emojiResolver = emojiResolver,
             )
         }
     }
@@ -257,6 +327,8 @@ private fun WorkspaceForwardQuoteBlock(
     reference: WorkspaceQuoteReference,
     style: TextStyle,
     viewModel: ChatDialogViewModel?,
+    mentionCatalog: WorkspaceMentionCatalog,
+    emojiResolver: (String) -> String?,
 ) {
     val colors = LocalWorkspaceColorsPalette.current
     val context = LocalContext.current
@@ -377,6 +449,8 @@ private fun WorkspaceForwardQuoteBlock(
                                 viewModel,
                             )
                         },
+                        mentionCatalog = mentionCatalog,
+                        emojiResolver = emojiResolver,
                     )
                 }
             }
@@ -497,23 +571,29 @@ private fun MessageNodes(
     style: TextStyle,
     depth: Int,
     navController: NavHostController?,
-    viewModel: ChatDialogViewModel?
+    viewModel: ChatDialogViewModel?,
+    mentionCatalog: WorkspaceMentionCatalog,
+    emojiResolver: (String) -> String?,
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
         nodes.forEach { node ->
             when (node) {
-                is QouteNode.Text -> EnhancedMarkdown(
+                is QouteNode.Text -> EnhancedMarkdownContent(
                     markdown = node.content,
                     style = style,
                     navController = navController,
                     viewModel = viewModel,
+                    mentionCatalog = mentionCatalog,
+                    emojiResolver = emojiResolver,
                 )
                 is QouteNode.Quote -> ZulipQuoteBlock(
                     quote = node,
                     style = style,
                     depth = depth,
                     navController = navController,
-                    viewModel
+                    viewModel = viewModel,
+                    mentionCatalog = mentionCatalog,
+                    emojiResolver = emojiResolver,
                 )
             }
         }
@@ -528,7 +608,9 @@ private fun ZulipQuoteBlock(
     style: TextStyle,
     depth: Int,
     navController: NavHostController?,
-    viewModel: ChatDialogViewModel?
+    viewModel: ChatDialogViewModel?,
+    mentionCatalog: WorkspaceMentionCatalog,
+    emojiResolver: (String) -> String?,
 ) {
     val context = LocalContext.current
     val colors = LocalWorkspaceColorsPalette.current
@@ -558,7 +640,9 @@ private fun ZulipQuoteBlock(
                 style = headerStyle,
                 onLinkClicked = { url ->
                     handleWorkspaceLink(url, context, viewModel)
-                }
+                },
+                mentionCatalog = mentionCatalog,
+                emojiResolver = emojiResolver,
             )
         }
         if (quote.children.isNotEmpty()) {
@@ -567,7 +651,9 @@ private fun ZulipQuoteBlock(
                 style = style,
                 depth = depth + 1,
                 navController = navController,
-                viewModel = viewModel
+                viewModel = viewModel,
+                mentionCatalog = mentionCatalog,
+                emojiResolver = emojiResolver,
             )
         }
     }
@@ -578,6 +664,8 @@ private fun WorkspaceMarkdownText(
     markdown: String,
     style: TextStyle,
     onLinkClicked: (String) -> Unit,
+    mentionCatalog: WorkspaceMentionCatalog,
+    emojiResolver: (String) -> String?,
 ) {
     val colors = LocalWorkspaceColorsPalette.current
     val showSpoilerLabel = stringResource(R.string.markdown_spoiler_show)
@@ -597,7 +685,7 @@ private fun WorkspaceMarkdownText(
     val currentInlineSpoilers by rememberUpdatedState(inlineSpoilers)
     val currentRevealedIds by rememberUpdatedState(revealedIds)
     val currentOnLinkClicked by rememberUpdatedState(onLinkClicked)
-    val renderedMarkdown = remember(
+    val spoilerMarkdown = remember(
         inlineSpoilers,
         revealedIds,
         showSpoilerLabel,
@@ -607,6 +695,17 @@ private fun WorkspaceMarkdownText(
             revealedIds = revealedIds,
             showLabel = showSpoilerLabel,
             hideLabel = hideSpoilerLabel,
+        )
+    }
+    val renderedMarkdown = remember(
+        spoilerMarkdown,
+        mentionCatalog,
+        emojiResolver,
+    ) {
+        renderWorkspaceMarkdownInlineMetadata(
+            markdown = spoilerMarkdown,
+            mentionCatalog = mentionCatalog,
+            resolveEmoji = emojiResolver,
         )
     }
     val structure = remember(renderedMarkdown) {

@@ -35,6 +35,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -76,6 +77,9 @@ import ru.genesiscorporation.workspace.beta.data.PersistedOutboxStatus
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.ui.AnimatedGif
 import ru.genesiscorporation.workspace.beta.ui.EnhancedMarkdown
+import ru.genesiscorporation.workspace.beta.ui.LocalWorkspaceMentionCatalog
+import ru.genesiscorporation.workspace.beta.ui.WorkspaceMentionCandidate
+import ru.genesiscorporation.workspace.beta.ui.WorkspaceMentionCatalog
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.net.URL
 import java.time.Duration
@@ -113,6 +117,19 @@ fun ChatDialogScreen(
     val topicUnreadCount by viewModel.topicUnreadCount.collectAsStateWithLifecycle()
     val forwardDialogState by
         viewModel.forwardDialogState.collectAsStateWithLifecycle()
+    val users by viewModel.repo.users.collectAsStateWithLifecycle()
+    val mentionCandidates = remember(users) {
+        users.map { user ->
+            WorkspaceMentionCandidate(
+                userUuid = user.uuid,
+                displayText = user.displayableName(),
+                username = user.username,
+            )
+        }
+    }
+    val mentionCatalog = remember(mentionCandidates) {
+        WorkspaceMentionCatalog.from(mentionCandidates)
+    }
     val listState = rememberLazyListState()
     val lifecycleOwner = LocalLifecycleOwner.current
     var isScreenResumed by remember(lifecycleOwner) {
@@ -575,33 +592,39 @@ fun ChatDialogScreen(
                                 if (message.uuid == effectiveUnreadAnchorUuid) {
                                     UnreadMessagesMarker(effectiveUnreadCount)
                                 }
-                                ChatMessage(
-                                    item = message,
-                                    viewModel = viewModel,
-                                    navController = navController,
-                                    outboxEntry = outboxEntries.firstOrNull {
-                                        it.localMessageUuid == message.uuid
-                                    },
-                                    isVerifyingOutbox =
-                                        message.uuid in verifyingOutbox,
-                                    onImageLoad = {
-                                        val lastVisibleIndex =
-                                            listState.layoutInfo.visibleItemsInfo
-                                                .lastOrNull()
-                                                ?.index
-                                        if (
-                                            lastVisibleIndex == null ||
-                                            lastVisibleIndex >=
-                                                lastMessageListIndex - 1
-                                        ) {
-                                            scope.launch {
-                                                listState.scrollToItem(
-                                                    lastMessageListIndex,
-                                                )
+                                CompositionLocalProvider(
+                                    LocalWorkspaceMentionCatalog provides
+                                        mentionCatalog,
+                                ) {
+                                    ChatMessage(
+                                        item = message,
+                                        viewModel = viewModel,
+                                        navController = navController,
+                                        outboxEntry = outboxEntries.firstOrNull {
+                                            it.localMessageUuid == message.uuid
+                                        },
+                                        isVerifyingOutbox =
+                                            message.uuid in verifyingOutbox,
+                                        onImageLoad = {
+                                            val lastVisibleIndex =
+                                                listState.layoutInfo
+                                                    .visibleItemsInfo
+                                                    .lastOrNull()
+                                                    ?.index
+                                            if (
+                                                lastVisibleIndex == null ||
+                                                lastVisibleIndex >=
+                                                    lastMessageListIndex - 1
+                                            ) {
+                                                scope.launch {
+                                                    listState.scrollToItem(
+                                                        lastMessageListIndex,
+                                                    )
+                                                }
                                             }
-                                        }
-                                    },
-                                )
+                                        },
+                                    )
+                                }
                             }
                         }
                         if (showNewerHistoryStatus) {
@@ -715,10 +738,14 @@ fun ChatDialogScreen(
         }
     }
     forwardDialogState?.let { state ->
-        ForwardMessageDialog(
-            viewModel = viewModel,
-            state = state,
-        )
+        CompositionLocalProvider(
+            LocalWorkspaceMentionCatalog provides mentionCatalog,
+        ) {
+            ForwardMessageDialog(
+                viewModel = viewModel,
+                state = state,
+            )
+        }
     }
 }
 

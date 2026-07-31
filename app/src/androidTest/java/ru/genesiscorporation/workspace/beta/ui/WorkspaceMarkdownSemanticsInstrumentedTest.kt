@@ -205,4 +205,34 @@ class WorkspaceMarkdownSemanticsInstrumentedTest {
         onView(withText(containsString("nested secret")))
             .check(matches(isDisplayed()))
     }
+
+    @Test
+    fun emojiCatalogAndUnresolvedMentionsStayReadable() {
+        val userUuid = "11111111-1111-4111-8111-111111111111"
+        composeRule.setContent {
+            WokspaceTheme(darkTheme = false) {
+                EnhancedMarkdown(
+                    markdown = "Meta :smile: :party_parrot: " +
+                        "@**Unknown User** <@$userUuid> `:smile:`",
+                    style = TextStyle(
+                        color = Color.Black,
+                        fontSize = 14.sp,
+                        lineHeight = 18.sp,
+                    ),
+                    navController = null,
+                    viewModel = null,
+                )
+            }
+        }
+
+        onView(
+            withText(
+                containsString(
+                    "Meta 😄 :party_parrot: @Unknown User @$userUuid",
+                ),
+            ),
+        ).check(matches(isDisplayed()))
+        onView(withText(containsString(":smile:")))
+            .check(matches(isDisplayed()))
+    }
 }

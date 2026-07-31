@@ -374,6 +374,7 @@ unsupported.
 | MSG-RICH-009 | Tap malformed, missing, response-mismatched or account-switch-raced user/message URNs | No local/external or guessed route opens; one single-flight owner-fenced lookup keeps the current conversation usable and exposes a visible dismissible error |
 | MSG-RICH-010 | Render ordered/unordered lists, blockquotes, inline code and fenced code in light/dark themes and with TalkBack | Visual structure matches the maintained desktop CommonMark contract; code foreground/background and every message text pair meet WCAG AA; the shared bounded structure model preserves list/quote/code meaning for accessibility without turning code into links or duplicating message actions |
 | MSG-RICH-011 | Render `||inline spoiler||` and fenced `spoiler` blocks, reveal and hide them, rotate, and change theme | Secrets are absent from the initial rendered/accessibility text; every visible spoiler control is functional, localized and exposes hidden/shown state; inline reveal/hide stays inside the message; block reveal/hide and both reveal states survive recreation; spoiler-like text inside inline/fenced code, link destinations, empty/unmatched delimiters and unclosed fences stays inert |
+| MSG-RICH-012 | Render known/unknown `:emoji:` shortcodes plus `@**Display Name**`, `@username`, `<@user-uuid>` and `[label](urn:user:<uuid>)` mentions | The pinned desktop emoji catalog and Zulip overrides replace every known Unicode shortcode without inventing custom-emoji URLs; unknown/custom shortcodes stay readable. A unique live user match renders one canonical UUID-only profile link and canonical display label; duplicate or missing display/username matches stay inert readable text, while an explicit canonical UUID remains an exact actionable UUID reference. Inline/fenced code, images, escapes, autolinks and link destinations remain metadata-inert; revealed spoilers and quote text use the same rules |
 
 Current physical coverage: MSG-HIST-001/002, 009–014, 016 and the latest-window
 path of 017 passed on the USB Android 14 Pixel using the sandbox topic's
@@ -452,6 +453,20 @@ reveal/hide work, and the revealed inline plus block state survives
 portrait-to-landscape recreation. The block was hidden again in landscape;
 portrait restoration preserved that independent state. Both light and dark
 surfaces remained readable, and no crash, ANR, Room or SQLite failure appeared.
+MSG-RICH-012 has focused coverage for complete pinned emoji-catalog generation,
+known/unknown/custom shortcode behavior, unique UUID/name/username resolution,
+ambiguous and conflicting catalog rows, canonical user links, unresolved
+readability, code/fence/image/autolink/destination isolation and revealed
+spoiler composition. An exact six-case Compose instrumentation run passed on
+the Android 14 Pixel. A message sent only in the dedicated sandbox proved that
+`:smile:` uses the pinned Unicode catalog, `:party_parrot:` stays readable
+without a custom-emoji guess, both `@**Display Name**` and `<@user-uuid>` open
+the exact live profile, and the shortcode inside inline code stays literal.
+The same delivered row remained readable in light and dark themes and after
+portrait-to-landscape recreation; no crash, ANR, Room or SQLite failure
+appeared. Username resolution, ambiguous live-catalog rows and the remaining
+metadata-isolation matrix retain focused automated rather than live-server
+acceptance.
 
 ### Current history acceptance coverage
 
