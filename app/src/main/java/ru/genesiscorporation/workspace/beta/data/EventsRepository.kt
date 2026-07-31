@@ -12,10 +12,13 @@ import io.ktor.websocket.readReason
 import io.ktor.websocket.readText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
@@ -51,8 +54,28 @@ import java.net.URI
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.plus
 
+sealed interface MessageProjectionEvent {
+    data class Upsert(
+        val message: MessageResponse,
+    ) : MessageProjectionEvent
+
+    data class Read(
+        val messageUuids: List<String>,
+    ) : MessageProjectionEvent
+
+    data class Deleted(
+        val messageUuid: String,
+    ) : MessageProjectionEvent
+}
+
+data class OwnedMessageProjectionEvent(
+    val ownerKey: String,
+    val sequence: Long,
+    val event: MessageProjectionEvent,
+)
 
 class EventsRepository(
     private val cursorStore: RealtimeCursorStore =
@@ -100,6 +123,14 @@ class EventsRepository(
     val externalOperations:
         StateFlow<Map<String, List<ExternalOperationResponse>>> =
             _externalOperations.asStateFlow()
+    private val _messageProjectionEvents =
+        MutableSharedFlow<OwnedMessageProjectionEvent>(
+            extraBufferCapacity = MESSAGE_PROJECTION_EVENT_BUFFER_CAPACITY,
+            onBufferOverflow = BufferOverflow.DROP_OLDEST,
+        )
+    val messageProjectionEvents: SharedFlow<OwnedMessageProjectionEvent> =
+        _messageProjectionEvents
+    private val messageProjectionSequence = AtomicLong(0L)
 
     fun setAppForeground(foreground: Boolean) {
         synchronized(realtimeControlLock) {
@@ -1647,9 +1678,18 @@ class EventsRepository(
                         return RealtimeCatchUpResult.RETRY
                     }
                     for (event in orderedEvents) {
+                        if (
+                            !webSocketClient.userViewModel.repo
+                                .isActiveCredentialOwner(ownerKey)
+                        ) {
+                            return RealtimeCatchUpResult.RETRY
+                        }
                         val previousEpoch = latestEpoch
                         try {
-                            processTextFrame(event.toString())
+                            processTextFrame(
+                                receivedText = event.toString(),
+                                ownerKey = ownerKey,
+                            )
                         } catch (cancellation: CancellationException) {
                             throw cancellation
                         } catch (exception: Exception) {
@@ -1764,9 +1804,19 @@ class EventsRepository(
                     is Frame.Text -> {
                         val receivedText = frame.readText()
                         try {
+                            if (
+                                !webSocketClient.userViewModel.repo
+                                    .isActiveCredentialOwner(ownerKey)
+                            ) {
+                                close()
+                                break
+                            }
                             val previousEpoch = latestEpoch
                             val frameReady =
-                                processTextFrame(receivedText)
+                                processTextFrame(
+                                    receivedText = receivedText,
+                                    ownerKey = ownerKey,
+                                )
                             if (frameReady && !readyReceived) {
                                 _realtimeConnectionState.value =
                                     RealtimeConnectionState.CONNECTED
@@ -1826,7 +1876,10 @@ class EventsRepository(
         )
     }
 
-    fun processTextFrame(receivedText: String): Boolean {
+    fun processTextFrame(
+        receivedText: String,
+        ownerKey: String? = null,
+    ): Boolean {
         val jsonObject = json.decodeFromString<JsonObject>(receivedText)
         val frameType = jsonObject["type"]?.jsonPrimitive?.contentOrNull
         if (frameType == "ready") {
@@ -1855,7 +1908,7 @@ class EventsRepository(
             ?: return false
         val payload = jsonObject["payload"]?.toString() ?: return false
         when (jsonObject["object_type"]?.jsonPrimitive?.contentOrNull) {
-            "message" -> didReceiveMessageEvent(payload, action)
+            "message" -> didReceiveMessageEvent(payload, action, ownerKey)
             "user" -> didReceiveUserEvent(payload, action)
             "folder" -> didReceiveFolderEvent(payload, action)
             "folder_item" -> didReceiveFolderItemEvent(payload, action)
@@ -1895,17 +1948,29 @@ class EventsRepository(
         }
     }
 
-    fun didReceiveMessageEvent(payload: String, action: String) {
+    fun didReceiveMessageEvent(
+        payload: String,
+        action: String,
+        ownerKey: String? = null,
+    ) {
         when(action) {
             "created" -> {
                 val message = json.decodeFromString<MessageResponse>(payload)
                 updateMessagesPool(listOf(message))
                 addMessageToStreamTopic(message)
+                emitMessageProjectionEvent(
+                    ownerKey,
+                    MessageProjectionEvent.Upsert(message),
+                )
             }
             "updated" -> {
                 val message = json.decodeFromString<MessageResponse>(payload)
                 updateMessagesPool(listOf(message))
                 updateMessage(message)
+                emitMessageProjectionEvent(
+                    ownerKey,
+                    MessageProjectionEvent.Upsert(message),
+                )
             }
             "read" -> {
                 val kind = runCatching {
@@ -1921,12 +1986,20 @@ class EventsRepository(
                         markMessagesRead(listOf(message.uuid))
                         updateMessagesPool(listOf(message))
                         updateMessage(message)
+                        emitMessageProjectionEvent(
+                            ownerKey,
+                            MessageProjectionEvent.Upsert(message),
+                        )
                     }
 
                     "messages.read" -> {
                         val event =
                             json.decodeFromString<MessagesReadPayload>(payload)
                         markMessagesRead(event.messageUuids)
+                        emitMessageProjectionEvent(
+                            ownerKey,
+                            MessageProjectionEvent.Read(event.messageUuids),
+                        )
                     }
 
                     else -> Log.w(
@@ -1936,11 +2009,29 @@ class EventsRepository(
                 }
             }
             "deleted" -> {
-                removeMessageEverywhere(
-                    json.decodeFromString<DeletedObjectPayload>(payload).uuid,
+                val messageUuid =
+                    json.decodeFromString<DeletedObjectPayload>(payload).uuid
+                removeMessageEverywhere(messageUuid)
+                emitMessageProjectionEvent(
+                    ownerKey,
+                    MessageProjectionEvent.Deleted(messageUuid),
                 )
             }
         }
+    }
+
+    private fun emitMessageProjectionEvent(
+        ownerKey: String?,
+        event: MessageProjectionEvent,
+    ) {
+        val validOwnerKey = ownerKey?.takeIf(String::isNotBlank) ?: return
+        _messageProjectionEvents.tryEmit(
+            OwnedMessageProjectionEvent(
+                ownerKey = validOwnerKey,
+                sequence = messageProjectionSequence.incrementAndGet(),
+                event = event,
+            ),
+        )
     }
 
     fun didReceiveFolderEvent(payload: String, action: String) {
@@ -2279,6 +2370,7 @@ internal fun nextRealtimeRetryDelay(
 private const val INITIAL_REALTIME_RETRY_DELAY_MILLIS = 1_000L
 private const val MAX_REALTIME_RETRY_DELAY_MILLIS = 30_000L
 private const val STABLE_REALTIME_CONNECTION_MILLIS = 60_000L
+private const val MESSAGE_PROJECTION_EVENT_BUFFER_CAPACITY = 64
 
 @Serializable
 data class PongMessage(

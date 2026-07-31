@@ -135,12 +135,18 @@ class ChatViewModelFactory(private val client: WorkspaceAPIClient,
 class FeedViewModelFactory(
     private val client: WorkspaceAPIClient,
     private val userViewModel: UserViewModel,
+    private val eventsRepository: EventsRepository,
     private val kind: MessageTimelineKind = MessageTimelineKind.FEED,
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(FeedViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return FeedViewModel(client, userViewModel, kind) as T
+            return FeedViewModel(
+                client,
+                userViewModel,
+                eventsRepository,
+                kind,
+            ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }

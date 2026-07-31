@@ -9,6 +9,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderItem
@@ -32,15 +33,38 @@ data class WorkspaceSnapshot(
     val streamBindings: List<StreamBindingResponseData> = emptyList(),
 )
 
+enum class WorkspaceTimelineKind(
+    val wireValue: String,
+) {
+    FEED("feed"),
+    STARRED("starred"),
+}
+
+data class WorkspaceTimelineSnapshot(
+    val messages: List<MessageResponse> = emptyList(),
+    val nextPageMarker: String? = null,
+)
+
 interface WorkspaceSnapshotStore {
     suspend fun read(ownerKey: String): WorkspaceSnapshot
     suspend fun write(ownerKey: String, snapshot: WorkspaceSnapshot)
+    suspend fun readTimeline(
+        ownerKey: String,
+        kind: WorkspaceTimelineKind,
+    ): WorkspaceTimelineSnapshot?
+    suspend fun writeTimeline(
+        ownerKey: String,
+        kind: WorkspaceTimelineKind,
+        snapshot: WorkspaceTimelineSnapshot,
+    )
     suspend fun clearAccount(ownerKey: String)
 }
 
 class InMemoryWorkspaceSnapshotStore : WorkspaceSnapshotStore {
     private val mutationMutex = Mutex()
     private val snapshots = mutableMapOf<String, WorkspaceSnapshot>()
+    private val timelines =
+        mutableMapOf<Pair<String, WorkspaceTimelineKind>, WorkspaceTimelineSnapshot>()
 
     override suspend fun read(ownerKey: String): WorkspaceSnapshot =
         mutationMutex.withLock {
@@ -56,9 +80,27 @@ class InMemoryWorkspaceSnapshotStore : WorkspaceSnapshotStore {
         }
     }
 
+    override suspend fun readTimeline(
+        ownerKey: String,
+        kind: WorkspaceTimelineKind,
+    ): WorkspaceTimelineSnapshot? = mutationMutex.withLock {
+        timelines[ownerKey to kind]
+    }
+
+    override suspend fun writeTimeline(
+        ownerKey: String,
+        kind: WorkspaceTimelineKind,
+        snapshot: WorkspaceTimelineSnapshot,
+    ) {
+        mutationMutex.withLock {
+            timelines[ownerKey to kind] = snapshot
+        }
+    }
+
     override suspend fun clearAccount(ownerKey: String) {
         mutationMutex.withLock {
             snapshots.remove(ownerKey)
+            timelines.keys.removeAll { it.first == ownerKey }
         }
     }
 }
@@ -123,6 +165,54 @@ class RoomWorkspaceSnapshotStore internal constructor(
                 folders = rows.folders,
                 users = rows.users,
                 streamBindings = rows.streamBindings,
+            )
+        }
+    }
+
+    override suspend fun readTimeline(
+        ownerKey: String,
+        kind: WorkspaceTimelineKind,
+    ): WorkspaceTimelineSnapshot? = withContext(Dispatchers.IO) {
+        require(ownerKey.isNotBlank()) {
+            "Timeline owner must not be blank"
+        }
+        mutationMutex.withLock {
+            decodeTimelineRows(
+                ownerKey = ownerKey,
+                kind = kind,
+                rows = dao.readTimeline(
+                    ownerKeyHash = ownerKeyHash(ownerKey),
+                    kind = kind.wireValue,
+                    messageLimit = MAX_TIMELINE_MESSAGES,
+                    maxEncryptedBytes = MAX_ENCRYPTED_PAYLOAD_BYTES,
+                ),
+            )
+        }
+    }
+
+    override suspend fun writeTimeline(
+        ownerKey: String,
+        kind: WorkspaceTimelineKind,
+        snapshot: WorkspaceTimelineSnapshot,
+    ) = withContext(Dispatchers.IO) {
+        require(ownerKey.isNotBlank()) {
+            "Timeline owner must not be blank"
+        }
+        mutationMutex.withLock {
+            val ownerHash = ownerKeyHash(ownerKey)
+            val cachedAtMillis = clockMillis()
+            val rows = encodeTimeline(
+                ownerKey = ownerKey,
+                ownerKeyHash = ownerHash,
+                kind = kind,
+                snapshot = snapshot,
+                cachedAtMillis = cachedAtMillis,
+            )
+            dao.replaceTimeline(
+                ownerKeyHash = ownerHash,
+                kind = kind.wireValue,
+                timeline = rows.timeline,
+                messages = rows.messages,
             )
         }
     }
@@ -531,6 +621,190 @@ class RoomWorkspaceSnapshotStore internal constructor(
         )
     }
 
+    private fun encodeTimeline(
+        ownerKey: String,
+        ownerKeyHash: String,
+        kind: WorkspaceTimelineKind,
+        snapshot: WorkspaceTimelineSnapshot,
+        cachedAtMillis: Long,
+    ): EncodedTimelineRows {
+        val canonicalMessages = snapshot.messages
+            .asSequence()
+            .filter { message ->
+                !message.uuid.startsWith(LOCAL_MESSAGE_UUID_PREFIX) &&
+                    isValidTimelineMessage(message, kind)
+            }
+            .distinctBy(MessageResponse::uuid)
+            .sortedWith(TIMELINE_MESSAGE_COMPARATOR)
+            .toList()
+        val retainedMessages = canonicalMessages.takeLast(MAX_TIMELINE_MESSAGES)
+        val sourceWasTrimmed =
+            retainedMessages.size < canonicalMessages.size
+        val requestedMarker = snapshot.nextPageMarker
+            ?.takeIf(::isCanonicalUuid)
+            ?.takeIf { marker ->
+                canonicalMessages.firstOrNull()?.uuid == marker
+            }
+        val markerWasRequested = snapshot.nextPageMarker != null
+        val nextMarker = when {
+            retainedMessages.isEmpty() -> null
+            sourceWasTrimmed -> retainedMessages.first().uuid
+            requestedMarker != null -> retainedMessages.first().uuid
+            markerWasRequested -> retainedMessages.first().uuid
+            else -> null
+        }
+        val messages = retainedMessages.mapIndexedNotNull { index, message ->
+            val plaintext = encodeBoundedOrNull(
+                message,
+                MAX_MESSAGE_PAYLOAD_BYTES,
+            ) ?: return@mapIndexedNotNull null
+            val createdAtMillis =
+                requireNotNull(parseTimestampMillis(message.createdAt))
+            val updatedAtMillis =
+                requireNotNull(parseTimestampMillis(message.updatedAt))
+            CachedTimelineMessageEntity(
+                ownerKeyHash = ownerKeyHash,
+                kind = kind.wireValue,
+                uuid = message.uuid,
+                streamUuid = message.streamUuid,
+                topicUuid = message.topicUuid,
+                position = index,
+                createdAtMillis = createdAtMillis,
+                updatedAtMillis = updatedAtMillis,
+                encryptedPayload = cipher.encrypt(
+                    plaintext,
+                    timelineAssociatedData(
+                        ownerKey = ownerKey,
+                        kind = kind,
+                        rowKind = TimelineRowKind.MESSAGE,
+                        uuid = message.uuid,
+                        streamUuid = message.streamUuid,
+                        topicUuid = message.topicUuid,
+                        position = index,
+                    ),
+                ),
+                cachedAtMillis = cachedAtMillis,
+            )
+        }
+        val persistedMarker = when {
+            messages.isEmpty() -> null
+            messages.size != retainedMessages.size -> messages.first().uuid
+            nextMarker != null -> messages.first().uuid
+            else -> null
+        }
+        val metadata = CachedTimelineMetadata(
+            kind = kind.wireValue,
+            messageCount = messages.size,
+            firstMessageUuid = messages.firstOrNull()?.uuid,
+            lastMessageUuid = messages.lastOrNull()?.uuid,
+            nextPageMarker = persistedMarker,
+        )
+        val metadataPlaintext = requireNotNull(
+            encodeBoundedOrNull(
+                metadata,
+                MAX_TIMELINE_METADATA_PAYLOAD_BYTES,
+            ),
+        )
+        return EncodedTimelineRows(
+            timeline = CachedTimelineEntity(
+                ownerKeyHash = ownerKeyHash,
+                kind = kind.wireValue,
+                encryptedPayload = cipher.encrypt(
+                    metadataPlaintext,
+                    timelineAssociatedData(
+                        ownerKey = ownerKey,
+                        kind = kind,
+                        rowKind = TimelineRowKind.METADATA,
+                    ),
+                ),
+                cachedAtMillis = cachedAtMillis,
+            ),
+            messages = messages,
+        )
+    }
+
+    private fun decodeTimelineRows(
+        ownerKey: String,
+        kind: WorkspaceTimelineKind,
+        rows: CachedTimelineRows,
+    ): WorkspaceTimelineSnapshot? {
+        val timeline = rows.timeline ?: return null
+        if (timeline.kind != kind.wireValue) return null
+        val metadata = decodeRow<CachedTimelineMetadata>(
+            ciphertext = timeline.encryptedPayload,
+            maximumBytes = MAX_TIMELINE_METADATA_PAYLOAD_BYTES,
+            associatedData = timelineAssociatedData(
+                ownerKey = ownerKey,
+                kind = kind,
+                rowKind = TimelineRowKind.METADATA,
+            ),
+        )?.takeIf { cached ->
+            cached.kind == kind.wireValue &&
+                cached.messageCount in 0..MAX_TIMELINE_MESSAGES &&
+                cached.firstMessageUuid?.let(::isCanonicalUuid) != false &&
+                cached.lastMessageUuid?.let(::isCanonicalUuid) != false &&
+                cached.nextPageMarker?.let(::isCanonicalUuid) != false &&
+                (
+                    cached.messageCount > 0 ||
+                        (
+                            cached.firstMessageUuid == null &&
+                                cached.lastMessageUuid == null &&
+                                cached.nextPageMarker == null
+                        )
+                )
+        } ?: return null
+
+        val messages = rows.messages.mapNotNull { row ->
+            if (
+                row.kind != kind.wireValue ||
+                row.position !in 0 until MAX_TIMELINE_MESSAGES
+            ) {
+                return@mapNotNull null
+            }
+            decodeRow<MessageResponse>(
+                ciphertext = row.encryptedPayload,
+                maximumBytes = MAX_MESSAGE_PAYLOAD_BYTES,
+                associatedData = timelineAssociatedData(
+                    ownerKey = ownerKey,
+                    kind = kind,
+                    rowKind = TimelineRowKind.MESSAGE,
+                    uuid = row.uuid,
+                    streamUuid = row.streamUuid,
+                    topicUuid = row.topicUuid,
+                    position = row.position,
+                ),
+            )?.takeIf { message ->
+                message.uuid == row.uuid &&
+                    message.streamUuid == row.streamUuid &&
+                    message.topicUuid == row.topicUuid &&
+                    parseTimestampMillis(message.createdAt) ==
+                        row.createdAtMillis &&
+                    parseTimestampMillis(message.updatedAt) ==
+                        row.updatedAtMillis &&
+                    isValidTimelineMessage(message, kind)
+            }
+        }.sortedWith(TIMELINE_MESSAGE_COMPARATOR)
+
+        if (metadata.messageCount == 0) {
+            return WorkspaceTimelineSnapshot()
+                .takeIf { messages.isEmpty() }
+        }
+        if (messages.isEmpty()) return null
+
+        val cacheIsComplete =
+            messages.size == metadata.messageCount &&
+                messages.first().uuid == metadata.firstMessageUuid &&
+                messages.last().uuid == metadata.lastMessageUuid
+        return WorkspaceTimelineSnapshot(
+            messages = messages,
+            nextPageMarker = if (cacheIsComplete) {
+                metadata.nextPageMarker
+            } else {
+                messages.first().uuid
+            },
+        )
+    }
+
     private inline fun <reified T> encodeBoundedOrNull(
         value: T,
         maximumBytes: Int,
@@ -681,6 +955,19 @@ private fun isValidCachedBinding(
         binding.role in VALID_STREAM_BINDING_ROLES &&
         binding.notificationMode in VALID_STREAM_NOTIFICATION_MODES
 
+private fun isValidTimelineMessage(
+    message: MessageResponse,
+    kind: WorkspaceTimelineKind,
+): Boolean =
+    isCanonicalUuid(message.uuid) &&
+        isCanonicalUuid(message.streamUuid) &&
+        isCanonicalUuid(message.topicUuid) &&
+        isCanonicalUuid(message.userUuid) &&
+        isCanonicalUuid(message.authorUuid) &&
+        parseTimestampMillis(message.createdAt) != null &&
+        parseTimestampMillis(message.updatedAt) != null &&
+        (kind != WorkspaceTimelineKind.STARRED || message.starred)
+
 private fun ownerKeyHash(ownerKey: String): String =
     Base64.encodeToString(
         MessageDigest.getInstance("SHA-256").digest(
@@ -709,6 +996,28 @@ private fun associatedData(
         .joinToString("|")
         .toByteArray(StandardCharsets.UTF_8)
 
+private fun timelineAssociatedData(
+    ownerKey: String,
+    kind: WorkspaceTimelineKind,
+    rowKind: TimelineRowKind,
+    uuid: String = "",
+    streamUuid: String = "",
+    topicUuid: String = "",
+    position: Int = -1,
+): ByteArray =
+    listOf(
+        TIMELINE_ASSOCIATED_DATA_PREFIX,
+        ownerKey,
+        kind.wireValue,
+        rowKind.wireValue,
+        uuid,
+        streamUuid,
+        topicUuid,
+        position.toString(),
+    )
+        .joinToString("|")
+        .toByteArray(StandardCharsets.UTF_8)
+
 private enum class SnapshotRowKind(
     val wireValue: String,
 ) {
@@ -720,6 +1029,27 @@ private enum class SnapshotRowKind(
     STREAM_BINDING("stream_binding"),
 }
 
+private enum class TimelineRowKind(
+    val wireValue: String,
+) {
+    METADATA("metadata"),
+    MESSAGE("message"),
+}
+
+@Serializable
+private data class CachedTimelineMetadata(
+    val kind: String,
+    val messageCount: Int,
+    val firstMessageUuid: String?,
+    val lastMessageUuid: String?,
+    val nextPageMarker: String?,
+)
+
+private data class EncodedTimelineRows(
+    val timeline: CachedTimelineEntity,
+    val messages: List<CachedTimelineMessageEntity>,
+)
+
 private data class CachedConversation(
     val streamUuid: String,
     val topicUuid: String,
@@ -729,12 +1059,15 @@ private data class CachedConversation(
 
 private const val TAG = "WorkspaceSnapshot"
 private const val ASSOCIATED_DATA_PREFIX = "workspace-snapshot-v1"
+private const val TIMELINE_ASSOCIATED_DATA_PREFIX =
+    "workspace-timeline-v1"
 private const val LOCAL_MESSAGE_UUID_PREFIX = "local-"
 internal const val MAX_STREAMS = 1_000
 internal const val MAX_TOPICS = 10_000
 internal const val MAX_CACHED_CONVERSATIONS = 100
 internal const val MAX_MESSAGES_PER_CONVERSATION = 100
 internal const val MAX_MESSAGES_PER_ACCOUNT = 5_000
+internal const val MAX_TIMELINE_MESSAGES = 500
 internal const val MAX_FOLDERS = 500
 internal const val MAX_FOLDER_ITEMS_PER_FOLDER = MAX_STREAMS
 internal const val MAX_USERS = 10_000
@@ -742,6 +1075,7 @@ internal const val MAX_STREAM_BINDINGS = 50_000
 internal const val MAX_CATALOG_PAYLOAD_BYTES = 256 * 1_024
 internal const val MAX_USER_PAYLOAD_BYTES = 64 * 1_024
 internal const val MAX_STREAM_BINDING_PAYLOAD_BYTES = 16 * 1_024
+internal const val MAX_TIMELINE_METADATA_PAYLOAD_BYTES = 16 * 1_024
 internal const val MAX_MESSAGE_PAYLOAD_BYTES = 1_024 * 1_024
 internal const val MAX_ENCRYPTED_PAYLOAD_BYTES =
     MAX_MESSAGE_PAYLOAD_BYTES + 4 * 1_024
@@ -761,4 +1095,8 @@ private val VALID_STREAM_NOTIFICATION_MODES = setOf(
     "mentions_only",
     "muted",
     "all_messages",
+)
+private val TIMELINE_MESSAGE_COMPARATOR = compareBy<MessageResponse>(
+    { parseTimestampMillis(it.createdAt) },
+    MessageResponse::uuid,
 )

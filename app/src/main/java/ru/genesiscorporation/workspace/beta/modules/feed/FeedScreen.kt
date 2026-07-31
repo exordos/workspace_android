@@ -247,7 +247,10 @@ fun FeedScreen(
             )
         }
         val visibleError = actionError ?: state.error
-        if (visibleError != null && state.messages.isNotEmpty()) {
+        if (
+            visibleError != null &&
+            hasDisplayableFeedSnapshot(state)
+        ) {
             FeedErrorBanner(
                 message = visibleError,
                 showRetry = actionError == null,
@@ -322,7 +325,8 @@ fun FeedScreen(
                 FeedStateCard("Загрузка…", loading = true)
             }
 
-            state.error != null -> {
+            state.error != null &&
+                !hasDisplayableFeedSnapshot(state) -> {
                 FeedStateCard(
                     message = state.error.orEmpty(),
                     action = "Повторить",

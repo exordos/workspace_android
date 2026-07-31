@@ -1,5 +1,11 @@
 package ru.genesiscorporation.workspace.beta.data
 
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -15,6 +21,65 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 
 class EventsRepositoryTest {
+    @Test
+    fun `message realtime actions publish feed projection deltas`() = runBlocking {
+        val repository = EventsRepository()
+        val events = async(start = CoroutineStart.UNDISPATCHED) {
+            repository.messageProjectionEvents.take(3).toList()
+        }
+        repository.didReceiveMessageEvent(
+            """
+                {
+                  "uuid": "$VALID_MESSAGE_UUID",
+                  "updated_at": "2026-07-31T08:00:00Z",
+                  "created_at": "2026-07-31T08:00:00Z",
+                  "stream_uuid": "$VALID_STREAM_UUID",
+                  "topic_uuid": "$VALID_TOPIC_UUID",
+                  "user_uuid": "$VALID_USER_UUID",
+                  "author_uuid": "$VALID_USER_UUID",
+                  "payload": {"kind": "markdown", "content": "Created"},
+                  "is_own": false,
+                  "reactions": {},
+                  "read": false,
+                  "starred": false
+                }
+            """.trimIndent(),
+            "created",
+            VALID_OWNER_KEY,
+        )
+        repository.didReceiveMessageEvent(
+            """
+                {
+                  "kind": "messages.read",
+                  "message_uuids": ["$VALID_MESSAGE_UUID"]
+                }
+            """.trimIndent(),
+            "read",
+            VALID_OWNER_KEY,
+        )
+        repository.didReceiveMessageEvent(
+            """{"uuid":"$VALID_MESSAGE_UUID"}""",
+            "deleted",
+            VALID_OWNER_KEY,
+        )
+
+        val collected = withTimeout(1_000) { events.await() }
+        assertTrue(collected.all { it.ownerKey == VALID_OWNER_KEY })
+        assertEquals(listOf(1L, 2L, 3L), collected.map { it.sequence })
+        assertEquals(
+            VALID_MESSAGE_UUID,
+            (collected[0].event as MessageProjectionEvent.Upsert).message.uuid,
+        )
+        assertEquals(
+            listOf(VALID_MESSAGE_UUID),
+            (collected[1].event as MessageProjectionEvent.Read).messageUuids,
+        )
+        assertEquals(
+            VALID_MESSAGE_UUID,
+            (collected[2].event as MessageProjectionEvent.Deleted).messageUuid,
+        )
+    }
+
     @Test
     fun `offline hydration preserves newer network state and local outbox rows`() {
         val repository = EventsRepository()
@@ -1620,6 +1685,16 @@ class EventsRepositoryTest {
         private const val USER_UUID = "user-1"
         private const val MESSAGE_UUID = "message-1"
         private const val REACTION_UUID = "reaction-1"
+        private const val VALID_STREAM_UUID =
+            "11000000-0000-4000-8000-000000000001"
+        private const val VALID_OWNER_KEY =
+            "10000000-0000-4000-8000-000000000000"
+        private const val VALID_TOPIC_UUID =
+            "22000000-0000-4000-8000-000000000002"
+        private const val VALID_USER_UUID =
+            "33000000-0000-4000-8000-000000000003"
+        private const val VALID_MESSAGE_UUID =
+            "44000000-0000-4000-8000-000000000004"
         private const val EXTERNAL_ACCOUNT_UUID =
             "10000000-0000-4000-8000-000000000001"
         private const val OTHER_EXTERNAL_ACCOUNT_UUID =

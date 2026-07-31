@@ -287,6 +287,194 @@ class WorkspaceSnapshotStoreInstrumentedTest {
         )
     }
 
+    @Test
+    fun timelineIsEncryptedAccountScopedAndKeepsAuthoritativeEmptyState() =
+        runBlocking {
+            val message = snapshotMessage(MESSAGE_SENTINEL)
+            store.writeTimeline(
+                ACCOUNT_A,
+                WorkspaceTimelineKind.FEED,
+                WorkspaceTimelineSnapshot(
+                    messages = listOf(message),
+                    nextPageMarker = message.uuid,
+                ),
+            )
+            store.writeTimeline(
+                ACCOUNT_A,
+                WorkspaceTimelineKind.STARRED,
+                WorkspaceTimelineSnapshot(),
+            )
+
+            assertEquals(
+                WorkspaceTimelineSnapshot(
+                    messages = listOf(message),
+                    nextPageMarker = message.uuid,
+                ),
+                store.readTimeline(ACCOUNT_A, WorkspaceTimelineKind.FEED),
+            )
+            assertEquals(
+                WorkspaceTimelineSnapshot(),
+                store.readTimeline(ACCOUNT_A, WorkspaceTimelineKind.STARRED),
+            )
+            assertEquals(
+                null,
+                store.readTimeline(ACCOUNT_B, WorkspaceTimelineKind.FEED),
+            )
+
+            val rows = dao.readTimeline(
+                ownerKeyHash = ownerHash(ACCOUNT_A),
+                kind = WorkspaceTimelineKind.FEED.wireValue,
+                messageLimit = MAX_TIMELINE_MESSAGES,
+                maxEncryptedBytes = MAX_ENCRYPTED_PAYLOAD_BYTES,
+            )
+            val persistedBytes = requireNotNull(rows.timeline)
+                .encryptedPayload + rows.messages.single().encryptedPayload
+            assertFalse(
+                persistedBytes
+                    .toString(StandardCharsets.UTF_8)
+                    .contains(MESSAGE_SENTINEL),
+            )
+            assertFalse(rows.timeline.ownerKeyHash.contains(ACCOUNT_A))
+
+            store.clearAccount(ACCOUNT_A)
+            assertEquals(
+                null,
+                store.readTimeline(ACCOUNT_A, WorkspaceTimelineKind.FEED),
+            )
+            assertEquals(
+                null,
+                store.readTimeline(ACCOUNT_A, WorkspaceTimelineKind.STARRED),
+            )
+        }
+
+    @Test
+    fun timelineCiphertextCannotCrossAccountsOrTimelineKinds() = runBlocking {
+        val feedMessage = snapshotMessage("owner-a")
+        val starredMessage = snapshotMessage("owner-b").copy(starred = true)
+        store.writeTimeline(
+            ACCOUNT_A,
+            WorkspaceTimelineKind.FEED,
+            WorkspaceTimelineSnapshot(listOf(feedMessage)),
+        )
+        store.writeTimeline(
+            ACCOUNT_B,
+            WorkspaceTimelineKind.STARRED,
+            WorkspaceTimelineSnapshot(listOf(starredMessage)),
+        )
+
+        val ownerARow = dao.readTimelineMessages(
+            ownerKeyHash = ownerHash(ACCOUNT_A),
+            kind = WorkspaceTimelineKind.FEED.wireValue,
+            limit = 1,
+            maxEncryptedBytes = MAX_ENCRYPTED_PAYLOAD_BYTES,
+        ).single()
+        val ownerBRow = dao.readTimelineMessages(
+            ownerKeyHash = ownerHash(ACCOUNT_B),
+            kind = WorkspaceTimelineKind.STARRED.wireValue,
+            limit = 1,
+            maxEncryptedBytes = MAX_ENCRYPTED_PAYLOAD_BYTES,
+        ).single()
+        dao.insertTimelineMessages(
+            listOf(
+                ownerBRow.copy(
+                    encryptedPayload = ownerARow.encryptedPayload,
+                ),
+            ),
+        )
+
+        assertEquals(
+            null,
+            store.readTimeline(ACCOUNT_B, WorkspaceTimelineKind.STARRED),
+        )
+        assertEquals(
+            "owner-a",
+            store.readTimeline(ACCOUNT_A, WorkspaceTimelineKind.FEED)
+                ?.messages
+                ?.single()
+                ?.payload
+                ?.content,
+        )
+    }
+
+    @Test
+    fun damagedTimelineRowForcesSafePaginationFromOldestSurvivor() =
+        runBlocking {
+            val oldest = snapshotMessage("oldest").copy(
+                uuid = messageUuid(901),
+            )
+            val newest = snapshotMessage("newest").copy(
+                uuid = messageUuid(902),
+                createdAt = OffsetDateTime.parse(TIMESTAMP)
+                    .plusSeconds(1)
+                    .toString(),
+                updatedAt = OffsetDateTime.parse(TIMESTAMP)
+                    .plusSeconds(1)
+                    .toString(),
+            )
+            store.writeTimeline(
+                ACCOUNT_A,
+                WorkspaceTimelineKind.FEED,
+                WorkspaceTimelineSnapshot(listOf(oldest, newest)),
+            )
+            val oldestRow = dao.readTimelineMessages(
+                ownerKeyHash = ownerHash(ACCOUNT_A),
+                kind = WorkspaceTimelineKind.FEED.wireValue,
+                limit = MAX_TIMELINE_MESSAGES,
+                maxEncryptedBytes = MAX_ENCRYPTED_PAYLOAD_BYTES,
+            ).first()
+            dao.insertTimelineMessages(
+                listOf(
+                    oldestRow.copy(
+                        encryptedPayload = byteArrayOf(1, 2, 3),
+                    ),
+                ),
+            )
+
+            val restored = requireNotNull(
+                store.readTimeline(ACCOUNT_A, WorkspaceTimelineKind.FEED),
+            )
+            assertEquals(listOf(newest.uuid), restored.messages.map { it.uuid })
+            assertEquals(newest.uuid, restored.nextPageMarker)
+        }
+
+    @Test
+    fun timelineBoundsRowsAndRejectsUnstarredStarredCacheEntries() =
+        runBlocking {
+            val messages = (0 until MAX_TIMELINE_MESSAGES + 3).map { index ->
+                val timestamp = OffsetDateTime.parse(TIMESTAMP)
+                    .plusSeconds(index.toLong())
+                    .toString()
+                snapshotMessage("message-$index").copy(
+                    uuid = messageUuid(index + 1_000),
+                    createdAt = timestamp,
+                    updatedAt = timestamp,
+                )
+            }
+            store.writeTimeline(
+                ACCOUNT_A,
+                WorkspaceTimelineKind.FEED,
+                WorkspaceTimelineSnapshot(messages),
+            )
+            val restored = requireNotNull(
+                store.readTimeline(ACCOUNT_A, WorkspaceTimelineKind.FEED),
+            )
+            assertEquals(MAX_TIMELINE_MESSAGES, restored.messages.size)
+            assertEquals(messages[3].uuid, restored.messages.first().uuid)
+            assertEquals(messages[3].uuid, restored.nextPageMarker)
+
+            store.writeTimeline(
+                ACCOUNT_A,
+                WorkspaceTimelineKind.STARRED,
+                WorkspaceTimelineSnapshot(
+                    listOf(snapshotMessage("not-starred")),
+                ),
+            )
+            assertEquals(
+                WorkspaceTimelineSnapshot(),
+                store.readTimeline(ACCOUNT_A, WorkspaceTimelineKind.STARRED),
+            )
+        }
+
     private fun snapshot(
         messageContent: String,
         includeLocalOutbox: Boolean = false,

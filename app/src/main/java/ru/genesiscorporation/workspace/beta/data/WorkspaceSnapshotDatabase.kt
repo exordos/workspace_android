@@ -142,6 +142,52 @@ internal data class CachedStreamBindingEntity(
     val cachedAtMillis: Long,
 )
 
+@Entity(
+    tableName = "cached_timelines",
+    primaryKeys = ["owner_key_hash", "kind"],
+)
+internal data class CachedTimelineEntity(
+    @ColumnInfo(name = "owner_key_hash")
+    val ownerKeyHash: String,
+    val kind: String,
+    @ColumnInfo(name = "encrypted_payload", typeAffinity = ColumnInfo.BLOB)
+    val encryptedPayload: ByteArray,
+    @ColumnInfo(name = "cached_at_millis")
+    val cachedAtMillis: Long,
+)
+
+@Entity(
+    tableName = "cached_timeline_messages",
+    primaryKeys = ["owner_key_hash", "kind", "uuid"],
+    indices = [
+        Index(value = ["owner_key_hash", "kind", "position"]),
+    ],
+)
+internal data class CachedTimelineMessageEntity(
+    @ColumnInfo(name = "owner_key_hash")
+    val ownerKeyHash: String,
+    val kind: String,
+    val uuid: String,
+    @ColumnInfo(name = "stream_uuid")
+    val streamUuid: String,
+    @ColumnInfo(name = "topic_uuid")
+    val topicUuid: String,
+    val position: Int,
+    @ColumnInfo(name = "created_at_millis")
+    val createdAtMillis: Long,
+    @ColumnInfo(name = "updated_at_millis")
+    val updatedAtMillis: Long,
+    @ColumnInfo(name = "encrypted_payload", typeAffinity = ColumnInfo.BLOB)
+    val encryptedPayload: ByteArray,
+    @ColumnInfo(name = "cached_at_millis")
+    val cachedAtMillis: Long,
+)
+
+internal data class CachedTimelineRows(
+    val timeline: CachedTimelineEntity?,
+    val messages: List<CachedTimelineMessageEntity>,
+)
+
 internal data class CachedWorkspaceRows(
     val streams: List<CachedStreamEntity>,
     val topics: List<CachedTopicEntity>,
@@ -243,6 +289,58 @@ internal interface WorkspaceSnapshotDao {
         maxEncryptedBytes: Int,
     ): List<CachedStreamBindingEntity>
 
+    @Query(
+        """
+        SELECT * FROM cached_timelines
+        WHERE owner_key_hash = :ownerKeyHash
+          AND kind = :kind
+          AND length(encrypted_payload) <= :maxEncryptedBytes
+        LIMIT 1
+        """,
+    )
+    suspend fun readTimelineMetadata(
+        ownerKeyHash: String,
+        kind: String,
+        maxEncryptedBytes: Int,
+    ): CachedTimelineEntity?
+
+    @Query(
+        """
+        SELECT * FROM cached_timeline_messages
+        WHERE owner_key_hash = :ownerKeyHash
+          AND kind = :kind
+          AND length(encrypted_payload) <= :maxEncryptedBytes
+        ORDER BY position ASC
+        LIMIT :limit
+        """,
+    )
+    suspend fun readTimelineMessages(
+        ownerKeyHash: String,
+        kind: String,
+        limit: Int,
+        maxEncryptedBytes: Int,
+    ): List<CachedTimelineMessageEntity>
+
+    @Transaction
+    suspend fun readTimeline(
+        ownerKeyHash: String,
+        kind: String,
+        messageLimit: Int,
+        maxEncryptedBytes: Int,
+    ): CachedTimelineRows = CachedTimelineRows(
+        timeline = readTimelineMetadata(
+            ownerKeyHash = ownerKeyHash,
+            kind = kind,
+            maxEncryptedBytes = maxEncryptedBytes,
+        ),
+        messages = readTimelineMessages(
+            ownerKeyHash = ownerKeyHash,
+            kind = kind,
+            limit = messageLimit,
+            maxEncryptedBytes = maxEncryptedBytes,
+        ),
+    )
+
     @Transaction
     suspend fun readAccount(
         ownerKeyHash: String,
@@ -306,6 +404,41 @@ internal interface WorkspaceSnapshotDao {
         streamBindings: List<CachedStreamBindingEntity>,
     )
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertTimeline(timeline: CachedTimelineEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertTimelineMessages(
+        messages: List<CachedTimelineMessageEntity>,
+    )
+
+    @Query(
+        """
+        DELETE FROM cached_timeline_messages
+        WHERE owner_key_hash = :ownerKeyHash AND kind = :kind
+        """,
+    )
+    suspend fun deleteTimelineMessages(ownerKeyHash: String, kind: String)
+
+    @Query(
+        """
+        DELETE FROM cached_timelines
+        WHERE owner_key_hash = :ownerKeyHash AND kind = :kind
+        """,
+    )
+    suspend fun deleteTimeline(ownerKeyHash: String, kind: String)
+
+    @Query(
+        "DELETE FROM cached_timeline_messages " +
+            "WHERE owner_key_hash = :ownerKeyHash",
+    )
+    suspend fun deleteAccountTimelineMessages(ownerKeyHash: String)
+
+    @Query(
+        "DELETE FROM cached_timelines WHERE owner_key_hash = :ownerKeyHash",
+    )
+    suspend fun deleteAccountTimelines(ownerKeyHash: String)
+
     @Query(
         "DELETE FROM cached_stream_bindings " +
             "WHERE owner_key_hash = :ownerKeyHash",
@@ -352,7 +485,22 @@ internal interface WorkspaceSnapshotDao {
     }
 
     @Transaction
+    suspend fun replaceTimeline(
+        ownerKeyHash: String,
+        kind: String,
+        timeline: CachedTimelineEntity,
+        messages: List<CachedTimelineMessageEntity>,
+    ) {
+        deleteTimelineMessages(ownerKeyHash, kind)
+        deleteTimeline(ownerKeyHash, kind)
+        insertTimeline(timeline)
+        if (messages.isNotEmpty()) insertTimelineMessages(messages)
+    }
+
+    @Transaction
     suspend fun clearAccount(ownerKeyHash: String) {
+        deleteAccountTimelineMessages(ownerKeyHash)
+        deleteAccountTimelines(ownerKeyHash)
         deleteStreamBindings(ownerKeyHash)
         deleteUsers(ownerKeyHash)
         deleteFolders(ownerKeyHash)
@@ -370,8 +518,10 @@ internal interface WorkspaceSnapshotDao {
         CachedFolderEntity::class,
         CachedUserEntity::class,
         CachedStreamBindingEntity::class,
+        CachedTimelineEntity::class,
+        CachedTimelineMessageEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 internal abstract class WorkspaceSnapshotDatabase : RoomDatabase() {
@@ -391,7 +541,7 @@ internal abstract class WorkspaceSnapshotDatabase : RoomDatabase() {
                     DATABASE_NAME,
                 )
                     .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .build()
                     .also { instance = it }
             }
@@ -455,6 +605,47 @@ internal abstract class WorkspaceSnapshotDatabase : RoomDatabase() {
                         `index_cached_stream_bindings_owner_key_hash_stream_uuid_position`
                     ON `cached_stream_bindings`
                         (`owner_key_hash`, `stream_uuid`, `position`)
+                    """.trimIndent(),
+                )
+            }
+        }
+
+        internal val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `cached_timelines` (
+                        `owner_key_hash` TEXT NOT NULL,
+                        `kind` TEXT NOT NULL,
+                        `encrypted_payload` BLOB NOT NULL,
+                        `cached_at_millis` INTEGER NOT NULL,
+                        PRIMARY KEY(`owner_key_hash`, `kind`)
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `cached_timeline_messages` (
+                        `owner_key_hash` TEXT NOT NULL,
+                        `kind` TEXT NOT NULL,
+                        `uuid` TEXT NOT NULL,
+                        `stream_uuid` TEXT NOT NULL,
+                        `topic_uuid` TEXT NOT NULL,
+                        `position` INTEGER NOT NULL,
+                        `created_at_millis` INTEGER NOT NULL,
+                        `updated_at_millis` INTEGER NOT NULL,
+                        `encrypted_payload` BLOB NOT NULL,
+                        `cached_at_millis` INTEGER NOT NULL,
+                        PRIMARY KEY(`owner_key_hash`, `kind`, `uuid`)
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS
+                        `index_cached_timeline_messages_owner_key_hash_kind_position`
+                    ON `cached_timeline_messages`
+                        (`owner_key_hash`, `kind`, `position`)
                     """.trimIndent(),
                 )
             }

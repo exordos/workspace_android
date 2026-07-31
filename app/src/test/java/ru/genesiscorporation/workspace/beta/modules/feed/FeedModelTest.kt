@@ -1,9 +1,11 @@
 package ru.genesiscorporation.workspace.beta.modules.feed
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import ru.genesiscorporation.workspace.beta.data.MessageProjectionEvent
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponsePayload
 
@@ -154,6 +156,206 @@ class FeedModelTest {
         )
         assertEquals("Сообщение без текста", feedMessageSummary("  **  "))
         assertEquals("1234…", feedMessageSummary("123456789", maxLength = 5))
+    }
+
+    @Test
+    fun `realtime updates are replayed over a REST page without losing edits`() {
+        val staleRest = message(
+            NEWER_MESSAGE_UUID,
+            "2026-07-30T10:02:00Z",
+            content = "REST copy",
+        )
+        val realtimeEdit = staleRest.copy(
+            updatedAt = "2026-07-30T10:03:00Z",
+            payload = MessageResponsePayload(
+                kind = "markdown",
+                content = "Realtime edit",
+            ),
+            read = false,
+        )
+
+        val projection = applyFeedProjectionEvents(
+            messages = listOf(staleRest),
+            nextPageMarker = null,
+            events = listOf(
+                SequencedMessageProjectionEvent(
+                    1,
+                    MessageProjectionEvent.Upsert(realtimeEdit),
+                ),
+                SequencedMessageProjectionEvent(
+                    2,
+                    MessageProjectionEvent.Read(
+                        listOf(NEWER_MESSAGE_UUID),
+                    ),
+                ),
+            ),
+            requireStarred = false,
+        )
+
+        assertEquals("Realtime edit", projection.messages.single().payload.content)
+        assertTrue(projection.messages.single().read)
+    }
+
+    @Test
+    fun `stale realtime edit cannot replace a newer cached message`() {
+        val current = message(
+            NEWER_MESSAGE_UUID,
+            "2026-07-30T10:02:00Z",
+            content = "Current",
+        ).copy(updatedAt = "2026-07-30T10:05:00Z")
+        val stale = current.copy(
+            updatedAt = "2026-07-30T10:04:00Z",
+            payload = MessageResponsePayload(
+                kind = "markdown",
+                content = "Stale",
+            ),
+        )
+
+        val projection = applyFeedProjectionEvents(
+            messages = listOf(current),
+            nextPageMarker = null,
+            events = listOf(
+                SequencedMessageProjectionEvent(
+                    1,
+                    MessageProjectionEvent.Upsert(stale),
+                ),
+            ),
+            requireStarred = false,
+        )
+
+        assertEquals("Current", projection.messages.single().payload.content)
+    }
+
+    @Test
+    fun `later realtime snapshot cannot regress confirmed read state`() {
+        val readMessage = message(
+            NEWER_MESSAGE_UUID,
+            "2026-07-30T10:02:00Z",
+        ).copy(read = true)
+        val laterUnreadSnapshot = readMessage.copy(
+            updatedAt = "2026-07-30T10:03:00Z",
+            read = false,
+        )
+
+        val projection = applyFeedProjectionEvents(
+            messages = listOf(readMessage),
+            nextPageMarker = null,
+            events = listOf(
+                SequencedMessageProjectionEvent(
+                    1,
+                    MessageProjectionEvent.Upsert(laterUnreadSnapshot),
+                ),
+            ),
+            requireStarred = false,
+        )
+
+        assertTrue(projection.messages.single().read)
+    }
+
+    @Test
+    fun `starred realtime projection removes unstarred and deleted rows`() {
+        val starred = message(
+            NEWER_MESSAGE_UUID,
+            "2026-07-30T10:02:00Z",
+        ).copy(starred = true)
+
+        val unstarred = applyFeedProjectionEvents(
+            messages = listOf(starred),
+            nextPageMarker = NEWER_MESSAGE_UUID,
+            events = listOf(
+                SequencedMessageProjectionEvent(
+                    1,
+                    MessageProjectionEvent.Upsert(
+                        starred.copy(
+                            updatedAt = "2026-07-30T10:03:00Z",
+                            starred = false,
+                        ),
+                    ),
+                ),
+            ),
+            requireStarred = true,
+        )
+        assertTrue(unstarred.messages.isEmpty())
+        assertNull(unstarred.nextPageMarker)
+
+        val deleted = applyFeedProjectionEvents(
+            messages = listOf(starred),
+            nextPageMarker = NEWER_MESSAGE_UUID,
+            events = listOf(
+                SequencedMessageProjectionEvent(
+                    2,
+                    MessageProjectionEvent.Deleted(NEWER_MESSAGE_UUID),
+                ),
+            ),
+            requireStarred = true,
+        )
+        assertTrue(deleted.messages.isEmpty())
+        assertNull(deleted.nextPageMarker)
+    }
+
+    @Test
+    fun `bounded realtime projection keeps a safe pagination marker`() {
+        val oldest = message(
+            OLDER_MESSAGE_UUID,
+            "2026-07-30T10:01:00Z",
+        )
+        val middle = message(
+            NEWER_MESSAGE_UUID,
+            "2026-07-30T10:02:00Z",
+        )
+        val newestUuid = "66666666-6666-4666-8666-666666666666"
+        val newest = message(
+            newestUuid,
+            "2026-07-30T10:03:00Z",
+        )
+
+        val projection = applyFeedProjectionEvents(
+            messages = listOf(oldest, middle),
+            nextPageMarker = null,
+            events = listOf(
+                SequencedMessageProjectionEvent(
+                    1,
+                    MessageProjectionEvent.Upsert(newest),
+                ),
+            ),
+            requireStarred = false,
+            maximumMessages = 2,
+        )
+
+        assertEquals(
+            listOf(NEWER_MESSAGE_UUID, newestUuid),
+            projection.messages.map(MessageResponse::uuid),
+        )
+        assertEquals(NEWER_MESSAGE_UUID, projection.nextPageMarker)
+    }
+
+    @Test
+    fun `realtime sequence detects dropped or replayed repository events`() {
+        assertFalse(isMessageProjectionSequenceGap(null, 7))
+        assertFalse(isMessageProjectionSequenceGap(7, 8))
+        assertTrue(isMessageProjectionSequenceGap(7, 9))
+        assertTrue(isMessageProjectionSequenceGap(7, 7))
+    }
+
+    @Test
+    fun `authoritative empty snapshot remains displayable after refresh failure`() {
+        assertTrue(
+            hasDisplayableFeedSnapshot(
+                FeedUiState(
+                    hasLoaded = true,
+                    hasUsableSnapshot = true,
+                    error = "offline",
+                ),
+            ),
+        )
+        assertFalse(
+            hasDisplayableFeedSnapshot(
+                FeedUiState(
+                    hasLoaded = true,
+                    error = "offline",
+                ),
+            ),
+        )
     }
 
     private fun message(

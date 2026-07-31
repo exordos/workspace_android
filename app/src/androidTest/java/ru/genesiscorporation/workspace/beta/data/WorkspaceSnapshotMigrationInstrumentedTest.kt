@@ -81,6 +81,83 @@ class WorkspaceSnapshotMigrationInstrumentedTest {
         }
     }
 
+    @Test
+    fun migrationFromTwoToThreePreservesCatalogAndCreatesTimelineTables() {
+        helper.createDatabase(DATABASE_NAME, 2).apply {
+            execSQL(
+                """
+                INSERT INTO cached_streams (
+                    owner_key_hash,
+                    uuid,
+                    position,
+                    encrypted_payload,
+                    cached_at_millis
+                ) VALUES (?, ?, ?, ?, ?)
+                """.trimIndent(),
+                arrayOf(
+                    "owner-hash",
+                    STREAM_UUID,
+                    0,
+                    byteArrayOf(1, 2, 3),
+                    1_785_456_000_000L,
+                ),
+            )
+            close()
+        }
+
+        helper.runMigrationsAndValidate(
+            DATABASE_NAME,
+            3,
+            true,
+            WorkspaceSnapshotDatabase.MIGRATION_2_3,
+        ).use { database ->
+            assertEquals(
+                1,
+                database.query("SELECT * FROM cached_streams").use {
+                    it.count
+                },
+            )
+            assertEquals(
+                0,
+                database.query("SELECT * FROM cached_timelines").use {
+                    it.count
+                },
+            )
+            assertEquals(
+                0,
+                database.query(
+                    "SELECT * FROM cached_timeline_messages",
+                ).use { it.count },
+            )
+        }
+    }
+
+    @Test
+    fun migrationFromOneToThreeRunsTheCompleteSupportedChain() {
+        helper.createDatabase(DATABASE_NAME, 1).close()
+
+        helper.runMigrationsAndValidate(
+            DATABASE_NAME,
+            3,
+            true,
+            WorkspaceSnapshotDatabase.MIGRATION_1_2,
+            WorkspaceSnapshotDatabase.MIGRATION_2_3,
+        ).use { database ->
+            assertEquals(
+                0,
+                database.query("SELECT * FROM cached_folders").use {
+                    it.count
+                },
+            )
+            assertEquals(
+                0,
+                database.query("SELECT * FROM cached_timelines").use {
+                    it.count
+                },
+            )
+        }
+    }
+
     companion object {
         private const val DATABASE_NAME =
             "workspace-snapshot-migration-test.db"

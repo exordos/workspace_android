@@ -218,19 +218,29 @@ flow. Stateful acceptance uses only the dedicated sandbox stream/topic.
 | FEED-010 | Account switch during request | Old-owner completion cannot replace the new account's feed, navigate, or start forwarding |
 | FEED-011 | Rotation/background/back stack | Retained state keeps pages, pending request and list position; Back returns to the prior catalog; no duplicate request or forward dialog appears |
 | FEED-012 | Accessibility, contrast and large feed | All controls have meaningful labels and 48 dp targets, preview text meets theme contrast, long content/labels remain bounded, and rapid scrolling/pagination causes no ANR or request fan-out |
+| FEED-013 | Cold offline launch after successful sync | The encrypted exact-owner timeline restores up to 500 real messages and its oldest-row continuation marker before REST succeeds; no fabricated row or login flash appears |
+| FEED-014 | Realtime create/update/read/delete during and after REST | Deltas converge once in chronological order; an older edit cannot replace a newer row, read is monotonic, delete removes the row, and events received during a delayed page request are replayed over that page |
+| FEED-015 | Realtime journal overflow during delayed REST | The stale REST response is discarded, current visible/cache state remains usable and a functional retry error appears instead of silently losing an event |
+| FEED-016 | Damaged/cross-owner/oversized timeline cache | Invalid encrypted rows never render; unrelated valid rows remain, pagination restarts from the oldest survivor, authoritative empty remains distinguishable from no cache, and sibling accounts are untouched |
 
 ### Current Feed acceptance coverage
 
 - Pure tests cover chronological ordering, current-row-wins overlap merge,
   malformed/repeated/unrelated cursors, invalid/duplicate conversation IDs,
-  canonical UUID normalization and bounded summaries that do not expose raw
-  attachment targets.
+  canonical UUID normalization, bounded summaries, realtime edit/read/delete/
+  unstar reconciliation, stale-edit rejection and safe marker retention after
+  bounded eviction.
 - The request contract test proves the global feed omits both conversation
   filters while retaining bounded descending keyset parameters.
 - The retained ViewModel serializes refresh and older-page work, fences every
   applied response to the active credential owner, keeps current rows across
-  recoverable failure and leaves a functional retry marker after a rejected
-  older page.
+  recoverable failure, replays a bounded realtime journal over delayed REST,
+  refuses overflow rollback and leaves a functional retry marker after a
+  rejected older page.
+- Exact Room instrumentation covers encrypted/account-scoped timelines,
+  authoritative empty state, 500-row bounds, cross-owner/kind ciphertext
+  rejection, damaged-row isolation and safe continuation from the oldest
+  survivor. Schema-v2→v3 and v1→v3 migration tests are defined.
 - Open and Forward share the exact message route. A missing catalog entry is
   resolved by one exact, owner-bound stream/topic lookup; case-variant
   duplicates and foreign topics fail closed. Forward does not duplicate send
@@ -241,15 +251,18 @@ flow. Stateful acceptance uses only the dedicated sandbox stream/topic.
   Refresh and older-page network failures retain content plus a functional
   Retry; recovery preserves the same visible message at the same screen
   coordinate. A completed multi-page list also retains its rows and position
-  through portrait/landscape recreation without crash or ANR.
+  through portrait/landscape recreation without crash or ANR. A schema-v3
+  online snapshot persisted 50 encrypted Feed rows; with no active Android
+  network, a force-stopped cold launch restored those rows before REST and
+  exposed no empty/loading replacement or crash.
 - One Feed-originated forward was delivered only to the dedicated sandbox.
   The mobile client received the server confirmation and a second visible
   Workspace client showed exactly one new forwarded article with the expected
   source content.
-- Controlled rotation during an in-flight page request, account switching,
-  injected timeout/5xx/malformed responses, large-font/TalkBack and
-  long-running/cache/realtime behavior remain open and are not implied by
-  these passes.
+- Physical realtime/schema-v3 in-place migration acceptance, controlled
+  rotation during an in-flight page request, account switching, injected
+  timeout/5xx/malformed responses, large-font/TalkBack and long-running
+  behavior remain open and are not implied by these passes.
 
 ## Starred activity scenarios
 
@@ -272,6 +285,9 @@ unsupported.
 | ACT-STAR-010 | Rotation/background/back stack | Retained page/request/position survive recreation; Back returns to the catalog and no duplicate dialog/request appears |
 | ACT-STAR-011 | Accessibility and contrast | Catalog/header/row actions have meaningful labels and 48 dp targets; text meets theme contrast and long labels remain bounded |
 | ACT-STAR-012 | Unsupported-action absence | No mentions/reactions/star/unstar control or placeholder destination is reachable from the mobile Activity surface |
+| ACT-STAR-013 | Cold offline empty/non-empty restore | An authoritative empty result remains empty rather than looking uncached; a non-empty encrypted exact-owner projection restores only rows with `starred=true` and its safe marker |
+| ACT-STAR-014 | Realtime star snapshot, unstar and delete | Full updated snapshots add/replace confirmed starred rows; `starred=false` and delete remove the exact UUID without affecting Feed or another account |
+| ACT-STAR-015 | Concurrent filtered REST and realtime | Events received during a delayed `starred=true` page are replayed; overflow retains current rows and exposes retry rather than accepting stale filtered state |
 
 ### Current Starred acceptance coverage
 
@@ -280,11 +296,15 @@ unsupported.
   unstarred row fails closed while a confirmed starred row is accepted.
 - The shared retained timeline covers owner fencing, single-flight
   refresh/pagination, rejected-page preservation, stable UUID anchoring,
-  exact open and the existing forwarding state machine.
+  exact open, encrypted authoritative-empty persistence, realtime reconciliation
+  and the existing forwarding state machine.
 - On the physical Android 14 Pixel, the primary account's empty result matched
   the visible desktop Starred page. Online refresh, offline
   `Network unavailable`, restored-connectivity Retry, portrait/landscape/
-  portrait, Back and labelled 48 dp controls pass without crash or ANR.
+  portrait, Back and labelled 48 dp controls pass without crash or ANR. The
+  schema-v3 cache persisted a distinct zero-row Starred snapshot; after a
+  force-stop with no active Android network, the screen retained the truthful
+  empty state together with a recoverable error and functional Retry.
 - The account currently has no starred row and the maintained product exposes
   no supported star mutation with which to fabricate one. Physical non-empty
   row rendering/open/forward/pagination, controlled account/in-flight/5xx/
@@ -686,24 +706,33 @@ and is replaced only while the same credential owner remains active.
 | OFFLINE-004 | Restore Wi-Fi/mobile data while cached chat is open | One catch-up/realtime recovery converges in place, hides the stale banner and retains the exact route without duplicate rows | Physical recovery passed; controlled request-count oracle pending |
 | OFFLINE-005 | Newer REST/realtime/local row races cached hydration | Current/newer state wins by UUID and timestamps; an authoritative empty folder/user/binding snapshot cannot be repopulated by a delayed disk read; local `local-*` outbox rows survive and are never written into Room | Repository/unit coverage, including the empty-snapshot race; delayed device injection pending |
 | OFFLINE-006 | Switch accounts during read or debounced write | Completion is owner-fenced; old rows never flash or write under the new owner | Source/repository coverage; delayed-I/O two-account instrumentation pending |
-| OFFLINE-007 | Logout one account | Only that owner's stream/topic/message/folder/user/binding rows are deleted before account removal; sibling account rows remain decryptable | Store instrumentation covers selective clear across the complete schema; two-account UI E2E pending |
-| OFFLINE-008 | Corrupt, moved, replayed, oversized or cross-scope row | AES-GCM associated-data validation and bounds reject only invalid rows; invalid folder relationships, membership enums and cross-stream bindings cannot enter the projection; unrelated valid rows remain available | Exact instrumentation covers ciphertext replay, invalid/local/catalog exclusion and bounds; raw-DB device injection pending |
-| OFFLINE-009 | Cache bounds under a large account | At most 1,000 streams, 10,000 topics, 500 folders with 1,000 items each, 10,000 users, 50,000 bindings, 100 conversations, 100 messages/conversation and 5,000 messages/account persist; payload-specific byte caps and deterministic newest-message retention apply | Source constants and store instrumentation; generated maximum-volume performance run pending |
+| OFFLINE-007 | Logout one account | Only that owner's stream/topic/message/folder/user/binding and Feed/Starred rows are deleted before account removal; sibling account rows remain decryptable | Store instrumentation covers selective clear across the complete schema; two-account UI E2E pending |
+| OFFLINE-008 | Corrupt, moved, replayed, oversized or cross-scope row | AES-GCM associated-data validation and bounds reject only invalid rows; invalid folder relationships, membership enums and cross-stream bindings cannot enter the projection; a damaged timeline continues from its oldest survivor; unrelated valid rows remain available | Exact instrumentation covers ciphertext replay, invalid/local/catalog exclusion, timeline corruption and bounds; raw-DB device injection pending |
+| OFFLINE-009 | Cache bounds under a large account | At most 1,000 streams, 10,000 topics, 500 folders with 1,000 items each, 10,000 users, 50,000 bindings, 100 conversations, 100 messages/conversation, 5,000 messages/account and 500 messages per Feed/Starred timeline persist; payload-specific byte caps and deterministic newest-message retention apply | Source constants and store instrumentation; generated maximum-volume performance run pending |
 | OFFLINE-010 | Rotation/background while fully offline | Route, catalog/history and one global stale surface survive recreation; no request, mutation or duplicate banner is created | Physical portrait/landscape/portrait passed; long background pending |
 | OFFLINE-011 | Cache database/keyset backup or device transfer | Room database and keyset are excluded; undecryptable transplanted data cannot render | Backup-rule source gate; emulator backup/restore acceptance pending |
 | OFFLINE-012 | Keystore/Room read or write failure | App remains usable online, logs no payload/credential, skips persistence for that runtime and never overwrites another owner | Fail-closed source path; injected Keystore/SQLite faults pending |
 | OFFLINE-013 | Upgrade an installed schema-v1 cache to schema v2 | Existing encrypted streams/topics/messages survive; empty folder/user/binding tables are added with exact indices; startup requires no destructive fallback | Exact migration instrumentation and physical in-place Pixel upgrade passed |
+| OFFLINE-014 | Upgrade schema v2 to v3 or directly v1 to v3 | Existing catalog/history/member rows survive; empty Feed/Starred tables and exact owner/kind/position index are created without destructive fallback | Exact sequential migration instrumentation defined; physical v2→v3 in-place acceptance pending |
+| OFFLINE-015 | Authoritative empty timeline versus missing cache | An empty successful Feed/Starred response is encrypted as metadata with zero rows and restores as content-ready empty; an account/kind never cached returns no projection and still attempts REST | Store instrumentation and physical offline empty Starred acceptance passed |
 
 Current verified coverage: the exact owner-scoped instrumentation class passes
 encrypted round-trip, account separation, ciphertext replay rejection,
-invalid/local/catalog-row exclusion, bounds and selective clear. The exact
-migration test preserves schema-v1 history while adding the three schema-v2
-catalog tables. Repository tests prove cache-under-current merging, an
+invalid/local/catalog-row exclusion, bounds and selective clear. The same
+class now covers independent encrypted Feed/Starred timelines, authoritative
+empty state, 500-row retention, damaged-row isolation and cross-owner/kind
+replay rejection. Exact migrations preserve schema-v1 history, add the three
+schema-v2 catalog tables and then add the schema-v3 timeline tables. Repository
+tests prove cache-under-current merging, an
 authoritative-empty race fence, and realtime binding add/delete projection. On
 the physical Pixel, an installed schema-v1 cache upgraded in place, an online
 snapshot populated 3 encrypted folders, 42 users and 124 bindings, both radios
 were disabled, the process was force-stopped, and the general catalog reopened
-cold. No stateful Workspace mutation was performed. Message text and the yellow
+cold. A later schema-v3 run persisted 50 encrypted Feed rows plus a distinct
+zero-row Starred snapshot; both restored after a no-network force-stop, and
+the empty Starred screen retained its recoverable Retry rather than becoming
+an uncached blocking error. No stateful Workspace mutation was performed.
+Message text and the yellow
 stale banner have readable dark-theme contrast; the banner's **Retry now** is a
 real action, while an uncached quote source retains its own truthful,
 functional Retry.

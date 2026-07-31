@@ -1,5 +1,6 @@
 package ru.genesiscorporation.workspace.beta.modules.feed
 
+import ru.genesiscorporation.workspace.beta.data.MessageProjectionEvent
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import java.time.Instant
 import java.time.OffsetDateTime
@@ -41,6 +42,7 @@ data class FeedUiState(
     val refreshing: Boolean = false,
     val loadingOlder: Boolean = false,
     val hasLoaded: Boolean = false,
+    val hasUsableSnapshot: Boolean = false,
     val nextPageMarker: String? = null,
     val error: String? = null,
     val olderError: String? = null,
@@ -49,11 +51,31 @@ data class FeedUiState(
         get() = nextPageMarker != null
 }
 
+internal fun hasDisplayableFeedSnapshot(state: FeedUiState): Boolean =
+    state.messages.isNotEmpty() || state.hasUsableSnapshot
+
 internal data class FeedPageValidation(
     val messages: List<MessageResponse>,
     val nextPageMarker: String?,
     val error: String? = null,
 )
+
+internal data class FeedProjection(
+    val messages: List<MessageResponse>,
+    val nextPageMarker: String?,
+)
+
+internal data class SequencedMessageProjectionEvent(
+    val sequence: Long,
+    val event: MessageProjectionEvent,
+)
+
+internal fun isMessageProjectionSequenceGap(
+    previousSequence: Long?,
+    currentSequence: Long,
+): Boolean =
+    previousSequence != null &&
+        currentSequence != previousSequence + 1L
 
 /**
  * The Workspace feed endpoint returns descending pages. UI keeps one
@@ -118,6 +140,103 @@ internal fun mergeOlderFeedMessages(
     )
 }
 
+internal fun applyFeedProjectionEvents(
+    messages: List<MessageResponse>,
+    nextPageMarker: String?,
+    events: List<SequencedMessageProjectionEvent>,
+    requireStarred: Boolean,
+    maximumMessages: Int = MAX_FEED_CACHE_MESSAGES,
+): FeedProjection {
+    require(maximumMessages > 0)
+    return events.fold(
+        FeedProjection(
+            messages = sortFeedMessages(messages),
+            nextPageMarker = nextPageMarker,
+        ),
+    ) { projection, sequencedEvent ->
+        applyFeedProjectionEvent(
+            projection = projection,
+            event = sequencedEvent.event,
+            requireStarred = requireStarred,
+            maximumMessages = maximumMessages,
+        )
+    }
+}
+
+private fun applyFeedProjectionEvent(
+    projection: FeedProjection,
+    event: MessageProjectionEvent,
+    requireStarred: Boolean,
+    maximumMessages: Int,
+): FeedProjection {
+    val currentByUuid = projection.messages
+        .associateByTo(linkedMapOf(), MessageResponse::uuid)
+    var nextMarker = projection.nextPageMarker
+    when (event) {
+        is MessageProjectionEvent.Upsert -> {
+            val incoming = normalizeFeedMessage(event.message)
+                ?: return projection
+            val existing = currentByUuid[incoming.uuid]
+            if (
+                existing != null &&
+                feedMessageInstant(incoming.updatedAt) <
+                feedMessageInstant(existing.updatedAt)
+            ) {
+                return projection
+            }
+            if (requireStarred && !incoming.starred) {
+                currentByUuid.remove(incoming.uuid)
+                if (nextMarker == incoming.uuid) {
+                    nextMarker = sortFeedMessages(
+                        currentByUuid.values.toList(),
+                    )
+                        .firstOrNull()
+                        ?.uuid
+                }
+            } else {
+                currentByUuid[incoming.uuid] = incoming.copy(
+                    read = incoming.read || existing?.read == true,
+                )
+            }
+        }
+
+        is MessageProjectionEvent.Read -> {
+            val messageUuids = event.messageUuids
+                .mapNotNull(::canonicalUuid)
+                .toSet()
+            messageUuids.forEach { uuid ->
+                currentByUuid[uuid]?.let { message ->
+                    currentByUuid[uuid] = message.copy(read = true)
+                }
+            }
+        }
+
+        is MessageProjectionEvent.Deleted -> {
+            val uuid = canonicalUuid(event.messageUuid)
+                ?: return projection
+            currentByUuid.remove(uuid)
+            if (nextMarker == uuid) {
+                nextMarker = sortFeedMessages(
+                    currentByUuid.values.toList(),
+                )
+                    .firstOrNull()
+                    ?.uuid
+            }
+        }
+    }
+    val sorted = sortFeedMessages(currentByUuid.values.toList())
+    val retained = sorted.takeLast(maximumMessages)
+    if (retained.size < sorted.size) {
+        nextMarker = retained.firstOrNull()?.uuid
+    } else if (nextMarker != null) {
+        nextMarker = retained.firstOrNull()?.uuid
+    }
+    return FeedProjection(
+        messages = retained,
+        nextPageMarker = nextMarker,
+    )
+}
+
 internal fun feedMessageSummary(
     markdown: String,
     maxLength: Int = 160,
@@ -145,7 +264,7 @@ private fun malformedFeedPage() = FeedPageValidation(
     error = MALFORMED_FEED_PAGE_ERROR,
 )
 
-private fun sortFeedMessages(
+internal fun sortFeedMessages(
     messages: List<MessageResponse>,
 ): List<MessageResponse> = messages.sortedWith(
     compareBy<MessageResponse>(
@@ -165,13 +284,16 @@ private fun canonicalUuid(value: String): String? {
     return canonical.takeIf { it.equals(trimmed, ignoreCase = true) }
 }
 
-private fun normalizeFeedMessage(message: MessageResponse): MessageResponse? {
+internal fun normalizeFeedMessage(message: MessageResponse): MessageResponse? {
     val messageUuid = canonicalUuid(message.uuid) ?: return null
     val streamUuid = canonicalUuid(message.streamUuid) ?: return null
     val topicUuid = canonicalUuid(message.topicUuid) ?: return null
     val userUuid = canonicalUuid(message.userUuid) ?: return null
     val authorUuid = canonicalUuid(message.authorUuid) ?: return null
     runCatching { OffsetDateTime.parse(message.createdAt).toInstant() }
+        .getOrNull()
+        ?: return null
+    runCatching { OffsetDateTime.parse(message.updatedAt).toInstant() }
         .getOrNull()
         ?: return null
     return message.copy(
@@ -185,6 +307,7 @@ private fun normalizeFeedMessage(message: MessageResponse): MessageResponse? {
 
 private const val MALFORMED_FEED_PAGE_ERROR =
     "Сервер вернул некорректную страницу ленты"
+internal const val MAX_FEED_CACHE_MESSAGES = 500
 private val IMAGE_MARKDOWN = Regex("""!\[[^\]]*]\([^)]+\)""")
 private val ATTACHMENT_MARKDOWN =
     Regex("""\[[^\]]+]\(urn:(?:image|file):[^)]+\)""")

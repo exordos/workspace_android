@@ -72,10 +72,10 @@ Compose semantics traversal on every supported role and account.
 | --- | --- | --- | --- | --- |
 | FEED-A01 | Catalog Feed tab | Opens the real cross-conversation message projection | Route is stable across Back and configuration recreation; no placeholder destination exists | FEED-001/011 |
 | FEED-A02 | Feed back | Pops to the prior messenger catalog route | Back stack and retained feed position remain valid | FEED-011 |
-| FEED-A03 | Feed refresh/retry | Refreshes one owner-bound global newest page; missing navigation targets are resolved lazily by exact UUID | Existing rows survive network/server/malformed failure; duplicate input is single-flight | FEED-009/010 |
+| FEED-A03 | Feed refresh/retry | Refreshes one owner-bound global newest page; missing navigation targets are resolved lazily by exact UUID | Existing cached/realtime rows survive network/server/malformed/journal-overflow failure; duplicate input is single-flight | FEED-009/010/013–015 |
 | FEED-A04 | Message preview/open action | Opens the exact canonical stream/topic/message route | Missing/deleted catalog target produces a visible recovery instruction, never a guessed route | FEED-002/003 |
 | FEED-A05 | Forward action | Opens the exact source message and immediately starts the retained production forwarding picker | Missing source reports a recoverable error; delivery uses existing ambiguity verification and never blindly retries | FEED-004 + MSG-FWD-001–012 |
-| FEED-A06 | Top-scroll/load previous/retry | Requests one older page, preserves the visible UUID anchor and reuses the marker on recoverable failure | Malformed/repeated/unrelated markers fail closed without merging or request loops | FEED-005–008 |
+| FEED-A06 | Top-scroll/load previous/retry | Requests one older page, preserves the visible UUID anchor and reuses the authenticated persisted marker on recoverable failure | Malformed/repeated/unrelated/damaged markers fail closed without merging, rollback or request loops | FEED-005–008/013–016 |
 | FEED-A07 | Scroll-to-newest button | Returns to the latest loaded row and rearms top pagination | Hidden while already at bottom; no external failure | FEED-001/005/012 |
 
 ## Starred activity
@@ -84,7 +84,7 @@ Compose semantics traversal on every supported role and account.
 | --- | --- | --- | --- | --- |
 | ACT-A01 | Catalog Starred tab | Opens the real read-only `starred=true` projection | Stable route/Back behavior; unsupported Activity filters are not rendered beside it | ACT-STAR-001/010/012 |
 | ACT-A02 | Starred back | Pops to the prior messenger catalog route | Back stack remains valid after refresh and recreation | ACT-STAR-010 |
-| ACT-A03 | Starred refresh/retry | Requests one owner-bound newest page while retaining the `starred=true` filter | Existing rows survive recoverable failure; duplicate input is single-flight | ACT-STAR-001/007/009 |
+| ACT-A03 | Starred refresh/retry | Requests one owner-bound newest page while retaining the `starred=true` filter | Existing cached/realtime rows survive recoverable or journal-overflow failure; duplicate input is single-flight | ACT-STAR-001/007/009/013–015 |
 | ACT-A04 | Message preview/open | Resolves and focuses the exact canonical stream/topic/message route | Missing/deleted target produces a visible error and never a guessed route | ACT-STAR-002/004 |
 | ACT-A05 | Forward | Opens the exact starred source in the normal retained forwarding picker | Missing source is recoverable; existing ambiguity/exactly-once protections apply | ACT-STAR-005 |
 | ACT-A06 | Load previous/retry | Requests the same filtered older marker and preserves the visible UUID anchor | Unstarred/malformed/repeated/unrelated pages fail closed without merge or loop | ACT-STAR-006/008 |

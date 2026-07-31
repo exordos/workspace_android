@@ -1178,6 +1178,7 @@ fun ChatNavigation(
                 FeedViewModelFactory(
                     workspaceApiClient,
                     user,
+                    eventsRepository,
                     MessageTimelineKind.FEED,
                 )
             }
@@ -1197,6 +1198,7 @@ fun ChatNavigation(
                 FeedViewModelFactory(
                     workspaceApiClient,
                     user,
+                    eventsRepository,
                     MessageTimelineKind.STARRED,
                 )
             }
