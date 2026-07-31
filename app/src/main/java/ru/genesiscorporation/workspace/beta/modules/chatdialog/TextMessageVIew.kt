@@ -64,6 +64,8 @@ fun TextMessageView(
     val context = LocalContext.current
     val deletingMessages by
         viewModel.deletingMessageUuids.collectAsStateWithLifecycle()
+    val hasReplySession by
+        viewModel.hasReplySession.collectAsStateWithLifecycle()
     val colors = LocalWorkspaceColorsPalette.current
 
     MessageRow(
@@ -138,6 +140,17 @@ fun TextMessageView(
                 onQuote = {
                     viewModel.onQuoteMessageClicked(item)
                     menuExpanded = false
+                },
+                onQuoteFragment = { fragment ->
+                    viewModel.onQuoteMessageClicked(item, fragment)
+                },
+                canAddReply = hasReplySession,
+                onAddQuote = {
+                    viewModel.onAddQuoteMessageClicked(item)
+                    menuExpanded = false
+                },
+                onAddQuoteFragment = { fragment ->
+                    viewModel.onAddQuoteMessageClicked(item, fragment)
                 },
                 onForward = {
                     viewModel.beginForward(item)
@@ -279,9 +292,16 @@ internal fun MessageActionsMenu(
     onDelete: () -> Unit,
     onCopy: () -> Unit,
     onQuote: () -> Unit,
+    onQuoteFragment: (String) -> Unit,
+    canAddReply: Boolean,
+    onAddQuote: () -> Unit,
+    onAddQuoteFragment: (String) -> Unit,
     onForward: () -> Unit,
 ) {
     var confirmDelete by remember(item.uuid) { mutableStateOf(false) }
+    var fragmentAdding by remember(item.uuid) {
+        mutableStateOf<Boolean?>(null)
+    }
     DropdownMenu(
         expanded = expanded,
         onDismissRequest = onDismiss,
@@ -357,10 +377,57 @@ internal fun MessageActionsMenu(
             )
         }
         DropdownMenuItem(
-            text = { Text("Цитировать") },
+            text = {
+                Text(stringResource(R.string.workspace_reply_action))
+            },
             onClick = onQuote,
             enabled = !isDeleting,
         )
+        if (item.payload.content.isNotBlank()) {
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        stringResource(
+                            R.string.workspace_reply_fragment_action,
+                        ),
+                    )
+                },
+                onClick = {
+                    onDismiss()
+                    fragmentAdding = false
+                },
+                enabled = !isDeleting,
+            )
+        }
+        if (canAddReply) {
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        stringResource(
+                            R.string.workspace_reply_add_action,
+                        ),
+                    )
+                },
+                onClick = onAddQuote,
+                enabled = !isDeleting,
+            )
+            if (item.payload.content.isNotBlank()) {
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            stringResource(
+                                R.string.workspace_reply_add_fragment_action,
+                            ),
+                        )
+                    },
+                    onClick = {
+                        onDismiss()
+                        fragmentAdding = true
+                    },
+                    enabled = !isDeleting,
+                )
+            }
+        }
         if (canForwardMessage(item)) {
             DropdownMenuItem(
                 text = { Text("Переслать") },
@@ -368,6 +435,21 @@ internal fun MessageActionsMenu(
                 enabled = !isDeleting,
             )
         }
+    }
+    fragmentAdding?.let { adding ->
+        WorkspaceReplyFragmentDialog(
+            sourceMarkdown = item.payload.content,
+            adding = adding,
+            onDismiss = { fragmentAdding = null },
+            onConfirm = { fragment ->
+                fragmentAdding = null
+                if (adding) {
+                    onAddQuoteFragment(fragment)
+                } else {
+                    onQuoteFragment(fragment)
+                }
+            },
+        )
     }
     if (confirmDelete) {
         AlertDialog(

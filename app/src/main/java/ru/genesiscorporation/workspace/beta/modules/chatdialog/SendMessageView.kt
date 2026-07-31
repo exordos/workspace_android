@@ -36,6 +36,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -52,18 +53,23 @@ fun SendMessageView(viewModel: ChatDialogViewModel) {
     val uploadStatus by viewModel.uploadStatus.collectAsStateWithLifecycle()
     val editingMessageBackupText by
         viewModel.editingMessageBackupText.collectAsStateWithLifecycle()
-    val quotedMessage by viewModel.quotedMessage.collectAsStateWithLifecycle()
+    val replySession by viewModel.replySession.collectAsStateWithLifecycle()
     val sending by viewModel.sending.collectAsStateWithLifecycle()
     val conversationStateReady by
         viewModel.conversationStateReady.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val colors = LocalWorkspaceColorsPalette.current
     val hasSendableContent = if (viewModel.editingMessage != null) {
-        messageText.isNotBlank()
+        if (replySession.tabs.isEmpty()) {
+            messageText.isNotBlank()
+        } else {
+            replySession.hasAnswer
+        }
+    } else if (replySession.tabs.isNotEmpty()) {
+        replySession.hasAnswer || attachments.isNotEmpty()
     } else {
         messageText.isNotBlank() ||
-            attachments.isNotEmpty() ||
-            quotedMessage != null
+            attachments.isNotEmpty()
     }
     val canSend = conversationStateReady && !sending && hasSendableContent
     val launcher = rememberLauncherForActivityResult(
@@ -104,17 +110,28 @@ fun SendMessageView(viewModel: ChatDialogViewModel) {
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             )
         }
-        when {
-            editingMessageBackupText != null -> ComposerContext(
-                title = "Редактирование",
-                text = editingMessageBackupText.orEmpty(),
+        if (editingMessageBackupText != null) {
+            ComposerContext(
+                title = stringResource(R.string.message_composer_editing),
+                text = if (replySession.tabs.isEmpty()) {
+                    editingMessageBackupText.orEmpty()
+                } else {
+                    stringResource(
+                        R.string.workspace_reply_editing_summary,
+                        replySession.tabs.size,
+                    )
+                },
                 onClose = viewModel::clearEditingMessage,
             )
-
-            quotedMessage != null -> ComposerContext(
-                title = "Ответ ${quotedMessage?.user?.displayableName().orEmpty()}",
-                text = quotedMessage?.payload?.content.orEmpty(),
-                onClose = viewModel::clearQuotedMessage,
+        }
+        if (replySession.tabs.isNotEmpty()) {
+            WorkspaceReplyComposer(
+                session = replySession,
+                enabled = conversationStateReady && !sending,
+                onSelect = viewModel::selectReplyTab,
+                onRemove = viewModel::removeReplyTab,
+                onMove = viewModel::moveReplyTab,
+                onClearAll = viewModel::clearQuotedMessage,
             )
         }
         Row(
@@ -146,7 +163,9 @@ fun SendMessageView(viewModel: ChatDialogViewModel) {
                 ) {
                     Icon(
                         painter = painterResource(R.drawable.attach_file),
-                        contentDescription = "Прикрепить файлы",
+                        contentDescription = stringResource(
+                            R.string.message_composer_attach_files,
+                        ),
                     )
                 }
                 BasicTextField(
@@ -167,7 +186,9 @@ fun SendMessageView(viewModel: ChatDialogViewModel) {
                         Box(contentAlignment = Alignment.CenterStart) {
                             if (messageText.isEmpty()) {
                                 Text(
-                                    text = "Сообщение…",
+                                    text = stringResource(
+                                        R.string.message_composer_placeholder,
+                                    ),
                                     color = colors.textAdditional30,
                                     fontSize = 14.sp,
                                 )
@@ -194,9 +215,9 @@ fun SendMessageView(viewModel: ChatDialogViewModel) {
                             if (viewModel.editingMessage == null) R.drawable.send else R.drawable.ic_check,
                         ),
                         contentDescription = if (viewModel.editingMessage == null) {
-                            "Отправить"
+                            stringResource(R.string.message_composer_send)
                         } else {
-                            "Сохранить"
+                            stringResource(R.string.message_composer_save)
                         },
                     )
                 }
@@ -307,7 +328,7 @@ private fun ComposerContext(
         ) {
             Icon(
                 painter = painterResource(R.drawable.ic_close_small),
-                contentDescription = "Закрыть",
+                contentDescription = stringResource(R.string.common_close),
                 tint = colors.iconBase,
                 modifier = Modifier.size(24.dp),
             )

@@ -12,6 +12,8 @@ import ru.genesiscorporation.workspace.beta.data.PersistedOutboxStatus
 import ru.genesiscorporation.workspace.beta.data.PersistedReadBoundary
 import ru.genesiscorporation.workspace.beta.data.PersistedDraftSyncStatus
 import ru.genesiscorporation.workspace.beta.data.PersistedServerDraftState
+import ru.genesiscorporation.workspace.beta.data.PersistedWorkspaceReplySession
+import ru.genesiscorporation.workspace.beta.data.PersistedWorkspaceReplyTab
 import ru.genesiscorporation.workspace.beta.data.remote.ApiError
 import ru.genesiscorporation.workspace.beta.data.remote.ApiErrorKind
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
@@ -243,6 +245,37 @@ class ConversationOutboxTest {
 
         assertEquals(null, sanitized.pendingReadBoundary)
         assertFalse(sanitized.hasConversationWork())
+    }
+
+    @Test
+    fun `persisted reply session is bounded canonical and retained as work`() {
+        val valid = PersistedWorkspaceReplyTab(
+            id = "reply",
+            messageUuid = READ_BOUNDARY_UUID,
+            senderUuid = "00000000-0000-4000-8000-000000000099",
+            senderName = "  Alice  ",
+            quotedContent = "quote",
+            createdAt = "2026-07-31T12:00:00Z",
+            answer = "answer",
+        )
+        val sanitized = sanitizePersistedConversationState(
+            PersistedConversationState(
+                replySession = PersistedWorkspaceReplySession(
+                    tabs = listOf(
+                        valid,
+                        valid.copy(messageUuid =
+                            "00000000-0000-4000-8000-000000000098"),
+                        valid.copy(id = "broken", messageUuid = "bad"),
+                    ),
+                    activeTabId = "missing",
+                ),
+            ),
+        )
+
+        assertEquals(1, sanitized.replySession.tabs.size)
+        assertEquals("Alice", sanitized.replySession.tabs.single().senderName)
+        assertEquals("reply", sanitized.replySession.activeTabId)
+        assertTrue(sanitized.hasConversationWork())
     }
 
     @Test

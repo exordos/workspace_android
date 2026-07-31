@@ -16,6 +16,7 @@ import ru.genesiscorporation.workspace.beta.data.PersistedConversationRoute
 import ru.genesiscorporation.workspace.beta.data.PersistedConversationState
 import ru.genesiscorporation.workspace.beta.data.PersistedDraftSyncStatus
 import ru.genesiscorporation.workspace.beta.data.PersistedServerDraftState
+import ru.genesiscorporation.workspace.beta.data.PersistedWorkspaceReplySession
 import ru.genesiscorporation.workspace.beta.data.deleteRemovedOwnedIncomingAttachments
 import ru.genesiscorporation.workspace.beta.data.remote.ApiError
 import ru.genesiscorporation.workspace.beta.data.remote.ApiErrorKind
@@ -444,6 +445,7 @@ class DraftsViewModel(
         val tombstone = current.copy(
             route = current.route ?: fallbackRoute(item),
             draftText = "",
+            replySession = PersistedWorkspaceReplySession(),
             attachments = emptyList(),
             quotedMessageUuid = null,
             editingMessageUuid = null,
@@ -823,6 +825,7 @@ private fun clearDraftFields(
 ): PersistedConversationState =
     state.copy(
         draftText = "",
+        replySession = PersistedWorkspaceReplySession(),
         editingMessageUuid = null,
         quotedMessageUuid = null,
         attachments = emptyList(),
@@ -833,6 +836,7 @@ private fun clearDraftFields(
 
 internal fun PersistedConversationState.hasRetainedConversationWork(): Boolean =
     draftText.isNotEmpty() ||
+        replySession.tabs.isNotEmpty() ||
         editingMessageUuid != null ||
         quotedMessageUuid != null ||
         attachments.isNotEmpty() ||

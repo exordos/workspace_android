@@ -58,10 +58,16 @@ internal fun planConversationStateStorage(
 
 internal fun PersistedConversationState.hasConversationWork(): Boolean =
     draftText.isNotEmpty() ||
+        replySession.tabs.isNotEmpty() ||
         editingMessageUuid != null ||
         quotedMessageUuid != null ||
         attachments.isNotEmpty() ||
-        suspendedDraft != null ||
+        suspendedDraft?.let { draft ->
+            draft.text.isNotEmpty() ||
+                draft.replySession.tabs.isNotEmpty() ||
+                draft.quotedMessageUuid != null ||
+                draft.attachments.isNotEmpty()
+        } == true ||
         outbox.isNotEmpty() ||
         pendingReadBoundary != null ||
         serverDraft != null
@@ -87,6 +93,9 @@ internal fun sanitizePersistedConversationState(
                     )
             },
         draftText = state.draftText.take(PERSISTED_MESSAGE_CHARS),
+        replySession = state.replySession
+            .toWorkspaceReplySession()
+            .toPersisted(),
         editingMessageUuid = state.editingMessageUuid
             ?.takeIf(::isReasonableIdentifier),
         quotedMessageUuid = state.quotedMessageUuid
@@ -95,6 +104,9 @@ internal fun sanitizePersistedConversationState(
         suspendedDraft = state.suspendedDraft?.let { draft ->
             PersistedComposerDraft(
                 text = draft.text.take(PERSISTED_MESSAGE_CHARS),
+                replySession = draft.replySession
+                    .toWorkspaceReplySession()
+                    .toPersisted(),
                 quotedMessageUuid = draft.quotedMessageUuid
                     ?.takeIf(::isReasonableIdentifier),
                 attachments = sanitizeAttachments(draft.attachments),

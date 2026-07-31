@@ -28,8 +28,29 @@ data class PersistedAttachment(
 )
 
 @Serializable
+data class PersistedWorkspaceReplyTab(
+    val id: String,
+    val messageUuid: String,
+    val senderUuid: String,
+    val senderName: String,
+    val quotedContent: String,
+    val selectedText: String? = null,
+    val createdAt: String,
+    val answer: String = "",
+)
+
+@Serializable
+data class PersistedWorkspaceReplySession(
+    val tabs: List<PersistedWorkspaceReplyTab> = emptyList(),
+    val activeTabId: String? = null,
+)
+
+@Serializable
 data class PersistedComposerDraft(
     val text: String = "",
+    val replySession: PersistedWorkspaceReplySession =
+        PersistedWorkspaceReplySession(),
+    // Kept for decoding drafts written by app versions before multi-reply.
     val quotedMessageUuid: String? = null,
     val attachments: List<PersistedAttachment> = emptyList(),
 )
@@ -106,7 +127,10 @@ data class PersistedConversationState(
     val route: PersistedConversationRoute? = null,
     val draftStorageSlot: String? = null,
     val draftText: String = "",
+    val replySession: PersistedWorkspaceReplySession =
+        PersistedWorkspaceReplySession(),
     val editingMessageUuid: String? = null,
+    // Kept for decoding drafts written by app versions before multi-reply.
     val quotedMessageUuid: String? = null,
     val attachments: List<PersistedAttachment> = emptyList(),
     val suspendedDraft: PersistedComposerDraft? = null,

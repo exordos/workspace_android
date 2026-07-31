@@ -171,7 +171,7 @@ internal fun parseForwardMarkdown(markdown: String): List<ForwardMarkdownSegment
     return result.ifEmpty { listOf(ForwardMarkdownSegment.Text(markdown)) }
 }
 
-private fun parseStandaloneWorkspaceQuote(line: String): WorkspaceQuoteReference? {
+internal fun parseStandaloneWorkspaceQuote(line: String): WorkspaceQuoteReference? {
     val match = FORWARD_QUOTE_MARKDOWN.matchEntire(line) ?: return null
     val parsedUrn = parseWorkspaceQuoteUrn(match.groupValues[2]) ?: return null
     val label = unescapeWorkspaceMarkdownInline(match.groupValues[1])

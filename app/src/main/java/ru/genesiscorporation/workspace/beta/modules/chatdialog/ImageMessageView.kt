@@ -69,6 +69,8 @@ fun ImageMessageView(
     var menuExpanded by remember { mutableStateOf(false) }
     val deletingMessages by
         viewModel.deletingMessageUuids.collectAsStateWithLifecycle()
+    val hasReplySession by
+        viewModel.hasReplySession.collectAsStateWithLifecycle()
     val colors = LocalWorkspaceColorsPalette.current
     val accessToken by viewModel.userViewModel.repo.accessTokenFlow.collectAsStateWithLifecycle(
         initialValue = "",
@@ -210,6 +212,17 @@ fun ImageMessageView(
                 onQuote = {
                     viewModel.onQuoteMessageClicked(item)
                     menuExpanded = false
+                },
+                onQuoteFragment = { fragment ->
+                    viewModel.onQuoteMessageClicked(item, fragment)
+                },
+                canAddReply = hasReplySession,
+                onAddQuote = {
+                    viewModel.onAddQuoteMessageClicked(item)
+                    menuExpanded = false
+                },
+                onAddQuoteFragment = { fragment ->
+                    viewModel.onAddQuoteMessageClicked(item, fragment)
                 },
                 onForward = {
                     viewModel.beginForward(item)

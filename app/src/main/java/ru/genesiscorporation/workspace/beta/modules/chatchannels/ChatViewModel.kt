@@ -1841,6 +1841,7 @@ internal fun resolvePersistedConversationRoute(
     val route = state?.route ?: return null
     val hasRetainedLocalWork =
         state.draftText.isNotEmpty() ||
+            state.replySession.tabs.isNotEmpty() ||
             state.editingMessageUuid != null ||
             state.quotedMessageUuid != null ||
             state.attachments.isNotEmpty() ||

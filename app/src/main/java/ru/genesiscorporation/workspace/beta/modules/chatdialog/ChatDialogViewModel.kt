@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.dropWhile
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -120,7 +121,7 @@ private data class ComposerSnapshot(
     val text: String,
     val attachments: List<SelectedLocalAttachment>,
     val editingMessage: MessageResponse?,
-    val quotedMessage: MessageResponse?,
+    val replySession: WorkspaceReplySession,
 )
 
 class ChatDialogViewModel(
@@ -189,9 +190,19 @@ class ChatDialogViewModel(
     private val _quotedMessage = MutableStateFlow<MessageResponse?>(null)
     val quotedMessage: StateFlow<MessageResponse?> = _quotedMessage
 
+    private val _replySession = MutableStateFlow(WorkspaceReplySession())
+    internal val replySession: StateFlow<WorkspaceReplySession> = _replySession
+    internal val hasReplySession: StateFlow<Boolean> = _replySession
+        .map { session -> session.tabs.isNotEmpty() }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = false,
+        )
 
     private val _messageText = MutableStateFlow("")
     val messageText: StateFlow<String> = _messageText
+    private var plainDraftText = ""
 
     private val _attachments = MutableStateFlow<List<SelectedLocalAttachment>>(emptyList())
     val attachments: StateFlow<List<SelectedLocalAttachment>> = _attachments
@@ -257,6 +268,7 @@ class ChatDialogViewModel(
     private var suspendedDraft: PersistedComposerDraft? = null
     private var composerRevision = 0L
     private var draftPersistenceJob: Job? = null
+    private var replyEditRestoreJob: Job? = null
     private var remoteDraftSyncJob: Job? = null
     private var draftUpdatedAt: String? = null
     private var nextOlderPageMarker: String? = null
@@ -285,7 +297,27 @@ class ChatDialogViewModel(
     private var initialForwardRequestHandled = false
 
     fun onMessageChange(newText: String) {
-        _messageText.value = newText.take(MAX_MESSAGE_CHARS)
+        val boundedText = newText.take(MAX_MESSAGE_CHARS)
+        _messageText.value = boundedText
+        if (
+            _replySession.value.tabs.isEmpty() &&
+            editingMessage == null &&
+            pendingEditingMessageUuid == null
+        ) {
+            plainDraftText = boundedText
+        } else if (_replySession.value.tabs.isNotEmpty()) {
+            val updated = setWorkspaceReplyAnswer(
+                _replySession.value,
+                boundedText,
+            )
+            _replySession.value = updated
+            if (updated.activeTab?.answer?.length != boundedText.length) {
+                _actionError.value =
+                    "Суммарный текст ответов и выбранных фрагментов " +
+                    "не может быть длиннее " +
+                    "$MAX_WORKSPACE_REPLY_INPUT_CHARS символов"
+            }
+        }
         if (newText.length > MAX_MESSAGE_CHARS) {
             _actionError.value =
                 "Сообщение не может быть длиннее $MAX_MESSAGE_CHARS символов"
@@ -377,14 +409,34 @@ class ChatDialogViewModel(
     }
 
     fun onEditMessageClicked(message: MessageResponse) {
+        replyEditRestoreJob?.cancel()
         if (editingMessage == null) {
             suspendedDraft = PersistedComposerDraft(
-                text = _messageText.value,
+                text = plainDraftText,
+                replySession = _replySession.value.toPersisted(),
                 quotedMessageUuid = _quotedMessage.value?.uuid
                     ?: pendingQuotedMessageUuid,
                 attachments = persistedAttachments(),
             )
         }
+        val restoredReply = restoreWorkspaceReplySessionFromMarkdown(
+            markdown = message.payload.content,
+            resolveMessage = { sourceUuid ->
+                repo.messagesPool.value
+                    .firstOrNull { it.uuid == sourceUuid }
+                    ?: repo.streamTopicMessages.value
+                        .values
+                        .asSequence()
+                        .flatten()
+                        .firstOrNull { it.uuid == sourceUuid }
+            },
+            createIdentity = { index ->
+                "workspace-reply-tab:edit:${message.uuid}:$index" to
+                    message.updatedAt
+            },
+        )
+        _replySession.value =
+            restoredReply?.session ?: WorkspaceReplySession()
         _quotedMessage.value = null
         pendingQuotedMessageUuid = null
         _attachments.value = emptyList()
@@ -392,17 +444,103 @@ class ChatDialogViewModel(
             editingMessage = message
             pendingEditingMessageUuid = message.uuid
             _editingMessageBackupText.value = message.payload.content
-            _messageText.value = message.payload.content
+            _messageText.value =
+                restoredReply?.activeAnswer ?: message.payload.content
             composerChanged()
+            if (restoredReply == null) {
+                scheduleWorkspaceReplyEditRestore(message)
+            }
         }
     }
 
-    fun onQuoteMessageClicked(message: MessageResponse) {
+    fun onQuoteMessageClicked(
+        message: MessageResponse,
+        selectedText: String? = null,
+    ) {
         if (editingMessage != null || pendingEditingMessageUuid != null) {
             restoreSuspendedDraftAfterEdit()
         }
-        _quotedMessage.value = message
-        pendingQuotedMessageUuid = message.uuid
+        val tab = createWorkspaceReplyTab(
+            message = message,
+            id = "workspace-reply-tab:${UUID.randomUUID()}",
+            createdAt = OffsetDateTime.now()
+                .format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
+            selectedText = selectedText,
+        )
+        if (tab == null || tab.quotedContent.isBlank()) {
+            _actionError.value = "Это сообщение нельзя процитировать"
+            return
+        }
+        if (_replySession.value.tabs.isEmpty()) {
+            plainDraftText = _messageText.value
+        }
+        val previousSession = _replySession.value
+        val updatedSession = replyToWorkspaceMessage(
+            previousSession,
+            tab,
+        )
+        if (
+            previousSession.tabs.isNotEmpty() &&
+            updatedSession == previousSession &&
+            (
+                previousSession.activeTab?.messageUuid != tab.messageUuid ||
+                    previousSession.activeTab?.selectedText != tab.selectedText
+                )
+        ) {
+            _actionError.value =
+                "Суммарный текст ответов и выбранных фрагментов " +
+                "не может быть длиннее " +
+                "$MAX_WORKSPACE_REPLY_INPUT_CHARS символов"
+            return
+        }
+        _replySession.value = updatedSession
+        _messageText.value = updatedSession.activeTab?.answer.orEmpty()
+        _quotedMessage.value = null
+        pendingQuotedMessageUuid = null
+        composerChanged()
+    }
+
+    fun onAddQuoteMessageClicked(
+        message: MessageResponse,
+        selectedText: String? = null,
+    ) {
+        if (_replySession.value.tabs.isEmpty()) {
+            onQuoteMessageClicked(message, selectedText)
+            return
+        }
+        if (editingMessage != null || pendingEditingMessageUuid != null) {
+            restoreSuspendedDraftAfterEdit()
+        }
+        val tab = createWorkspaceReplyTab(
+            message = message,
+            id = "workspace-reply-tab:${UUID.randomUUID()}",
+            createdAt = OffsetDateTime.now()
+                .format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
+            selectedText = selectedText,
+        )
+        if (tab == null || tab.quotedContent.isBlank()) {
+            _actionError.value = "Это сообщение нельзя добавить к ответу"
+            return
+        }
+        val previousSize = _replySession.value.tabs.size
+        if (
+            workspaceReplyInputChars(_replySession.value) +
+            tab.selectedText.orEmpty().length >
+            MAX_WORKSPACE_REPLY_INPUT_CHARS
+        ) {
+            _actionError.value =
+                "Суммарный текст ответов и выбранных фрагментов " +
+                "не может быть длиннее " +
+                "$MAX_WORKSPACE_REPLY_INPUT_CHARS символов"
+            return
+        }
+        _replySession.value = addWorkspaceReplyTab(_replySession.value, tab)
+        if (_replySession.value.tabs.size == previousSize) {
+            _actionError.value =
+                "Можно добавить не более $MAX_WORKSPACE_REPLY_TABS ответов"
+            return
+        }
+        _messageText.value = _replySession.value.activeTab?.answer.orEmpty()
         composerChanged()
     }
 
@@ -1786,8 +1924,45 @@ class ChatDialogViewModel(
     }
 
     fun clearQuotedMessage() {
+        _replySession.value = WorkspaceReplySession()
+        _messageText.value = if (
+            editingMessage != null || pendingEditingMessageUuid != null
+        ) {
+            _editingMessageBackupText.value.orEmpty()
+        } else {
+            plainDraftText
+        }
         _quotedMessage.value = null
         pendingQuotedMessageUuid = null
+        composerChanged()
+    }
+
+    fun selectReplyTab(tabId: String) {
+        val selected = selectWorkspaceReplyTab(_replySession.value, tabId)
+        if (selected == _replySession.value) return
+        _replySession.value = selected
+        _messageText.value = selected.activeTab?.answer.orEmpty()
+        composerChanged()
+    }
+
+    fun removeReplyTab(tabId: String) {
+        val removed = removeWorkspaceReplyTab(_replySession.value, tabId)
+        if (removed == _replySession.value) return
+        _replySession.value = removed
+        _messageText.value = removed.activeTab?.answer ?: if (
+            editingMessage != null || pendingEditingMessageUuid != null
+        ) {
+            _editingMessageBackupText.value.orEmpty()
+        } else {
+            plainDraftText
+        }
+        composerChanged()
+    }
+
+    fun moveReplyTab(tabId: String, offset: Int) {
+        val moved = moveWorkspaceReplyTab(_replySession.value, tabId, offset)
+        if (moved == _replySession.value) return
+        _replySession.value = moved
         composerChanged()
     }
 
@@ -1798,13 +1973,22 @@ class ChatDialogViewModel(
             snapshot.text.isBlank() &&
             snapshot.attachments.isEmpty() &&
             snapshot.editingMessage == null &&
-            snapshot.quotedMessage == null
+            (
+                snapshot.replySession.tabs.isEmpty() ||
+                    !snapshot.replySession.hasAnswer
+            )
         ) {
             return
         }
         if (
             snapshot.editingMessage != null &&
-            snapshot.text.isBlank()
+            (
+                if (snapshot.replySession.tabs.isEmpty()) {
+                    snapshot.text.isBlank()
+                } else {
+                    !snapshot.replySession.hasAnswer
+                }
+            )
         ) {
             _actionError.value = "Сообщение не может быть пустым"
             return
@@ -1869,16 +2053,10 @@ class ChatDialogViewModel(
         context: Context,
         snapshot: ComposerSnapshot,
     ): String? {
-        var content = ""
-        snapshot.quotedMessage?.let { quoted ->
-            content +=
-                "[${quoted.user?.displayableName() ?: ""}]" +
-                "(urn:user:${quoted.authorUuid}) " +
-                "[said](urn:message:${quoted.uuid})\n" +
-                "```quote\n${quoted.payload.content}\n```\n"
-        }
-        if (snapshot.text.isNotBlank()) {
-            content += snapshot.text
+        var content = if (snapshot.replySession.tabs.isEmpty()) {
+            snapshot.text
+        } else {
+            buildWorkspaceReplyMarkdown(snapshot.replySession).orEmpty()
         }
         if (content.length > MAX_MESSAGE_CHARS) {
             _actionError.value =
@@ -2233,7 +2411,7 @@ class ChatDialogViewModel(
             text = _messageText.value,
             attachments = _attachments.value,
             editingMessage = editingMessage,
-            quotedMessage = _quotedMessage.value,
+            replySession = _replySession.value,
         )
 
     private fun composerChanged() {
@@ -2258,19 +2436,44 @@ class ChatDialogViewModel(
         if (editingMessage != null || pendingEditingMessageUuid != null) return
         var changed = false
         if (composerRevision == snapshot.revision) {
-            _messageText.value = ""
+            if (snapshot.replySession.tabs.isEmpty()) {
+                plainDraftText = ""
+                _messageText.value = ""
+            } else {
+                _replySession.value = WorkspaceReplySession()
+                _messageText.value = plainDraftText
+            }
             _attachments.value = emptyList()
             _quotedMessage.value = null
             pendingQuotedMessageUuid = null
             changed = true
         } else {
-            val currentText = _messageText.value
-            if (
-                snapshot.text.isNotEmpty() &&
-                currentText.startsWith(snapshot.text)
-            ) {
-                _messageText.value = currentText.removePrefix(snapshot.text)
-                changed = true
+            if (snapshot.replySession.tabs.isEmpty()) {
+                val currentText = plainDraftText
+                if (
+                    snapshot.text.isNotEmpty() &&
+                    currentText.startsWith(snapshot.text)
+                ) {
+                    plainDraftText = currentText.removePrefix(snapshot.text)
+                    _messageText.value = plainDraftText
+                    changed = true
+                }
+            } else {
+                val sentTabs = snapshot.replySession.tabs.associateBy { it.id }
+                val remainingTabs = _replySession.value.tabs.filter { current ->
+                    sentTabs[current.id] != current
+                }
+                if (remainingTabs != _replySession.value.tabs) {
+                    _replySession.value = normalizeWorkspaceReplySession(
+                        WorkspaceReplySession(
+                            tabs = remainingTabs,
+                            activeTabId = _replySession.value.activeTabId,
+                        ),
+                    )
+                    _messageText.value =
+                        _replySession.value.activeTab?.answer ?: plainDraftText
+                    changed = true
+                }
             }
             val sentAttachmentUris = snapshot.attachments
                 .mapTo(mutableSetOf()) { it.uri }
@@ -2282,14 +2485,6 @@ class ChatDialogViewModel(
                     _attachments.value = remainingAttachments
                     changed = true
                 }
-            }
-            if (
-                snapshot.quotedMessage?.uuid != null &&
-                _quotedMessage.value?.uuid == snapshot.quotedMessage.uuid
-            ) {
-                _quotedMessage.value = null
-                pendingQuotedMessageUuid = null
-                changed = true
             }
         }
         if (changed) {
@@ -2356,11 +2551,16 @@ class ChatDialogViewModel(
             }
         }
         if (composerRevision == initialRevision) {
-            _messageText.value = restored.draftText
+            plainDraftText = restored.draftText
+            _replySession.value =
+                restored.replySession.toWorkspaceReplySession()
+            _messageText.value =
+                _replySession.value.activeTab?.answer ?: plainDraftText
             _attachments.value = restored.attachments
                 .mapNotNull(::selectedAttachment)
             pendingEditingMessageUuid = restored.editingMessageUuid
             pendingQuotedMessageUuid = restored.quotedMessageUuid
+                ?.takeIf { _replySession.value.tabs.isEmpty() }
             suspendedDraft = restored.suspendedDraft
         }
         if (restoredOutbox != baseState?.outbox.orEmpty()) {
@@ -2404,16 +2604,25 @@ class ChatDialogViewModel(
     }
 
     private fun restoreSuspendedDraftAfterEdit() {
+        replyEditRestoreJob?.cancel()
+        replyEditRestoreJob = null
         val restored = suspendedDraft
         editingMessage = null
         pendingEditingMessageUuid = null
         _editingMessageBackupText.value = null
         suspendedDraft = null
-        _messageText.value = restored?.text.orEmpty()
+        plainDraftText = restored?.text.orEmpty()
+        _replySession.value = restored
+            ?.replySession
+            ?.toWorkspaceReplySession()
+            ?: WorkspaceReplySession()
+        _messageText.value =
+            _replySession.value.activeTab?.answer ?: plainDraftText
         _attachments.value = restored?.attachments
             .orEmpty()
             .mapNotNull(::selectedAttachment)
         pendingQuotedMessageUuid = restored?.quotedMessageUuid
+            ?.takeIf { _replySession.value.tabs.isEmpty() }
         _quotedMessage.value = restored?.quotedMessageUuid?.let { quotedUuid ->
             repo.messagesPool.value.firstOrNull { it.uuid == quotedUuid }
                 ?: repo.streamTopicMessages.value
@@ -2422,6 +2631,93 @@ class ChatDialogViewModel(
                     .firstOrNull { it.uuid == quotedUuid }
         }
     }
+
+    private fun scheduleWorkspaceReplyEditRestore(
+        message: MessageResponse,
+    ) {
+        val sourceUuids = workspaceReplyMessageUuidsFromMarkdown(
+            message.payload.content,
+        ) ?: return
+        val missingUuids = sourceUuids.filter { sourceUuid ->
+            cachedMessageByUuid(sourceUuid) == null
+        }
+        if (missingUuids.isEmpty()) return
+        val expectedRevision = composerRevision
+        replyEditRestoreJob = viewModelScope.launch {
+            try {
+                val ownerKey =
+                    userViewModel.repo.activeCredentialSnapshot().ownerKey
+                        ?.takeIf(String::isNotBlank)
+                        ?: return@launch
+                val fetched = when (
+                    val response = client.performRequest(
+                        MessagesByIdsRequest(missingUuids),
+                    )
+                ) {
+                    is ApiResult.Success -> response.value
+                        .filter { it.uuid in missingUuids }
+                        .groupBy(MessageResponse::uuid)
+                        .takeIf { groups ->
+                            missingUuids.all { groups[it]?.size == 1 }
+                        }
+                        ?.values
+                        ?.map(List<MessageResponse>::single)
+                        ?: return@launch
+
+                    is ApiResult.Error -> return@launch
+                }
+                if (
+                    !userViewModel.repo.isActiveCredentialOwner(ownerKey) ||
+                    editingMessage?.uuid != message.uuid ||
+                    composerRevision != expectedRevision ||
+                    _messageText.value != message.payload.content
+                ) {
+                    return@launch
+                }
+                fetched.forEach { source ->
+                    repo.addStreamTopicMessages(
+                        source.streamUuid,
+                        source.topicUuid,
+                        listOf(source),
+                    )
+                }
+                val restored = restoreWorkspaceReplySessionFromMarkdown(
+                    markdown = message.payload.content,
+                    resolveMessage = ::cachedMessageByUuid,
+                    createIdentity = { index ->
+                        "workspace-reply-tab:edit:${message.uuid}:$index" to
+                            message.updatedAt
+                    },
+                ) ?: return@launch
+                if (
+                    editingMessage?.uuid != message.uuid ||
+                    composerRevision != expectedRevision ||
+                    _messageText.value != message.payload.content
+                ) {
+                    return@launch
+                }
+                _replySession.value = restored.session
+                _messageText.value = restored.activeAnswer
+                composerChanged()
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                // Raw Markdown remains fully editable when source loading fails.
+            } finally {
+                if (replyEditRestoreJob == coroutineContext[Job]) {
+                    replyEditRestoreJob = null
+                }
+            }
+        }
+    }
+
+    private fun cachedMessageByUuid(messageUuid: String): MessageResponse? =
+        repo.messagesPool.value.firstOrNull { it.uuid == messageUuid }
+            ?: repo.streamTopicMessages.value
+                .values
+                .asSequence()
+                .flatten()
+                .firstOrNull { it.uuid == messageUuid }
 
     private fun clearDeletedComposerReference(messageUuid: String) {
         var changed = false
@@ -2464,7 +2760,8 @@ class ChatDialogViewModel(
                 isDirectMessages = isDirectMessages,
             ),
             draftStorageSlot = selectedDraftStorageSlot,
-            draftText = _messageText.value,
+            draftText = plainDraftText,
+            replySession = _replySession.value.toPersisted(),
             editingMessageUuid = editingMessage?.uuid
                 ?: pendingEditingMessageUuid,
             quotedMessageUuid = _quotedMessage.value?.uuid
@@ -2488,13 +2785,26 @@ class ChatDialogViewModel(
                 composerSnapshot != null &&
                 composerRevision == composerSnapshot.revision
             ) {
-                state = state.copy(
-                    draftText = "",
-                    editingMessageUuid = null,
-                    quotedMessageUuid = null,
-                    attachments = emptyList(),
-                    suspendedDraft = null,
-                )
+                state = if (composerSnapshot.replySession.tabs.isEmpty()) {
+                    state.copy(
+                        draftText = "",
+                        replySession =
+                            WorkspaceReplySession().toPersisted(),
+                        editingMessageUuid = null,
+                        quotedMessageUuid = null,
+                        attachments = emptyList(),
+                        suspendedDraft = null,
+                    )
+                } else {
+                    state.copy(
+                        replySession =
+                            WorkspaceReplySession().toPersisted(),
+                        editingMessageUuid = null,
+                        quotedMessageUuid = null,
+                        attachments = emptyList(),
+                        suspendedDraft = null,
+                    )
+                }
             }
             persistStateAndSharedOutbox(ownerKey, state)
         }
@@ -2624,7 +2934,7 @@ class ChatDialogViewModel(
             if (!userViewModel.repo.isActiveCredentialOwner(ownerKey)) {
                 return@withLock false
             }
-            val localContent = _messageText.value
+            val localContent = plainDraftText
             var state = try {
                 beginDraftSync(_draftSyncState.value, localContent)
             } catch (exception: IllegalArgumentException) {
@@ -2704,7 +3014,7 @@ class ChatDialogViewModel(
                             state = state,
                             server = server,
                             sentContent = sentContent,
-                            currentLocalContent = _messageText.value,
+                            currentLocalContent = plainDraftText,
                         )
                         _draftSyncState.value = state
                         persistConversationStateSafely(
@@ -2730,7 +3040,7 @@ class ChatDialogViewModel(
             }
 
             state = _draftSyncState.value ?: return@withLock false
-            if (state.deleteRequested || _messageText.value.isBlank()) {
+            if (state.deleteRequested || plainDraftText.isBlank()) {
                 return@withLock deleteServerDraft(
                     state = state.copy(
                         deleteRequested = true,
@@ -2743,7 +3053,7 @@ class ChatDialogViewModel(
             }
             if (
                 normalizeRemoteDraftText(state.syncedContent.orEmpty()) ==
-                    normalizeRemoteDraftText(_messageText.value)
+                    normalizeRemoteDraftText(plainDraftText)
             ) {
                 _draftSyncState.value = state.copy(
                     status = PersistedDraftSyncStatus.SAVED,
@@ -2757,7 +3067,7 @@ class ChatDialogViewModel(
             }
 
             val entityTag = state.entityTag ?: return@withLock true
-            val sentContent = _messageText.value
+            val sentContent = plainDraftText
             state = markDraftSaving(state)
             _draftSyncState.value = state
             if (!persistBeforeRemoteDraftMutation(
@@ -2808,7 +3118,7 @@ class ChatDialogViewModel(
                         state = state,
                         server = server,
                         sentContent = sentContent,
-                        currentLocalContent = _messageText.value,
+                        currentLocalContent = plainDraftText,
                     )
                     persistConversationStateSafely(
                         failureMessage =
@@ -2826,7 +3136,7 @@ class ChatDialogViewModel(
                     if (response.error.httpStatus == 404) {
                         _draftSyncState.value = beginDraftSync(
                             existing = null,
-                            localContent = _messageText.value,
+                            localContent = plainDraftText,
                         )
                         persistConversationStateSafely(
                             failureMessage =
@@ -2847,7 +3157,7 @@ class ChatDialogViewModel(
                         _draftSyncState.value = applyDraftConflict(
                             state,
                             conflict,
-                            _messageText.value,
+                            plainDraftText,
                         )
                         persistConversationStateSafely(
                             failureMessage =
@@ -3125,7 +3435,28 @@ class ChatDialogViewModel(
         }
         pendingQuotedMessageUuid?.let { quotedUuid ->
             messages.firstOrNull { it.uuid == quotedUuid }?.let { message ->
-                _quotedMessage.value = message
+                val migrated = createWorkspaceReplyTab(
+                    message = message,
+                    id = "workspace-reply-tab:legacy:$quotedUuid",
+                    createdAt = message.createdAt,
+                )
+                if (migrated != null && migrated.quotedContent.isNotBlank()) {
+                    val migrationTab =
+                        if (_replySession.value.tabs.isEmpty()) {
+                            migrated.copy(answer = _messageText.value)
+                        } else {
+                            migrated
+                        }
+                    if (_replySession.value.tabs.isEmpty()) plainDraftText = ""
+                    _replySession.value = replyToWorkspaceMessage(
+                        _replySession.value,
+                        migrationTab,
+                    )
+                    _messageText.value =
+                        _replySession.value.activeTab?.answer.orEmpty()
+                }
+                _quotedMessage.value = null
+                pendingQuotedMessageUuid = null
             }
         }
     }
@@ -3134,10 +3465,13 @@ class ChatDialogViewModel(
         if (pendingEditingMessageUuid != null && editingMessage == null) {
             val recoveredEditText = _messageText.value
             restoreSuspendedDraftAfterEdit()
-            _messageText.value = mergeRecoveredDraftTexts(
-                originalDraft = _messageText.value,
+            plainDraftText = mergeRecoveredDraftTexts(
+                originalDraft = plainDraftText,
                 recoveredEdit = recoveredEditText,
             )
+            if (_replySession.value.tabs.isEmpty()) {
+                _messageText.value = plainDraftText
+            }
             composerRevision += 1
             _actionError.value =
                 "Исходное сообщение для редактирования недоступно; " +
@@ -3172,9 +3506,19 @@ class ChatDialogViewModel(
         messageBeingEdited: MessageResponse,
         snapshot: ComposerSnapshot,
     ) {
+        val editedContent = if (snapshot.replySession.tabs.isEmpty()) {
+            snapshot.text
+        } else {
+            buildWorkspaceReplyMarkdown(snapshot.replySession)
+                ?: run {
+                    _actionError.value =
+                        "Не удалось подготовить ответы для сохранения"
+                    return
+                }
+        }
         val editMessageRequest = EditMessageRequest(
             messageBeingEdited.uuid,
-            snapshot.text,
+            editedContent,
         )
         val response = client.performRequest(editMessageRequest)
         when(response) {
@@ -3183,7 +3527,7 @@ class ChatDialogViewModel(
                     messageBeingEdited.streamUuid,
                     messageBeingEdited.topicUuid,
                     messageBeingEdited.uuid,
-                    snapshot.text,
+                    editedContent,
                 )
                 if (composerRevision == snapshot.revision) {
                     restoreSuspendedDraftAfterEdit()
@@ -3245,7 +3589,7 @@ class ChatDialogViewModel(
                     failureMessage = "Не удалось сохранить восстановленный черновик",
                 )
                 if (
-                    _messageText.value.isNotBlank() ||
+                    plainDraftText.isNotBlank() ||
                     _draftSyncState.value != null
                 ) {
                     scheduleRemoteDraftSync(initialDelayMillis = 0)
@@ -4340,7 +4684,10 @@ class ChatDialogViewModel(
         val resolution = _draftSyncState.value
             ?.let(::acceptServerDraftVersion)
             ?: return
-        _messageText.value = resolution.first
+        plainDraftText = resolution.first
+        if (_replySession.value.tabs.isEmpty()) {
+            _messageText.value = plainDraftText
+        }
         _draftSyncState.value = resolution.second
         composerRevision += 1
         draftUpdatedAt = OffsetDateTime.now()
@@ -4371,7 +4718,10 @@ class ChatDialogViewModel(
         val next = _draftSyncState.value
             ?.let(::deleteConflictedServerDraft)
             ?: return
-        _messageText.value = ""
+        plainDraftText = ""
+        if (_replySession.value.tabs.isEmpty()) {
+            _messageText.value = ""
+        }
         _draftSyncState.value = next
         composerRevision += 1
         draftUpdatedAt = OffsetDateTime.now()

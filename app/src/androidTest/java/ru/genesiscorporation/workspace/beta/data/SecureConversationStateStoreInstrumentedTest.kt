@@ -41,6 +41,23 @@ class SecureConversationStateStoreInstrumentedTest {
                 isDirectMessages = false,
             ),
             draftText = DRAFT_SENTINEL,
+            replySession = PersistedWorkspaceReplySession(
+                tabs = listOf(
+                    PersistedWorkspaceReplyTab(
+                        id = "reply-tab",
+                        messageUuid =
+                            "44444444-4444-4444-8444-444444444444",
+                        senderUuid =
+                            "55555555-5555-4555-8555-555555555555",
+                        senderName = "CASSI",
+                        quotedContent = REPLY_QUOTE_SENTINEL,
+                        selectedText = "selected fragment",
+                        createdAt = "2026-07-31T12:00:00Z",
+                        answer = REPLY_ANSWER_SENTINEL,
+                    ),
+                ),
+                activeTabId = "reply-tab",
+            ),
             outbox = listOf(
                 PersistedOutboxEntry(
                     localMessageUuid = "local-message",
@@ -73,6 +90,8 @@ class SecureConversationStateStoreInstrumentedTest {
         assertFalse(persistedValues.contains(OUTBOX_SENTINEL))
         assertFalse(persistedValues.contains(ROUTE_SENTINEL))
         assertFalse(persistedValues.contains(READ_BOUNDARY_SENTINEL))
+        assertFalse(persistedValues.contains(REPLY_QUOTE_SENTINEL))
+        assertFalse(persistedValues.contains(REPLY_ANSWER_SENTINEL))
         assertFalse(persistedValues.contains(ACCOUNT_A))
 
         store.clearAccount(ACCOUNT_A)
@@ -226,6 +245,8 @@ class SecureConversationStateStoreInstrumentedTest {
         const val DRAFT_SENTINEL = "draft-plaintext-sentinel"
         const val OUTBOX_SENTINEL = "outbox-plaintext-sentinel"
         const val ROUTE_SENTINEL = "route-plaintext-sentinel"
+        const val REPLY_QUOTE_SENTINEL = "reply-quote-plaintext-sentinel"
+        const val REPLY_ANSWER_SENTINEL = "reply-answer-plaintext-sentinel"
         const val READ_BOUNDARY_SENTINEL =
             "33333333-3333-4333-8333-333333333333"
         const val DRAFT_SLOT_A = "11111111-1111-4111-8111-111111111111"

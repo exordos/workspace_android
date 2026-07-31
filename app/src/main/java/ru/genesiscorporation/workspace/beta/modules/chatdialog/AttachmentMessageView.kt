@@ -47,6 +47,8 @@ fun AttachmentMessageView(
     val downloadingUuid by viewModel.downloadingAttachmentUuid.collectAsStateWithLifecycle()
     val deletingMessages by
         viewModel.deletingMessageUuids.collectAsStateWithLifecycle()
+    val hasReplySession by
+        viewModel.hasReplySession.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val colors = LocalWorkspaceColorsPalette.current
 
@@ -166,6 +168,17 @@ fun AttachmentMessageView(
                 onQuote = {
                     viewModel.onQuoteMessageClicked(item)
                     menuExpanded = false
+                },
+                onQuoteFragment = { fragment ->
+                    viewModel.onQuoteMessageClicked(item, fragment)
+                },
+                canAddReply = hasReplySession,
+                onAddQuote = {
+                    viewModel.onAddQuoteMessageClicked(item)
+                    menuExpanded = false
+                },
+                onAddQuoteFragment = { fragment ->
+                    viewModel.onAddQuoteMessageClicked(item, fragment)
                 },
                 onForward = {
                     viewModel.beginForward(item)
