@@ -578,74 +578,66 @@ acceptance.
   continuation beyond those retained rows and non-conversation projections
   still require persisted cursors/entities.
 
-### Composer preview
+### Compact message composer
 
-The maintained desktop client exposes a real local Workspace Markdown preview.
-Android keeps the same outgoing-body contract and uses the production message
-renderer instead of a second simplified preview grammar. Switching modes is a
-local UI operation: it must never create, update or delete a server resource.
+The Android composer follows the approved mobile Figma frame rather than the
+desktop control density. Its base state is one 48 dp row containing Attach,
+editor, Emoji, Draft history and Send/Save in that exact order. Android keeps
+the desktop-compatible outgoing Markdown contract, but does not expose
+Write/Preview tabs or a formatting-button strip in the production composer.
 
 | ID | Scenario | Main assertions |
 | --- | --- | --- |
-| MSG-COMP-001 | Switch Write → Preview → Write | The exact draft stays unchanged, the keyboard/focus leaves the hidden editor, and returning to Write restores an editable field without a network mutation |
-| MSG-COMP-002 | Preview rich Markdown | The production renderer shows the same bounded body syntax used by sent messages, including lists, quotes, code, spoilers, Unicode emoji and canonical mention/reference behavior |
-| MSG-COMP-003 | Preview one or several replies | Preview receives the full canonical outgoing body, not only the active answer; every `[author](urn:quote:<uuid>)` section appears in visible tab order |
-| MSG-COMP-004 | Empty or attachments-only draft | Empty preview has a localized honest state; selected image/document cards remain visible and removable above the preview, with no fake uploaded attachment URN |
-| MSG-COMP-005 | Rotation, background or theme change | Selected mode and exact draft survive Activity recreation; the renderer rebuilds with readable light/dark tokens and no light-on-light text |
-| MSG-COMP-006 | Send or save from Preview | The existing send/edit handler receives the unchanged outgoing snapshot once and the UI returns to Write; rejected/ambiguous delivery follows the durable outbox contract |
-| MSG-COMP-007 | TalkBack and touch | Write/Preview expose selected tab semantics and 48 dp targets; the preview is a localized polite live region while rendered links and references retain their real actions |
-| MSG-COMP-008 | Process death and account/conversation switch | The encrypted draft/reply state restores under its exact owner and slot; the presentation-only mode may restore only with the same saved Activity or defaults to Write on a fresh cold launch, and cannot leak into another conversation |
+| MSG-COMP-001 | Render the default composer | The row is 48 dp high and orders Attach, editor, Emoji, Draft history and Send/Save from left to right, matching the Figma frame |
+| MSG-COMP-002 | Guard the mobile control density | Write, Preview and the desktop formatting toolbar do not exist in the production semantics tree or visible UI |
+| MSG-COMP-003 | Enter plain or Markdown source | The editor accepts the exact bounded source text directly and no local control performs a server mutation before Send/Save |
+| MSG-COMP-004 | Empty or attachments-only draft | The localized placeholder is visible; selected image/document cards remain visible and removable above the compact row, with no fake uploaded attachment URN |
+| MSG-COMP-005 | Multiline input, rotation or theme change | The row grows only up to its bounded multiline height; exact draft and cursor-safe state survive Activity recreation with readable light/dark tokens |
+| MSG-COMP-006 | Send or save | The existing send/edit handler receives the unchanged outgoing snapshot once; rejected/ambiguous delivery follows the durable outbox contract |
+| MSG-COMP-007 | Draft history action | The history icon opens the real Drafts route with single-top navigation; Back returns to the unchanged conversation draft |
+| MSG-COMP-008 | TalkBack, touch, process death and owner switch | Every action has a localized description and functional enabled/disabled state; encrypted draft/reply state restores only for its exact owner and slot |
 | MSG-COMP-009 | Apply bold, italic, strikethrough, inline code or spoiler to a selection | The exact selected range is wrapped with the desktop marker and the cursor collapses after the inserted syntax; no text outside the range changes |
 | MSG-COMP-010 | Apply an inline action with an empty selection | A paired marker is inserted at the exact cursor and the cursor remains between the pair, ready for immediate typing |
 | MSG-COMP-011 | Quote or list one or several lines | Quote/bullet prefixes every selected line; numbered list uses stable one-based indices; an empty selection inserts only the first prefix |
 | MSG-COMP-012 | Insert a code block | Selected text is fenced with newlines; an empty selection creates two fences and positions the cursor on the blank body line |
 | MSG-COMP-013 | Insert a link | Selected text or the localized fallback becomes the label and only the placeholder `https://` is selected, even when the label itself contains `https://` |
-| MSG-COMP-014 | Scroll and invoke the formatting toolbar | All ten localized actions are reachable in one horizontal row, use 48 dp targets, retain selection when tapped, refocus the editor and expose no unsupported AI/schedule/snippet control |
+| MSG-COMP-014 | Verify desktop formatting controls stay hidden | No formatting-button row, AI, schedule or snippet control is rendered; supported Markdown remains available through direct source entry and restored drafts |
 | MSG-COMP-015 | Formatting at the 40,000-character or aggregate multi-reply bound | ViewModel acceptance is authoritative; the visible editor reconciles to the accepted text and clamped selection instead of displaying unsendable overflow |
-| MSG-COMP-016 | Format, rotate, switch Preview/Write and change theme | Exact Markdown and selection-safe draft state survive recreation, Preview renders the result, and enabled glyphs remain readable without looking disabled in light or dark mode |
+| MSG-COMP-016 | Enter formatted source, rotate and change theme | Exact Markdown and selection-safe draft state survive recreation, and enabled compact-row glyphs remain readable without looking disabled in light or dark mode |
 | MSG-COMP-017 | Type `@` at the beginning or after desktop-compatible boundary punctuation | A bounded list of real non-system Workspace users appears above the editor; email-like text, a non-collapsed selection, an inactive cursor and overlong query expose no picker |
 | MSG-COMP-018 | Filter mention suggestions | Case-insensitive UUID, username, display-name and email matches retain the desktop priority order, canonical UUID duplicates collapse, malformed/system users are absent and at most eight rows render |
 | MSG-COMP-019 | Select a mention in the middle of a draft | Only the active `@query` range becomes `[escaped display name](urn:user:<canonical uuid>) `; text before/after remains exact and the cursor lands after the inserted space |
-| MSG-COMP-020 | Preview, send and reopen an inserted mention | Preview resolves the canonical user link to the real profile action; the sent body retains only the UUID URN and ordinary escaped label, and edit restores the exact source Markdown |
+| MSG-COMP-020 | Send and reopen an inserted mention | The sent body retains only the UUID URN and ordinary escaped label; the rendered message exposes the real profile action and edit restores the exact source Markdown |
 | MSG-COMP-021 | Mention picker touch, TalkBack, rotation and theme | Every row has a 56 dp target and localized name/username description; live rows remain readable at 2x font and after light/dark/portrait/landscape recreation without covering Send |
 | MSG-COMP-022 | Catalog refresh, owner switch, offline restore and input bound | Suggestions use only the active owner-scoped real catalog; an empty/stale catalog exposes no fake rows, late account data cannot cross owners, and ViewModel-authoritative text/selection reconciliation prevents visible unsendable overflow |
 | MSG-COMP-023 | Open and search the composer emoji picker | The localized button opens the complete pinned desktop-compatible Unicode catalog; glyph, shortcode, punctuation/space-normalized aliases and an explicit empty result all behave exactly like the maintained reaction catalog |
 | MSG-COMP-024 | Insert emoji at a collapsed cursor | The selected native glyph, including a multi-codepoint skin-tone/ZWJ sequence, is inserted at the exact UTF-16 cursor without moving or changing surrounding text |
 | MSG-COMP-025 | Insert emoji over a selection | Only the normalized selected range is replaced, the cursor collapses immediately after the glyph, and stale IME composition cannot overwrite the result |
 | MSG-COMP-026 | Insert at the draft or aggregate multi-reply bound | The picker accepts only a bounded catalog glyph and the editor reconciles to ViewModel-authoritative text/selection when the insertion would exceed the sendable limit |
-| MSG-COMP-027 | Picker touch, TalkBack, rotation and theme | The trigger is a localized 44 dp action; every result has at least a 68 dp target and announces glyph plus shortcode; search, query and dialog survive recreation with readable light/dark colors |
-| MSG-COMP-028 | Catalog failure, close, Preview, send and edit | Load failure has a real Retry, close is side-effect free, unsupported sticker/AI controls are absent, Preview renders the native glyph, and send/edit retain the exact Unicode source without a fake upload or server-side picker mutation |
+| MSG-COMP-027 | Picker touch, TalkBack, rotation and theme | The trigger uses the Figma 40 dp visual slot with Compose's 48 dp effective touch target; every result has at least a 68 dp target and announces glyph plus shortcode; search, query and dialog survive recreation with readable light/dark colors |
+| MSG-COMP-028 | Catalog failure, close, send and edit | Load failure has a real Retry, close is side-effect free, unsupported sticker/AI controls are absent, and send/edit retain the exact Unicode source without a fake upload or server-side picker mutation |
 
 Current automated coverage proves exact plain and ordered multi-reply outgoing
-Markdown; every desktop formatting mutation has selection/cursor unit coverage,
-including localized and URL-containing link labels plus bounded-state
-reconciliation. Mention unit coverage proves trigger boundaries, match priority,
+Markdown. Legacy formatting mutation helpers retain selection/cursor unit
+coverage for restored source compatibility, but their desktop control strip is
+deliberately absent from the production mobile composer. Mention unit coverage proves trigger boundaries, match priority,
 catalog validation/deduplication, maximum results, Markdown escaping and exact
 cursor placement. Emoji insertion unit coverage proves exact cursor/selection,
 multi-codepoint and invalid-value behavior; the shared production-catalog
 Compose tests cover composer search/selection and guard the existing reaction
-picker against regression. Locale-independent Compose tests cover mode/selected/preview
-semantics, horizontal scrolling from the first to the last functional toolbar
-action and an enabled localized mention row.
+picker against regression. Locale-independent Compose tests cover the exact
+compact-row order and height, the absence of mode tabs/toolbar, functional
+enabled/disabled actions and an enabled localized mention row.
 
-Physical Android 14 acceptance in the dedicated sandbox rendered bold Markdown
-and a Unicode emoji, wrapped one selected token as
-`**CASSI_FORMAT**`, inserted `[текст ссылки](https://)` through the
-horizontally scrolled Link action, and rendered the formatted result in
-Preview. A real `@cas` query showed only the active Cassandra row, selection
-inserted the canonical UUID link at the cursor, Preview rendered its functional
-profile mention, and a sandbox send produced the exact readable message. Edit
-restored the original `urn:user` Markdown; cancel preserved the message, then
-the test message was explicitly deleted and its absence confirmed. The exact
-draft and Preview survived portrait → landscape → portrait; empty state,
-light/dark themes and enabled-action readability were visually inspected. The
-composer emoji picker then searched both `smile` and the normalized
-`thumbs up` alias, inserted 😄 at the beginning and 👍 at the exact cursor
-before an existing `END` suffix, preserved the live query through portrait →
-landscape recreation, and remained readable in dark portrait and light
-landscape. Preview, sandbox send and edit restored the exact Unicode body; the
-test message was deleted and both its row and draft marker were confirmed
-absent.
+Earlier Android 14 acceptance established direct Markdown-source, mention and
+emoji send/edit behavior in the dedicated sandbox. The compact-shell increment
+then passed on a physical Pixel 5 / Android 14: the empty and populated states
+matched the Figma order, the base row measured 48 dp, no Write/Preview or
+desktop formatting control existed, Send changed from disabled to enabled with
+bounded text, Emoji opened the real picker, Draft history opened the real
+Drafts screen and Back returned to the same `# general chat` conversation. No
+file was uploaded during this increment and the temporary local text was
+cleared after the screenshots.
 
 ### Message actions
 

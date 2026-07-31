@@ -87,6 +87,7 @@
     <string name="message_composer_mentions_title">Варианты упоминаний</string>
     <string name="message_composer_mention_item_description">%1$s, @%2$s</string>
     <string name="message_composer_choose_emoji">Выбрать emoji</string>
+    <string name="message_composer_open_drafts">Открыть черновики</string>
     <string name="message_composer_emoji_picker_pane_title">Выбор emoji</string>
     <string name="message_composer_emoji_picker_title">Вставить emoji</string>
     <string name="message_composer_emoji_item_description">Emoji %1$s, :%2$s:</string>

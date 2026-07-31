@@ -872,7 +872,14 @@ fun ChatDialogScreen(
                 },
                 onCancel = viewModel::clearMessageSelection,
             )
-            SendMessageView(viewModel)
+            SendMessageView(
+                viewModel = viewModel,
+                onOpenDrafts = {
+                    navController.navigate(ChatFlow.Drafts) {
+                        launchSingleTop = true
+                    }
+                },
+            )
         }
     }
     forwardDialogState?.let { state ->

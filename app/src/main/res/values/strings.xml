@@ -86,6 +86,7 @@
     <string name="message_composer_mentions_title">Mention suggestions</string>
     <string name="message_composer_mention_item_description">%1$s, @%2$s</string>
     <string name="message_composer_choose_emoji">Choose emoji</string>
+    <string name="message_composer_open_drafts">Open drafts</string>
     <string name="message_composer_emoji_picker_pane_title">Emoji picker</string>
     <string name="message_composer_emoji_picker_title">Insert emoji</string>
     <string name="message_composer_emoji_item_description">Emoji %1$s, :%2$s:</string>

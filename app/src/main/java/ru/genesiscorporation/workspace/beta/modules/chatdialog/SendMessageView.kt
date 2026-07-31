@@ -23,8 +23,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -66,7 +64,10 @@ import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 
 @Composable
-fun SendMessageView(viewModel: ChatDialogViewModel) {
+fun SendMessageView(
+    viewModel: ChatDialogViewModel,
+    onOpenDrafts: () -> Unit,
+) {
     val messageText by viewModel.messageText.collectAsStateWithLifecycle()
     val attachments by viewModel.attachments.collectAsStateWithLifecycle()
     val uploadingAttachmentUri by
@@ -82,15 +83,6 @@ fun SendMessageView(viewModel: ChatDialogViewModel) {
     val focusManager = LocalFocusManager.current
     val colors = LocalWorkspaceColorsPalette.current
     val editorFocusRequester = remember { FocusRequester() }
-    val defaultLinkText = stringResource(
-        R.string.message_composer_link_text,
-    )
-    val emojiButtonLabel = stringResource(
-        R.string.message_composer_choose_emoji,
-    )
-    var composerMode by rememberSaveable {
-        mutableStateOf(ComposerMode.WRITE)
-    }
     var emojiPickerOpen by rememberSaveable {
         mutableStateOf(false)
     }
@@ -125,11 +117,7 @@ fun SendMessageView(viewModel: ChatDialogViewModel) {
             attachments.isNotEmpty()
     }
     val canSend = conversationStateReady && !sending && hasSendableContent
-    val mentionQuery = if (composerMode == ComposerMode.WRITE) {
-        detectComposerMentionQuery(editorValue)
-    } else {
-        null
-    }
+    val mentionQuery = detectComposerMentionQuery(editorValue)
     val mentionCandidates = remember(mentionUsers) {
         composerMentionCandidates(mentionUsers)
     }
@@ -200,37 +188,6 @@ fun SendMessageView(viewModel: ChatDialogViewModel) {
                 onClearAll = viewModel::clearQuotedMessage,
             )
         }
-        ComposerModeTabs(
-            mode = composerMode,
-            onModeChange = { nextMode ->
-                composerMode = nextMode
-                emojiPickerOpen = false
-                if (nextMode == ComposerMode.PREVIEW) {
-                    focusManager.clearFocus()
-                } else {
-                    editorFocusRequester.requestFocus()
-                }
-            },
-        )
-        if (composerMode == ComposerMode.WRITE) {
-            ComposerFormattingToolbar(
-                enabled = conversationStateReady,
-                onAction = { action ->
-                    val formatted = applyComposerFormatting(
-                        value = editorValue,
-                        action = action,
-                        linkText = defaultLinkText,
-                    )
-                    val acceptedText =
-                        viewModel.onMessageChange(formatted.text)
-                    editorValue = reconcileComposerEditorValue(
-                        candidate = formatted,
-                        acceptedText = acceptedText,
-                    )
-                    editorFocusRequester.requestFocus()
-                },
-            )
-        }
         ComposerMentionSuggestions(
             suggestions = mentionSuggestions,
             onSelect = { suggestion ->
@@ -250,142 +207,31 @@ fun SendMessageView(viewModel: ChatDialogViewModel) {
                 editorFocusRequester.requestFocus()
             },
         )
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.Bottom,
-        ) {
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .heightIn(min = 46.dp, max = 112.dp)
-                    .background(colors.background, RoundedCornerShape(14.dp))
-                    .padding(horizontal = 7.dp, vertical = 5.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (composerMode == ComposerMode.WRITE) {
-                    IconButton(
-                        onClick = {
-                            focusManager.clearFocus()
-                            emojiPickerOpen = true
-                        },
-                        enabled = conversationStateReady && !sending,
-                        modifier = Modifier
-                            .size(44.dp)
-                            .semantics {
-                                contentDescription = emojiButtonLabel
-                            },
-                        colors = IconButtonDefaults.iconButtonColors(
-                            contentColor = colors.iconBase,
-                            disabledContentColor =
-                                colors.iconBase.copy(alpha = 0.38f),
-                        ),
-                    ) {
-                        Text(
-                            text = "☺",
-                            fontSize = 24.sp,
-                        )
-                    }
-                }
-                Button(
-                    onClick = { launcher.launch(arrayOf("*/*")) },
-                    enabled = conversationStateReady &&
-                        !sending &&
-                        viewModel.editingMessage == null,
-                    modifier = Modifier.size(44.dp),
-                    shape = CircleShape,
-                    contentPadding = PaddingValues(8.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color.Transparent,
-                        contentColor = colors.iconBase,
-                    ),
-                ) {
-                    Icon(
-                        painter = painterResource(R.drawable.attach_file),
-                        contentDescription = stringResource(
-                            R.string.message_composer_attach_files,
-                        ),
-                    )
-                }
-                if (composerMode == ComposerMode.WRITE) {
-                    BasicTextField(
-                        value = editorValue,
-                        onValueChange = { updated ->
-                            val acceptedText =
-                                viewModel.onMessageChange(updated.text)
-                            editorValue = reconcileComposerEditorValue(
-                                candidate = updated,
-                                acceptedText = acceptedText,
-                            )
-                        },
-                        enabled = conversationStateReady,
-                        textStyle = TextStyle(
-                            color = colors.textHeaders,
-                            fontSize = 14.sp,
-                            lineHeight = 18.sp,
-                        ),
-                        cursorBrush = SolidColor(colors.primary),
-                        maxLines = 4,
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(horizontal = 8.dp, vertical = 7.dp)
-                            .focusRequester(editorFocusRequester),
-                        decorationBox = { innerTextField ->
-                            Box(contentAlignment = Alignment.CenterStart) {
-                                if (editorValue.text.isEmpty()) {
-                                    Text(
-                                        text = stringResource(
-                                            R.string.message_composer_placeholder,
-                                        ),
-                                        color = colors.textAdditional30,
-                                        fontSize = 14.sp,
-                                    )
-                                }
-                                innerTextField()
-                            }
-                        },
-                    )
-                } else {
-                    ComposerMarkdownPreview(
-                        markdown = buildComposerPreviewMarkdown(
-                            messageText = messageText,
-                            replySession = replySession,
-                        ),
-                        hasAttachments = attachments.isNotEmpty(),
-                        viewModel = viewModel,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                Button(
-                    onClick = {
-                        viewModel.onSendClicked(context)
-                        composerMode = ComposerMode.WRITE
-                    },
-                    enabled = canSend,
-                    modifier = Modifier.size(44.dp),
-                    shape = CircleShape,
-                    contentPadding = PaddingValues(9.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (canSend) colors.primary else Color.Transparent,
-                        contentColor = colors.onPrimary,
-                        disabledContainerColor = Color.Transparent,
-                        disabledContentColor = colors.iconBase,
-                    ),
-                ) {
-                    Icon(
-                        painter = painterResource(
-                            if (viewModel.editingMessage == null) R.drawable.send else R.drawable.ic_check,
-                        ),
-                        contentDescription = if (viewModel.editingMessage == null) {
-                            stringResource(R.string.message_composer_send)
-                        } else {
-                            stringResource(R.string.message_composer_save)
-                        },
-                    )
-                }
-            }
-        }
+        CompactMessageComposer(
+            value = editorValue,
+            onValueChange = { updated ->
+                val acceptedText = viewModel.onMessageChange(updated.text)
+                editorValue = reconcileComposerEditorValue(
+                    candidate = updated,
+                    acceptedText = acceptedText,
+                )
+            },
+            editorEnabled = conversationStateReady,
+            actionsEnabled = conversationStateReady && !sending,
+            attachmentEnabled = conversationStateReady &&
+                !sending &&
+                viewModel.editingMessage == null,
+            canSend = canSend,
+            editing = viewModel.editingMessage != null,
+            onAttach = { launcher.launch(arrayOf("*/*")) },
+            onEmoji = {
+                focusManager.clearFocus()
+                emojiPickerOpen = true
+            },
+            onOpenDrafts = onOpenDrafts,
+            onSend = { viewModel.onSendClicked(context) },
+            editorFocusRequester = editorFocusRequester,
+        )
     }
     ComposerEmojiPicker(
         open = emojiPickerOpen,
@@ -408,6 +254,169 @@ fun SendMessageView(viewModel: ChatDialogViewModel) {
             editorFocusRequester.requestFocus()
         },
     )
+}
+
+@Composable
+internal fun CompactMessageComposer(
+    value: TextFieldValue,
+    onValueChange: (TextFieldValue) -> Unit,
+    editorEnabled: Boolean,
+    actionsEnabled: Boolean,
+    attachmentEnabled: Boolean,
+    canSend: Boolean,
+    editing: Boolean,
+    onAttach: () -> Unit,
+    onEmoji: () -> Unit,
+    onOpenDrafts: () -> Unit,
+    onSend: () -> Unit,
+    modifier: Modifier = Modifier,
+    editorFocusRequester: FocusRequester? = null,
+) {
+    val colors = LocalWorkspaceColorsPalette.current
+    val focusRequester = editorFocusRequester ?: remember { FocusRequester() }
+    val attachLabel = stringResource(R.string.message_composer_attach_files)
+    val emojiLabel = stringResource(R.string.message_composer_choose_emoji)
+    val draftsLabel = stringResource(R.string.message_composer_open_drafts)
+    val sendLabel = stringResource(
+        if (editing) {
+            R.string.message_composer_save
+        } else {
+            R.string.message_composer_send
+        },
+    )
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .heightIn(min = 48.dp, max = 112.dp)
+            .background(colors.background, RoundedCornerShape(12.dp))
+            .padding(horizontal = 4.dp)
+            .testTag(COMPACT_COMPOSER_ROW_TAG),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(
+            onClick = onAttach,
+            enabled = attachmentEnabled,
+            modifier = Modifier
+                .size(40.dp)
+                .testTag(COMPACT_COMPOSER_ATTACH_TAG),
+            colors = IconButtonDefaults.iconButtonColors(
+                contentColor = colors.iconBase,
+                disabledContentColor = colors.iconBase.copy(alpha = 0.38f),
+            ),
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_figma_composer_attach),
+                contentDescription = attachLabel,
+                modifier = Modifier.size(28.dp),
+            )
+        }
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            enabled = editorEnabled,
+            textStyle = TextStyle(
+                color = colors.textHeaders,
+                fontSize = 16.sp,
+                lineHeight = 18.sp,
+            ),
+            cursorBrush = SolidColor(colors.primary),
+            maxLines = 4,
+            modifier = Modifier
+                .weight(1f)
+                .heightIn(min = 40.dp)
+                .padding(horizontal = 4.dp, vertical = 10.dp)
+                .focusRequester(focusRequester)
+                .testTag(COMPACT_COMPOSER_EDITOR_TAG),
+            decorationBox = { innerTextField ->
+                Box(contentAlignment = Alignment.CenterStart) {
+                    if (value.text.isEmpty()) {
+                        Text(
+                            text = stringResource(
+                                R.string.message_composer_placeholder,
+                            ),
+                            color = colors.textAdditional30,
+                            fontSize = 16.sp,
+                            lineHeight = 18.sp,
+                        )
+                    }
+                    innerTextField()
+                }
+            },
+        )
+        ComposerIconAction(
+            icon = R.drawable.ic_figma_composer_emoji,
+            label = emojiLabel,
+            enabled = actionsEnabled,
+            testTag = COMPACT_COMPOSER_EMOJI_TAG,
+            onClick = onEmoji,
+        )
+        ComposerIconAction(
+            icon = R.drawable.ic_figma_composer_history,
+            label = draftsLabel,
+            enabled = actionsEnabled,
+            testTag = COMPACT_COMPOSER_HISTORY_TAG,
+            onClick = onOpenDrafts,
+        )
+        IconButton(
+            onClick = onSend,
+            enabled = canSend,
+            modifier = Modifier
+                .size(40.dp)
+                .testTag(COMPACT_COMPOSER_SEND_TAG),
+            colors = IconButtonDefaults.iconButtonColors(
+                contentColor = colors.onPrimary,
+                disabledContentColor = colors.iconBase,
+            ),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        color = if (canSend) colors.primary else Color.Transparent,
+                        shape = RoundedCornerShape(12.dp),
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    painter = painterResource(
+                        if (editing) R.drawable.ic_check else R.drawable.send,
+                    ),
+                    contentDescription = sendLabel,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ComposerIconAction(
+    icon: Int,
+    label: String,
+    enabled: Boolean,
+    testTag: String,
+    onClick: () -> Unit,
+) {
+    val colors = LocalWorkspaceColorsPalette.current
+    IconButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier
+            .size(40.dp)
+            .testTag(testTag),
+        colors = IconButtonDefaults.iconButtonColors(
+            contentColor = colors.iconBase,
+            disabledContentColor = colors.iconBase.copy(alpha = 0.38f),
+        ),
+    ) {
+        Icon(
+            painter = painterResource(icon),
+            contentDescription = label,
+            modifier = Modifier.size(28.dp),
+        )
+    }
 }
 
 @Composable
@@ -509,6 +518,12 @@ internal const val SELECTED_ATTACHMENT_PREVIEW_TAG =
     "selected-attachment-preview"
 internal const val SELECTED_ATTACHMENT_REMOVE_TAG =
     "selected-attachment-remove"
+internal const val COMPACT_COMPOSER_ROW_TAG = "compact-composer-row"
+internal const val COMPACT_COMPOSER_ATTACH_TAG = "compact-composer-attach"
+internal const val COMPACT_COMPOSER_EDITOR_TAG = "compact-composer-editor"
+internal const val COMPACT_COMPOSER_EMOJI_TAG = "compact-composer-emoji"
+internal const val COMPACT_COMPOSER_HISTORY_TAG = "compact-composer-history"
+internal const val COMPACT_COMPOSER_SEND_TAG = "compact-composer-send"
 
 @Composable
 private fun ComposerContext(
