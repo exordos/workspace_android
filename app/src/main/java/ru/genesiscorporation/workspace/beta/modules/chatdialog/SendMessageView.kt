@@ -25,6 +25,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -45,6 +46,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.TextFieldValue
@@ -75,8 +78,14 @@ fun SendMessageView(viewModel: ChatDialogViewModel) {
     val defaultLinkText = stringResource(
         R.string.message_composer_link_text,
     )
+    val emojiButtonLabel = stringResource(
+        R.string.message_composer_choose_emoji,
+    )
     var composerMode by rememberSaveable {
         mutableStateOf(ComposerMode.WRITE)
+    }
+    var emojiPickerOpen by rememberSaveable {
+        mutableStateOf(false)
     }
     var editorValue by rememberSaveable(
         stateSaver = TextFieldValue.Saver,
@@ -191,6 +200,7 @@ fun SendMessageView(viewModel: ChatDialogViewModel) {
             mode = composerMode,
             onModeChange = { nextMode ->
                 composerMode = nextMode
+                emojiPickerOpen = false
                 if (nextMode == ComposerMode.PREVIEW) {
                     focusManager.clearFocus()
                 } else {
@@ -250,6 +260,30 @@ fun SendMessageView(viewModel: ChatDialogViewModel) {
                     .padding(horizontal = 7.dp, vertical = 5.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                if (composerMode == ComposerMode.WRITE) {
+                    IconButton(
+                        onClick = {
+                            focusManager.clearFocus()
+                            emojiPickerOpen = true
+                        },
+                        enabled = conversationStateReady && !sending,
+                        modifier = Modifier
+                            .size(44.dp)
+                            .semantics {
+                                contentDescription = emojiButtonLabel
+                            },
+                        colors = IconButtonDefaults.iconButtonColors(
+                            contentColor = colors.iconBase,
+                            disabledContentColor =
+                                colors.iconBase.copy(alpha = 0.38f),
+                        ),
+                    ) {
+                        Text(
+                            text = "☺",
+                            fontSize = 24.sp,
+                        )
+                    }
+                }
                 Button(
                     onClick = { launcher.launch(arrayOf("*/*")) },
                     enabled = conversationStateReady &&
@@ -349,6 +383,27 @@ fun SendMessageView(viewModel: ChatDialogViewModel) {
             }
         }
     }
+    ComposerEmojiPicker(
+        open = emojiPickerOpen,
+        onDismiss = {
+            emojiPickerOpen = false
+            editorFocusRequester.requestFocus()
+        },
+        onEmoji = { glyph ->
+            val insertion = insertComposerEmoji(
+                value = editorValue,
+                glyph = glyph,
+            )
+            val acceptedText =
+                viewModel.onMessageChange(insertion.text)
+            editorValue = reconcileComposerEditorValue(
+                candidate = insertion,
+                acceptedText = acceptedText,
+            )
+            emojiPickerOpen = false
+            editorFocusRequester.requestFocus()
+        },
+    )
 }
 
 @Composable

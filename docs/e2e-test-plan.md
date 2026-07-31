@@ -604,13 +604,22 @@ local UI operation: it must never create, update or delete a server resource.
 | MSG-COMP-020 | Preview, send and reopen an inserted mention | Preview resolves the canonical user link to the real profile action; the sent body retains only the UUID URN and ordinary escaped label, and edit restores the exact source Markdown |
 | MSG-COMP-021 | Mention picker touch, TalkBack, rotation and theme | Every row has a 56 dp target and localized name/username description; live rows remain readable at 2x font and after light/dark/portrait/landscape recreation without covering Send |
 | MSG-COMP-022 | Catalog refresh, owner switch, offline restore and input bound | Suggestions use only the active owner-scoped real catalog; an empty/stale catalog exposes no fake rows, late account data cannot cross owners, and ViewModel-authoritative text/selection reconciliation prevents visible unsendable overflow |
+| MSG-COMP-023 | Open and search the composer emoji picker | The localized button opens the complete pinned desktop-compatible Unicode catalog; glyph, shortcode, punctuation/space-normalized aliases and an explicit empty result all behave exactly like the maintained reaction catalog |
+| MSG-COMP-024 | Insert emoji at a collapsed cursor | The selected native glyph, including a multi-codepoint skin-tone/ZWJ sequence, is inserted at the exact UTF-16 cursor without moving or changing surrounding text |
+| MSG-COMP-025 | Insert emoji over a selection | Only the normalized selected range is replaced, the cursor collapses immediately after the glyph, and stale IME composition cannot overwrite the result |
+| MSG-COMP-026 | Insert at the draft or aggregate multi-reply bound | The picker accepts only a bounded catalog glyph and the editor reconciles to ViewModel-authoritative text/selection when the insertion would exceed the sendable limit |
+| MSG-COMP-027 | Picker touch, TalkBack, rotation and theme | The trigger is a localized 44 dp action; every result has at least a 68 dp target and announces glyph plus shortcode; search, query and dialog survive recreation with readable light/dark colors |
+| MSG-COMP-028 | Catalog failure, close, Preview, send and edit | Load failure has a real Retry, close is side-effect free, unsupported sticker/AI controls are absent, Preview renders the native glyph, and send/edit retain the exact Unicode source without a fake upload or server-side picker mutation |
 
 Current automated coverage proves exact plain and ordered multi-reply outgoing
 Markdown; every desktop formatting mutation has selection/cursor unit coverage,
 including localized and URL-containing link labels plus bounded-state
 reconciliation. Mention unit coverage proves trigger boundaries, match priority,
 catalog validation/deduplication, maximum results, Markdown escaping and exact
-cursor placement. Locale-independent Compose tests cover mode/selected/preview
+cursor placement. Emoji insertion unit coverage proves exact cursor/selection,
+multi-codepoint and invalid-value behavior; the shared production-catalog
+Compose tests cover composer search/selection and guard the existing reaction
+picker against regression. Locale-independent Compose tests cover mode/selected/preview
 semantics, horizontal scrolling from the first to the last functional toolbar
 action and an enabled localized mention row.
 
@@ -624,7 +633,14 @@ profile mention, and a sandbox send produced the exact readable message. Edit
 restored the original `urn:user` Markdown; cancel preserved the message, then
 the test message was explicitly deleted and its absence confirmed. The exact
 draft and Preview survived portrait → landscape → portrait; empty state,
-light/dark themes and enabled-action readability were visually inspected.
+light/dark themes and enabled-action readability were visually inspected. The
+composer emoji picker then searched both `smile` and the normalized
+`thumbs up` alias, inserted 😄 at the beginning and 👍 at the exact cursor
+before an existing `END` suffix, preserved the live query through portrait →
+landscape recreation, and remained readable in dark portrait and light
+landscape. Preview, sandbox send and edit restored the exact Unicode body; the
+test message was deleted and both its row and draft marker were confirmed
+absent.
 
 ### Message actions
 
