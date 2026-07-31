@@ -145,11 +145,13 @@ class WorkspaceViewModel(
                     repo.streams,
                     repo.streamTopics,
                     repo.streamTopicMessages,
-                ) { streams, topics, messages ->
+                    repo.conversationPagination,
+                ) { streams, topics, messages, pagination ->
                     ru.genesiscorporation.workspace.beta.data.WorkspaceSnapshot(
                         streams = streams,
                         topicsByStream = topics,
                         messagesByConversation = messages,
+                        paginationByConversation = pagination,
                     )
                 }
                 combine(
@@ -202,6 +204,7 @@ private fun ru.genesiscorporation.workspace.beta.data.WorkspaceSnapshot
     streams.isNotEmpty() ||
         topicsByStream.values.any { it.isNotEmpty() } ||
         messagesByConversation.values.any { it.isNotEmpty() } ||
+        paginationByConversation.isNotEmpty() ||
         folders.isNotEmpty() ||
         users.isNotEmpty() ||
         streamBindings.isNotEmpty()

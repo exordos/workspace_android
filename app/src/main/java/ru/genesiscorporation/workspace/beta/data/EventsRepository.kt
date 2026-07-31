@@ -251,6 +251,7 @@ class EventsRepository(
         jitsiServerUrl = ""
         resetRealtimeCursor()
         _streamTopicMessages.value = emptyMap()
+        _conversationPagination.value = emptyMap()
         _messagesPool.value = emptyList()
         _userReactions.value = emptyList()
         synchronized(catalogProjectionLock) {
@@ -318,6 +319,12 @@ class EventsRepository(
                 }
             }
         }
+        _conversationPagination.update { current ->
+            boundedConversationPagination(
+                older = snapshot.paginationByConversation,
+                newer = current,
+            )
+        }
         val cachedMessages = snapshot.messagesByConversation
             .values
             .flatten()
@@ -346,6 +353,8 @@ class EventsRepository(
                 streams = _streams.value,
                 topicsByStream = _streamTopics.value,
                 messagesByConversation = _streamTopicMessages.value,
+                paginationByConversation =
+                    _conversationPagination.value,
                 folders = _folders.value,
                 users = _users.value,
                 streamBindings = _streamBindings.value,
@@ -361,6 +370,7 @@ class EventsRepository(
                 messages.filter { it.uuid.startsWith("local-") }
             }.filterValues(List<MessageResponse>::isNotEmpty)
         }
+        _conversationPagination.value = emptyMap()
         _messagesPool.value = emptyList()
         _userReactions.value = emptyList()
         synchronized(catalogProjectionLock) {
@@ -672,6 +682,51 @@ class EventsRepository(
 
     private val _streamTopicMessages = MutableStateFlow<Map<String, List<MessageResponse>>>(emptyMap())
     val streamTopicMessages: StateFlow<Map<String, List<MessageResponse>>> = _streamTopicMessages.asStateFlow()
+    private val _conversationPagination =
+        MutableStateFlow<Map<String, ConversationPaginationState>>(emptyMap())
+    val conversationPagination:
+        StateFlow<Map<String, ConversationPaginationState>> =
+            _conversationPagination.asStateFlow()
+
+    fun updateConversationPagination(
+        state: ConversationPaginationState,
+    ) {
+        val key = conversationKey(
+            state.streamUuid,
+            state.topicUuid,
+        )
+        _conversationPagination.update { current ->
+            boundedConversationPagination(
+                older = current,
+                newer = mapOf(key to state),
+            )
+        }
+    }
+
+    fun removeConversationPagination(
+        streamUuid: String,
+        topicUuid: String,
+    ) {
+        val key = conversationKey(streamUuid, topicUuid)
+        _conversationPagination.update { current -> current - key }
+    }
+
+    private fun boundedConversationPagination(
+        older: Map<String, ConversationPaginationState>,
+        newer: Map<String, ConversationPaginationState>,
+    ): Map<String, ConversationPaginationState> {
+        val merged = LinkedHashMap<String, ConversationPaginationState>()
+        sequenceOf(older, newer).forEach { source ->
+            source.forEach { (key, state) ->
+                merged.remove(key)
+                merged[key] = state
+            }
+        }
+        while (merged.size > MAX_CACHED_CONVERSATIONS) {
+            merged.remove(merged.keys.first())
+        }
+        return merged
+    }
 
     fun addStreamTopicMessages(streamUuid: String, topicUuid: String, messages: List<MessageResponse>) {
         val messagesWithUser = messages.map { message ->
@@ -1352,6 +1407,11 @@ class EventsRepository(
         _streamTopicMessages.update { current ->
             current.filterKeys { key -> !key.startsWith("$streamUuid.") }
         }
+        _conversationPagination.update { current ->
+            current.filterKeys { key ->
+                !key.startsWith("$streamUuid.")
+            }
+        }
         mutateStreamBindings { current ->
             current.filterNot { it.streamUuid == streamUuid }
         }
@@ -1422,6 +1482,11 @@ class EventsRepository(
         }
         _streamTopicMessages.update { current ->
             current.filterKeys { key -> !key.endsWith(".$topicUuid") }
+        }
+        _conversationPagination.update { current ->
+            current.filterKeys { key ->
+                !key.endsWith(".$topicUuid")
+            }
         }
     }
 

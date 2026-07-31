@@ -33,7 +33,9 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import ru.genesiscorporation.workspace.beta.BuildConfig
 import ru.genesiscorporation.workspace.beta.UserViewModel
+import ru.genesiscorporation.workspace.beta.data.ConversationPaginationState
 import ru.genesiscorporation.workspace.beta.data.ConversationStateStore
+import ru.genesiscorporation.workspace.beta.data.ConversationWindowMode
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
 import ru.genesiscorporation.workspace.beta.data.PersistedAttachment
 import ru.genesiscorporation.workspace.beta.data.PersistedComposerDraft
@@ -45,6 +47,8 @@ import ru.genesiscorporation.workspace.beta.data.PersistedOutboxStatus
 import ru.genesiscorporation.workspace.beta.data.PersistedServerDraftState
 import ru.genesiscorporation.workspace.beta.data.deleteOwnedIncomingAttachment
 import ru.genesiscorporation.workspace.beta.data.isOwnedIncomingAttachment
+import ru.genesiscorporation.workspace.beta.data.normalizeConversationPaginationState
+import ru.genesiscorporation.workspace.beta.data.unknownConversationPaginationState
 import ru.genesiscorporation.workspace.beta.data.remote.ApiError
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.ApiErrorKind
@@ -230,6 +234,12 @@ class ChatDialogViewModel(
     private var draftUpdatedAt: String? = null
     private var nextOlderPageMarker: String? = null
     private var contextWindowAnchorUuid: String? = focusMessageUuid
+    private var conversationWindowMode =
+        if (focusMessageUuid == null) {
+            ConversationWindowMode.LATEST
+        } else {
+            ConversationWindowMode.CONTEXT
+        }
     private var olderMessagesJob: Job? = null
     private var refreshHistoryBeforeOlderRetry = false
     private var nextNewerPageMarker: String? = null
@@ -2973,11 +2983,13 @@ class ChatDialogViewModel(
         // This keeps a slow page request from leaving a valid message link on
         // an unrelated latest-history loading screen.
         repo.replaceStreamTopicMessages(chatId, topicUuid, listOf(anchor))
+        conversationWindowMode = ConversationWindowMode.CONTEXT
         contextWindowAnchorUuid = anchor.uuid
         nextOlderPageMarker = anchor.uuid
         nextNewerPageMarker = anchor.uuid
         _hasOlderMessages.value = true
         _hasNewerMessages.value = true
+        publishCurrentPaginationState()
         _loadingOlderMessages.value = true
         _loadingNewerMessages.value = true
         if (focusAnchor) {
@@ -3124,6 +3136,7 @@ class ChatDialogViewModel(
             }
 
             repo.replaceStreamTopicMessages(chatId, topicUuid, loadedMessages)
+            publishCurrentPaginationState()
             restoreComposerReferences(loadedMessages + composerReferenceMessages)
             reconcileOutboxWithServer(loadedMessages)
             focusProviderMessageId?.let { providerMessageId ->
@@ -3163,6 +3176,7 @@ class ChatDialogViewModel(
     ): Boolean {
         _isLoading.value = true
         _loadError.value = null
+        conversationWindowMode = ConversationWindowMode.LATEST
         contextWindowAnchorUuid = null
         nextNewerPageMarker = null
         _hasNewerMessages.value = false
@@ -3192,6 +3206,8 @@ class ChatDialogViewModel(
                 refreshHistoryBeforeOlderRetry = false
                 if (pageState.error != null) {
                     _loadError.value = pageState.error
+                    conversationWindowMode =
+                        ConversationWindowMode.UNKNOWN
                 }
                 var loadedMessages = latestPageMessages
                 focusMessageUuid?.takeIf { resolveMessageFocus }?.let { requestedUuid ->
@@ -3254,6 +3270,11 @@ class ChatDialogViewModel(
                     topicUuid,
                     visibleMessages,
                 )
+                if (pageState.error == null) {
+                    publishCurrentPaginationState()
+                } else {
+                    publishUnknownPaginationState(visibleMessages)
+                }
                 restoreComposerReferences(loadedMessages)
                 reconcileOutboxWithServer(visibleMessages)
                 focusProviderMessageId?.let { providerMessageId ->
@@ -3291,7 +3312,12 @@ class ChatDialogViewModel(
                 true
             }
             is ApiResult.Error -> {
-                if (restoreCachedHistory(resolveMessageFocus)) {
+                if (
+                    restoreCachedHistory(
+                        resolveMessageFocus = resolveMessageFocus,
+                        refreshError = messagesResponse.error.message,
+                    )
+                ) {
                     true
                 } else {
                     _isLoading.value = false
@@ -3305,16 +3331,39 @@ class ChatDialogViewModel(
 
     private fun restoreCachedHistory(
         resolveMessageFocus: Boolean,
+        refreshError: String?,
     ): Boolean {
         val cachedMessages = cachedConversationMessages()
         if (!hasCachedServerHistory(cachedMessages)) return false
-        _loadError.value = null
+        _loadError.value = refreshError
+            ?.takeIf(String::isNotBlank)
+            ?.let {
+                "Показана сохранённая история. Не удалось обновить: $it"
+            }
+            ?: "Показана сохранённая история без подключения к серверу"
         _olderMessagesError.value = null
         _newerMessagesError.value = null
-        _hasOlderMessages.value = false
-        _hasNewerMessages.value = false
-        nextOlderPageMarker = null
-        nextNewerPageMarker = null
+        val key = "$chatId.$topicUuid"
+        val retainedMessageUuids =
+            cachedServerMessageUuids(cachedMessages)
+        if (retainedMessageUuids.isEmpty()) return false
+        val restoredPagination = repo.conversationPagination.value[key]
+            ?.let { state ->
+                normalizeConversationPaginationState(
+                    state = state,
+                    retainedMessageUuids = retainedMessageUuids,
+                    sourceFirstMessageUuid =
+                        retainedMessageUuids.first(),
+                    sourceLastMessageUuid =
+                        retainedMessageUuids.last(),
+                )
+            }
+            ?: unknownConversationPaginationState(
+                    streamUuid = chatId,
+                    topicUuid = topicUuid,
+                    retainedMessageUuids = retainedMessageUuids,
+                )
+        applyConversationPaginationState(restoredPagination)
         restoreComposerReferences(cachedMessages)
         focusProviderMessageId?.let { providerMessageId ->
             cachedMessages
@@ -3341,8 +3390,76 @@ class ChatDialogViewModel(
         return true
     }
 
+    private fun applyConversationPaginationState(
+        state: ConversationPaginationState?,
+    ) {
+        val restored = state ?: run {
+            conversationWindowMode = ConversationWindowMode.UNKNOWN
+            contextWindowAnchorUuid = null
+            nextOlderPageMarker = null
+            nextNewerPageMarker = null
+            _hasOlderMessages.value = false
+            _hasNewerMessages.value = false
+            return
+        }
+        conversationWindowMode = restored.mode
+        contextWindowAnchorUuid = restored.contextAnchorUuid
+        nextOlderPageMarker = restored.olderPageMarker
+        nextNewerPageMarker = restored.newerPageMarker
+        _hasOlderMessages.value = restored.olderPageMarker != null
+        _hasNewerMessages.value =
+            restored.mode != ConversationWindowMode.LATEST &&
+                restored.newerPageMarker != null
+    }
+
+    private fun currentConversationPaginationState():
+        ConversationPaginationState =
+        ConversationPaginationState(
+            streamUuid = chatId,
+            topicUuid = topicUuid,
+            mode = conversationWindowMode,
+            contextAnchorUuid = contextWindowAnchorUuid,
+            olderPageMarker = nextOlderPageMarker,
+            newerPageMarker = nextNewerPageMarker,
+        )
+
+    private fun publishCurrentPaginationState() {
+        if (!hasCachedServerHistory()) {
+            repo.removeConversationPagination(chatId, topicUuid)
+            return
+        }
+        repo.updateConversationPagination(
+            currentConversationPaginationState(),
+        )
+    }
+
+    private fun publishUnknownPaginationState(
+        messages: List<MessageResponse>,
+    ) {
+        val unknown = unknownConversationPaginationState(
+            streamUuid = chatId,
+            topicUuid = topicUuid,
+            retainedMessageUuids = messages.map(MessageResponse::uuid),
+        )
+        applyConversationPaginationState(unknown)
+        if (unknown == null) {
+            repo.removeConversationPagination(chatId, topicUuid)
+        } else {
+            repo.updateConversationPagination(unknown)
+        }
+    }
+
     private fun cachedConversationMessages(): List<MessageResponse> =
         repo.streamTopicMessages.value["$chatId.$topicUuid"].orEmpty()
+
+    private fun cachedServerMessageUuids(
+        messages: List<MessageResponse>,
+    ): List<String> = messages.mapNotNull { message ->
+        message.uuid.takeIf { uuid ->
+            !uuid.startsWith("local-") &&
+                runCatching { UUID.fromString(uuid) }.isSuccess
+        }
+    }
 
     private fun hasCachedServerHistory(): Boolean =
         hasCachedServerHistory(cachedConversationMessages())
@@ -3446,7 +3563,8 @@ class ChatDialogViewModel(
                         ]?.singleOrNull { it.uuid == marker }
                         val pageState =
                             if (
-                                contextWindowAnchorUuid != null &&
+                                conversationWindowMode !=
+                                    ConversationWindowMode.LATEST &&
                                 boundary != null
                             ) {
                                 validateMessageWindowPageState(
@@ -3475,6 +3593,7 @@ class ChatDialogViewModel(
                             nextOlderPageMarker = pageState.nextMarker
                             _hasOlderMessages.value = pageState.nextMarker != null
                             refreshHistoryBeforeOlderRetry = false
+                            publishCurrentPaginationState()
                         } else {
                             refreshHistoryBeforeOlderRetry = true
                             nextOlderPageMarker = null
@@ -3507,7 +3626,7 @@ class ChatDialogViewModel(
 
     fun loadNewerMessages(): Boolean {
         if (
-            contextWindowAnchorUuid == null ||
+            conversationWindowMode == ConversationWindowMode.LATEST ||
             !_hasNewerMessages.value ||
             _loadingNewerMessages.value ||
             _newerMessagesError.value != null ||
@@ -3521,18 +3640,51 @@ class ChatDialogViewModel(
     fun retryNewerMessages(): Boolean {
         if (
             _loadingNewerMessages.value ||
-            contextWindowAnchorUuid == null
+            conversationWindowMode == ConversationWindowMode.LATEST
         ) {
             return false
         }
         _newerMessagesError.value = null
         if (refreshHistoryBeforeNewerRetry) {
-            refreshHistoryBeforeNewerRetry = false
-            nextNewerPageMarker = contextWindowAnchorUuid
-            _hasNewerMessages.value = true
+            val anchorUuid = contextWindowAnchorUuid
+            if (
+                conversationWindowMode ==
+                    ConversationWindowMode.CONTEXT &&
+                anchorUuid != null
+            ) {
+                refreshHistoryBeforeNewerRetry = false
+                nextNewerPageMarker = anchorUuid
+                _hasNewerMessages.value = true
+            } else {
+                return refreshHistoryForNewerRetry()
+            }
         }
         if (!_hasNewerMessages.value) return false
         return startNewerMessagesLoad()
+    }
+
+    private fun refreshHistoryForNewerRetry(): Boolean {
+        if (newerMessagesJob?.isActive == true || _isLoading.value) {
+            return false
+        }
+        _loadingNewerMessages.value = true
+        newerMessagesJob = viewModelScope.launch {
+            try {
+                val loaded = loadLatestMessages(
+                    resolveMessageFocus = false,
+                )
+                if (!loaded || _loadError.value != null) {
+                    _newerMessagesError.value = _loadError.value
+                        ?: "Не удалось обновить историю сообщений"
+                    _loadError.value = null
+                }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } finally {
+                _loadingNewerMessages.value = false
+            }
+        }
+        return true
     }
 
     private fun startNewerMessagesLoad(): Boolean {
@@ -3583,6 +3735,16 @@ class ChatDialogViewModel(
                             nextNewerPageMarker = pageState.nextMarker
                             _hasNewerMessages.value = pageState.nextMarker != null
                             refreshHistoryBeforeNewerRetry = false
+                            if (
+                                conversationWindowMode ==
+                                    ConversationWindowMode.UNKNOWN &&
+                                pageState.nextMarker == null
+                            ) {
+                                conversationWindowMode =
+                                    ConversationWindowMode.LATEST
+                                contextWindowAnchorUuid = null
+                            }
+                            publishCurrentPaginationState()
                         } else {
                             refreshHistoryBeforeNewerRetry = true
                             nextNewerPageMarker = null

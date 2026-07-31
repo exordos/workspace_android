@@ -28,9 +28,27 @@ data class WorkspaceSnapshot(
     val streams: List<Stream> = emptyList(),
     val topicsByStream: Map<String, List<TopicsResponseData>> = emptyMap(),
     val messagesByConversation: Map<String, List<MessageResponse>> = emptyMap(),
+    val paginationByConversation:
+        Map<String, ConversationPaginationState> = emptyMap(),
     val folders: List<FolderResponseData> = emptyList(),
     val users: List<UserResponseData> = emptyList(),
     val streamBindings: List<StreamBindingResponseData> = emptyList(),
+)
+
+@Serializable
+enum class ConversationWindowMode {
+    LATEST,
+    CONTEXT,
+    UNKNOWN,
+}
+
+data class ConversationPaginationState(
+    val streamUuid: String,
+    val topicUuid: String,
+    val mode: ConversationWindowMode,
+    val contextAnchorUuid: String? = null,
+    val olderPageMarker: String? = null,
+    val newerPageMarker: String? = null,
 )
 
 enum class WorkspaceTimelineKind(
@@ -139,6 +157,8 @@ class RoomWorkspaceSnapshotStore internal constructor(
                     streamLimit = MAX_STREAMS,
                     topicLimit = MAX_TOPICS,
                     messageLimit = MAX_MESSAGES_PER_ACCOUNT,
+                    conversationPaginationLimit =
+                        MAX_CACHED_CONVERSATIONS,
                     folderLimit = MAX_FOLDERS,
                     userLimit = MAX_USERS,
                     streamBindingLimit = MAX_STREAM_BINDINGS,
@@ -169,6 +189,7 @@ class RoomWorkspaceSnapshotStore internal constructor(
                 streams = rows.streams,
                 topics = rows.topics,
                 messages = rows.messages,
+                conversationPagination = rows.conversationPagination,
                 folders = rows.folders,
                 users = rows.users,
                 streamBindings = rows.streamBindings,
@@ -338,17 +359,22 @@ class RoomWorkspaceSnapshotStore internal constructor(
                         ),
                     )
                     .toList()
-                    .takeLast(MAX_MESSAGES_PER_CONVERSATION)
                 if (canonicalMessages.isEmpty()) {
                     null
                 } else {
+                    val retainedMessages = canonicalMessages
+                        .takeLast(MAX_MESSAGES_PER_CONVERSATION)
                     CachedConversation(
                         streamUuid = ids.first,
                         topicUuid = ids.second,
-                        messages = canonicalMessages,
+                        messages = retainedMessages,
+                        sourceFirstMessageUuid =
+                            canonicalMessages.first().uuid,
+                        sourceLastMessageUuid =
+                            canonicalMessages.last().uuid,
                         newestMessageMillis =
                             parseTimestampMillis(
-                                canonicalMessages.last().createdAt,
+                                retainedMessages.last().createdAt,
                             ) ?: Long.MIN_VALUE,
                     )
                 }
@@ -399,6 +425,78 @@ class RoomWorkspaceSnapshotStore internal constructor(
                 remainingMessages -= selected.size
             }
         }
+
+        val messageUuidsByConversation = messages
+            .groupBy {
+                conversationKey(it.streamUuid, it.topicUuid)
+            }
+            .mapValues { (_, rows) ->
+                rows.sortedBy(CachedMessageEntity::position)
+                    .map(CachedMessageEntity::uuid)
+            }
+        val selectedConversationsByKey = selectedConversations.associateBy {
+            conversationKey(it.streamUuid, it.topicUuid)
+        }
+        val conversationPagination = snapshot.paginationByConversation
+            .asSequence()
+            .mapNotNull { (key, state) ->
+                val conversation = selectedConversationsByKey[key]
+                    ?: return@mapNotNull null
+                if (
+                    state.streamUuid != conversation.streamUuid ||
+                    state.topicUuid != conversation.topicUuid
+                ) {
+                    return@mapNotNull null
+                }
+                val retainedMessageUuids =
+                    messageUuidsByConversation[key].orEmpty()
+                val normalized = normalizeConversationPaginationState(
+                    state = state,
+                    retainedMessageUuids = retainedMessageUuids,
+                    sourceFirstMessageUuid =
+                        conversation.sourceFirstMessageUuid,
+                    sourceLastMessageUuid =
+                        conversation.sourceLastMessageUuid,
+                    cacheIsComplete =
+                        retainedMessageUuids.size ==
+                            conversation.messages.size,
+                ) ?: return@mapNotNull null
+                val metadata = CachedConversationPaginationMetadata(
+                    streamUuid = normalized.streamUuid,
+                    topicUuid = normalized.topicUuid,
+                    mode = normalized.mode,
+                    contextAnchorUuid = normalized.contextAnchorUuid,
+                    olderPageMarker = normalized.olderPageMarker,
+                    newerPageMarker = normalized.newerPageMarker,
+                    messageCount = retainedMessageUuids.size,
+                    firstMessageUuid = retainedMessageUuids.first(),
+                    lastMessageUuid = retainedMessageUuids.last(),
+                )
+                val plaintext = encodeBoundedOrNull(
+                    metadata,
+                    MAX_CONVERSATION_PAGINATION_PAYLOAD_BYTES,
+                ) ?: return@mapNotNull null
+                CachedConversationPaginationEntity(
+                    ownerKeyHash = ownerKeyHash,
+                    streamUuid = normalized.streamUuid,
+                    topicUuid = normalized.topicUuid,
+                    encryptedPayload = cipher.encrypt(
+                        plaintext,
+                        associatedData(
+                            ownerKey = ownerKey,
+                            kind =
+                                SnapshotRowKind.CONVERSATION_PAGINATION,
+                            uuid = "",
+                            streamUuid = normalized.streamUuid,
+                            topicUuid = normalized.topicUuid,
+                            position = -1,
+                        ),
+                    ),
+                    cachedAtMillis = cachedAtMillis,
+                )
+            }
+            .take(MAX_CACHED_CONVERSATIONS)
+            .toList()
 
         val folders = snapshot.folders
             .asSequence()
@@ -492,6 +590,7 @@ class RoomWorkspaceSnapshotStore internal constructor(
             streams = streams,
             topics = topics,
             messages = messages,
+            conversationPagination = conversationPagination,
             folders = folders,
             users = users,
             streamBindings = streamBindings,
@@ -567,6 +666,72 @@ class RoomWorkspaceSnapshotStore internal constructor(
                         row.updatedAtMillis
             }
         }
+        val messagesByConversation = messages.groupBy {
+            conversationKey(it.streamUuid, it.topicUuid)
+        }
+
+        val conversationPagination = rows.conversationPagination
+            .asSequence()
+            .distinctBy { row ->
+                conversationKey(row.streamUuid, row.topicUuid)
+            }
+            .mapNotNull { row ->
+                val key = conversationKey(
+                    row.streamUuid,
+                    row.topicUuid,
+                )
+                val retainedMessageUuids = messagesByConversation[key]
+                    .orEmpty()
+                    .map(MessageResponse::uuid)
+                if (retainedMessageUuids.isEmpty()) {
+                    return@mapNotNull null
+                }
+                val metadata =
+                    decodeRow<CachedConversationPaginationMetadata>(
+                        ciphertext = row.encryptedPayload,
+                        maximumBytes =
+                            MAX_CONVERSATION_PAGINATION_PAYLOAD_BYTES,
+                        associatedData = associatedData(
+                            ownerKey = ownerKey,
+                            kind =
+                                SnapshotRowKind.CONVERSATION_PAGINATION,
+                            uuid = "",
+                            streamUuid = row.streamUuid,
+                            topicUuid = row.topicUuid,
+                            position = -1,
+                        ),
+                    )?.takeIf {
+                        it.streamUuid == row.streamUuid &&
+                            it.topicUuid == row.topicUuid &&
+                            it.messageCount in
+                                1..MAX_MESSAGES_PER_CONVERSATION &&
+                            isCanonicalUuid(it.firstMessageUuid) &&
+                            isCanonicalUuid(it.lastMessageUuid)
+                    } ?: return@mapNotNull null
+                val normalized = normalizeConversationPaginationState(
+                    state = ConversationPaginationState(
+                        streamUuid = metadata.streamUuid,
+                        topicUuid = metadata.topicUuid,
+                        mode = metadata.mode,
+                        contextAnchorUuid =
+                            metadata.contextAnchorUuid,
+                        olderPageMarker =
+                            metadata.olderPageMarker,
+                        newerPageMarker =
+                            metadata.newerPageMarker,
+                    ),
+                    retainedMessageUuids = retainedMessageUuids,
+                    sourceFirstMessageUuid =
+                        metadata.firstMessageUuid,
+                    sourceLastMessageUuid =
+                        metadata.lastMessageUuid,
+                    cacheIsComplete =
+                        metadata.messageCount ==
+                            retainedMessageUuids.size,
+                ) ?: return@mapNotNull null
+                key to normalized
+            }
+            .toMap()
 
         val folders = rows.folders.mapNotNull { row ->
             decodeRow<FolderResponseData>(
@@ -619,9 +784,8 @@ class RoomWorkspaceSnapshotStore internal constructor(
         return WorkspaceSnapshot(
             streams = streams,
             topicsByStream = topics.groupBy(TopicsResponseData::streamUuid),
-            messagesByConversation = messages.groupBy {
-                conversationKey(it.streamUuid, it.topicUuid)
-            },
+            messagesByConversation = messagesByConversation,
+            paginationByConversation = conversationPagination,
             folders = folders,
             users = users,
             streamBindings = streamBindings,
@@ -884,6 +1048,111 @@ private fun parseConversationKey(
     }
 }
 
+internal fun unknownConversationPaginationState(
+    streamUuid: String,
+    topicUuid: String,
+    retainedMessageUuids: List<String>,
+): ConversationPaginationState? {
+    val canonicalRows = retainedMessageUuids
+        .filter(::isCanonicalUuid)
+        .distinctBy { it.lowercase() }
+    if (
+        !isCanonicalUuid(streamUuid) ||
+        !isCanonicalUuid(topicUuid) ||
+        canonicalRows.isEmpty()
+    ) {
+        return null
+    }
+    return ConversationPaginationState(
+        streamUuid = streamUuid,
+        topicUuid = topicUuid,
+        mode = ConversationWindowMode.UNKNOWN,
+        olderPageMarker = canonicalRows.first(),
+        newerPageMarker = canonicalRows.last(),
+    )
+}
+
+internal fun normalizeConversationPaginationState(
+    state: ConversationPaginationState,
+    retainedMessageUuids: List<String>,
+    sourceFirstMessageUuid: String,
+    sourceLastMessageUuid: String,
+    cacheIsComplete: Boolean = true,
+): ConversationPaginationState? {
+    if (
+        !isCanonicalUuid(state.streamUuid) ||
+        !isCanonicalUuid(state.topicUuid)
+    ) {
+        return null
+    }
+    val retained = retainedMessageUuids
+        .filter(::isCanonicalUuid)
+        .distinctBy { it.lowercase() }
+    if (retained.isEmpty()) return null
+    val unknown = unknownConversationPaginationState(
+        streamUuid = state.streamUuid,
+        topicUuid = state.topicUuid,
+        retainedMessageUuids = retained,
+    ) ?: return null
+    if (
+        !cacheIsComplete ||
+        !isCanonicalUuid(sourceFirstMessageUuid) ||
+        !isCanonicalUuid(sourceLastMessageUuid)
+    ) {
+        return unknown
+    }
+    val actualUuidByCanonical = retained.associateBy(String::lowercase)
+    fun retainedUuid(value: String?): String? =
+        value
+            ?.takeIf(::isCanonicalUuid)
+            ?.lowercase()
+            ?.let(actualUuidByCanonical::get)
+
+    val sourceFirstRetained =
+        retainedUuid(sourceFirstMessageUuid) == retained.first()
+    val sourceLastRetained =
+        retainedUuid(sourceLastMessageUuid) == retained.last()
+    val identifiersAreValid =
+        state.contextAnchorUuid?.let(::isCanonicalUuid) != false &&
+            state.olderPageMarker?.let(::isCanonicalUuid) != false &&
+            state.newerPageMarker?.let(::isCanonicalUuid) != false
+    if (!identifiersAreValid) return unknown
+
+    val contextAnchor = retainedUuid(state.contextAnchorUuid)
+    if (
+        (state.mode == ConversationWindowMode.CONTEXT &&
+            contextAnchor == null) ||
+        (state.mode != ConversationWindowMode.CONTEXT &&
+            state.contextAnchorUuid != null) ||
+        (state.mode == ConversationWindowMode.LATEST &&
+            state.newerPageMarker != null) ||
+        (state.mode == ConversationWindowMode.LATEST &&
+            !sourceLastRetained)
+    ) {
+        return unknown
+    }
+
+    val olderPageMarker = when {
+        !sourceFirstRetained -> retained.first()
+        state.olderPageMarker == null -> null
+        else -> retainedUuid(state.olderPageMarker) ?: retained.first()
+    }
+    val newerPageMarker = when {
+        state.mode == ConversationWindowMode.LATEST -> null
+        !sourceLastRetained -> retained.last()
+        state.newerPageMarker == null -> null
+        else -> retainedUuid(state.newerPageMarker) ?: retained.last()
+    }
+    return ConversationPaginationState(
+        streamUuid = state.streamUuid,
+        topicUuid = state.topicUuid,
+        mode = state.mode,
+        contextAnchorUuid = contextAnchor,
+        olderPageMarker = olderPageMarker,
+        newerPageMarker = newerPageMarker,
+    )
+}
+
 private fun isCanonicalUuid(value: String): Boolean =
     runCatching { UUID.fromString(value).toString() }
         .getOrNull()
@@ -1040,6 +1309,7 @@ private enum class SnapshotRowKind(
     STREAM("stream"),
     TOPIC("topic"),
     MESSAGE("message"),
+    CONVERSATION_PAGINATION("conversation_pagination"),
     FOLDER("folder"),
     USER("user"),
     STREAM_BINDING("stream_binding"),
@@ -1070,7 +1340,22 @@ private data class CachedConversation(
     val streamUuid: String,
     val topicUuid: String,
     val messages: List<MessageResponse>,
+    val sourceFirstMessageUuid: String,
+    val sourceLastMessageUuid: String,
     val newestMessageMillis: Long,
+)
+
+@Serializable
+private data class CachedConversationPaginationMetadata(
+    val streamUuid: String,
+    val topicUuid: String,
+    val mode: ConversationWindowMode,
+    val contextAnchorUuid: String?,
+    val olderPageMarker: String?,
+    val newerPageMarker: String?,
+    val messageCount: Int,
+    val firstMessageUuid: String,
+    val lastMessageUuid: String,
 )
 
 private const val TAG = "WorkspaceSnapshot"
@@ -1088,6 +1373,8 @@ internal const val MAX_FOLDERS = 500
 internal const val MAX_FOLDER_ITEMS_PER_FOLDER = MAX_STREAMS
 internal const val MAX_USERS = 10_000
 internal const val MAX_STREAM_BINDINGS = 50_000
+internal const val MAX_CONVERSATION_PAGINATION_PAYLOAD_BYTES =
+    16 * 1_024
 internal const val MAX_CATALOG_PAYLOAD_BYTES = 256 * 1_024
 internal const val MAX_USER_PAYLOAD_BYTES = 64 * 1_024
 internal const val MAX_STREAM_BINDING_PAYLOAD_BYTES = 16 * 1_024

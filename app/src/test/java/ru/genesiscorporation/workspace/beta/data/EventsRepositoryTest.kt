@@ -123,6 +123,13 @@ class EventsRepositoryTest {
         repository.setInitialStreamBindings(
             listOf(binding(role = "owner")),
         )
+        val networkPagination = ConversationPaginationState(
+            streamUuid = STREAM_UUID,
+            topicUuid = TOPIC_UUID,
+            mode = ConversationWindowMode.LATEST,
+            olderPageMarker = MESSAGE_UUID,
+        )
+        repository.updateConversationPagination(networkPagination)
 
         repository.hydrateCachedSnapshot(
             WorkspaceSnapshot(
@@ -144,6 +151,15 @@ class EventsRepositoryTest {
                     TOPIC_KEY to listOf(
                         message(MESSAGE_UUID, "cached"),
                         message("cached-only", "offline history"),
+                    ),
+                ),
+                paginationByConversation = mapOf(
+                    TOPIC_KEY to ConversationPaginationState(
+                        streamUuid = STREAM_UUID,
+                        topicUuid = TOPIC_UUID,
+                        mode = ConversationWindowMode.UNKNOWN,
+                        olderPageMarker = "cached-only",
+                        newerPageMarker = MESSAGE_UUID,
                     ),
                 ),
                 folders = listOf(folder("Cached folder")),
@@ -199,6 +215,12 @@ class EventsRepositoryTest {
             repository.streamBindings.value,
             repository.workspaceSnapshot().streamBindings,
         )
+        assertEquals(
+            networkPagination,
+            repository.workspaceSnapshot()
+                .paginationByConversation
+                .getValue(TOPIC_KEY),
+        )
     }
 
     @Test
@@ -249,6 +271,34 @@ class EventsRepositoryTest {
             "member",
             repository.streamBindings.value.single().role,
         )
+    }
+
+    @Test
+    fun `conversation pagination projection is bounded and account reset clears it`() {
+        val repository = EventsRepository()
+        repeat(MAX_CACHED_CONVERSATIONS + 3) { index ->
+            repository.updateConversationPagination(
+                ConversationPaginationState(
+                    streamUuid = "stream-$index",
+                    topicUuid = "topic-$index",
+                    mode = ConversationWindowMode.UNKNOWN,
+                ),
+            )
+        }
+
+        assertEquals(
+            MAX_CACHED_CONVERSATIONS,
+            repository.conversationPagination.value.size,
+        )
+        assertTrue(
+            repository.conversationPagination.value.keys.none {
+                it == "stream-0.topic-0"
+            },
+        )
+
+        repository.resetAccountState()
+
+        assertTrue(repository.conversationPagination.value.isEmpty())
     }
 
     @Test

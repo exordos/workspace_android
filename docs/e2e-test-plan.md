@@ -350,6 +350,7 @@ unsupported.
 | MSG-HIST-014 | Scroll below an around-message window | The ascending continuation loads once near the lower boundary or through `Загрузить следующие`, appends in chronological order, and removes its status control at the real newest row |
 | MSG-HIST-015 | One context direction fails | The anchor and successful side remain usable; the failed side exposes a real Retry using the safe boundary, while rejected/malformed later markers reset to the route anchor instead of looping |
 | MSG-HIST-016 | Rotate while focused on an old route anchor | Portrait → landscape → portrait keeps the exact anchor visible and does not jump to the latest row when status rows or context pages relayout |
+| MSG-HIST-017 | Process death with a latest, context or partially loaded history window | The exact owner's encrypted page mode, context anchor and both validated continuation markers restore with the bounded message rows; offline UI keeps real previous/next actions and a full-refresh Retry, while a missing, trimmed, malformed or damaged metadata/message row becomes a conservative two-sided unknown window instead of claiming a false oldest/newest boundary |
 | MSG-UNREAD-001 | Open a latest window containing incoming unread rows | The list initially positions the first loaded incoming unread row at a non-interactive `Непрочитанные сообщения • N` marker; loading alone sends no read request |
 | MSG-UNREAD-002 | Open an exact focused-message route while unread rows exist | Exact focus has priority over the first-unread anchor and opening the route still sends no read request |
 | MSG-UNREAD-003 | Drag the list until unread rows are at least 50% visible | Only incoming unread rows qualify; one canonical `read_up_to` request uses the newest visible `(created_at, uuid)` boundary |
@@ -362,9 +363,11 @@ unsupported.
 | MSG-UNREAD-010 | The first unread predates the bounded latest page | The client fetches and anchors the exact server-first unread window instead of silently treating the latest loaded unread as globally first |
 | MSG-UNREAD-011 | All unread rows fit without a scrollable drag | Gesture-free read is allowed only while resumed, with no newer page pending, the fully loaded newest edge visible, and every authoritative unread row at least 50% visible; any missing condition preserves unread |
 
-Current physical coverage: MSG-HIST-001/002, 009–014 and 016 passed on the USB
-Android 14 Pixel using the sandbox topic's 55-message generated sequence.
-MSG-HIST-003/004/007/010–015 have focused automated contract/model coverage.
+Current physical coverage: MSG-HIST-001/002, 009–014, 016 and the latest-window
+path of 017 passed on the USB Android 14 Pixel using the sandbox topic's
+55-message generated sequence. MSG-HIST-003/004/007/010–015/017 have focused
+automated contract/model/store coverage; the context-window and deliberately
+damaged-window physical paths of 017 remain pending.
 MSG-HIST-005 controlled timeout/5xx, MSG-HIST-006 deleted-marker injection and
 MSG-HIST-008 edit-in-old-history remain fault/interaction automation work;
 merely disabling radios is not counted as proof because an already resolved
@@ -399,14 +402,27 @@ offline/timeout/5xx Retry and process-death persistence remain automation work.
   viewport correction and recreation positioning.
 - A cold, force-stopped exact sandbox topic link with both radios disabled
   restored its Room-backed title and latest server messages in 1.411 seconds.
-  The global stale banner remained the single network-status surface; redundant
-  initial-history and first-unread errors were absent. Portrait → landscape →
+  The global stale banner remained visible. The chat now also retains a
+  scoped cached-history refresh error with a functional Retry because
+  continuation completeness is independently recoverable. Portrait → landscape →
   portrait kept the exact chat and cached rows, and restoring connectivity
   removed the banner while retaining the same route.
+- Schema v4 model/store coverage persists latest/context/unknown window state,
+  authenticates both markers with the owner and conversation, forces a
+  trimmed oldest row back to `has more`, and converts damaged or incomplete
+  rows to a two-sided unknown window.
+- On the physical Pixel, the online sandbox conversation wrote one encrypted
+  schema-v4 pagination row beside the retained messages. A force-stop with
+  both radios disabled restored the cached latest window, exposed the real
+  previous-page continuation as a recoverable network error instead of a false
+  oldest boundary, and kept a separate full-refresh Retry. Restoring Wi-Fi and
+  retrying removed both scoped/global errors and returned the control to
+  `Загрузить предыдущие` without duplicate rows. The same live bubbles and
+  metadata remained legible in dark and light themes.
 - Remaining gates include automated rotation during an intentionally delayed
   page request, controlled timeout/5xx/deleted-marker injection, process death,
-  persisted continuation-cursor restoration, storage pressure and corrupt-row
-  device injection.
+  physical context-window restoration, storage pressure and corrupt-row device
+  injection.
 
 ### Send and outbox
 
@@ -726,6 +742,7 @@ and is replaced only while the same credential owner remains active.
 | OFFLINE-014 | Upgrade schema v2 to v3 or directly v1 to v3 | Existing catalog/history/member rows survive; empty Feed/Starred tables and exact owner/kind/position index are created without destructive fallback | Exact sequential migration instrumentation defined; physical v2→v3 in-place acceptance pending |
 | OFFLINE-015 | Authoritative empty timeline versus missing cache | An empty successful Feed/Starred response is encrypted as metadata with zero rows and restores as content-ready empty; an account/kind never cached returns no projection and still attempts REST | Store instrumentation and physical offline empty Starred acceptance passed |
 | OFFLINE-016 | Authoritative Inbox marker versus missing cache | A successful catalog write is followed by an encrypted owner-scoped zero-row Inbox marker; cached rows or confirmed empty remain usable on a cold failed refresh, while a missing/corrupt marker never fabricates an empty Inbox | Store instrumentation and repository/UI-model coverage; physical non-empty cold-offline restore/Retry passed with one marker and zero duplicate message rows; physical authoritative-empty injection pending |
+| OFFLINE-017 | Upgrade schema v3 to v4 and restore conversation pagination | Existing catalog/history/timeline rows survive; the new exact-owner stream/topic pagination table starts empty. Subsequent snapshots atomically retain at most 100 encrypted page-state rows matching retained conversations; cross-owner/replayed/corrupt/incomplete metadata cannot hide a missing history side | Sequential migration, normalization unit and exact store instrumentation passed on an Android 14 Pixel; cold-offline latest continuation/Retry passed, while context and injected-corruption device paths remain pending |
 
 Current verified coverage: the exact owner-scoped instrumentation class passes
 encrypted round-trip, account separation, ciphertext replay rejection,
@@ -733,9 +750,11 @@ invalid/local/catalog-row exclusion, bounds and selective clear. The same
 class now covers independent encrypted Feed/Starred timelines, authoritative
 empty state, 500-row retention, damaged-row isolation and cross-owner/kind
 replay rejection. It also covers the zero-row Inbox success marker without
-storing duplicate message rows. Exact migrations preserve schema-v1 history,
+storing duplicate message rows. Schema-v4 coverage adds encrypted
+conversation mode/anchor/marker round-trip and degrades a damaged message
+window to conservative bidirectional continuation. Exact migrations preserve schema-v1 history,
 add the three schema-v2 catalog tables and then add the schema-v3 timeline
-tables. Repository
+tables plus the schema-v4 pagination table. Repository
 tests prove cache-under-current merging, an
 authoritative-empty race fence, and realtime binding add/delete projection. On
 the physical Pixel, an installed schema-v1 cache upgraded in place, an online
@@ -744,7 +763,10 @@ were disabled, the process was force-stopped, and the general catalog reopened
 cold. A later schema-v3 run persisted 50 encrypted Feed rows plus a distinct
 zero-row Starred snapshot; both restored after a no-network force-stop, and
 the empty Starred screen retained its recoverable Retry rather than becoming
-an uncached blocking error. No stateful Workspace mutation was performed.
+an uncached blocking error. The schema-v4 run then persisted one encrypted
+conversation-pagination row, restored its latest-window continuation after a
+radio-off force-stop, and converged in place after Wi-Fi recovery. No stateful
+Workspace mutation was performed.
 Message text and the yellow
 stale banner have readable dark-theme contrast; the banner's **Retry now** is a
 real action, while an uncached quote source retains its own truthful,

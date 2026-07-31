@@ -77,6 +77,7 @@ class WorkspaceSnapshotStoreInstrumentedTest {
             streamLimit = MAX_STREAMS,
             topicLimit = MAX_TOPICS,
             messageLimit = MAX_MESSAGES_PER_ACCOUNT,
+            conversationPaginationLimit = MAX_CACHED_CONVERSATIONS,
             folderLimit = MAX_FOLDERS,
             userLimit = MAX_USERS,
             streamBindingLimit = MAX_STREAM_BINDINGS,
@@ -253,15 +254,28 @@ class WorkspaceSnapshotStoreInstrumentedTest {
                 messagesByConversation = mapOf(
                     CONVERSATION_KEY to messages,
                 ),
+                paginationByConversation = mapOf(
+                    CONVERSATION_KEY to ConversationPaginationState(
+                        streamUuid = STREAM_UUID,
+                        topicUuid = TOPIC_UUID,
+                        mode = ConversationWindowMode.LATEST,
+                    ),
+                ),
             ),
         )
 
-        val restoredMessages = store.read(ACCOUNT_A)
-            .messagesByConversation
+        val restored = store.read(ACCOUNT_A)
+        val restoredMessages = restored.messagesByConversation
             .getValue(CONVERSATION_KEY)
         assertEquals(MAX_MESSAGES_PER_CONVERSATION, restoredMessages.size)
         assertEquals("message-6", restoredMessages.first().payload.content)
         assertEquals("message-105", restoredMessages.last().payload.content)
+        assertEquals(
+            restoredMessages.first().uuid,
+            restored.paginationByConversation
+                .getValue(CONVERSATION_KEY)
+                .olderPageMarker,
+        )
 
         val oversized = snapshotMessage(
             "x".repeat(MAX_MESSAGE_PAYLOAD_BYTES + 1),
@@ -284,6 +298,148 @@ class WorkspaceSnapshotStoreInstrumentedTest {
                 .messagesByConversation
                 .getValue(CONVERSATION_KEY)
                 .map { it.payload.content },
+        )
+    }
+
+    @Test
+    fun conversationPaginationIsEncryptedAndFailsOpenToBothBoundaries() =
+        runBlocking {
+            val oldest = snapshotMessage("oldest").copy(
+                uuid = messageUuid(601),
+            )
+            val anchor = snapshotMessage("anchor").copy(
+                uuid = messageUuid(602),
+                createdAt = OffsetDateTime.parse(TIMESTAMP)
+                    .plusSeconds(1)
+                    .toString(),
+                updatedAt = OffsetDateTime.parse(TIMESTAMP)
+                    .plusSeconds(1)
+                    .toString(),
+            )
+            val newest = snapshotMessage("newest").copy(
+                uuid = messageUuid(603),
+                createdAt = OffsetDateTime.parse(TIMESTAMP)
+                    .plusSeconds(2)
+                    .toString(),
+                updatedAt = OffsetDateTime.parse(TIMESTAMP)
+                    .plusSeconds(2)
+                    .toString(),
+            )
+            val pagination = ConversationPaginationState(
+                streamUuid = STREAM_UUID,
+                topicUuid = TOPIC_UUID,
+                mode = ConversationWindowMode.CONTEXT,
+                contextAnchorUuid = anchor.uuid,
+                olderPageMarker = oldest.uuid,
+                newerPageMarker = newest.uuid,
+            )
+            store.write(
+                ACCOUNT_A,
+                snapshot("unused").copy(
+                    messagesByConversation = mapOf(
+                        CONVERSATION_KEY to
+                            listOf(oldest, anchor, newest),
+                    ),
+                    paginationByConversation = mapOf(
+                        CONVERSATION_KEY to pagination,
+                    ),
+                ),
+            )
+
+            assertEquals(
+                pagination,
+                store.read(ACCOUNT_A)
+                    .paginationByConversation
+                    .getValue(CONVERSATION_KEY),
+            )
+            val paginationRow = dao.readConversationPagination(
+                ownerKeyHash = ownerHash(ACCOUNT_A),
+                limit = MAX_CACHED_CONVERSATIONS,
+                maxEncryptedBytes = MAX_ENCRYPTED_PAYLOAD_BYTES,
+            ).single()
+            assertFalse(
+                paginationRow.encryptedPayload
+                    .toString(StandardCharsets.UTF_8)
+                    .contains(anchor.uuid),
+            )
+
+            val anchorRow = dao.readMessages(
+                ownerKeyHash = ownerHash(ACCOUNT_A),
+                limit = MAX_MESSAGES_PER_ACCOUNT,
+                maxEncryptedBytes = MAX_ENCRYPTED_PAYLOAD_BYTES,
+            ).single { it.uuid == anchor.uuid }
+            dao.insertMessages(
+                listOf(
+                    anchorRow.copy(
+                        encryptedPayload = byteArrayOf(1, 2, 3),
+                    ),
+                ),
+            )
+
+            val recovered = store.read(ACCOUNT_A)
+                .paginationByConversation
+                .getValue(CONVERSATION_KEY)
+            assertEquals(ConversationWindowMode.UNKNOWN, recovered.mode)
+            assertEquals(oldest.uuid, recovered.olderPageMarker)
+            assertEquals(newest.uuid, recovered.newerPageMarker)
+        }
+
+    @Test
+    fun conversationPaginationCiphertextCannotCrossAccounts() = runBlocking {
+        val message = snapshotMessage("message")
+        val ownerAState = ConversationPaginationState(
+            streamUuid = STREAM_UUID,
+            topicUuid = TOPIC_UUID,
+            mode = ConversationWindowMode.UNKNOWN,
+            olderPageMarker = message.uuid,
+            newerPageMarker = message.uuid,
+        )
+        val ownerBState = ownerAState.copy(
+            mode = ConversationWindowMode.LATEST,
+            newerPageMarker = null,
+        )
+        store.write(
+            ACCOUNT_A,
+            snapshot("message").copy(
+                paginationByConversation = mapOf(
+                    CONVERSATION_KEY to ownerAState,
+                ),
+            ),
+        )
+        store.write(
+            ACCOUNT_B,
+            snapshot("message").copy(
+                paginationByConversation = mapOf(
+                    CONVERSATION_KEY to ownerBState,
+                ),
+            ),
+        )
+        val ownerARow = dao.readConversationPagination(
+            ownerKeyHash = ownerHash(ACCOUNT_A),
+            limit = MAX_CACHED_CONVERSATIONS,
+            maxEncryptedBytes = MAX_ENCRYPTED_PAYLOAD_BYTES,
+        ).single()
+        val ownerBRow = dao.readConversationPagination(
+            ownerKeyHash = ownerHash(ACCOUNT_B),
+            limit = MAX_CACHED_CONVERSATIONS,
+            maxEncryptedBytes = MAX_ENCRYPTED_PAYLOAD_BYTES,
+        ).single()
+        dao.insertConversationPagination(
+            listOf(
+                ownerBRow.copy(
+                    encryptedPayload = ownerARow.encryptedPayload,
+                ),
+            ),
+        )
+
+        assertTrue(
+            store.read(ACCOUNT_B).paginationByConversation.isEmpty(),
+        )
+        assertEquals(
+            ownerAState,
+            store.read(ACCOUNT_A)
+                .paginationByConversation
+                .getValue(CONVERSATION_KEY),
         )
     }
 

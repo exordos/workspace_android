@@ -183,6 +183,26 @@ internal data class CachedTimelineMessageEntity(
     val cachedAtMillis: Long,
 )
 
+@Entity(
+    tableName = "cached_conversation_pagination",
+    primaryKeys = ["owner_key_hash", "stream_uuid", "topic_uuid"],
+    indices = [
+        Index(value = ["owner_key_hash", "cached_at_millis"]),
+    ],
+)
+internal data class CachedConversationPaginationEntity(
+    @ColumnInfo(name = "owner_key_hash")
+    val ownerKeyHash: String,
+    @ColumnInfo(name = "stream_uuid")
+    val streamUuid: String,
+    @ColumnInfo(name = "topic_uuid")
+    val topicUuid: String,
+    @ColumnInfo(name = "encrypted_payload", typeAffinity = ColumnInfo.BLOB)
+    val encryptedPayload: ByteArray,
+    @ColumnInfo(name = "cached_at_millis")
+    val cachedAtMillis: Long,
+)
+
 internal data class CachedTimelineRows(
     val timeline: CachedTimelineEntity?,
     val messages: List<CachedTimelineMessageEntity>,
@@ -192,6 +212,7 @@ internal data class CachedWorkspaceRows(
     val streams: List<CachedStreamEntity>,
     val topics: List<CachedTopicEntity>,
     val messages: List<CachedMessageEntity>,
+    val conversationPagination: List<CachedConversationPaginationEntity>,
     val folders: List<CachedFolderEntity>,
     val users: List<CachedUserEntity>,
     val streamBindings: List<CachedStreamBindingEntity>,
@@ -243,6 +264,21 @@ internal interface WorkspaceSnapshotDao {
         limit: Int,
         maxEncryptedBytes: Int,
     ): List<CachedMessageEntity>
+
+    @Query(
+        """
+        SELECT * FROM cached_conversation_pagination
+        WHERE owner_key_hash = :ownerKeyHash
+          AND length(encrypted_payload) <= :maxEncryptedBytes
+        ORDER BY cached_at_millis DESC, stream_uuid ASC, topic_uuid ASC
+        LIMIT :limit
+        """,
+    )
+    suspend fun readConversationPagination(
+        ownerKeyHash: String,
+        limit: Int,
+        maxEncryptedBytes: Int,
+    ): List<CachedConversationPaginationEntity>
 
     @Query(
         """
@@ -347,6 +383,7 @@ internal interface WorkspaceSnapshotDao {
         streamLimit: Int,
         topicLimit: Int,
         messageLimit: Int,
+        conversationPaginationLimit: Int,
         folderLimit: Int,
         userLimit: Int,
         streamBindingLimit: Int,
@@ -365,6 +402,11 @@ internal interface WorkspaceSnapshotDao {
         messages = readMessages(
             ownerKeyHash,
             messageLimit,
+            maxEncryptedBytes,
+        ),
+        conversationPagination = readConversationPagination(
+            ownerKeyHash,
+            conversationPaginationLimit,
             maxEncryptedBytes,
         ),
         folders = readFolders(
@@ -392,6 +434,11 @@ internal interface WorkspaceSnapshotDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMessages(messages: List<CachedMessageEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertConversationPagination(
+        pagination: List<CachedConversationPaginationEntity>,
+    )
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertFolders(folders: List<CachedFolderEntity>)
@@ -454,6 +501,12 @@ internal interface WorkspaceSnapshotDao {
     @Query("DELETE FROM cached_messages WHERE owner_key_hash = :ownerKeyHash")
     suspend fun deleteMessages(ownerKeyHash: String)
 
+    @Query(
+        "DELETE FROM cached_conversation_pagination " +
+            "WHERE owner_key_hash = :ownerKeyHash",
+    )
+    suspend fun deleteConversationPagination(ownerKeyHash: String)
+
     @Query("DELETE FROM cached_topics WHERE owner_key_hash = :ownerKeyHash")
     suspend fun deleteTopics(ownerKeyHash: String)
 
@@ -466,6 +519,7 @@ internal interface WorkspaceSnapshotDao {
         streams: List<CachedStreamEntity>,
         topics: List<CachedTopicEntity>,
         messages: List<CachedMessageEntity>,
+        conversationPagination: List<CachedConversationPaginationEntity>,
         folders: List<CachedFolderEntity>,
         users: List<CachedUserEntity>,
         streamBindings: List<CachedStreamBindingEntity>,
@@ -473,12 +527,16 @@ internal interface WorkspaceSnapshotDao {
         deleteStreamBindings(ownerKeyHash)
         deleteUsers(ownerKeyHash)
         deleteFolders(ownerKeyHash)
+        deleteConversationPagination(ownerKeyHash)
         deleteMessages(ownerKeyHash)
         deleteTopics(ownerKeyHash)
         deleteStreams(ownerKeyHash)
         if (streams.isNotEmpty()) insertStreams(streams)
         if (topics.isNotEmpty()) insertTopics(topics)
         if (messages.isNotEmpty()) insertMessages(messages)
+        if (conversationPagination.isNotEmpty()) {
+            insertConversationPagination(conversationPagination)
+        }
         if (folders.isNotEmpty()) insertFolders(folders)
         if (users.isNotEmpty()) insertUsers(users)
         if (streamBindings.isNotEmpty()) insertStreamBindings(streamBindings)
@@ -504,6 +562,7 @@ internal interface WorkspaceSnapshotDao {
         deleteStreamBindings(ownerKeyHash)
         deleteUsers(ownerKeyHash)
         deleteFolders(ownerKeyHash)
+        deleteConversationPagination(ownerKeyHash)
         deleteMessages(ownerKeyHash)
         deleteTopics(ownerKeyHash)
         deleteStreams(ownerKeyHash)
@@ -520,8 +579,9 @@ internal interface WorkspaceSnapshotDao {
         CachedStreamBindingEntity::class,
         CachedTimelineEntity::class,
         CachedTimelineMessageEntity::class,
+        CachedConversationPaginationEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 internal abstract class WorkspaceSnapshotDatabase : RoomDatabase() {
@@ -541,7 +601,11 @@ internal abstract class WorkspaceSnapshotDatabase : RoomDatabase() {
                     DATABASE_NAME,
                 )
                     .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                    .addMigrations(
+                        MIGRATION_1_2,
+                        MIGRATION_2_3,
+                        MIGRATION_3_4,
+                    )
                     .build()
                     .also { instance = it }
             }
@@ -646,6 +710,35 @@ internal abstract class WorkspaceSnapshotDatabase : RoomDatabase() {
                         `index_cached_timeline_messages_owner_key_hash_kind_position`
                     ON `cached_timeline_messages`
                         (`owner_key_hash`, `kind`, `position`)
+                    """.trimIndent(),
+                )
+            }
+        }
+
+        internal val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `cached_conversation_pagination` (
+                        `owner_key_hash` TEXT NOT NULL,
+                        `stream_uuid` TEXT NOT NULL,
+                        `topic_uuid` TEXT NOT NULL,
+                        `encrypted_payload` BLOB NOT NULL,
+                        `cached_at_millis` INTEGER NOT NULL,
+                        PRIMARY KEY(
+                            `owner_key_hash`,
+                            `stream_uuid`,
+                            `topic_uuid`
+                        )
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS
+                        `index_cached_conversation_pagination_owner_key_hash_cached_at_millis`
+                    ON `cached_conversation_pagination`
+                        (`owner_key_hash`, `cached_at_millis`)
                     """.trimIndent(),
                 )
             }
