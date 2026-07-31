@@ -1,10 +1,22 @@
 package ru.genesiscorporation.workspace.beta.modules.chatdialog
 
 import ru.genesiscorporation.workspace.beta.ChatFlow
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
+import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import ru.genesiscorporation.workspace.beta.modules.chatchannels.isDirectProviderChat
 import java.util.UUID
+
+internal sealed interface WorkspaceEntityReference {
+    data class UserReference(
+        val userUuid: String,
+    ) : WorkspaceEntityReference
+
+    data class MessageReference(
+        val messageUuid: String,
+    ) : WorkspaceEntityReference
+}
 
 internal sealed interface WorkspaceConversationReference {
     data class StreamReference(
@@ -25,6 +37,25 @@ internal sealed interface OpenWorkspaceConversationEvent {
     data class Dialog(
         val route: ChatFlow.ChatDialog,
     ) : OpenWorkspaceConversationEvent
+}
+
+internal fun parseWorkspaceEntityReferenceUrn(
+    value: String,
+): WorkspaceEntityReference? {
+    val parts = value.trim().split(':')
+    if (parts.size != 3 || !parts[0].equals("urn", ignoreCase = true)) {
+        return null
+    }
+    val uuid = canonicalWorkspaceReferenceUuid(parts[2]) ?: return null
+    return when {
+        parts[1].equals("user", ignoreCase = true) ->
+            WorkspaceEntityReference.UserReference(uuid)
+
+        parts[1].equals("message", ignoreCase = true) ->
+            WorkspaceEntityReference.MessageReference(uuid)
+
+        else -> null
+    }
 }
 
 internal fun parseWorkspaceConversationReferenceUrn(
@@ -81,6 +112,33 @@ internal fun selectWorkspaceReferenceTopic(
     }
     .singleOrNull()
 
+internal fun selectWorkspaceReferenceUser(
+    userUuid: String,
+    users: Collection<UserResponseData>,
+): UserResponseData? = users
+    .filter { it.uuid == userUuid }
+    .singleOrNull()
+
+internal fun buildOpenWorkspaceUserRoute(
+    user: UserResponseData,
+): ChatFlow.ChatUserInfo = ChatFlow.ChatUserInfo(
+    userName = user.displayableName(),
+    userId = user.uuid,
+    avatarUrl = user.avatar,
+    email = user.email.orEmpty(),
+)
+
+internal fun validateWorkspaceReferenceMessage(
+    reference: WorkspaceEntityReference.MessageReference,
+    message: MessageResponse,
+): MessageResponse? = message.takeIf {
+    message.uuid == reference.messageUuid &&
+        canonicalWorkspaceReferenceUuid(message.streamUuid) ==
+        message.streamUuid &&
+        canonicalWorkspaceReferenceUuid(message.topicUuid) ==
+        message.topicUuid
+}
+
 internal fun selectWorkspaceReferenceDefaultTopic(
     stream: Stream,
     topics: Collection<TopicsResponseData>,
@@ -103,6 +161,7 @@ internal fun selectWorkspaceReferenceDefaultTopic(
 internal fun buildOpenWorkspaceConversationEvent(
     stream: Stream,
     topic: TopicsResponseData?,
+    focusMessageUuid: String? = null,
 ): OpenWorkspaceConversationEvent? {
     if (topic == null) {
         return if (stream.isDirectProviderChat()) {
@@ -126,6 +185,7 @@ internal fun buildOpenWorkspaceConversationEvent(
             topicUuid = topic.uuid,
             isDirectMessages = isDirect,
             userId = null,
+            focusMessageUuid = focusMessageUuid,
         ),
     )
 }

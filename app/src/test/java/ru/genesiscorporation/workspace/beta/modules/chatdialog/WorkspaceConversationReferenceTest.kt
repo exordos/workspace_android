@@ -5,10 +5,44 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import ru.genesiscorporation.workspace.beta.ChatFlow
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponsePayload
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
+import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 
 class WorkspaceConversationReferenceTest {
+    @Test
+    fun `canonical user and message references match the desktop contract`() {
+        assertEquals(
+            WorkspaceEntityReference.UserReference(USER_UUID),
+            parseWorkspaceEntityReferenceUrn("urn:user:$USER_UUID"),
+        )
+        assertEquals(
+            WorkspaceEntityReference.MessageReference(MESSAGE_UUID),
+            parseWorkspaceEntityReferenceUrn(
+                "  URN:MESSAGE:${MESSAGE_UUID.uppercase()}  ",
+            ),
+        )
+    }
+
+    @Test
+    fun `malformed user and message references fail closed`() {
+        listOf(
+            "",
+            "urn:user:",
+            "urn:user:not-a-uuid",
+            "urn:user:1-1-1-1-1",
+            "urn:user:$USER_UUID:extra",
+            "urn:message:",
+            "urn:message:$MESSAGE_UUID?query=1",
+            "urn:message:urn:message:$MESSAGE_UUID",
+            "urn:stream:$STREAM_UUID",
+        ).forEach { value ->
+            assertNull(value, parseWorkspaceEntityReferenceUrn(value))
+        }
+    }
+
     @Test
     fun `canonical stream and topic references match the desktop contract`() {
         assertEquals(
@@ -111,6 +145,34 @@ class WorkspaceConversationReferenceTest {
                 ),
                 listOf(match),
             ),
+        )
+    }
+
+    @Test
+    fun `user selection is unique and builds an exact profile route`() {
+        val match = user(USER_UUID)
+
+        assertEquals(
+            match,
+            selectWorkspaceReferenceUser(
+                USER_UUID,
+                listOf(match, user(OTHER_USER_UUID)),
+            ),
+        )
+        assertNull(
+            selectWorkspaceReferenceUser(
+                USER_UUID,
+                listOf(match, match.copy(username = "duplicate")),
+            ),
+        )
+        assertEquals(
+            ChatFlow.ChatUserInfo(
+                userName = "Cassandra Volkova",
+                userId = USER_UUID,
+                avatarUrl = "urn:avatar:test",
+                email = "cassi@example.test",
+            ),
+            buildOpenWorkspaceUserRoute(match),
         )
     }
 
@@ -224,6 +286,38 @@ class WorkspaceConversationReferenceTest {
         )
     }
 
+    @Test
+    fun `message response must match and creates an exact focused route`() {
+        val reference =
+            WorkspaceEntityReference.MessageReference(MESSAGE_UUID)
+        val message = message()
+
+        assertEquals(
+            message,
+            validateWorkspaceReferenceMessage(reference, message),
+        )
+        assertNull(
+            validateWorkspaceReferenceMessage(
+                reference,
+                message.copy(uuid = MISSING_TOPIC_UUID),
+            ),
+        )
+        assertNull(
+            validateWorkspaceReferenceMessage(
+                reference,
+                message.copy(streamUuid = "not-a-uuid"),
+            ),
+        )
+        val event = buildOpenWorkspaceConversationEvent(
+            stream = stream(STREAM_UUID, "Sandbox"),
+            topic = topic(TOPIC_UUID, STREAM_UUID, "E2E"),
+            focusMessageUuid = MESSAGE_UUID,
+        ) as OpenWorkspaceConversationEvent.Dialog
+        assertEquals(MESSAGE_UUID, event.route.focusMessageUuid)
+        assertEquals(STREAM_UUID, event.route.chatId)
+        assertEquals(TOPIC_UUID, event.route.topicUuid)
+    }
+
     private fun stream(
         uuid: String,
         name: String,
@@ -256,6 +350,32 @@ class WorkspaceConversationReferenceTest {
         isDefault = isDefault,
     )
 
+    private fun user(uuid: String) = UserResponseData(
+        email = "cassi@example.test",
+        firstName = "Cassandra",
+        lastName = "Volkova",
+        username = "cassi",
+        uuid = uuid,
+        status = "active",
+        avatar = "urn:avatar:test",
+    )
+
+    private fun message() = MessageResponse(
+        uuid = MESSAGE_UUID,
+        updatedAt = UPDATED_AT,
+        createdAt = UPDATED_AT,
+        streamUuid = STREAM_UUID,
+        topicUuid = TOPIC_UUID,
+        userUuid = USER_UUID,
+        authorUuid = USER_UUID,
+        payload = MessageResponsePayload(
+            kind = "markdown",
+            content = "Reference target",
+        ),
+        isOwn = true,
+        reactions = emptyMap(),
+    )
+
     private companion object {
         const val STREAM_UUID = "11111111-1111-4111-8111-111111111111"
         const val TOPIC_UUID = "22222222-2222-4222-8222-222222222222"
@@ -266,6 +386,10 @@ class WorkspaceConversationReferenceTest {
             "55555555-5555-4555-8555-555555555555"
         const val MISSING_TOPIC_UUID =
             "66666666-6666-4666-8666-666666666666"
+        const val MESSAGE_UUID =
+            "77777777-7777-4777-8777-777777777777"
+        const val OTHER_USER_UUID =
+            "88888888-8888-4888-8888-888888888888"
         const val UPDATED_AT = "2026-07-31T00:00:00Z"
     }
 }

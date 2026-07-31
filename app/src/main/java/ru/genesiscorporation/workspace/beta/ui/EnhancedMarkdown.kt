@@ -37,13 +37,13 @@ import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import dev.jeziellago.compose.markdowntext.MarkdownText
-import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.ChatDialogViewModel
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.ForwardMarkdownSegment
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.ForwardQuoteResolution
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.WorkspaceQuoteReference
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.parseForwardMarkdown
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.parseWorkspaceConversationReferenceUrn
+import ru.genesiscorporation.workspace.beta.modules.chatdialog.parseWorkspaceEntityReferenceUrn
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.parseWorkspaceQuoteUrn
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.net.URI
@@ -71,7 +71,6 @@ fun EnhancedMarkdown(
                     is ForwardMarkdownSegment.Quote -> WorkspaceForwardQuoteBlock(
                         reference = segment.reference,
                         style = style,
-                        navController = navController,
                         viewModel = viewModel,
                     )
                 }
@@ -112,7 +111,7 @@ private fun LegacyEnhancedMarkdown(
             markdown = markdown,
             style = style,
             onLinkClicked = { url ->
-                handleWorkspaceLink(url, context, navController, viewModel)
+                handleWorkspaceLink(url, context, viewModel)
             }
         )
     }
@@ -122,10 +121,10 @@ private fun LegacyEnhancedMarkdown(
 private fun WorkspaceForwardQuoteBlock(
     reference: WorkspaceQuoteReference,
     style: TextStyle,
-    navController: NavHostController?,
     viewModel: ChatDialogViewModel?,
 ) {
     val colors = LocalWorkspaceColorsPalette.current
+    val context = LocalContext.current
     val resolutions by viewModel
         ?.forwardQuoteResolutions
         ?.collectAsStateWithLifecycle()
@@ -237,11 +236,9 @@ private fun WorkspaceForwardQuoteBlock(
                         markdown = resolution.message.payload.content,
                         style = style,
                         onLinkClicked = { url ->
-                            val context = navController?.context ?: return@WorkspaceMarkdownText
                             handleWorkspaceLink(
                                 url,
                                 context,
-                                navController,
                                 viewModel,
                             )
                         },
@@ -375,7 +372,7 @@ private fun MessageNodes(
                     markdown = node.content,
                     style = style,
                     onLinkClicked = { url ->
-                        handleWorkspaceLink(url, context, navController, viewModel)
+                        handleWorkspaceLink(url, context, viewModel)
                     }
                 )
                 is QouteNode.Quote -> ZulipQuoteBlock(
@@ -427,7 +424,7 @@ private fun ZulipQuoteBlock(
                 markdown = header.toMarkdownLine(),
                 style = headerStyle,
                 onLinkClicked = { url ->
-                    handleWorkspaceLink(url, context, navController, viewModel)
+                    handleWorkspaceLink(url, context, viewModel)
                 }
             )
         }
@@ -470,48 +467,40 @@ private fun WorkspaceMarkdownText(
 private fun handleWorkspaceLink(
     url: String,
     context: Context,
-    navController: NavHostController?,
     viewModel: ChatDialogViewModel?,
 ) {
+    val normalizedUrl = url.trim()
+    val entityReference =
+        parseWorkspaceEntityReferenceUrn(normalizedUrl)
     val conversationReference =
-        parseWorkspaceConversationReferenceUrn(url)
+        parseWorkspaceConversationReferenceUrn(normalizedUrl)
     when {
+        entityReference != null -> {
+            viewModel?.openWorkspaceEntityReference(entityReference)
+        }
+
         conversationReference != null -> {
             viewModel?.openWorkspaceConversationReference(
                 conversationReference,
             )
         }
 
-        url.trim().startsWith("urn:stream:", ignoreCase = true) ||
-            url.trim().startsWith("urn:topic:", ignoreCase = true) -> {
+        normalizedUrl.startsWith("urn:stream:", ignoreCase = true) ||
+            normalizedUrl.startsWith("urn:topic:", ignoreCase = true) -> {
             viewModel?.reportActionError(
                 "Повреждённая ссылка на чат или топик",
             )
         }
 
-        url.startsWith("urn:user:") -> {
-            val userId = url.removePrefix("urn:user:")
-            val user = viewModel?.getUser(userId)
-            if (user != null && navController != null) {
-                navController.navigate(
-                    ChatFlow.ChatUserInfo(
-                        user.displayableName(),
-                        user.uuid,
-                        user.avatar,
-                        user.email.orEmpty(),
-                    ),
-                )
-            } else {
-                viewModel?.reportActionError("Профиль пользователя недоступен")
-            }
+        normalizedUrl.startsWith("urn:user:", ignoreCase = true) ||
+            normalizedUrl.startsWith("urn:message:", ignoreCase = true) -> {
+            viewModel?.reportActionError(
+                "Повреждённая ссылка на пользователя или сообщение",
+            )
         }
 
-        url.startsWith("urn:message:") -> {
-            viewModel?.requestMessageFocus(url.removePrefix("urn:message:"))
-        }
-
-        url.startsWith("urn:quote:", ignoreCase = true) -> {
-            val quote = parseWorkspaceQuoteUrn(url)
+        normalizedUrl.startsWith("urn:quote:", ignoreCase = true) -> {
+            val quote = parseWorkspaceQuoteUrn(normalizedUrl)
             if (quote == null) {
                 viewModel?.reportActionError("Повреждённая ссылка на сообщение")
             } else {

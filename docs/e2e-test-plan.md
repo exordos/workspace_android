@@ -369,6 +369,9 @@ unsupported.
 | MSG-RICH-004 | Tap `[channel](urn:stream:<uuid>)` for a regular or direct stream | A unique active regular stream opens its exact UUID topic catalog; a direct/provider stream resolves its authoritative default topic and opens the real dialog instead of fabricating a route |
 | MSG-RICH-005 | Tap `[topic](urn:topic:<topic-uuid>)` or `[topic](urn:topic:<stream-uuid>:<topic-uuid>)` | The unique exact topic and its authoritative stream open by UUID even when labels collide; the optional stream scope must match and direct-chat technical topic names stay hidden |
 | MSG-RICH-006 | Tap malformed, missing, archived, duplicated, cross-stream, offline-uncached or account-switch-raced stream/topic URNs | No guessed or cross-account route opens; one owner-fenced lookup either produces the exact destination or a visible dismissible error, and repeated taps cannot start concurrent lookups |
+| MSG-RICH-007 | Tap `[person](urn:user:<uuid>)` with and without a warm user catalog | The unique authoritative user opens the exact profile UUID; missing optional profile fields remain empty, a cold catalog uses one owner-fenced refresh, and duplicate labels cannot redirect the route |
+| MSG-RICH-008 | Tap `[message](urn:message:<uuid>)` for a same-topic, off-page or cross-topic message | The canonical detail response must match the requested UUID and contain canonical stream/topic UUIDs; the client resolves their exact active catalog rows and opens a focused message route that loads the anchor plus bidirectional context |
+| MSG-RICH-009 | Tap malformed, missing, response-mismatched or account-switch-raced user/message URNs | No local/external or guessed route opens; one single-flight owner-fenced lookup keeps the current conversation usable and exposes a visible dismissible error |
 
 Current physical coverage: MSG-HIST-001/002, 009–014, 016 and the latest-window
 path of 017 passed on the USB Android 14 Pixel using the sandbox topic's
@@ -415,6 +418,15 @@ missing and malformed references kept Workspace foregrounded, preserved the
 current conversation and exposed a functional visible error/Close action.
 Direct/provider navigation, owner-switch cancellation and controlled offline
 uncached catalog cases remain pending.
+MSG-RICH-007–009 have focused parser, unique-user selection, exact-profile
+route, message-response validation and focused-route construction coverage.
+Physical sandbox acceptance passed for the exact current-user profile, a
+same-topic message UUID recovered independently from the delivered server
+projection, missing-message handling and a malformed user URN. The valid
+message reference opened a focused route and positioned the known target in
+the viewport; both invalid references kept the current conversation usable and
+exposed a functional visible error/Close action. Off-page/cross-topic message,
+cold missing-user catalog and account-switch failure acceptance remain pending.
 
 ### Current history acceptance coverage
 

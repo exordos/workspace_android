@@ -32,6 +32,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import ru.genesiscorporation.workspace.beta.BuildConfig
+import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.UserViewModel
 import ru.genesiscorporation.workspace.beta.data.ConversationPaginationState
 import ru.genesiscorporation.workspace.beta.data.ConversationStateStore
@@ -231,6 +232,10 @@ class ChatDialogViewModel(
         Channel<OpenWorkspaceConversationEvent>(Channel.BUFFERED)
     internal val openWorkspaceConversationEvents =
         openWorkspaceConversationChannel.receiveAsFlow()
+    private val openWorkspaceUserChannel =
+        Channel<ChatFlow.ChatUserInfo>(Channel.BUFFERED)
+    internal val openWorkspaceUserEvents =
+        openWorkspaceUserChannel.receiveAsFlow()
     private var conversationOwnerKey: String? = null
     private var pendingEditingMessageUuid: String? = null
     private var pendingQuotedMessageUuid: String? = null
@@ -259,7 +264,7 @@ class ChatDialogViewModel(
     private var durableReadBoundary: PersistedReadBoundary? = null
     private var forwardCatalogJob: Job? = null
     private var forwardTopicLoadJob: Job? = null
-    private var workspaceConversationReferenceJob: Job? = null
+    private var workspaceReferenceJob: Job? = null
     private var forwardSelectionGeneration = 0L
     private var forwardDeliveryAttempt: ForwardDeliveryAttempt? = null
     private var initialForwardRequestHandled = false
@@ -1262,9 +1267,9 @@ class ChatDialogViewModel(
     internal fun openWorkspaceConversationReference(
         reference: WorkspaceConversationReference,
     ) {
-        if (workspaceConversationReferenceJob?.isActive == true) return
+        if (workspaceReferenceJob?.isActive == true) return
         _actionError.value = null
-        workspaceConversationReferenceJob = viewModelScope.launch {
+        workspaceReferenceJob = viewModelScope.launch {
             try {
                 val ownerKey = userViewModel.repo
                     .activeCredentialSnapshot()
@@ -1296,9 +1301,148 @@ class ChatDialogViewModel(
                 _actionError.value =
                     "Не удалось открыть ссылку на чат или топик"
             } finally {
-                workspaceConversationReferenceJob = null
+                workspaceReferenceJob = null
             }
         }
+    }
+
+    internal fun openWorkspaceEntityReference(
+        reference: WorkspaceEntityReference,
+    ) {
+        if (workspaceReferenceJob?.isActive == true) return
+        _actionError.value = null
+        workspaceReferenceJob = viewModelScope.launch {
+            try {
+                val ownerKey = userViewModel.repo
+                    .activeCredentialSnapshot()
+                    .ownerKey
+                    ?.takeIf(String::isNotBlank)
+                if (ownerKey == null) {
+                    _actionError.value =
+                        "Не удалось определить активную учётную запись"
+                    return@launch
+                }
+                when (reference) {
+                    is WorkspaceEntityReference.UserReference -> {
+                        val route = resolveWorkspaceUserReference(
+                            reference = reference,
+                            ownerKey = ownerKey,
+                        ) ?: return@launch
+                        if (!referenceOwnerIsActive(ownerKey)) return@launch
+                        openWorkspaceUserChannel.send(route)
+                    }
+
+                    is WorkspaceEntityReference.MessageReference -> {
+                        val event = resolveWorkspaceMessageReference(
+                            reference = reference,
+                            ownerKey = ownerKey,
+                        ) ?: return@launch
+                        if (!referenceOwnerIsActive(ownerKey)) return@launch
+                        openWorkspaceConversationChannel.send(event)
+                    }
+                }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (exception: Exception) {
+                _actionError.value =
+                    "Не удалось открыть ссылку на пользователя или сообщение"
+            } finally {
+                workspaceReferenceJob = null
+            }
+        }
+    }
+
+    private suspend fun resolveWorkspaceUserReference(
+        reference: WorkspaceEntityReference.UserReference,
+        ownerKey: String,
+    ): ChatFlow.ChatUserInfo? {
+        val cachedMatches = repo.users.value
+            .filter { it.uuid == reference.userUuid }
+        if (cachedMatches.size > 1) {
+            _actionError.value =
+                "Каталог содержит противоречивую ссылку на пользователя"
+            return null
+        }
+        selectWorkspaceReferenceUser(
+            userUuid = reference.userUuid,
+            users = cachedMatches,
+        )?.let(::buildOpenWorkspaceUserRoute)?.let { return it }
+        if (!referenceOwnerIsActive(ownerKey)) return null
+        val response = client.performRequest(UsersRequest())
+        if (!referenceOwnerIsActive(ownerKey)) return null
+        return when (response) {
+            is ApiResult.Success -> {
+                val matches = response.value
+                    .filter { it.uuid == reference.userUuid }
+                val selected = selectWorkspaceReferenceUser(
+                    userUuid = reference.userUuid,
+                    users = matches,
+                )
+                when {
+                    matches.size > 1 -> {
+                        _actionError.value =
+                            "Сервер вернул противоречивый список пользователей"
+                        null
+                    }
+
+                    selected == null -> {
+                        _actionError.value =
+                            "Пользователь по ссылке недоступен или был удалён"
+                        null
+                    }
+
+                    else -> buildOpenWorkspaceUserRoute(selected)
+                }
+            }
+
+            is ApiResult.Error -> {
+                _actionError.value = response.error.message
+                    ?: "Не удалось обновить список пользователей"
+                null
+            }
+        }
+    }
+
+    private suspend fun resolveWorkspaceMessageReference(
+        reference: WorkspaceEntityReference.MessageReference,
+        ownerKey: String,
+    ): OpenWorkspaceConversationEvent? {
+        if (!referenceOwnerIsActive(ownerKey)) return null
+        val response = client.performRequest(
+            MessageRequest(reference.messageUuid),
+        )
+        if (!referenceOwnerIsActive(ownerKey)) return null
+        val message = when (response) {
+            is ApiResult.Success ->
+                validateWorkspaceReferenceMessage(
+                    reference = reference,
+                    message = response.value,
+                ) ?: run {
+                    _actionError.value =
+                        "Сервер вернул сообщение с противоречивым маршрутом"
+                    return null
+                }
+
+            is ApiResult.Error -> {
+                _actionError.value = if (
+                    response.error.kind == ApiErrorKind.NOT_FOUND
+                ) {
+                    "Сообщение по ссылке недоступно или было удалено"
+                } else {
+                    response.error.message
+                        ?: "Не удалось загрузить сообщение по ссылке"
+                }
+                return null
+            }
+        }
+        return resolveWorkspaceTopicReference(
+            reference = WorkspaceConversationReference.TopicReference(
+                topicUuid = message.topicUuid,
+                streamUuid = message.streamUuid,
+            ),
+            ownerKey = ownerKey,
+            focusMessageUuid = message.uuid,
+        )
     }
 
     private suspend fun resolveWorkspaceStreamReference(
@@ -1328,6 +1472,7 @@ class ChatDialogViewModel(
     private suspend fun resolveWorkspaceTopicReference(
         reference: WorkspaceConversationReference.TopicReference,
         ownerKey: String,
+        focusMessageUuid: String? = null,
     ): OpenWorkspaceConversationEvent? {
         val topic = resolveWorkspaceReferenceTopic(
             reference = reference,
@@ -1340,6 +1485,7 @@ class ChatDialogViewModel(
         return buildOpenWorkspaceConversationEvent(
             stream = stream,
             topic = topic,
+            focusMessageUuid = focusMessageUuid,
         ) ?: run {
             _actionError.value =
                 "Ссылка указывает на топик из другого чата"
