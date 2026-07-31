@@ -598,22 +598,33 @@ local UI operation: it must never create, update or delete a server resource.
 | MSG-COMP-014 | Scroll and invoke the formatting toolbar | All ten localized actions are reachable in one horizontal row, use 48 dp targets, retain selection when tapped, refocus the editor and expose no unsupported AI/schedule/snippet control |
 | MSG-COMP-015 | Formatting at the 40,000-character or aggregate multi-reply bound | ViewModel acceptance is authoritative; the visible editor reconciles to the accepted text and clamped selection instead of displaying unsendable overflow |
 | MSG-COMP-016 | Format, rotate, switch Preview/Write and change theme | Exact Markdown and selection-safe draft state survive recreation, Preview renders the result, and enabled glyphs remain readable without looking disabled in light or dark mode |
+| MSG-COMP-017 | Type `@` at the beginning or after desktop-compatible boundary punctuation | A bounded list of real non-system Workspace users appears above the editor; email-like text, a non-collapsed selection, an inactive cursor and overlong query expose no picker |
+| MSG-COMP-018 | Filter mention suggestions | Case-insensitive UUID, username, display-name and email matches retain the desktop priority order, canonical UUID duplicates collapse, malformed/system users are absent and at most eight rows render |
+| MSG-COMP-019 | Select a mention in the middle of a draft | Only the active `@query` range becomes `[escaped display name](urn:user:<canonical uuid>) `; text before/after remains exact and the cursor lands after the inserted space |
+| MSG-COMP-020 | Preview, send and reopen an inserted mention | Preview resolves the canonical user link to the real profile action; the sent body retains only the UUID URN and ordinary escaped label, and edit restores the exact source Markdown |
+| MSG-COMP-021 | Mention picker touch, TalkBack, rotation and theme | Every row has a 56 dp target and localized name/username description; live rows remain readable at 2x font and after light/dark/portrait/landscape recreation without covering Send |
+| MSG-COMP-022 | Catalog refresh, owner switch, offline restore and input bound | Suggestions use only the active owner-scoped real catalog; an empty/stale catalog exposes no fake rows, late account data cannot cross owners, and ViewModel-authoritative text/selection reconciliation prevents visible unsendable overflow |
 
 Current automated coverage proves exact plain and ordered multi-reply outgoing
 Markdown; every desktop formatting mutation has selection/cursor unit coverage,
 including localized and URL-containing link labels plus bounded-state
-reconciliation. Locale-independent Compose tests cover mode/selected/preview
-semantics and horizontal scrolling from the first to the last functional
-toolbar action.
+reconciliation. Mention unit coverage proves trigger boundaries, match priority,
+catalog validation/deduplication, maximum results, Markdown escaping and exact
+cursor placement. Locale-independent Compose tests cover mode/selected/preview
+semantics, horizontal scrolling from the first to the last functional toolbar
+action and an enabled localized mention row.
 
 Physical Android 14 acceptance in the dedicated sandbox rendered bold Markdown
 and a Unicode emoji, wrapped one selected token as
 `**CASSI_FORMAT**`, inserted `[текст ссылки](https://)` through the
 horizontally scrolled Link action, and rendered the formatted result in
-Preview. The exact unsent draft survived portrait → landscape → portrait;
-empty state, light/dark themes and enabled-action readability were visually
-inspected. Send was deliberately not invoked, no server message was created,
-and the draft was cleared before leaving the sandbox.
+Preview. A real `@cas` query showed only the active Cassandra row, selection
+inserted the canonical UUID link at the cursor, Preview rendered its functional
+profile mention, and a sandbox send produced the exact readable message. Edit
+restored the original `urn:user` Markdown; cancel preserved the message, then
+the test message was explicitly deleted and its absence confirmed. The exact
+draft and Preview survived portrait → landscape → portrait; empty state,
+light/dark themes and enabled-action readability were visually inspected.
 
 ### Message actions
 

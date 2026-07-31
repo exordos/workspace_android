@@ -67,6 +67,7 @@ fun SendMessageView(viewModel: ChatDialogViewModel) {
     val sending by viewModel.sending.collectAsStateWithLifecycle()
     val conversationStateReady by
         viewModel.conversationStateReady.collectAsStateWithLifecycle()
+    val mentionUsers by viewModel.repo.users.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     val colors = LocalWorkspaceColorsPalette.current
@@ -108,6 +109,22 @@ fun SendMessageView(viewModel: ChatDialogViewModel) {
             attachments.isNotEmpty()
     }
     val canSend = conversationStateReady && !sending && hasSendableContent
+    val mentionQuery = if (composerMode == ComposerMode.WRITE) {
+        detectComposerMentionQuery(editorValue)
+    } else {
+        null
+    }
+    val mentionCandidates = remember(mentionUsers) {
+        composerMentionCandidates(mentionUsers)
+    }
+    val mentionSuggestions = remember(mentionCandidates, mentionQuery) {
+        mentionQuery?.let { query ->
+            filterComposerMentionSuggestions(
+                mentionCandidates,
+                query.query,
+            )
+        }.orEmpty()
+    }
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments(),
     ) { uris ->
@@ -190,15 +207,35 @@ fun SendMessageView(viewModel: ChatDialogViewModel) {
                         action = action,
                         linkText = defaultLinkText,
                     )
-                    viewModel.onMessageChange(formatted.text)
+                    val acceptedText =
+                        viewModel.onMessageChange(formatted.text)
                     editorValue = reconcileComposerEditorValue(
                         candidate = formatted,
-                        acceptedText = viewModel.messageText.value,
+                        acceptedText = acceptedText,
                     )
                     editorFocusRequester.requestFocus()
                 },
             )
         }
+        ComposerMentionSuggestions(
+            suggestions = mentionSuggestions,
+            onSelect = { suggestion ->
+                val query = mentionQuery
+                    ?: return@ComposerMentionSuggestions
+                val insertion = insertComposerMention(
+                    value = editorValue,
+                    query = query,
+                    suggestion = suggestion,
+                )
+                val acceptedText =
+                    viewModel.onMessageChange(insertion.text)
+                editorValue = reconcileComposerEditorValue(
+                    candidate = insertion,
+                    acceptedText = acceptedText,
+                )
+                editorFocusRequester.requestFocus()
+            },
+        )
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -237,10 +274,11 @@ fun SendMessageView(viewModel: ChatDialogViewModel) {
                     BasicTextField(
                         value = editorValue,
                         onValueChange = { updated ->
-                            viewModel.onMessageChange(updated.text)
+                            val acceptedText =
+                                viewModel.onMessageChange(updated.text)
                             editorValue = reconcileComposerEditorValue(
                                 candidate = updated,
-                                acceptedText = viewModel.messageText.value,
+                                acceptedText = acceptedText,
                             )
                         },
                         enabled = conversationStateReady,

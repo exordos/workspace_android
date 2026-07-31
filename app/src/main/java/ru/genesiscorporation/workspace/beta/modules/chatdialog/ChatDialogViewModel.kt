@@ -300,7 +300,7 @@ class ChatDialogViewModel(
     private var forwardDeliveryAttempt: ForwardDeliveryAttempt? = null
     private var initialForwardRequestHandled = false
 
-    fun onMessageChange(newText: String) {
+    fun onMessageChange(newText: String): String {
         val boundedText = newText.take(MAX_MESSAGE_CHARS)
         _messageText.value = boundedText
         if (
@@ -329,6 +329,7 @@ class ChatDialogViewModel(
                 "Сообщение не может быть длиннее $MAX_MESSAGE_CHARS символов"
         }
         composerChanged()
+        return _messageText.value
     }
 
     fun addAttachments(context: Context, uris: List<Uri>) {
