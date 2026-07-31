@@ -64,6 +64,8 @@ fun ImageMessageView(
     item: MessageResponse,
     navController: NavHostController,
     onImageLoad: () -> Unit,
+    isSelected: Boolean = false,
+    onToggleSelection: () -> Unit = {},
 ) {
     var fullscreenImageIndex by rememberSaveable { mutableStateOf<Int?>(null) }
     var menuExpanded by remember { mutableStateOf(false) }
@@ -226,6 +228,11 @@ fun ImageMessageView(
                 },
                 onForward = {
                     viewModel.beginForward(item)
+                    menuExpanded = false
+                },
+                isSelected = isSelected,
+                onToggleSelection = {
+                    onToggleSelection()
                     menuExpanded = false
                 },
             )

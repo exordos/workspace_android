@@ -42,6 +42,8 @@ fun AttachmentMessageView(
     viewModel: ChatDialogViewModel,
     item: MessageResponse,
     navController: NavHostController,
+    isSelected: Boolean = false,
+    onToggleSelection: () -> Unit = {},
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val downloadingUuid by viewModel.downloadingAttachmentUuid.collectAsStateWithLifecycle()
@@ -182,6 +184,11 @@ fun AttachmentMessageView(
                 },
                 onForward = {
                     viewModel.beginForward(item)
+                    menuExpanded = false
+                },
+                isSelected = isSelected,
+                onToggleSelection = {
+                    onToggleSelection()
                     menuExpanded = false
                 },
             )

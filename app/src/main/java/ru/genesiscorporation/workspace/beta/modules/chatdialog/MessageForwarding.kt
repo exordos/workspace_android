@@ -26,7 +26,8 @@ internal enum class ForwardDeliveryStatus {
 }
 
 internal data class ForwardDialogState(
-    val sourceMessage: MessageResponse,
+    val sourceMessages: List<MessageResponse>,
+    val clearSelectionOnSuccess: Boolean = false,
     val targetKind: ForwardTargetKind = ForwardTargetKind.CHANNEL,
     val selectedStreamUuid: String? = null,
     val selectedTopicUuid: String? = null,
@@ -39,7 +40,32 @@ internal data class ForwardDialogState(
     val deliveryStatus: ForwardDeliveryStatus = ForwardDeliveryStatus.EDITING,
     val error: String? = null,
     val canRetryUncertainSend: Boolean = false,
-)
+) {
+    init {
+        require(sourceMessages.isNotEmpty()) {
+            "Forwarding requires at least one source message"
+        }
+        require(sourceMessages.size <= MAX_FORWARD_SOURCE_MESSAGES) {
+            "Forwarding source count exceeds the supported limit"
+        }
+        require(sourceMessages.all(::canForwardMessage)) {
+            "Forwarding sources must be canonical server messages"
+        }
+        require(
+            sourceMessages
+                .mapNotNull { message ->
+                    parseCanonicalMessageUuid(message.uuid)
+                }
+                .distinct()
+                .size == sourceMessages.size,
+        ) {
+            "Forwarding sources must be unique"
+        }
+    }
+
+    val sourceMessage: MessageResponse
+        get() = sourceMessages.first()
+}
 
 internal data class ForwardDestination(
     val streamUuid: String,
@@ -91,6 +117,96 @@ internal fun buildWorkspaceForwardMarkdown(message: MessageResponse): String? {
     return "[${escapeWorkspaceMarkdownInline(authorLabel)}]" +
         "(urn:quote:$canonicalUuid)"
 }
+
+internal fun buildWorkspaceForwardMarkdown(
+    messages: List<MessageResponse>,
+): String? {
+    val uniqueMessages = messages
+        .asSequence()
+        .distinctBy { message ->
+            parseCanonicalMessageUuid(message.uuid) ?: message.uuid
+        }
+        .take(MAX_FORWARD_SOURCE_MESSAGES + 1)
+        .toList()
+    if (
+        uniqueMessages.isEmpty() ||
+        uniqueMessages.size > MAX_FORWARD_SOURCE_MESSAGES
+    ) {
+        return null
+    }
+    val references = uniqueMessages.map { message ->
+        buildWorkspaceForwardMarkdown(message) ?: return null
+    }
+    return references.joinToString("\n\n")
+}
+
+internal data class ForwardSelectionUpdate(
+    val messageUuids: List<String>,
+    val limitReached: Boolean = false,
+)
+
+internal fun toggleForwardSelection(
+    current: List<String>,
+    messageUuid: String,
+): ForwardSelectionUpdate {
+    val normalized = current
+        .asSequence()
+        .mapNotNull(::parseCanonicalMessageUuid)
+        .distinct()
+        .take(MAX_FORWARD_SOURCE_MESSAGES)
+        .toMutableList()
+    val canonicalUuid = parseCanonicalMessageUuid(messageUuid)
+        ?: return ForwardSelectionUpdate(normalized)
+    if (canonicalUuid in normalized) {
+        normalized.remove(canonicalUuid)
+        return ForwardSelectionUpdate(normalized)
+    }
+    if (normalized.size >= MAX_FORWARD_SOURCE_MESSAGES) {
+        return ForwardSelectionUpdate(
+            messageUuids = normalized,
+            limitReached = true,
+        )
+    }
+    normalized += canonicalUuid
+    return ForwardSelectionUpdate(normalized)
+}
+
+internal fun snapshotForwardSources(
+    selectedMessageUuids: List<String>,
+    availableMessages: List<MessageResponse>,
+): List<MessageResponse> {
+    val canonicalSelection = selectedMessageUuids
+        .mapNotNull(::parseCanonicalMessageUuid)
+    if (
+        canonicalSelection.isEmpty() ||
+        canonicalSelection.size != selectedMessageUuids.size ||
+        canonicalSelection.distinct().size != canonicalSelection.size ||
+        canonicalSelection.size > MAX_FORWARD_SOURCE_MESSAGES
+    ) {
+        return emptyList()
+    }
+    val messagesByUuid = availableMessages.mapNotNull { message ->
+        parseCanonicalMessageUuid(message.uuid)?.let { canonicalUuid ->
+            canonicalUuid to message
+        }
+    }.toMap()
+    return canonicalSelection.mapNotNull { messageUuid ->
+        messagesByUuid[messageUuid]
+            ?.takeIf(::canForwardMessage)
+            ?.let(::snapshotForwardSource)
+    }
+}
+
+internal fun forwardSourceKey(messages: List<MessageResponse>): String =
+    messages.joinToString(separator = "|", transform = MessageResponse::uuid)
+
+private fun snapshotForwardSource(message: MessageResponse): MessageResponse =
+    message.copy(
+        payload = message.payload.copy(
+            content = message.payload.content.take(MAX_FORWARD_PREVIEW_CHARS),
+        ),
+        user = message.user?.copy(),
+    )
 
 internal fun escapeWorkspaceMarkdownInline(value: String): String = buildString {
     value.forEach { character ->
@@ -406,4 +522,6 @@ private val FORWARD_MARKDOWN_FENCE = Regex("""^(`{3,}|~{3,})""")
 private const val MAX_FORWARD_AUTHOR_LABEL_CHARS = 512
 private const val MAX_SELECTED_TEXT_CHARS = 40_000
 private const val MAX_ENCODED_SELECTED_TEXT_CHARS = MAX_SELECTED_TEXT_CHARS * 3
+internal const val MAX_FORWARD_SOURCE_MESSAGES = 32
+private const val MAX_FORWARD_PREVIEW_CHARS = 512
 private const val HEX = "0123456789ABCDEF"

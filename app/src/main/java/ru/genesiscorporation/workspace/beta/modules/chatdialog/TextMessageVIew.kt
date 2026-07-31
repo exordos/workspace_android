@@ -59,6 +59,8 @@ fun TextMessageView(
     item: MessageResponse,
     viewModel: ChatDialogViewModel,
     navController: NavHostController,
+    isSelected: Boolean = false,
+    onToggleSelection: () -> Unit = {},
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val context = LocalContext.current
@@ -154,6 +156,11 @@ fun TextMessageView(
                 },
                 onForward = {
                     viewModel.beginForward(item)
+                    menuExpanded = false
+                },
+                isSelected = isSelected,
+                onToggleSelection = {
+                    onToggleSelection()
                     menuExpanded = false
                 },
             )
@@ -297,6 +304,8 @@ internal fun MessageActionsMenu(
     onAddQuote: () -> Unit,
     onAddQuoteFragment: (String) -> Unit,
     onForward: () -> Unit,
+    isSelected: Boolean,
+    onToggleSelection: () -> Unit,
 ) {
     var confirmDelete by remember(item.uuid) { mutableStateOf(false) }
     var fragmentAdding by remember(item.uuid) {
@@ -430,8 +439,25 @@ internal fun MessageActionsMenu(
         }
         if (canForwardMessage(item)) {
             DropdownMenuItem(
-                text = { Text("Переслать") },
+                text = {
+                    Text(stringResource(R.string.message_selection_forward))
+                },
                 onClick = onForward,
+                enabled = !isDeleting,
+            )
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        stringResource(
+                            if (isSelected) {
+                                R.string.message_unselect
+                            } else {
+                                R.string.message_select
+                            },
+                        ),
+                    )
+                },
+                onClick = onToggleSelection,
                 enabled = !isDeleting,
             )
         }

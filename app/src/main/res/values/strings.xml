@@ -47,6 +47,20 @@
     <string name="workspace_reply_move_right">Move reply right</string>
     <string name="workspace_reply_active_title">Reply to %1$s</string>
     <string name="workspace_reply_selected_fragment">Selected fragment</string>
+    <string name="message_select">Select message</string>
+    <string name="message_unselect">Deselect message</string>
+    <string name="message_selection_cancel">Cancel selection</string>
+    <string name="message_selection_forward">Forward</string>
+    <string name="message_forward_title_single">Forward message</string>
+    <string name="message_forward_title_multiple">Forward messages</string>
+    <string name="message_forward_completed_single">Message forwarded</string>
+    <string name="message_forward_completed_multiple">Messages forwarded</string>
+    <string name="message_forward_preview_empty">Message without text</string>
+    <string name="message_forward_preview_multiple">%1$d messages selected</string>
+    <plurals name="message_selected_count">
+        <item quantity="one">%d message selected</item>
+        <item quantity="other">%d messages selected</item>
+    </plurals>
     <string name="workspace_reply_clear_all">Clear all replies</string>
     <string name="message_composer_editing">Editing</string>
     <string name="message_composer_attach_files">Attach files</string>

@@ -215,6 +215,9 @@ class ChatDialogViewModel(
     val verifyingOutbox: StateFlow<Set<String>> = _verifyingOutbox
     private val _deletingMessageUuids = MutableStateFlow<Set<String>>(emptySet())
     val deletingMessageUuids: StateFlow<Set<String>> = _deletingMessageUuids
+    private val _selectedMessageUuids = MutableStateFlow<List<String>>(emptyList())
+    internal val selectedMessageUuids: StateFlow<List<String>> =
+        _selectedMessageUuids
     private val _loadingOlderMessages = MutableStateFlow(false)
     val loadingOlderMessages: StateFlow<Boolean> = _loadingOlderMessages
     private val _hasOlderMessages = MutableStateFlow(false)
@@ -292,6 +295,7 @@ class ChatDialogViewModel(
     private var forwardCatalogJob: Job? = null
     private var forwardTopicLoadJob: Job? = null
     private var workspaceReferenceJob: Job? = null
+    private var forwardDialogGeneration = 0L
     private var forwardSelectionGeneration = 0L
     private var forwardDeliveryAttempt: ForwardDeliveryAttempt? = null
     private var initialForwardRequestHandled = false
@@ -544,27 +548,88 @@ class ChatDialogViewModel(
         composerChanged()
     }
 
-    internal fun beginForward(message: MessageResponse) {
+    internal fun toggleMessageSelection(message: MessageResponse) {
         if (!canForwardMessage(message)) {
+            _actionError.value = "Это сообщение нельзя выбрать"
+            return
+        }
+        val update = toggleForwardSelection(
+            current = _selectedMessageUuids.value,
+            messageUuid = message.uuid,
+        )
+        _selectedMessageUuids.value = update.messageUuids
+        if (update.limitReached) {
+            _actionError.value =
+                "Можно выбрать не более $MAX_FORWARD_SOURCE_MESSAGES сообщений"
+        }
+    }
+
+    internal fun clearMessageSelection() {
+        _selectedMessageUuids.value = emptyList()
+    }
+
+    internal fun reconcileMessageSelection(availableMessageUuids: Set<String>) {
+        val current = _selectedMessageUuids.value
+        val next = current.filter(availableMessageUuids::contains)
+        if (next != current) {
+            _selectedMessageUuids.value = next
+        }
+    }
+
+    internal fun beginForward(message: MessageResponse) {
+        beginForward(
+            messages = listOf(message),
+            clearSelectionOnSuccess = false,
+        )
+    }
+
+    internal fun beginForwardSelected(availableMessages: List<MessageResponse>) {
+        val selected = _selectedMessageUuids.value
+        val sources = snapshotForwardSources(selected, availableMessages)
+        if (sources.size != selected.size || sources.isEmpty()) {
+            reconcileMessageSelection(
+                availableMessages
+                    .asSequence()
+                    .filter(::canForwardMessage)
+                    .mapTo(mutableSetOf(), MessageResponse::uuid),
+            )
+            _actionError.value =
+                "Некоторые выбранные сообщения больше недоступны"
+            return
+        }
+        beginForward(
+            messages = sources,
+            clearSelectionOnSuccess = true,
+        )
+    }
+
+    private fun beginForward(
+        messages: List<MessageResponse>,
+        clearSelectionOnSuccess: Boolean,
+    ) {
+        val sourceSnapshots = snapshotForwardSources(
+            selectedMessageUuids = messages.map(MessageResponse::uuid),
+            availableMessages = messages,
+        )
+        if (sourceSnapshots.size != messages.size || sourceSnapshots.isEmpty()) {
             _actionError.value = "Это сообщение нельзя переслать"
             return
         }
         forwardCatalogJob?.cancel()
         forwardTopicLoadJob?.cancel()
+        val dialogGeneration = ++forwardDialogGeneration
         forwardSelectionGeneration += 1
         forwardDeliveryAttempt = null
-        val sourceSnapshot = message.copy(
-            payload = message.payload.copy(),
-            user = message.user?.copy(),
-        )
+        val sourceKey = forwardSourceKey(sourceSnapshots)
         _forwardDialogState.value = ForwardDialogState(
-            sourceMessage = sourceSnapshot,
+            sourceMessages = sourceSnapshots,
+            clearSelectionOnSuccess = clearSelectionOnSuccess,
             currentUserUuid =
                 userViewModel.userId.value ?: userViewModel.userData?.uuid,
             catalogLoading = true,
         )
         forwardCatalogJob = viewModelScope.launch {
-            refreshForwardCatalog(sourceSnapshot.uuid)
+            refreshForwardCatalog(sourceKey, dialogGeneration)
         }
     }
 
@@ -573,6 +638,7 @@ class ChatDialogViewModel(
         if (state.submitting || state.verifying) return
         forwardCatalogJob?.cancel()
         forwardTopicLoadJob?.cancel()
+        forwardDialogGeneration += 1
         forwardSelectionGeneration += 1
         forwardDeliveryAttempt = null
         _forwardDialogState.value = null
@@ -748,9 +814,13 @@ class ChatDialogViewModel(
         }
     }
 
-    private suspend fun refreshForwardCatalog(sourceMessageUuid: String) {
+    private suspend fun refreshForwardCatalog(
+        sourceKey: String,
+        dialogGeneration: Long,
+    ) {
+        if (dialogGeneration != forwardDialogGeneration) return
         val current = _forwardDialogState.value
-            ?.takeIf { it.sourceMessage.uuid == sourceMessageUuid }
+            ?.takeIf { forwardSourceKey(it.sourceMessages) == sourceKey }
             ?: return
         val credentials = userViewModel.repo.activeCredentialSnapshot()
         val ownerKey = credentials.ownerKey
@@ -794,8 +864,11 @@ class ChatDialogViewModel(
         } catch (exception: Exception) {
             refreshError = "Не удалось обновить получателей"
         } finally {
+            if (dialogGeneration != forwardDialogGeneration) return
             val latest = _forwardDialogState.value
-                ?.takeIf { it.sourceMessage.uuid == sourceMessageUuid }
+                ?.takeIf {
+                    forwardSourceKey(it.sourceMessages) == sourceKey
+                }
                 ?: return
             _forwardDialogState.value = latest.copy(
                 currentUserUuid = credentials.userId,
@@ -859,7 +932,7 @@ class ChatDialogViewModel(
     private suspend fun submitForwardInternal() {
         val initialState = _forwardDialogState.value ?: return
         var sendStarted = false
-        val content = buildWorkspaceForwardMarkdown(initialState.sourceMessage)
+        val content = buildWorkspaceForwardMarkdown(initialState.sourceMessages)
         if (content == null) {
             setForwardError("Исходное сообщение повреждено")
             return
@@ -1270,6 +1343,9 @@ class ChatDialogViewModel(
             listOf(message),
         )
         forwardDeliveryAttempt = null
+        if (_forwardDialogState.value?.clearSelectionOnSuccess == true) {
+            clearMessageSelection()
+        }
         _forwardDialogState.update { state ->
             state?.copy(
                 submitting = false,

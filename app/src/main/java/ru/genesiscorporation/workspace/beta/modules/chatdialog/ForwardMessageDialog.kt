@@ -31,12 +31,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalLocale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
@@ -53,8 +55,11 @@ internal fun ForwardMessageDialog(
     val colors = LocalWorkspaceColorsPalette.current
     val locale = LocalLocale.current.platformLocale
     val targetListState = rememberLazyListState()
-    var query by rememberSaveable(state.sourceMessage.uuid) { mutableStateOf("") }
-    var confirmRiskyRetry by remember(state.sourceMessage.uuid) {
+    val sourceKey = remember(state.sourceMessages) {
+        forwardSourceKey(state.sourceMessages)
+    }
+    var query by rememberSaveable(sourceKey) { mutableStateOf("") }
+    var confirmRiskyRetry by remember(sourceKey) {
         mutableStateOf(false)
     }
     val busy = state.submitting || state.verifying
@@ -139,15 +144,41 @@ internal fun ForwardMessageDialog(
             Column {
                 Text(
                     text = when (state.deliveryStatus) {
-                        ForwardDeliveryStatus.COMPLETED -> "Сообщение переслано"
-                        else -> "Переслать сообщение"
+                        ForwardDeliveryStatus.COMPLETED ->
+                            stringResource(
+                                if (state.sourceMessages.size == 1) {
+                                    R.string.message_forward_completed_single
+                                } else {
+                                    R.string.message_forward_completed_multiple
+                                },
+                            )
+
+                        else ->
+                            stringResource(
+                                if (state.sourceMessages.size == 1) {
+                                    R.string.message_forward_title_single
+                                } else {
+                                    R.string.message_forward_title_multiple
+                                },
+                            )
                     },
                 )
                 if (state.deliveryStatus != ForwardDeliveryStatus.COMPLETED) {
                     Text(
-                        text = state.sourceMessage.payload.content
-                            .replace('\n', ' ')
-                            .ifBlank { "Сообщение без текста" },
+                        text = if (state.sourceMessages.size == 1) {
+                            state.sourceMessage.payload.content
+                                .replace('\n', ' ')
+                                .ifBlank {
+                                    stringResource(
+                                        R.string.message_forward_preview_empty,
+                                    )
+                                }
+                        } else {
+                            stringResource(
+                                R.string.message_forward_preview_multiple,
+                                state.sourceMessages.size,
+                            )
+                        },
                         color = colors.textAdditional50,
                         fontSize = 12.sp,
                         lineHeight = 16.sp,

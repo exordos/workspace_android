@@ -25,11 +25,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -161,6 +163,8 @@ fun ChatDialogScreen(
     val topicUnreadCount by viewModel.topicUnreadCount.collectAsStateWithLifecycle()
     val forwardDialogState by
         viewModel.forwardDialogState.collectAsStateWithLifecycle()
+    val selectedMessageUuids by
+        viewModel.selectedMessageUuids.collectAsStateWithLifecycle()
     val reactionPickerMessageUuid by
         viewModel.reactionPickerMessageUuid.collectAsStateWithLifecycle()
     val users by viewModel.repo.users.collectAsStateWithLifecycle()
@@ -221,6 +225,10 @@ fun ChatDialogScreen(
         streamTopicMessages[key].orEmpty()
             .sortedBy { messageSortInstant(it.createdAt) }
     }
+    val selectedMessageUuidSet = remember(selectedMessageUuids) {
+        selectedMessageUuids.toSet()
+    }
+    val selectionMode = selectedMessageUuids.isNotEmpty()
     val loadedUnreadMessages = remember(messages) {
         messages.filter { !it.read && !it.isOwn }
     }
@@ -305,6 +313,12 @@ fun ChatDialogScreen(
 
             else -> loadedUnreadMessages.first().uuid
         }
+    }
+
+    LaunchedEffect(messages) {
+        viewModel.reconcileMessageSelection(
+            messages.mapTo(mutableSetOf(), MessageResponse::uuid),
+        )
     }
 
     LaunchedEffect(
@@ -686,6 +700,15 @@ fun ChatDialogScreen(
                                         },
                                         isVerifyingOutbox =
                                             message.uuid in verifyingOutbox,
+                                        selectionMode = selectionMode,
+                                        isSelected =
+                                            message.uuid in
+                                                selectedMessageUuidSet,
+                                        onToggleSelection = {
+                                            viewModel.toggleMessageSelection(
+                                                message,
+                                            )
+                                        },
                                         onImageLoad = {
                                             val lastVisibleIndex =
                                                 listState.layoutInfo
@@ -842,6 +865,13 @@ fun ChatDialogScreen(
                     onDelete = viewModel::deleteConflictedDraft,
                 )
             }
+            MessageSelectionBar(
+                selectedCount = selectedMessageUuids.size,
+                onForward = {
+                    viewModel.beginForwardSelected(messages)
+                },
+                onCancel = viewModel::clearMessageSelection,
+            )
             SendMessageView(viewModel)
         }
     }
@@ -1222,6 +1252,9 @@ fun ChatMessage(
     reactionCounts: Map<String, Int>,
     outboxEntry: PersistedOutboxEntry? = null,
     isVerifyingOutbox: Boolean = false,
+    selectionMode: Boolean = false,
+    isSelected: Boolean = false,
+    onToggleSelection: () -> Unit = {},
     onImageLoad: () -> Unit,
 ) {
     val colors = LocalWorkspaceColorsPalette.current
@@ -1264,7 +1297,13 @@ fun ChatMessage(
             jitsiBaseUrl.isNotBlank() &&
                 Patterns.WEB_URL.matcher(item.payload.content).matches() &&
                 item.payload.content.startsWith(jitsiBaseUrl) ->
-                CallMessageView(item, viewModel, navController)
+                CallMessageView(
+                    item = item,
+                    viewModel = viewModel,
+                    navController = navController,
+                    isSelected = isSelected,
+                    onToggleSelection = onToggleSelection,
+                )
 
             upload != null &&
                 upload.attachments.all { it.kind == WorkspaceAttachmentKind.IMAGE } ->
@@ -1274,6 +1313,8 @@ fun ChatMessage(
                     viewModel = viewModel,
                     item = item,
                     navController = navController,
+                    isSelected = isSelected,
+                    onToggleSelection = onToggleSelection,
                     onImageLoad = onImageLoad,
                 )
 
@@ -1284,10 +1325,18 @@ fun ChatMessage(
                     viewModel = viewModel,
                     item = item,
                     navController = navController,
+                    isSelected = isSelected,
+                    onToggleSelection = onToggleSelection,
                 )
 
             else ->
-                TextMessageView(item, viewModel, navController)
+                TextMessageView(
+                    item = item,
+                    viewModel = viewModel,
+                    navController = navController,
+                    isSelected = isSelected,
+                    onToggleSelection = onToggleSelection,
+                )
         }
 
         if (outboxEntry == null && reactionCounts.isNotEmpty()) {
@@ -1365,6 +1414,41 @@ fun ChatMessage(
                         )
                     }
                 }
+            }
+        }
+        if (
+            selectionMode &&
+            outboxEntry == null &&
+            canForwardMessage(item)
+        ) {
+            val selectionLabel = stringResource(
+                if (isSelected) {
+                    R.string.message_unselect
+                } else {
+                    R.string.message_select
+                },
+            )
+            Row(
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .toggleable(
+                        value = isSelected,
+                        role = Role.Checkbox,
+                        onValueChange = { onToggleSelection() },
+                    )
+                    .padding(horizontal = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Checkbox(
+                    checked = isSelected,
+                    onCheckedChange = null,
+                )
+                Text(
+                    text = selectionLabel,
+                    color = colors.textAdditional50,
+                    fontSize = 12.sp,
+                )
             }
         }
     }

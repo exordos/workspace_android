@@ -657,13 +657,21 @@ and never the active task-reporting topic.
 | MSG-FWD-010 | Open forwarded source in same or another chat | Same-chat source is focused after bounded fetch; cross-chat source resolves stream/topic metadata and opens the exact UUID |
 | MSG-FWD-011 | Deleted/forbidden/offline/malformed quote source | Block shows an unavailable state and functional retry; unsafe or malformed URNs never launch an external intent |
 | MSG-FWD-012 | Account switches during catalog/create/send/verify/open | Stale completion cannot navigate, claim success, or mutate the new account projection; the user receives an actionable error |
+| MSG-FWD-013 | Select several canonical messages | Long-press `Select message` enters selection mode; row checkboxes toggle independently and the localized count follows insertion order up to 32 unique sources |
+| MSG-FWD-014 | Rotate/background while selecting | ViewModel-owned selection and its exact order survive Activity recreation; Cancel clears it without a request or draft mutation |
+| MSG-FWD-015 | Forward an ordered selection | One ordinary message contains one canonical quote reference per source in selection order; duplicate or missing sources fail closed before POST |
+| MSG-FWD-016 | Multi-forward confirmation or uncertain result | Confirmed delivery clears selection; timeout, malformed response, zero/multiple verification matches, dismissal and retry retain it until the user can safely resolve the outcome |
+| MSG-FWD-017 | Selection actions have complete behavior | Forward and Cancel meet the 48 dp target and work with touch/TalkBack; the desktop no-op bulk Delete action is not rendered on Android |
+| MSG-FWD-018 | Source changes during selection | Deleted, trimmed, local-outbox, malformed or account-foreign sources cannot be submitted; remaining valid selection is reconciled and an actionable error is shown |
 
 ### Current forwarding acceptance coverage
 
 - Unit coverage passes for desktop-compatible escaping, Unicode selected-text
   URN encode/decode, strict malformed-query rejection, fenced-code isolation,
   stream/topic/user filtering, existing-direct resolution, exact response
-  validation, and unique post-attempt verification.
+  validation, unique post-attempt verification, ordered multi-source Markdown,
+  duplicate/invalid-source rejection, the 32-source bound, and bounded source
+  snapshots.
 - The retained ViewModel owns catalog/topic loading, direct-chat recovery,
   preflight UUID baseline, send, and bounded verification. Target controls lock
   once delivery becomes uncertain, and retry requires an explicit duplicate
@@ -677,6 +685,15 @@ and never the active task-reporting topic.
   visible area. Tapping the second forwarded block moved Android from the end
   of the conversation to its distant source; visible desktop opened the exact
   source message URL.
+- Physical Android 14 acceptance also selected two existing sandbox messages,
+  retained their count and order across portrait/landscape/portrait recreation,
+  sent one two-reference message, received authoritative server confirmation,
+  cleared selection only after confirmation, and rendered both navigable quote
+  blocks in exact selection order. The test-created result was then deleted
+  through the ordinary confirmed message action, leaving the sandbox clean.
+- Exact Compose instrumentation verifies that the localized selection bar has
+  functional Forward and Cancel actions and exposes no dead bulk Delete
+  control.
 - A fully offline preflight kept the selected target and source, showed a
   recoverable `Network unavailable` error, exposed neither uncertain-delivery
   retry action, and created no message. Wi-Fi, data, and automatic rotation
@@ -686,9 +703,10 @@ and never the active task-reporting topic.
   Every ambiguous result enters verification, excludes preflight UUIDs, accepts
   exactly one new exact match, rejects multiple matches, and never becomes an
   ordinary blind retry; validation rejection remains safely retryable.
-- Post-request timeout/connection-cut and malformed/wrong-success injection,
-  physical cross-topic navigation, and direct-chat creation/recovery remain
-  required before this slice is marked fully accepted.
+- Physical multi-selection fault injection after POST, post-request
+  timeout/connection-cut and malformed/wrong-success injection, physical
+  cross-topic navigation, and direct-chat creation/recovery remain required
+  before this slice is marked fully accepted.
 
 ### Current message-action acceptance coverage
 

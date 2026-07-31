@@ -46,6 +46,22 @@
     <string name="workspace_reply_move_right">Переместить ответ вправо</string>
     <string name="workspace_reply_active_title">Ответ для %1$s</string>
     <string name="workspace_reply_selected_fragment">Выбранный фрагмент</string>
+    <string name="message_select">Выбрать сообщение</string>
+    <string name="message_unselect">Снять выбор</string>
+    <string name="message_selection_cancel">Отменить выбор</string>
+    <string name="message_selection_forward">Переслать</string>
+    <string name="message_forward_title_single">Переслать сообщение</string>
+    <string name="message_forward_title_multiple">Переслать сообщения</string>
+    <string name="message_forward_completed_single">Сообщение переслано</string>
+    <string name="message_forward_completed_multiple">Сообщения пересланы</string>
+    <string name="message_forward_preview_empty">Сообщение без текста</string>
+    <string name="message_forward_preview_multiple">Выбрано сообщений: %1$d</string>
+    <plurals name="message_selected_count">
+        <item quantity="one">Выбрано %d сообщение</item>
+        <item quantity="few">Выбрано %d сообщения</item>
+        <item quantity="many">Выбрано %d сообщений</item>
+        <item quantity="other">Выбрано %d сообщения</item>
+    </plurals>
     <string name="workspace_reply_clear_all">Очистить все ответы</string>
     <string name="message_composer_editing">Редактирование</string>
     <string name="message_composer_attach_files">Прикрепить файлы</string>

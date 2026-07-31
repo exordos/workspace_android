@@ -3,6 +3,7 @@ package ru.genesiscorporation.workspace.beta.modules.chatdialog
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import ru.genesiscorporation.workspace.beta.data.remote.ApiError
@@ -29,6 +30,104 @@ class MessageForwardingTest {
             "[Alice \\[Admin\\]](urn:quote:$MESSAGE_UUID)",
             buildWorkspaceForwardMarkdown(message),
         )
+    }
+
+    @Test
+    fun `multiple forward references keep selection order and deduplicate`() {
+        val first = message().apply {
+            user = user(AUTHOR_UUID, "alice", "Alice")
+        }
+        val second = first.copy(
+            uuid = OTHER_UUID,
+            authorUuid = OTHER_UUID,
+            userUuid = OTHER_UUID,
+        ).apply {
+            user = user(OTHER_UUID, "bob", "Bob")
+        }
+
+        assertEquals(
+            "[Bob](urn:quote:$OTHER_UUID)\n\n" +
+                "[Alice](urn:quote:$MESSAGE_UUID)",
+            buildWorkspaceForwardMarkdown(
+                listOf(second, first, second),
+            ),
+        )
+        assertNull(
+            buildWorkspaceForwardMarkdown(
+                listOf(first, second.copy(uuid = "not-a-uuid")),
+            ),
+        )
+    }
+
+    @Test
+    fun `selection toggles in insertion order and enforces the bounded limit`() {
+        val first = toggleForwardSelection(emptyList(), MESSAGE_UUID)
+        val second = toggleForwardSelection(first.messageUuids, OTHER_UUID)
+        val removed = toggleForwardSelection(second.messageUuids, MESSAGE_UUID)
+
+        assertEquals(listOf(MESSAGE_UUID, OTHER_UUID), second.messageUuids)
+        assertEquals(listOf(OTHER_UUID), removed.messageUuids)
+        assertFalse(removed.limitReached)
+
+        val full = (1..MAX_FORWARD_SOURCE_MESSAGES).map(::canonicalUuid)
+        val overflow = toggleForwardSelection(
+            current = full,
+            messageUuid = canonicalUuid(MAX_FORWARD_SOURCE_MESSAGES + 1),
+        )
+        assertEquals(full, overflow.messageUuids)
+        assertTrue(overflow.limitReached)
+        assertEquals(
+            full,
+            toggleForwardSelection(full + full.first(), "invalid")
+                .messageUuids,
+        )
+    }
+
+    @Test
+    fun `source snapshots follow selection order and bound preview memory`() {
+        val first = message().copy(
+            payload = MessageResponsePayload(
+                kind = "markdown",
+                content = "x".repeat(4_000),
+            ),
+        )
+        val second = message().copy(uuid = OTHER_UUID)
+        val snapshots = snapshotForwardSources(
+            selectedMessageUuids = listOf(OTHER_UUID, MESSAGE_UUID),
+            availableMessages = listOf(first, second),
+        )
+
+        assertEquals(listOf(OTHER_UUID, MESSAGE_UUID), snapshots.map { it.uuid })
+        assertEquals(512, snapshots.last().payload.content.length)
+        assertEquals(
+            "$OTHER_UUID|$MESSAGE_UUID",
+            forwardSourceKey(snapshots),
+        )
+        assertTrue(
+            snapshotForwardSources(
+                selectedMessageUuids = listOf(MESSAGE_UUID, MESSAGE_UUID),
+                availableMessages = listOf(first),
+            ).isEmpty(),
+        )
+    }
+
+    @Test
+    fun `forward dialog state rejects invalid source invariants`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            ForwardDialogState(sourceMessages = emptyList())
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            ForwardDialogState(
+                sourceMessages = listOf(message(), message()),
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            ForwardDialogState(
+                sourceMessages = listOf(
+                    message().copy(uuid = "not-a-uuid"),
+                ),
+            )
+        }
     }
 
     @Test
@@ -413,6 +512,9 @@ class MessageForwardingTest {
         status = "active",
         avatar = "",
     )
+
+    private fun canonicalUuid(index: Int): String =
+        "%08x-0000-4000-8000-%012x".format(index, index)
 
     private companion object {
         const val MESSAGE_UUID = "11111111-1111-4111-8111-111111111111"

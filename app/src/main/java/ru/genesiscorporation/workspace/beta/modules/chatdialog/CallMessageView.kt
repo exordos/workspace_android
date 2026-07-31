@@ -39,6 +39,8 @@ fun CallMessageView(
     item: MessageResponse,
     viewModel: ChatDialogViewModel,
     navController: NavHostController,
+    isSelected: Boolean = false,
+    onToggleSelection: () -> Unit = {},
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val deletingMessages by
@@ -174,6 +176,11 @@ fun CallMessageView(
                 },
                 onForward = {
                     viewModel.beginForward(item)
+                    menuExpanded = false
+                },
+                isSelected = isSelected,
+                onToggleSelection = {
+                    onToggleSelection()
                     menuExpanded = false
                 },
             )
