@@ -145,6 +145,63 @@ class FeedModelTest {
     }
 
     @Test
+    fun `stream timeline rejects a server row from another channel`() {
+        val result = validateFeedPage(
+            messages = listOf(
+                message(
+                    NEWER_MESSAGE_UUID,
+                    "2026-07-30T10:02:00Z",
+                ),
+                message(
+                    OLDER_MESSAGE_UUID,
+                    "2026-07-30T10:01:00Z",
+                ).copy(streamUuid = OTHER_STREAM_UUID),
+            ),
+            nextMarkerHeader = null,
+            requiredStreamUuid = STREAM_UUID,
+        )
+
+        assertTrue(result.messages.isEmpty())
+        assertTrue(result.error?.contains("некорректную страницу") == true)
+    }
+
+    @Test
+    fun `stream realtime projection ignores other channels and removes a moved row`() {
+        val current = message(
+            NEWER_MESSAGE_UUID,
+            "2026-07-30T10:02:00Z",
+        )
+        val unrelated = message(
+            OLDER_MESSAGE_UUID,
+            "2026-07-30T10:03:00Z",
+        ).copy(streamUuid = OTHER_STREAM_UUID)
+        val moved = current.copy(
+            updatedAt = "2026-07-30T10:04:00Z",
+            streamUuid = OTHER_STREAM_UUID,
+        )
+
+        val projection = applyFeedProjectionEvents(
+            messages = listOf(current),
+            nextPageMarker = NEWER_MESSAGE_UUID,
+            events = listOf(
+                SequencedMessageProjectionEvent(
+                    1,
+                    MessageProjectionEvent.Upsert(unrelated),
+                ),
+                SequencedMessageProjectionEvent(
+                    2,
+                    MessageProjectionEvent.Upsert(moved),
+                ),
+            ),
+            requireStarred = false,
+            requiredStreamUuid = STREAM_UUID,
+        )
+
+        assertTrue(projection.messages.isEmpty())
+        assertNull(projection.nextPageMarker)
+    }
+
+    @Test
     fun `feed summary hides raw attachment targets and bounds whitespace`() {
         assertEquals(
             "Изображение report Read this",
@@ -377,6 +434,7 @@ class FeedModelTest {
 
     private companion object {
         const val STREAM_UUID = "11111111-1111-4111-8111-111111111111"
+        const val OTHER_STREAM_UUID = "77777777-7777-4777-8777-777777777777"
         const val TOPIC_UUID = "22222222-2222-4222-8222-222222222222"
         const val USER_UUID = "33333333-3333-4333-8333-333333333333"
         const val NEWER_MESSAGE_UUID = "44444444-4444-4444-8444-444444444444"

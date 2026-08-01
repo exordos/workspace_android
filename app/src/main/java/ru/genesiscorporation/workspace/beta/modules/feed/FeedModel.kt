@@ -8,6 +8,7 @@ import java.util.UUID
 
 enum class MessageTimelineKind(
     val starredOnly: Boolean,
+    val persistent: Boolean,
     val title: String,
     val refreshDescription: String,
     val busyDescription: String,
@@ -17,6 +18,7 @@ enum class MessageTimelineKind(
 ) {
     FEED(
         starredOnly = false,
+        persistent = true,
         title = "Лента",
         refreshDescription = "Обновить ленту",
         busyDescription = "Обновление ленты",
@@ -26,12 +28,23 @@ enum class MessageTimelineKind(
     ),
     STARRED(
         starredOnly = true,
+        persistent = true,
         title = "Избранное",
         refreshDescription = "Обновить избранные сообщения",
         busyDescription = "Обновление избранных сообщений",
         emptyMessage = "В избранном пока нет сообщений",
         refreshError = "Не удалось обновить избранные сообщения",
         olderError = "Не удалось загрузить предыдущие избранные сообщения",
+    ),
+    STREAM(
+        starredOnly = false,
+        persistent = false,
+        title = "Все темы",
+        refreshDescription = "Обновить общий поток канала",
+        busyDescription = "Обновление общего потока канала",
+        emptyMessage = "В канале пока нет сообщений",
+        refreshError = "Не удалось обновить общий поток канала",
+        olderError = "Не удалось загрузить предыдущие сообщения канала",
     ),
 }
 
@@ -87,11 +100,22 @@ internal fun validateFeedPage(
     nextMarkerHeader: String?,
     previousMarker: String? = null,
     requireStarred: Boolean = false,
+    requiredStreamUuid: String? = null,
 ): FeedPageValidation {
+    val canonicalRequiredStreamUuid = requiredStreamUuid?.let(::canonicalFeedUuid)
+    if (requiredStreamUuid != null && canonicalRequiredStreamUuid == null) {
+        return malformedFeedPage()
+    }
     val normalizedMessages = messages.map { message ->
         normalizeFeedMessage(message) ?: return malformedFeedPage()
     }
     if (requireStarred && normalizedMessages.any { !it.starred }) {
+        return malformedFeedPage()
+    }
+    if (
+        canonicalRequiredStreamUuid != null &&
+        normalizedMessages.any { it.streamUuid != canonicalRequiredStreamUuid }
+    ) {
         return malformedFeedPage()
     }
     if (
@@ -107,7 +131,7 @@ internal fun validateFeedPage(
     val nextMarker = if (rawMarker.isEmpty()) {
         null
     } else {
-        val marker = canonicalUuid(rawMarker) ?: return FeedPageValidation(
+        val marker = canonicalFeedUuid(rawMarker) ?: return FeedPageValidation(
             messages = sortFeedMessages(normalizedMessages),
             nextPageMarker = null,
             error = MALFORMED_FEED_PAGE_ERROR,
@@ -145,9 +169,12 @@ internal fun applyFeedProjectionEvents(
     nextPageMarker: String?,
     events: List<SequencedMessageProjectionEvent>,
     requireStarred: Boolean,
+    requiredStreamUuid: String? = null,
     maximumMessages: Int = MAX_FEED_CACHE_MESSAGES,
 ): FeedProjection {
     require(maximumMessages > 0)
+    val canonicalRequiredStreamUuid = requiredStreamUuid?.let(::canonicalFeedUuid)
+    require(requiredStreamUuid == null || canonicalRequiredStreamUuid != null)
     return events.fold(
         FeedProjection(
             messages = sortFeedMessages(messages),
@@ -158,6 +185,7 @@ internal fun applyFeedProjectionEvents(
             projection = projection,
             event = sequencedEvent.event,
             requireStarred = requireStarred,
+            requiredStreamUuid = canonicalRequiredStreamUuid,
             maximumMessages = maximumMessages,
         )
     }
@@ -167,6 +195,7 @@ private fun applyFeedProjectionEvent(
     projection: FeedProjection,
     event: MessageProjectionEvent,
     requireStarred: Boolean,
+    requiredStreamUuid: String?,
     maximumMessages: Int,
 ): FeedProjection {
     val currentByUuid = projection.messages
@@ -184,7 +213,10 @@ private fun applyFeedProjectionEvent(
             ) {
                 return projection
             }
-            if (requireStarred && !incoming.starred) {
+            if (
+                (requireStarred && !incoming.starred) ||
+                (requiredStreamUuid != null && incoming.streamUuid != requiredStreamUuid)
+            ) {
                 currentByUuid.remove(incoming.uuid)
                 if (nextMarker == incoming.uuid) {
                     nextMarker = sortFeedMessages(
@@ -202,7 +234,7 @@ private fun applyFeedProjectionEvent(
 
         is MessageProjectionEvent.Read -> {
             val messageUuids = event.messageUuids
-                .mapNotNull(::canonicalUuid)
+                .mapNotNull(::canonicalFeedUuid)
                 .toSet()
             messageUuids.forEach { uuid ->
                 currentByUuid[uuid]?.let { message ->
@@ -212,7 +244,7 @@ private fun applyFeedProjectionEvent(
         }
 
         is MessageProjectionEvent.Deleted -> {
-            val uuid = canonicalUuid(event.messageUuid)
+            val uuid = canonicalFeedUuid(event.messageUuid)
                 ?: return projection
             currentByUuid.remove(uuid)
             if (nextMarker == uuid) {
@@ -277,7 +309,7 @@ private fun feedMessageInstant(value: String): Instant =
     runCatching { OffsetDateTime.parse(value).toInstant() }
         .getOrDefault(Instant.EPOCH)
 
-private fun canonicalUuid(value: String): String? {
+internal fun canonicalFeedUuid(value: String): String? {
     val trimmed = value.trim()
     val canonical = runCatching { UUID.fromString(trimmed).toString() }.getOrNull()
         ?: return null
@@ -285,11 +317,11 @@ private fun canonicalUuid(value: String): String? {
 }
 
 internal fun normalizeFeedMessage(message: MessageResponse): MessageResponse? {
-    val messageUuid = canonicalUuid(message.uuid) ?: return null
-    val streamUuid = canonicalUuid(message.streamUuid) ?: return null
-    val topicUuid = canonicalUuid(message.topicUuid) ?: return null
-    val userUuid = canonicalUuid(message.userUuid) ?: return null
-    val authorUuid = canonicalUuid(message.authorUuid) ?: return null
+    val messageUuid = canonicalFeedUuid(message.uuid) ?: return null
+    val streamUuid = canonicalFeedUuid(message.streamUuid) ?: return null
+    val topicUuid = canonicalFeedUuid(message.topicUuid) ?: return null
+    val userUuid = canonicalFeedUuid(message.userUuid) ?: return null
+    val authorUuid = canonicalFeedUuid(message.authorUuid) ?: return null
     runCatching { OffsetDateTime.parse(message.createdAt).toInstant() }
         .getOrNull()
         ?: return null

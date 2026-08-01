@@ -47,6 +47,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -73,6 +74,7 @@ fun FeedScreen(
     chatViewModel: ChatViewModel,
     navController: NavHostController,
     kind: MessageTimelineKind = MessageTimelineKind.FEED,
+    title: String = kind.title,
     onBack: (() -> Unit)? = null,
 ) {
     val state by feedViewModel.state.collectAsStateWithLifecycle()
@@ -237,7 +239,7 @@ fun FeedScreen(
             .background(colors.background),
     ) {
         FeedTopBar(
-            title = kind.title,
+            title = title,
             refreshDescription = kind.refreshDescription,
             busyDescription = kind.busyDescription,
             busy = state.initialLoading || state.refreshing || state.loadingOlder,
@@ -377,7 +379,13 @@ private fun FeedTopBar(
             lineHeight = 22.sp,
             fontFamily = NavigationFontFamily,
             fontWeight = FontWeight.Medium,
-            modifier = Modifier.align(Alignment.Center),
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .align(Alignment.Center)
+                .fillMaxWidth()
+                .padding(horizontal = 52.dp),
         )
         if (busy) {
             CircularProgressIndicator(

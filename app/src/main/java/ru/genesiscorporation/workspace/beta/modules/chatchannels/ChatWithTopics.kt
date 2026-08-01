@@ -308,64 +308,89 @@ fun ChatWithTopics(
                     },
             ) {
                 val topics = streamTopics[stream.uuid].orEmpty()
-                if (topics.isEmpty()) {
-                    if (state is QueryState.Error) {
-                        MessengerErrorState(
-                            message = (state as QueryState.Error).message,
-                            onRetry = { scope.launch { chatViewModel.loadTopics(stream) } },
-                        )
-                    } else {
-                        EmptyMessengerState(
-                            loading = state is QueryState.Loading,
-                            text = "Список тем пуст",
-                        )
-                    }
-                } else {
-                    val orderedTopics = topics.sortedByDescending {
-                        parseTime(it.lastMessage?.createdAt ?: it.updatedAt)
-                    }
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(end = 12.dp),
-                    ) {
-                        itemsIndexed(
-                            items = orderedTopics,
-                            key = { _, topic -> topic.uuid },
-                        ) { _, topic ->
-                            ChatTopic(
-                                viewModel = chatViewModel,
-                                item = topic,
-                                displayName = forwardTopicLabel(topic, topics),
-                                stream = stream,
-                                navController = navController,
-                                selected = topic.uuid == stream.lastMessage?.topicUuid,
-                                onLongClick = { topicToManageUuid = topic.uuid },
+                Column(modifier = Modifier.fillMaxSize()) {
+                    AllTopicsRow(
+                        stream = stream,
+                        onClick = {
+                            onShowDetailChange(false)
+                            navController.navigate(
+                                ChatFlow.StreamFeed(
+                                    streamName = stream.name,
+                                    streamUuid = stream.uuid,
+                                ),
                             )
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(start = 12.dp)
-                                    .height(1.dp)
-                                    .background(colors.cardBackgroundActive),
+                        },
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 12.dp, end = 12.dp)
+                            .height(1.dp)
+                            .background(colors.cardBackgroundActive),
+                    )
+                    if (topics.isEmpty()) {
+                        if (state is QueryState.Error) {
+                            MessengerErrorState(
+                                message = (state as QueryState.Error).message,
+                                onRetry = {
+                                    scope.launch { chatViewModel.loadTopics(stream) }
+                                },
+                                modifier = Modifier.weight(1f),
+                            )
+                        } else {
+                            EmptyMessengerState(
+                                loading = state is QueryState.Loading,
+                                text = "Список тем пуст",
+                                modifier = Modifier.weight(1f),
                             )
                         }
-                        item(key = "create-topic") {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(38.dp)
-                                    .clickable {
-                                        createTopicForStreamUuid = stream.uuid
-                                    },
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(
-                                    text = "+ Новая тема",
-                                    color = colors.primary,
-                                    fontSize = 14.sp,
-                                    lineHeight = 20.sp,
+                    } else {
+                        val orderedTopics = topics.sortedByDescending {
+                            parseTime(it.lastMessage?.createdAt ?: it.updatedAt)
+                        }
+                        LazyColumn(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(end = 12.dp),
+                        ) {
+                            itemsIndexed(
+                                items = orderedTopics,
+                                key = { _, topic -> topic.uuid },
+                            ) { _, topic ->
+                                ChatTopic(
+                                    viewModel = chatViewModel,
+                                    item = topic,
+                                    displayName = forwardTopicLabel(topic, topics),
+                                    stream = stream,
+                                    navController = navController,
+                                    selected = topic.uuid == stream.lastMessage?.topicUuid,
+                                    onLongClick = { topicToManageUuid = topic.uuid },
                                 )
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(start = 12.dp)
+                                        .height(1.dp)
+                                        .background(colors.cardBackgroundActive),
+                                )
+                            }
+                            item(key = "create-topic") {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(38.dp)
+                                        .clickable {
+                                            createTopicForStreamUuid = stream.uuid
+                                        },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        text = "+ Новая тема",
+                                        color = colors.primary,
+                                        fontSize = 14.sp,
+                                        lineHeight = 20.sp,
+                                    )
+                                }
                             }
                         }
                     }

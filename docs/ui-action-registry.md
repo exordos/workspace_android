@@ -63,6 +63,7 @@ Compose semantics traversal on every supported role and account.
 | CAT-A21 | New topic | POSTs a nonblank name for the exact stream and upserts the returned topic | Retained single-flight request; request-ID completion closes only the matching restored form; error preserves retry context | CAT-005/013/019 |
 | CAT-A22 | Topic long press | Opens desktop-parity notification/read/rename/done actions | No backend-only placeholder or unsupported action is rendered | CAT-005/006/009/010 |
 | CAT-A23 | Topic rename/done/notification/read | Invokes the exact topic action and updates the shared stream/topic projection | Retained single-flight request survives recreation; request-ID completion and recoverable inline error | CAT-005/006/009/010/013/019 |
+| CAT-A24 | `Все темы` in a channel topic panel | Opens a read-only stream-filtered chronological projection; rows preserve canonical stream/topic/message IDs and open the exact source message | Cross-stream or malformed pages fail closed; realtime from another stream is ignored; refresh/pagination errors retain usable rows; the stream projection does not overwrite global Feed cache | CAT-022 + Feed validation suite |
 
 ## Inbox
 

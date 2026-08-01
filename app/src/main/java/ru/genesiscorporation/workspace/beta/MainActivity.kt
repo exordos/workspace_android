@@ -1415,6 +1415,29 @@ fun ChatNavigation(
                 MessageTimelineKind.STARRED,
             )
         }
+        composable<ChatFlow.StreamFeed> {
+            LaunchedEffect(Unit) { onBottomNavigationVisibilityChange(true) }
+            val args = it.toRoute<ChatFlow.StreamFeed>()
+            val streamFeedViewModelFactory = remember(args.streamUuid) {
+                FeedViewModelFactory(
+                    workspaceApiClient,
+                    user,
+                    eventsRepository,
+                    MessageTimelineKind.STREAM,
+                    args.streamUuid,
+                )
+            }
+            val streamFeedViewModel: FeedViewModel = viewModel(
+                factory = streamFeedViewModelFactory,
+            )
+            FeedScreen(
+                feedViewModel = streamFeedViewModel,
+                chatViewModel = chatViewModel,
+                navController = navController,
+                kind = MessageTimelineKind.STREAM,
+                title = "Все темы · #${args.streamName}",
+            )
+        }
         composable<ChatFlow.Drafts> {
             LaunchedEffect(Unit) { onBottomNavigationVisibilityChange(true) }
             val appContext = LocalContext.current.applicationContext

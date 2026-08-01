@@ -144,6 +144,7 @@ class FeedViewModelFactory(
     private val userViewModel: UserViewModel,
     private val eventsRepository: EventsRepository,
     private val kind: MessageTimelineKind = MessageTimelineKind.FEED,
+    private val streamUuid: String? = null,
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(FeedViewModel::class.java)) {
@@ -153,6 +154,7 @@ class FeedViewModelFactory(
                 userViewModel,
                 eventsRepository,
                 kind,
+                streamUuid,
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")

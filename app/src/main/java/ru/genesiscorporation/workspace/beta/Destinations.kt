@@ -46,6 +46,9 @@ object ChatFlow {
     object Starred
 
     @Serializable
+    data class StreamFeed(val streamName: String, val streamUuid: String)
+
+    @Serializable
     object Drafts
 
     @Serializable

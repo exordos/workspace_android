@@ -145,9 +145,15 @@ not on a personal physical device.
 | CAT-019 | Activity recreation during catalog mutation | The retained ViewModel owns the request; request-ID completion closes only the matching restored dialog; no duplicate POST/PUT/DELETE is possible |
 | CAT-020 | Create accepted, follow-up topic/catalog fetch fails | Existing server stream is retained, default topic is recovered from response/topic/refetch when possible, partial success is explicit, and retry cannot create a duplicate channel |
 | CAT-021 | Figma folder list → create with selected sandbox chat → open → delete | Frames `12169:30283` / `12169:30552` remain visually aligned; one validated folder is created, only the selected `песочница` stream is assigned and shown after returning to Chats, then the temporary folder is deleted without touching the chat | Compose instrumentation + physical Pixel 5 / Android 14 passed; temporary `cassi-*` folder removed |
+| CAT-022 | Open `Все темы` from a channel topic panel | One read-only request sends the exact canonical `stream_uuid` without `topic_uuid`, uses bounded descending keyset pagination, renders messages from multiple topics chronologically, and opens the exact source topic/message; a cross-stream page or realtime upsert fails closed and the global Feed cache remains independent. Pure stream-validation tests, the labelled-row Compose test and physical Pixel 5 entry/latest/older-page/exact-topic navigation pass |
 
 ### Current M2 acceptance coverage
 
+- The channel topic panel's `Все темы` entry is labelled and clickable in an
+  exact Compose test. On the physical Pixel 5, the real stream projection
+  displayed current `android app5` rows, paged back to `ошибки на орион`, and
+  opened that exact topic through the existing message resolver without crash
+  or lost session.
 - Physical Android ↔ desktop folder create/rename/delete converged through
   realtime without reload; the temporary folder was removed on both clients.
 - In a dedicated sandbox topic, Android `done` and notification-mode mutations

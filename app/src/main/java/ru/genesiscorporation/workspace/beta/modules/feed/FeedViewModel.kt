@@ -28,7 +28,9 @@ class FeedViewModel(
     private val userViewModel: UserViewModel,
     private val eventsRepository: EventsRepository,
     private val kind: MessageTimelineKind = MessageTimelineKind.FEED,
+    streamUuid: String? = null,
 ) : ViewModel() {
+    private val requiredStreamUuid = streamUuid?.let(::canonicalFeedUuid)
     private val _state = MutableStateFlow(FeedUiState())
     val state: StateFlow<FeedUiState> = _state
     private val requestMutex = Mutex()
@@ -40,6 +42,12 @@ class FeedViewModel(
     private var cacheWriteJob: Job? = null
 
     init {
+        require(kind == MessageTimelineKind.STREAM || streamUuid == null) {
+            "A stream filter is only valid for a stream timeline"
+        }
+        require(kind != MessageTimelineKind.STREAM || requiredStreamUuid != null) {
+            "A stream timeline requires a canonical stream UUID"
+        }
         viewModelScope.launch {
             eventsRepository.messageProjectionEvents.collect { ownedEvent ->
                 applyRealtimeEvent(
@@ -83,7 +91,7 @@ class FeedViewModel(
 
     private suspend fun restoreAndRefresh() {
         val ownerKey = activeOwnerKey()
-        if (ownerKey != null) {
+        if (ownerKey != null && kind.persistent) {
             resetRealtimeJournal()
             try {
                 val cached = userViewModel.workspaceSnapshotStore
@@ -137,6 +145,7 @@ class FeedViewModel(
             when (
                 val response = client.performRequest(
                     MessagesRequest(
+                        streamId = requiredStreamUuid,
                         pageLimit = FEED_PAGE_SIZE,
                         sortDirection = MessageSortDirection.DESCENDING,
                         starred = true.takeIf { kind.starredOnly },
@@ -152,6 +161,7 @@ class FeedViewModel(
                         messages = response.value,
                         nextMarkerHeader = response.metadata.nextPageMarker,
                         requireStarred = kind.starredOnly,
+                        requiredStreamUuid = requiredStreamUuid,
                     )
                     val prior = _state.value
                     if (page.error != null) {
@@ -244,6 +254,7 @@ class FeedViewModel(
             when (
                 val response = client.performRequest(
                     MessagesRequest(
+                        streamId = requiredStreamUuid,
                         pageLimit = FEED_PAGE_SIZE,
                         pageMarker = marker,
                         sortDirection = MessageSortDirection.DESCENDING,
@@ -264,6 +275,7 @@ class FeedViewModel(
                         nextMarkerHeader = response.metadata.nextPageMarker,
                         previousMarker = marker,
                         requireStarred = kind.starredOnly,
+                        requiredStreamUuid = requiredStreamUuid,
                     )
                     if (page.error != null) {
                         _state.value = _state.value.copy(
@@ -357,6 +369,7 @@ class FeedViewModel(
             nextPageMarker = current.nextPageMarker,
             events = listOf(sequenced),
             requireStarred = kind.starredOnly,
+            requiredStreamUuid = requiredStreamUuid,
         )
         _state.value = current.copy(
             messages = projection.messages,
@@ -389,6 +402,7 @@ class FeedViewModel(
             nextPageMarker = nextPageMarker,
             events = realtimeJournal.filter { it.sequence > requestSequence },
             requireStarred = kind.starredOnly,
+            requiredStreamUuid = requiredStreamUuid,
         )
     }
 
@@ -407,6 +421,7 @@ class FeedViewModel(
     }
 
     private fun scheduleTimelineWrite(ownerKey: String) {
+        if (!kind.persistent) return
         cacheWriteJob?.cancel()
         cacheWriteJob = viewModelScope.launch {
             delay(REALTIME_CACHE_WRITE_DEBOUNCE_MILLIS)
@@ -415,6 +430,7 @@ class FeedViewModel(
     }
 
     private suspend fun persistTimeline(ownerKey: String) {
+        if (!kind.persistent) return
         try {
             userViewModel.repo.withActiveCredentialOwner(ownerKey) {
                 val current = _state.value
@@ -437,12 +453,11 @@ class FeedViewModel(
         }
     }
 
-    private fun workspaceTimelineKind(): WorkspaceTimelineKind =
-        if (kind.starredOnly) {
-            WorkspaceTimelineKind.STARRED
-        } else {
-            WorkspaceTimelineKind.FEED
-        }
+    private fun workspaceTimelineKind(): WorkspaceTimelineKind = when (kind) {
+        MessageTimelineKind.FEED -> WorkspaceTimelineKind.FEED
+        MessageTimelineKind.STARRED -> WorkspaceTimelineKind.STARRED
+        MessageTimelineKind.STREAM -> error("Stream timelines are not persisted")
+    }
 
     private fun resetRealtimeJournal() {
         realtimeJournal.clear()
