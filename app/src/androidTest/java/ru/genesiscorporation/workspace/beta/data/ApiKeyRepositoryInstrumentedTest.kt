@@ -129,8 +129,118 @@ class ApiKeyRepositoryInstrumentedTest {
         }
     }
 
+    @Test
+    fun attachmentCacheFailureKeepsTheAccountAndCredentialsRetryable() =
+        runBlocking {
+            val targetContext = ApplicationProvider.getApplicationContext<Context>()
+            val context = IsolatedAndroidTestContext(
+                targetContext,
+                "account-attachment-cleanup-failure",
+            )
+            val credentials = InMemoryCredentialStore()
+            var attachmentCleanupSucceeds = false
+            val repository = ApiKeyRepository(
+                context = context,
+                credentialStore = credentials,
+                clearAccountAttachmentCache = {
+                    attachmentCleanupSucceeds
+                },
+            )
+
+            try {
+                val account = saveAccount(repository)
+
+                assertTrue(
+                    runCatching {
+                        repository.removeActiveAccountIfOwner(account.accountId)
+                    }.isFailure,
+                )
+                assertEquals(account.accountId, repository.activeAccountIdFlow.first())
+                assertEquals(
+                    "access-a",
+                    credentials.read(account.accountId, Credential.ACCESS_TOKEN),
+                )
+                assertEquals(
+                    "refresh-a",
+                    credentials.read(account.accountId, Credential.REFRESH_TOKEN),
+                )
+
+                attachmentCleanupSucceeds = true
+                assertTrue(repository.removeActiveAccountIfOwner(account.accountId))
+                assertNull(repository.activeAccountIdFlow.first())
+                assertNull(credentials.read(account.accountId, Credential.ACCESS_TOKEN))
+                assertNull(credentials.read(account.accountId, Credential.REFRESH_TOKEN))
+            } finally {
+                attachmentCleanupSucceeds = true
+                repository.clearAll()
+                context.cleanUp()
+            }
+        }
+
+    @Test
+    fun credentialRemovalFailureRollsBackBeforeAccountRemoval() = runBlocking {
+        val targetContext = ApplicationProvider.getApplicationContext<Context>()
+        val context = IsolatedAndroidTestContext(
+            targetContext,
+            "account-credential-cleanup-failure",
+        )
+        val credentials = InMemoryCredentialStore()
+        val repository = ApiKeyRepository(
+            context = context,
+            credentialStore = credentials,
+        )
+
+        try {
+            val account = saveAccount(repository)
+            credentials.failingRemoval = Credential.REFRESH_TOKEN
+
+            assertTrue(
+                runCatching {
+                    repository.removeActiveAccountIfOwner(account.accountId)
+                }.isFailure,
+            )
+            assertEquals(account.accountId, repository.activeAccountIdFlow.first())
+            assertEquals(
+                "access-a",
+                credentials.read(account.accountId, Credential.ACCESS_TOKEN),
+            )
+            assertEquals(
+                "refresh-a",
+                credentials.read(account.accountId, Credential.REFRESH_TOKEN),
+            )
+
+            credentials.failingRemoval = null
+            assertTrue(repository.removeActiveAccountIfOwner(account.accountId))
+            assertNull(repository.activeAccountIdFlow.first())
+            assertNull(credentials.read(account.accountId, Credential.ACCESS_TOKEN))
+            assertNull(credentials.read(account.accountId, Credential.REFRESH_TOKEN))
+        } finally {
+            credentials.failingRemoval = null
+            repository.clearAll()
+            context.cleanUp()
+        }
+    }
+
+    private suspend fun saveAccount(
+        repository: ApiKeyRepository,
+    ): WorkspaceAccount {
+        repository.addBaseUrl(SERVER)
+        repository.saveSessionCredentials(
+            projectId = PROJECT_A,
+            projectName = "Project A",
+            organizationName = "Example",
+            userId = USER,
+            login = "cassi",
+            accessToken = "access-a",
+            refreshToken = "refresh-a",
+        )
+        return repository.activeAccountFlow.first()
+            ?: error("Account was not saved")
+    }
+
     private class InMemoryCredentialStore : CredentialStore {
         private val values = mutableMapOf<Pair<String, Credential>, String>()
+        var failingRemoval: Credential? = null
 
         override fun read(accountKey: String, credential: Credential): String? =
             values[accountKey to credential]
@@ -144,6 +254,9 @@ class ApiKeyRepositoryInstrumentedTest {
         }
 
         override fun remove(accountKey: String, credential: Credential) {
+            check(credential != failingRemoval) {
+                "Injected credential-removal failure"
+            }
             values.remove(accountKey to credential)
         }
 

@@ -40,6 +40,10 @@ class ApiKeyRepository(
     private val context: Context,
     private val credentialStore: CredentialStore = TinkCredentialStore(context),
     private val clearAccountLocalData: suspend (String) -> Unit = {},
+    private val clearAccountAttachmentCache: (String) -> Boolean = { ownerKey ->
+        accountAttachmentCacheDirectory(context.cacheDir, ownerKey)
+            .deleteRecursively()
+    },
 ) {
     private val sessionMutationMutex = Mutex()
 
@@ -388,35 +392,50 @@ class ApiKeyRepository(
                 return@withLock false
             }
             clearAccountLocalData(active.accountId)
-            context.dataStore.edit { mutablePrefs ->
-                val remaining = storedAccounts(mutablePrefs)
-                    .filterNot { it.accountId == active.accountId }
-                writeAccounts(mutablePrefs, remaining)
-                val next = remaining.firstOrNull()
-                if (next == null) {
-                    mutablePrefs.remove(ACTIVE_ACCOUNT_ID)
-                    mutablePrefs.remove(BASE_URL)
-                } else {
-                    mutablePrefs[ACTIVE_ACCOUNT_ID] = next.accountId
-                    mutablePrefs[BASE_URL] = next.baseUrl
-                }
-                mutablePrefs.remove(RETURN_ACCOUNT_ID)
-                bumpRevision(mutablePrefs)
+            check(clearAccountAttachmentCache(active.accountId)) {
+                "Could not clear the account attachment cache"
             }
-            runCatching {
+            val previousAccessToken =
+                credentialStore.read(active.accountId, Credential.ACCESS_TOKEN)
+            val previousRefreshToken =
+                credentialStore.read(active.accountId, Credential.REFRESH_TOKEN)
+            try {
                 credentialStore.remove(
                     active.accountId,
                     Credential.ACCESS_TOKEN,
                 )
-            }
-            runCatching {
                 credentialStore.remove(
                     active.accountId,
                     Credential.REFRESH_TOKEN,
                 )
+                context.dataStore.edit { mutablePrefs ->
+                    val remaining = storedAccounts(mutablePrefs)
+                        .filterNot { it.accountId == active.accountId }
+                    writeAccounts(mutablePrefs, remaining)
+                    val next = remaining.firstOrNull()
+                    if (next == null) {
+                        mutablePrefs.remove(ACTIVE_ACCOUNT_ID)
+                        mutablePrefs.remove(BASE_URL)
+                    } else {
+                        mutablePrefs[ACTIVE_ACCOUNT_ID] = next.accountId
+                        mutablePrefs[BASE_URL] = next.baseUrl
+                    }
+                    mutablePrefs.remove(RETURN_ACCOUNT_ID)
+                    bumpRevision(mutablePrefs)
+                }
+            } catch (exception: Exception) {
+                restoreCredential(
+                    active.accountId,
+                    Credential.ACCESS_TOKEN,
+                    previousAccessToken,
+                )
+                restoreCredential(
+                    active.accountId,
+                    Credential.REFRESH_TOKEN,
+                    previousRefreshToken,
+                )
+                throw exception
             }
-            accountAttachmentCacheDirectory(context.cacheDir, active.accountId)
-                .deleteRecursively()
             true
         }
 
