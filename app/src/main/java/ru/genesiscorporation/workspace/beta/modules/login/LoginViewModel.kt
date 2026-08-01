@@ -150,7 +150,7 @@ class LoginViewModel(
                     _queryState.value = QueryState.Error(
                         "Сервер не вернул refresh token",
                     )
-                    loginProcessState.markPhase(LoginPhase.CREDENTIALS)
+                    loginProcessState.markPhase(retryPhase())
                     return
                 }
                 val userUuid = userUuidFromAccessToken(userResponse.accessToken)
@@ -158,7 +158,7 @@ class LoginViewModel(
                     _queryState.value = QueryState.Error(
                         "Токен не содержит идентификатор пользователя",
                     )
-                    loginProcessState.markPhase(LoginPhase.CREDENTIALS)
+                    loginProcessState.markPhase(retryPhase())
                     return
                 }
                 when (
@@ -173,14 +173,14 @@ class LoginViewModel(
                             _queryState.value = QueryState.Error(
                                 "Сервер вернул некорректный список проектов",
                             )
-                            loginProcessState.markPhase(LoginPhase.CREDENTIALS)
+                            loginProcessState.markPhase(retryPhase())
                             return
                         }
                         if (availableProjects.isEmpty()) {
                             _queryState.value = QueryState.Error(
                                 "Для этой учётной записи нет доступных проектов",
                             )
-                            loginProcessState.markPhase(LoginPhase.CREDENTIALS)
+                            loginProcessState.markPhase(retryPhase())
                             return
                         }
                         pendingRefreshToken = refreshToken
@@ -198,7 +198,7 @@ class LoginViewModel(
                         _queryState.value = QueryState.Error(
                             "Не удалось загрузить доступные проекты",
                         )
-                        loginProcessState.markPhase(LoginPhase.CREDENTIALS)
+                        loginProcessState.markPhase(retryPhase())
                     }
                 }
             }
@@ -222,13 +222,12 @@ class LoginViewModel(
                         LoginErrorClassifier.publicMessage(
                             httpStatus = error.httpStatus,
                             errorCode = error.code,
+                            errorKind = error.kind,
                             safeMessage = error.errorMessage,
                             otpProvided = otp.isNotBlank(),
                         ),
                     )
-                    loginProcessState.markPhase(
-                        if (_needsOtp.value) LoginPhase.OTP else LoginPhase.CREDENTIALS,
-                    )
+                    loginProcessState.markPhase(retryPhase())
                 }
             }
         }
@@ -311,6 +310,9 @@ class LoginViewModel(
             if (_passwordText.value.isBlank()) "Введите пароль" else null
         return _loginFieldError.value == null && _passwordFieldError.value == null
     }
+
+    private fun retryPhase(): LoginPhase =
+        if (_needsOtp.value) LoginPhase.OTP else LoginPhase.CREDENTIALS
 
     private fun clearQueryError() {
         if (_queryState.value is QueryState.Error) {

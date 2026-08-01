@@ -91,6 +91,7 @@ not on a personal physical device.
 | AUTH-014 | Cancel adding another account | Existing authenticated account, server-discovery screen | Previous account and navigation restore without reauthentication or data loss | Unit + physical device |
 | AUTH-015 | Stale request completes after account switch | Delay original response/refresh until a second account is active | Result is discarded; no token, logout, cache file, or event mutates the new account | MockEngine + instrumented |
 | AUTH-016 | Account attachment-cache isolation | Same attachment UUID under two accounts, switch/logout/offline | Distinct opaque cache paths; logout clears only the removed account | Unit + instrumented |
+| AUTH-017 | Login response fault matrix | Malformed JSON, missing access/refresh data, invalid project collection, timeout, 5xx, and delayed completion at credentials, OTP, project discovery, or project-token confirmation | A bounded actionable error replaces loading; the current retryable OTP/project step and non-secret checkpoint stay aligned; no account, access token, refresh token, password, OTP, or project data is persisted | Android real-client MockEngine instrumented matrix passed 8/8 on a physical Android 14 device; typed timeout mapping unit passed |
 
 ## Navigation and deep-link scenarios
 

@@ -9,6 +9,7 @@ import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.MockRequestHandleScope
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.HttpRequestData
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
@@ -18,6 +19,9 @@ import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
 import java.nio.charset.StandardCharsets
 import java.util.Base64
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
@@ -262,8 +266,375 @@ class LoginStateMachineInstrumentedTest {
         }
     }
 
+    @Test
+    fun malformedMissingTimeoutAndServerFailuresStayRetryableWithoutSession() =
+        runBlocking {
+            val cases = listOf(
+                ResponseFaultCase(
+                    label = "malformed-json",
+                    body = "{not-json",
+                    status = HttpStatusCode.OK,
+                    expectedMessage = GENERIC_LOGIN_ERROR,
+                ),
+                ResponseFaultCase(
+                    label = "missing-access-token",
+                    body = "{}",
+                    status = HttpStatusCode.OK,
+                    expectedMessage = GENERIC_LOGIN_ERROR,
+                ),
+                ResponseFaultCase(
+                    label = "missing-refresh-token",
+                    body = """{"access_token":"$LOGIN_ACCESS_TOKEN"}""",
+                    status = HttpStatusCode.OK,
+                    expectedMessage = "Сервер не вернул refresh token",
+                ),
+                ResponseFaultCase(
+                    label = "server-503",
+                    body = """{"code":"temporarily_unavailable"}""",
+                    status = HttpStatusCode.ServiceUnavailable,
+                    expectedMessage = GENERIC_LOGIN_ERROR,
+                ),
+            )
+
+            cases.forEach { case ->
+                withHarness("login-fault-${case.label}", handler = { request ->
+                    assertEquals(TOKEN_PATH, request.url.encodedPath)
+                    respond(
+                        content = case.body,
+                        status = case.status,
+                        headers = JSON_HEADERS,
+                    )
+                }) { harness ->
+                    submitSyntheticCredentials(harness)
+
+                    assertEquals(
+                        case.expectedMessage,
+                        (harness.viewModel.queryState.value as QueryState.Error).message,
+                    )
+                    assertFalse(harness.viewModel.needsOtp.value)
+                    assertFalse(harness.viewModel.needsProject.value)
+                    assertEquals(SYNTHETIC_PASSWORD, harness.viewModel.passwordText.value)
+                    assertEquals("CREDENTIALS", harness.savedState["login.phase"])
+                    assertSavedStateContainsNoSecrets(harness.savedState)
+                    assertNoSession(harness)
+                }
+            }
+
+            withHarness(
+                label = "login-fault-timeout",
+                timeoutMillis = 50,
+                handler = { request ->
+                    assertEquals(TOKEN_PATH, request.url.encodedPath)
+                    delay(500)
+                    respond(
+                        content = """{"access_token":"$LOGIN_ACCESS_TOKEN"}""",
+                        status = HttpStatusCode.OK,
+                        headers = JSON_HEADERS,
+                    )
+                },
+            ) { harness ->
+                submitSyntheticCredentials(harness)
+
+                assertEquals(
+                    "Сервер не ответил вовремя. Попробуйте ещё раз",
+                    (harness.viewModel.queryState.value as QueryState.Error).message,
+                )
+                assertEquals("CREDENTIALS", harness.savedState["login.phase"])
+                assertSavedStateContainsNoSecrets(harness.savedState)
+                assertNoSession(harness)
+            }
+        }
+
+    @Test
+    fun otpAndProjectFaultsPreserveOnlyRetryableInMemoryState() = runBlocking {
+        listOf(
+            ResponseFaultCase(
+                label = "otp-missing-refresh",
+                body = """{"access_token":"$LOGIN_ACCESS_TOKEN"}""",
+                status = HttpStatusCode.OK,
+                expectedMessage = "Сервер не вернул refresh token",
+            ),
+            ResponseFaultCase(
+                label = "otp-malformed-token",
+                body = "{not-json",
+                status = HttpStatusCode.OK,
+                expectedMessage = GENERIC_LOGIN_ERROR,
+            ),
+            ResponseFaultCase(
+                label = "otp-server-503",
+                body = """{"message":"temporary backend detail"}""",
+                status = HttpStatusCode.ServiceUnavailable,
+                expectedMessage = GENERIC_LOGIN_ERROR,
+            ),
+        ).forEach { case ->
+            var attempts = 0
+            withHarness("login-fault-${case.label}", handler = { request ->
+                assertEquals(TOKEN_PATH, request.url.encodedPath)
+                attempts += 1
+                if (attempts == 1) {
+                    otpError("OTP required")
+                } else {
+                    assertEquals(VALID_OTP, request.headers["X-OTP"])
+                    respond(
+                        content = case.body,
+                        status = case.status,
+                        headers = JSON_HEADERS,
+                    )
+                }
+            }) { harness ->
+                harness.viewModel.onLoginChange("cassi@example.invalid")
+                harness.viewModel.onPasswordChange(SYNTHETIC_PASSWORD)
+                harness.viewModel.onLoginClick()
+                harness.viewModel.onOtpTextChange(VALID_OTP)
+                harness.viewModel.onLoginClick()
+
+                assertEquals(2, attempts)
+                assertTrue(harness.viewModel.needsOtp.value)
+                assertFalse(harness.viewModel.needsProject.value)
+                assertEquals(
+                    case.expectedMessage,
+                    (harness.viewModel.queryState.value as QueryState.Error).message,
+                )
+                assertEquals("OTP", harness.savedState["login.phase"])
+                assertSavedStateContainsNoSecrets(harness.savedState)
+                assertNoSession(harness)
+            }
+        }
+
+        listOf(
+            ResponseFaultCase(
+                label = "malformed-projects",
+                body = "{}",
+                status = HttpStatusCode.OK,
+                expectedMessage = "Сервер вернул некорректный список проектов",
+            ),
+            ResponseFaultCase(
+                label = "projects-503",
+                body = """{"message":"temporary backend detail"}""",
+                status = HttpStatusCode.ServiceUnavailable,
+                expectedMessage = "Не удалось загрузить доступные проекты",
+            ),
+        ).forEach { case ->
+            withHarness("login-fault-${case.label}", handler = { request ->
+                when (request.url.encodedPath) {
+                    TOKEN_PATH -> when (request.headers["X-OTP"]) {
+                        null -> otpError("OTP required")
+                        VALID_OTP -> respond(
+                            content =
+                                """{"access_token":"$LOGIN_ACCESS_TOKEN","refresh_token":"$PENDING_REFRESH_TOKEN"}""",
+                            status = HttpStatusCode.OK,
+                            headers = JSON_HEADERS,
+                        )
+                        else -> error("Unexpected OTP")
+                    }
+                    PROJECTS_PATH -> respond(
+                        content = case.body,
+                        status = case.status,
+                        headers = JSON_HEADERS,
+                    )
+                    else -> error("Unexpected path ${request.url.encodedPath}")
+                }
+            }) { harness ->
+                harness.viewModel.onLoginChange("cassi")
+                harness.viewModel.onPasswordChange(SYNTHETIC_PASSWORD)
+                harness.viewModel.onLoginClick()
+                harness.viewModel.onOtpTextChange(VALID_OTP)
+                harness.viewModel.onLoginClick()
+
+                assertTrue(harness.viewModel.needsOtp.value)
+                assertFalse(harness.viewModel.needsProject.value)
+                assertEquals(
+                    case.expectedMessage,
+                    (harness.viewModel.queryState.value as QueryState.Error).message,
+                )
+                assertEquals("OTP", harness.savedState["login.phase"])
+                assertSavedStateContainsNoSecrets(harness.savedState)
+                assertNoSession(harness)
+            }
+        }
+    }
+
+    @Test
+    fun delayedLoginCompletionKeepsLoadingCheckpointUntilResultArrives() =
+        runBlocking {
+            val requestStarted = CompletableDeferred<Unit>()
+            val releaseResponse = CompletableDeferred<Unit>()
+            withHarness("login-delayed-completion", handler = { request ->
+                assertEquals(TOKEN_PATH, request.url.encodedPath)
+                requestStarted.complete(Unit)
+                releaseResponse.await()
+                respond(
+                    content = """{"code":"temporarily_unavailable"}""",
+                    status = HttpStatusCode.ServiceUnavailable,
+                    headers = JSON_HEADERS,
+                )
+            }) { harness ->
+                harness.viewModel.onLoginChange("cassi")
+                harness.viewModel.onPasswordChange(SYNTHETIC_PASSWORD)
+                val request = async { harness.viewModel.onLoginClick() }
+                requestStarted.await()
+
+                assertEquals(QueryState.Loading, harness.viewModel.queryState.value)
+                assertEquals("AUTHENTICATING", harness.savedState["login.phase"])
+                assertSavedStateContainsNoSecrets(harness.savedState)
+                assertNoSession(harness)
+
+                releaseResponse.complete(Unit)
+                request.await()
+
+                assertEquals(
+                    GENERIC_LOGIN_ERROR,
+                    (harness.viewModel.queryState.value as QueryState.Error).message,
+                )
+                assertEquals("CREDENTIALS", harness.savedState["login.phase"])
+                assertSavedStateContainsNoSecrets(harness.savedState)
+                assertNoSession(harness)
+            }
+        }
+
+    @Test
+    fun projectTokenFaultsKeepPickerRetryableWithoutPersistingSession() =
+        runBlocking {
+            listOf(
+                ResponseFaultCase(
+                    label = "project-token-malformed",
+                    body = "{not-json",
+                    status = HttpStatusCode.OK,
+                    expectedMessage = "Не удалось открыть выбранный проект",
+                ),
+                ResponseFaultCase(
+                    label = "project-token-missing-access",
+                    body = "{}",
+                    status = HttpStatusCode.OK,
+                    expectedMessage = "Не удалось открыть выбранный проект",
+                ),
+                ResponseFaultCase(
+                    label = "project-token-503",
+                    body = """{"message":"temporary backend detail"}""",
+                    status = HttpStatusCode.ServiceUnavailable,
+                    expectedMessage = "Не удалось открыть выбранный проект",
+                ),
+            ).forEach { case ->
+                withHarness("login-fault-${case.label}", handler = { request ->
+                    when (request.url.encodedPath) {
+                        TOKEN_PATH -> when (requestJson(request).string("grant_type")) {
+                            "login+password" -> respondLoginSuccess()
+                            "refresh_token" -> respond(
+                                content = case.body,
+                                status = case.status,
+                                headers = JSON_HEADERS,
+                            )
+                            else -> error("Unexpected grant type")
+                        }
+                        PROJECTS_PATH -> respondProjectsSuccess()
+                        else -> error("Unexpected path ${request.url.encodedPath}")
+                    }
+                }) { harness ->
+                    submitSyntheticCredentials(harness)
+                    assertTrue(harness.viewModel.needsProject.value)
+
+                    harness.viewModel.onProjectConfirm()
+
+                    assertTrue(harness.viewModel.needsProject.value)
+                    assertEquals(PROJECT_ID, harness.viewModel.selectedProjectId.value)
+                    assertEquals(
+                        case.expectedMessage,
+                        (harness.viewModel.queryState.value as QueryState.Error).message,
+                    )
+                    assertEquals("PROJECT", harness.savedState["login.phase"])
+                    assertSavedStateContainsNoSecrets(harness.savedState)
+                    assertNoSession(harness)
+                }
+            }
+
+            withHarness(
+                label = "login-fault-project-token-timeout",
+                timeoutMillis = 50,
+                handler = { request ->
+                    when (request.url.encodedPath) {
+                        TOKEN_PATH -> when (requestJson(request).string("grant_type")) {
+                            "login+password" -> respondLoginSuccess()
+                            "refresh_token" -> {
+                                delay(500)
+                                respond(
+                                    content = "{}",
+                                    status = HttpStatusCode.OK,
+                                    headers = JSON_HEADERS,
+                                )
+                            }
+                            else -> error("Unexpected grant type")
+                        }
+                        PROJECTS_PATH -> respondProjectsSuccess()
+                        else -> error("Unexpected path ${request.url.encodedPath}")
+                    }
+                },
+            ) { harness ->
+                submitSyntheticCredentials(harness)
+                harness.viewModel.onProjectConfirm()
+
+                assertTrue(harness.viewModel.needsProject.value)
+                assertEquals(
+                    "Не удалось открыть выбранный проект",
+                    (harness.viewModel.queryState.value as QueryState.Error).message,
+                )
+                assertEquals("PROJECT", harness.savedState["login.phase"])
+                assertSavedStateContainsNoSecrets(harness.savedState)
+                assertNoSession(harness)
+            }
+        }
+
+    @Test
+    fun delayedProjectTokenCompletionKeepsPickerAndCheckpointStable() =
+        runBlocking {
+            val requestStarted = CompletableDeferred<Unit>()
+            val releaseResponse = CompletableDeferred<Unit>()
+            withHarness("login-delayed-project-token", handler = { request ->
+                when (request.url.encodedPath) {
+                    TOKEN_PATH -> when (requestJson(request).string("grant_type")) {
+                        "login+password" -> respondLoginSuccess()
+                        "refresh_token" -> {
+                            requestStarted.complete(Unit)
+                            releaseResponse.await()
+                            respond(
+                                content = """{"message":"temporary backend detail"}""",
+                                status = HttpStatusCode.ServiceUnavailable,
+                                headers = JSON_HEADERS,
+                            )
+                        }
+                        else -> error("Unexpected grant type")
+                    }
+                    PROJECTS_PATH -> respondProjectsSuccess()
+                    else -> error("Unexpected path ${request.url.encodedPath}")
+                }
+            }) { harness ->
+                submitSyntheticCredentials(harness)
+                val request = async { harness.viewModel.onProjectConfirm() }
+                requestStarted.await()
+
+                assertEquals(QueryState.Loading, harness.viewModel.queryState.value)
+                assertTrue(harness.viewModel.needsProject.value)
+                assertEquals(PROJECT_ID, harness.viewModel.selectedProjectId.value)
+                assertEquals("PROJECT", harness.savedState["login.phase"])
+                assertSavedStateContainsNoSecrets(harness.savedState)
+                assertNoSession(harness)
+
+                releaseResponse.complete(Unit)
+                request.await()
+
+                assertTrue(harness.viewModel.needsProject.value)
+                assertEquals(
+                    "Не удалось открыть выбранный проект",
+                    (harness.viewModel.queryState.value as QueryState.Error).message,
+                )
+                assertEquals("PROJECT", harness.savedState["login.phase"])
+                assertSavedStateContainsNoSecrets(harness.savedState)
+                assertNoSession(harness)
+            }
+        }
+
     private suspend fun withHarness(
         label: String,
+        timeoutMillis: Long? = null,
         handler: suspend MockRequestHandleScope.(HttpRequestData) ->
             io.ktor.client.request.HttpResponseData,
         block: suspend (LoginHarness) -> Unit,
@@ -280,6 +651,13 @@ class LoginStateMachineInstrumentedTest {
         val httpClient = HttpClient(MockEngine(handler)) {
             install(ContentNegotiation) {
                 json(REQUEST_JSON)
+            }
+            if (timeoutMillis != null) {
+                install(HttpTimeout) {
+                    requestTimeoutMillis = timeoutMillis
+                    connectTimeoutMillis = timeoutMillis
+                    socketTimeoutMillis = timeoutMillis
+                }
             }
         }
 
@@ -322,6 +700,19 @@ class LoginStateMachineInstrumentedTest {
         headers = JSON_HEADERS,
     )
 
+    private fun MockRequestHandleScope.respondLoginSuccess() = respond(
+        content =
+            """{"access_token":"$LOGIN_ACCESS_TOKEN","refresh_token":"$PENDING_REFRESH_TOKEN"}""",
+        status = HttpStatusCode.OK,
+        headers = JSON_HEADERS,
+    )
+
+    private fun MockRequestHandleScope.respondProjectsSuccess() = respond(
+        content = PROJECTS_RESPONSE,
+        status = HttpStatusCode.OK,
+        headers = JSON_HEADERS,
+    )
+
     private fun requestJson(request: HttpRequestData): JsonObject {
         val text = (request.body as TextContent).text
         return REQUEST_JSON.parseToJsonElement(text).jsonObject
@@ -329,6 +720,19 @@ class LoginStateMachineInstrumentedTest {
 
     private fun JsonObject.string(key: String): String? =
         get(key)?.jsonPrimitive?.content
+
+    private suspend fun submitSyntheticCredentials(harness: LoginHarness) {
+        harness.viewModel.onLoginChange("cassi@example.invalid")
+        harness.viewModel.onPasswordChange(SYNTHETIC_PASSWORD)
+        harness.viewModel.onLoginClick()
+    }
+
+    private suspend fun assertNoSession(harness: LoginHarness) {
+        val session = harness.repository.activeCredentialSnapshot()
+        assertNull(session.accountId)
+        assertNull(session.accessToken)
+        assertNull(session.refreshToken)
+    }
 
     private fun assertSavedStateContainsNoSecrets(savedState: SavedStateHandle) {
         assertEquals(
@@ -365,6 +769,13 @@ class LoginStateMachineInstrumentedTest {
             LoginProcessState(savedState),
         )
     }
+
+    private data class ResponseFaultCase(
+        val label: String,
+        val body: String,
+        val status: HttpStatusCode,
+        val expectedMessage: String,
+    )
 
     private class InMemoryCredentialStore : CredentialStore {
         private val values = mutableMapOf<Pair<String, Credential>, String>()
@@ -430,6 +841,7 @@ class LoginStateMachineInstrumentedTest {
         const val VALID_OTP = "123456"
         const val PENDING_REFRESH_TOKEN = "pending-refresh-token"
         const val FINAL_REFRESH_TOKEN = "final-refresh-token"
+        const val GENERIC_LOGIN_ERROR = "Не удалось выполнить вход. Попробуйте ещё раз"
         val LOGIN_ACCESS_TOKEN = jwt(USER_ID)
         val PROJECT_ACCESS_TOKEN = jwt(USER_ID, PROJECT_ID)
         val JSON_HEADERS = headersOf(

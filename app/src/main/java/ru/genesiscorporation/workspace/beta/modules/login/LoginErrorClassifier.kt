@@ -1,5 +1,7 @@
 package ru.genesiscorporation.workspace.beta.modules.login
 
+import ru.genesiscorporation.workspace.beta.data.remote.ApiErrorKind
+
 internal object LoginErrorClassifier {
     private val otpChallengePattern =
         Regex("""\b(?:otp|totp|one[-\s]?time|2fa|mfa)\b""", RegexOption.IGNORE_CASE)
@@ -21,13 +23,11 @@ internal object LoginErrorClassifier {
     fun publicMessage(
         httpStatus: Int?,
         errorCode: String,
+        errorKind: ApiErrorKind,
         safeMessage: String,
         otpProvided: Boolean,
     ): String =
         when {
-            errorCode == "REQUEST_FAILED" ->
-                "Не удалось подключиться к серверу. Проверьте соединение"
-
             otpProvided && (
                 otpChallengePattern.containsMatchIn(errorCode) ||
                     otpChallengePattern.containsMatchIn(safeMessage)
@@ -37,8 +37,12 @@ internal object LoginErrorClassifier {
             httpStatus == 401 ->
                 "Неверное имя пользователя или пароль"
 
-            safeMessage.contains("timeout", ignoreCase = true) ->
+            errorKind == ApiErrorKind.TIMEOUT ||
+                safeMessage.contains("timeout", ignoreCase = true) ->
                 "Сервер не ответил вовремя. Попробуйте ещё раз"
+
+            errorKind == ApiErrorKind.NETWORK || errorCode == "REQUEST_FAILED" ->
+                "Не удалось подключиться к серверу. Проверьте соединение"
 
             else ->
                 "Не удалось выполнить вход. Попробуйте ещё раз"

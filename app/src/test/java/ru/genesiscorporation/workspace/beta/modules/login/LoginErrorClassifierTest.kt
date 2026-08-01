@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import ru.genesiscorporation.workspace.beta.data.remote.ApiErrorKind
 
 class LoginErrorClassifierTest {
 
@@ -62,8 +63,23 @@ class LoginErrorClassifierTest {
             LoginErrorClassifier.publicMessage(
                 httpStatus = 401,
                 errorCode = "OTPInvalidCodeError",
+                errorKind = ApiErrorKind.UNAUTHORIZED,
                 safeMessage = "Invalid OTP",
                 otpProvided = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `maps typed timeout without relying on transport text`() {
+        assertEquals(
+            "Сервер не ответил вовремя. Попробуйте ещё раз",
+            LoginErrorClassifier.publicMessage(
+                httpStatus = null,
+                errorCode = "REQUEST_FAILED",
+                errorKind = ApiErrorKind.TIMEOUT,
+                safeMessage = "Operation was cancelled",
+                otpProvided = false,
             ),
         )
     }
