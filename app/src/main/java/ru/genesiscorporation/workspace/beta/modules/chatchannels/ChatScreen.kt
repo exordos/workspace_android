@@ -59,7 +59,6 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamBindingResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
-import ru.genesiscorporation.workspace.beta.modules.users.UsersScreen
 import ru.genesiscorporation.workspace.beta.modules.users.UsersViewModel
 import ru.genesiscorporation.workspace.beta.ui.AddChatToFolder
 import ru.genesiscorporation.workspace.beta.ui.CreateFolder
@@ -74,8 +73,9 @@ fun ChatScreen(
     navController: NavHostController,
 ) {
     var showDetail by rememberSaveable { mutableStateOf(false) }
-    var showUserList by rememberSaveable { mutableStateOf(false) }
-    var showNewChatChooser by rememberSaveable { mutableStateOf(false) }
+    var chatCreationPage by rememberSaveable {
+        mutableStateOf<ChatCreationPage?>(null)
+    }
     var showCreateChannel by rememberSaveable { mutableStateOf(false) }
     var folderMenuUuid by rememberSaveable { mutableStateOf<String?>(null) }
     var folderToRenameUuid by rememberSaveable { mutableStateOf<String?>(null) }
@@ -105,17 +105,32 @@ fun ChatScreen(
     val actionError by chatViewModel.actionError.collectAsStateWithLifecycle()
     val currentlySelectedStream by
         chatViewModel.currentlySelectedStream.collectAsStateWithLifecycle()
+    val streams by chatViewModel.streams.collectAsStateWithLifecycle()
     val streamBindings by chatViewModel.streamBindings.collectAsStateWithLifecycle()
     val users by chatViewModel.users.collectAsStateWithLifecycle()
     val usersViewModelFactory = remember { UsersViewModelFactory(chatViewModel.client) }
     val usersViewModel: UsersViewModel = viewModel(factory = usersViewModelFactory)
     val availableUsers by usersViewModel.users.collectAsStateWithLifecycle()
+    val availableUsersState by usersViewModel.state.collectAsStateWithLifecycle()
+    val baseUrl by
+        chatViewModel.client.userViewModel.baseUrl.collectAsStateWithLifecycle()
     val currentUserUuid by
         chatViewModel.userViewModel.userId.collectAsStateWithLifecycle()
     val colors = LocalWorkspaceColorsPalette.current
 
-    BackHandler(enabled = showDetail) {
-        showDetail = false
+    BackHandler(enabled = chatCreationPage != null || showDetail) {
+        chatCreationPage = when (chatCreationPage) {
+            ChatCreationPage.DIRECT -> if (createState is QueryState.Loading) {
+                ChatCreationPage.DIRECT
+            } else {
+                ChatCreationPage.CHOOSER
+            }
+            ChatCreationPage.CHOOSER -> null
+            null -> {
+                showDetail = false
+                null
+            }
+        }
     }
 
     LaunchedEffect(createState) {
@@ -140,7 +155,7 @@ fun ChatScreen(
                 )
             }
             showCreateChannel = false
-            showUserList = false
+            chatCreationPage = null
             chatViewModel.consumeCreatedStream()
         }
     }
@@ -158,127 +173,111 @@ fun ChatScreen(
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(colors.background)
-            .imePadding(),
-    ) {
-        MessengerTopBar(
-            detailOpen = showDetail,
-            title = currentlySelectedStream
-                ?.name
-                ?.takeIf { showDetail }
-                ?: "Мессенджер",
-            subtitle = currentlySelectedStream
-                ?.takeIf { showDetail }
-                ?.let { selected ->
-                    channelMembersSubtitle(
-                        streamUuid = selected.uuid,
-                        bindings = streamBindings,
-                        users = users,
-                    )
-                },
-            onNewChat = { showNewChatChooser = true },
-        )
-        actionError?.let { error ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 4.dp)
-                    .background(colors.infoCardBackground, RoundedCornerShape(8.dp))
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = error,
-                    color = colors.indicatorRed,
-                    fontSize = 12.sp,
-                    lineHeight = 16.sp,
-                    modifier = Modifier.weight(1f),
-                )
-                Text(
-                    text = "Закрыть",
-                    color = colors.primary,
-                    fontSize = 12.sp,
-                    modifier = Modifier
-                        .clickable(onClick = chatViewModel::clearActionError)
-                        .padding(8.dp),
-                )
-            }
-        }
-        SearchField(
-            value = searchQuery,
-            onValueChange = {
-                showDetail = false
-                chatViewModel.onSearchQueryChange(it)
+    when (chatCreationPage) {
+        ChatCreationPage.CHOOSER -> NewChatChooserScreen(
+            streams = streams,
+            streamBindings = streamBindings,
+            currentUserUuid = currentUserUuid,
+            onBack = { chatCreationPage = null },
+            onStartDirect = { chatCreationPage = ChatCreationPage.DIRECT },
+            onCreateChannel = {
+                chatCreationPage = null
+                showCreateChannel = true
+            },
+            onOpenChannel = { stream ->
+                chatCreationPage = null
+                navController.navigate(ChatFlow.ChannelInfo(stream.uuid))
             },
         )
-        FolderTabs(
-            folders = folders,
-            selected = currentlySelectedFolder,
-            onSelected = { folder ->
-                showDetail = false
-                chatViewModel.updateCurrentlySelectedFolder(folder)
-            },
-            onAddFolder = {
-                navController.navigate(ChatFlow.FolderDisplay) {
-                    launchSingleTop = true
-                }
-            },
-            onManageFolder = { folderMenuUuid = it.uuid },
-        )
-        ChatWithTopics(
-            chatViewModel = chatViewModel,
-            navController = navController,
-            showDetail = showDetail,
-            onShowDetailChange = { showDetail = it },
-        )
-    }
 
-    if (showUserList) {
-        UsersScreen(
-            usersViewModel,
-            onUserSelected = { userResponse ->
-                showUserList = false
-                chatViewModel.createPrivateStream(userResponse)
-            },
-            onDismiss = { showUserList = false },
+        ChatCreationPage.DIRECT -> DirectChatPickerScreen(
+            users = availableUsers,
+            catalogState = availableUsersState,
+            createState = createState,
+            baseUrl = baseUrl.orEmpty(),
+            onBack = { chatCreationPage = ChatCreationPage.CHOOSER },
+            onClose = { chatCreationPage = null },
+            onRetry = usersViewModel::retry,
+            onUserSelected = chatViewModel::createPrivateStream,
         )
-    }
-    if (showNewChatChooser) {
-        AlertDialog(
-            onDismissRequest = { showNewChatChooser = false },
-            title = { Text("Новый чат") },
-            text = {
-                Column {
-                    TextButton(
-                        onClick = {
-                            showNewChatChooser = false
-                            showUserList = true
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("Личный чат")
-                    }
-                    TextButton(
-                        onClick = {
-                            showNewChatChooser = false
-                            showCreateChannel = true
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("Канал")
-                    }
+
+        null -> Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(colors.background)
+                .imePadding(),
+        ) {
+            MessengerTopBar(
+                detailOpen = showDetail,
+                title = currentlySelectedStream
+                    ?.name
+                    ?.takeIf { showDetail }
+                    ?: "Мессенджер",
+                subtitle = currentlySelectedStream
+                    ?.takeIf { showDetail }
+                    ?.let { selected ->
+                        channelMembersSubtitle(
+                            streamUuid = selected.uuid,
+                            bindings = streamBindings,
+                            users = users,
+                        )
+                    },
+                onNewChat = { chatCreationPage = ChatCreationPage.CHOOSER },
+            )
+            actionError?.let { error ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                        .background(colors.infoCardBackground, RoundedCornerShape(8.dp))
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = error,
+                        color = colors.indicatorRed,
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = "Закрыть",
+                        color = colors.primary,
+                        fontSize = 12.sp,
+                        modifier = Modifier
+                            .clickable(onClick = chatViewModel::clearActionError)
+                            .padding(8.dp),
+                    )
                 }
-            },
-            confirmButton = {},
-            dismissButton = {
-                TextButton(onClick = { showNewChatChooser = false }) {
-                    Text("Отмена")
-                }
-            },
-        )
+            }
+            SearchField(
+                value = searchQuery,
+                onValueChange = {
+                    showDetail = false
+                    chatViewModel.onSearchQueryChange(it)
+                },
+            )
+            FolderTabs(
+                folders = folders,
+                selected = currentlySelectedFolder,
+                onSelected = { folder ->
+                    showDetail = false
+                    chatViewModel.updateCurrentlySelectedFolder(folder)
+                },
+                onAddFolder = {
+                    navController.navigate(ChatFlow.FolderDisplay) {
+                        launchSingleTop = true
+                    }
+                },
+                onManageFolder = { folderMenuUuid = it.uuid },
+            )
+            ChatWithTopics(
+                chatViewModel = chatViewModel,
+                navController = navController,
+                showDetail = showDetail,
+                onShowDetailChange = { showDetail = it },
+            )
+        }
     }
     if (showCreateChannel) {
         CreateChannelDialog(
