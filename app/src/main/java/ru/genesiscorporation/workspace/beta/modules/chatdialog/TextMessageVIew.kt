@@ -1,5 +1,6 @@
 package ru.genesiscorporation.workspace.beta.modules.chatdialog
 
+import android.view.WindowManager
 import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -23,6 +24,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -33,6 +35,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -45,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import ru.genesiscorporation.workspace.beta.ChatFlow
@@ -65,12 +69,19 @@ fun TextMessageView(
     onToggleSelection: () -> Unit = {},
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
+    val openMenu = {
+        menuExpanded = true
+        viewModel.openMessageMenu(item.uuid)
+    }
+    val closeMenu = {
+        menuExpanded = false
+        viewModel.closeMessageMenu(item.uuid)
+    }
     val context = LocalContext.current
     val deletingMessages by
         viewModel.deletingMessageUuids.collectAsStateWithLifecycle()
     val hasReplySession by
         viewModel.hasReplySession.collectAsStateWithLifecycle()
-    val colors = LocalWorkspaceColorsPalette.current
 
     MessageRow(
         item = item,
@@ -78,43 +89,16 @@ fun TextMessageView(
         navController = navController,
     ) {
         Box {
-            Column(
-                modifier = Modifier
-                    .widthIn(max = 310.dp)
-                    .background(
-                        if (item.isOwn) colors.messageOwnBackground else colors.messageBackground,
-                        messageBubbleShape(item.isOwn),
-                    )
-                    .pointerInput(item.uuid) {
-                        detectTapGestures(
-                            onLongPress = { menuExpanded = true },
-                        )
-                    }
-                    .semantics {
-                        onLongClick(label = "Действия с сообщением") {
-                            menuExpanded = true
-                            true
-                        }
-                    }
-                    .padding(horizontal = 10.dp, vertical = 8.dp),
-            ) {
-                MessageHeader(item, viewModel)
-                EnhancedMarkdown(
-                    markdown = item.payload.content,
-                    style = TextStyle(
-                        color = colors.textHeaders,
-                        fontSize = 13.sp,
-                        lineHeight = 17.sp,
-                    ),
-                    navController = navController,
-                    viewModel = viewModel,
-                )
-                MessageFooter(item)
-            }
+            TextMessageBubble(
+                item = item,
+                viewModel = viewModel,
+                navController = navController,
+                onOpenMenu = openMenu,
+            )
             MessageActionsMenu(
                 expanded = menuExpanded,
                 item = item,
-                onDismiss = { menuExpanded = false },
+                onDismiss = closeMenu,
                 onReaction = { reaction ->
                     viewModel.onMessageReactionTap(
                         messageUuid = item.uuid,
@@ -122,28 +106,28 @@ fun TextMessageView(
                         equivalentEmojiNames =
                             reaction.equivalentEmojiNames,
                     )
-                    menuExpanded = false
+                    closeMenu()
                 },
                 onOpenReactionPicker = {
-                    menuExpanded = false
+                    closeMenu()
                     viewModel.openMessageReactionPicker(item.uuid)
                 },
                 onEdit = {
                     viewModel.onEditMessageClicked(item)
-                    menuExpanded = false
+                    closeMenu()
                 },
                 isDeleting = item.uuid in deletingMessages,
                 onDelete = {
                     viewModel.deleteMessage(item)
-                    menuExpanded = false
+                    closeMenu()
                 },
                 onCopy = {
                     viewModel.copyMessageText(context, item)
-                    menuExpanded = false
+                    closeMenu()
                 },
                 onQuote = {
                     viewModel.onQuoteMessageClicked(item)
-                    menuExpanded = false
+                    closeMenu()
                 },
                 onQuoteFragment = { fragment ->
                     viewModel.onQuoteMessageClicked(item, fragment)
@@ -151,22 +135,87 @@ fun TextMessageView(
                 canAddReply = hasReplySession,
                 onAddQuote = {
                     viewModel.onAddQuoteMessageClicked(item)
-                    menuExpanded = false
+                    closeMenu()
                 },
                 onAddQuoteFragment = { fragment ->
                     viewModel.onAddQuoteMessageClicked(item, fragment)
                 },
                 onForward = {
                     viewModel.beginForward(item)
-                    menuExpanded = false
+                    closeMenu()
                 },
                 isSelected = isSelected,
                 onToggleSelection = {
                     onToggleSelection()
-                    menuExpanded = false
+                    closeMenu()
+                },
+                highlightedMessage = {
+                    MessageRow(
+                        item = item,
+                        viewModel = viewModel,
+                        navController = navController,
+                    ) {
+                        TextMessageBubble(
+                            item = item,
+                            viewModel = viewModel,
+                            navController = navController,
+                            onOpenMenu = null,
+                        )
+                    }
                 },
             )
         }
+    }
+}
+
+@Composable
+private fun TextMessageBubble(
+    item: MessageResponse,
+    viewModel: ChatDialogViewModel,
+    navController: NavHostController,
+    onOpenMenu: (() -> Unit)?,
+) {
+    val colors = LocalWorkspaceColorsPalette.current
+    val interactionModifier = if (onOpenMenu == null) {
+        Modifier
+    } else {
+        Modifier
+            .pointerInput(item.uuid) {
+                detectTapGestures(onLongPress = { onOpenMenu() })
+            }
+            .semantics {
+                onLongClick(label = "Действия с сообщением") {
+                    onOpenMenu()
+                    true
+                }
+            }
+    }
+    Column(
+        modifier = Modifier
+            .widthIn(max = 310.dp)
+            .background(
+                if (item.isOwn) {
+                    colors.messageOwnBackground
+                } else {
+                    colors.messageBackground
+                },
+                messageBubbleShape(item.isOwn),
+            )
+            .then(interactionModifier)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+    ) {
+        MessageHeader(item, viewModel)
+        EnhancedMarkdown(
+            markdown = item.payload.content,
+            style = TextStyle(
+                color = colors.textHeaders,
+                fontSize = 13.sp,
+                lineHeight = 17.sp,
+            ),
+            navController = navController,
+            viewModel = viewModel,
+        )
+        MessageFooter(item)
     }
 }
 
@@ -308,6 +357,7 @@ internal fun MessageActionsMenu(
     onForward: () -> Unit,
     isSelected: Boolean,
     onToggleSelection: () -> Unit,
+    highlightedMessage: (@Composable () -> Unit)? = null,
 ) {
     var confirmDelete by remember(item.uuid) { mutableStateOf(false) }
     var fragmentAdding by remember(item.uuid) {
@@ -316,6 +366,9 @@ internal fun MessageActionsMenu(
     val moreReactionDescription =
         stringResource(R.string.message_reaction_more)
     if (expanded) {
+        DisposableEffect(item.uuid) {
+            onDispose { onDismiss() }
+        }
         val colors = LocalWorkspaceColorsPalette.current
         val actionEnabled = !isDeleting
         Dialog(
@@ -326,12 +379,30 @@ internal fun MessageActionsMenu(
                 usePlatformDefaultWidth = false,
             ),
         ) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
+            MessageMenuDialogWindowEffects()
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(
+                        horizontal = MESSAGE_ACTION_OVERLAY_HORIZONTAL_PADDING,
+                        vertical = 24.dp,
+                    ),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = if (item.isOwn) {
+                    Alignment.End
+                } else {
+                    Alignment.Start
+                },
             ) {
                 Column(
                     modifier = Modifier
+                        .then(
+                            if (item.isOwn) {
+                                Modifier
+                            } else {
+                                Modifier.padding(start = MESSAGE_AVATAR_SPACE)
+                            },
+                        )
                         .width(MESSAGE_ACTION_MENU_WIDTH)
                         .clip(MESSAGE_ACTION_MENU_SHAPE)
                         .background(colors.cardBackgroundActive)
@@ -488,6 +559,18 @@ internal fun MessageActionsMenu(
                         )
                     }
                 }
+                highlightedMessage?.let { message ->
+                    Spacer(Modifier.height(4.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .semantics {
+                                contentDescription = "Выбранное сообщение"
+                            },
+                    ) {
+                        message()
+                    }
+                }
             }
         }
     }
@@ -533,6 +616,21 @@ internal fun MessageActionsMenu(
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun MessageMenuDialogWindowEffects() {
+    val dialogView = LocalView.current
+    DisposableEffect(dialogView) {
+        val window = (dialogView.parent as? DialogWindowProvider)?.window
+        if (window != null) {
+            val attributes = window.attributes
+            attributes.dimAmount = 0f
+            window.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            window.attributes = attributes
+        }
+        onDispose {}
     }
 }
 
@@ -650,6 +748,9 @@ private val QUICK_REACTIONS = listOf(
 
 private val MESSAGE_ACTION_MENU_WIDTH = 226.dp
 private val MESSAGE_ACTION_MENU_SHAPE = RoundedCornerShape(10.dp)
+private val MESSAGE_ACTION_OVERLAY_HORIZONTAL_PADDING = 14.dp
+private val MESSAGE_AVATAR_SPACE = 44.dp
+internal val MESSAGE_BACKGROUND_BLUR_RADIUS = 18.dp
 
 internal fun canMutateNativeMessage(item: MessageResponse): Boolean =
         item.isOwn &&

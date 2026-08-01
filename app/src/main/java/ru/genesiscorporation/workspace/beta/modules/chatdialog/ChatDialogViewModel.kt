@@ -235,6 +235,9 @@ class ChatDialogViewModel(
     private val _selectedMessageUuids = MutableStateFlow<List<String>>(emptyList())
     internal val selectedMessageUuids: StateFlow<List<String>> =
         _selectedMessageUuids
+    private val _activeMessageMenuUuid = MutableStateFlow<String?>(null)
+    internal val activeMessageMenuUuid: StateFlow<String?> =
+        _activeMessageMenuUuid
     private val _loadingOlderMessages = MutableStateFlow(false)
     val loadingOlderMessages: StateFlow<Boolean> = _loadingOlderMessages
     private val _hasOlderMessages = MutableStateFlow(false)
@@ -604,6 +607,16 @@ class ChatDialogViewModel(
 
     internal fun clearMessageSelection() {
         _selectedMessageUuids.value = emptyList()
+    }
+
+    internal fun openMessageMenu(messageUuid: String) {
+        _activeMessageMenuUuid.value = messageUuid
+    }
+
+    internal fun closeMessageMenu(messageUuid: String) {
+        if (_activeMessageMenuUuid.value == messageUuid) {
+            _activeMessageMenuUuid.value = null
+        }
     }
 
     internal fun reconcileMessageSelection(availableMessageUuids: Set<String>) {

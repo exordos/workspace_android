@@ -69,6 +69,14 @@ fun ImageMessageView(
 ) {
     var fullscreenImageIndex by rememberSaveable { mutableStateOf<Int?>(null) }
     var menuExpanded by remember { mutableStateOf(false) }
+    val openMenu = {
+        menuExpanded = true
+        viewModel.openMessageMenu(item.uuid)
+    }
+    val closeMenu = {
+        menuExpanded = false
+        viewModel.closeMessageMenu(item.uuid)
+    }
     val deletingMessages by
         viewModel.deletingMessageUuids.collectAsStateWithLifecycle()
     val hasReplySession by
@@ -117,6 +125,86 @@ fun ImageMessageView(
                 .build()
         }
     }
+    val messageBubble: @Composable (Boolean) -> Unit = { interactive ->
+        val interactionModifier = if (interactive) {
+            Modifier
+                .pointerInput(item.uuid) {
+                    detectTapGestures(onLongPress = { openMenu() })
+                }
+                .semantics {
+                    onLongClick(label = "Действия с сообщением") {
+                        openMenu()
+                        true
+                    }
+                }
+        } else {
+            Modifier
+        }
+        Column(
+            modifier = Modifier
+                .widthIn(max = 300.dp)
+                .background(
+                    if (item.isOwn) {
+                        colors.messageOwnBackground
+                    } else {
+                        colors.messageBackground
+                    },
+                    messageBubbleShape(item.isOwn),
+                )
+                .then(interactionModifier)
+                .padding(10.dp),
+        ) {
+            MessageHeader(item, viewModel)
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                imageRequests.forEachIndexed { index, imageRequest ->
+                    AsyncImage(
+                        model = imageRequest,
+                        contentDescription = "Изображение в сообщении",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .width(230.dp)
+                            .then(
+                                if (imageRequests.size == 1) {
+                                    Modifier.heightIn(min = 120.dp, max = 280.dp)
+                                } else {
+                                    Modifier.height(150.dp)
+                                },
+                            )
+                            .clip(RoundedCornerShape(9.dp))
+                            .background(colors.background, RoundedCornerShape(9.dp))
+                            .then(
+                                if (interactive) {
+                                    Modifier.combinedClickable(
+                                        onClick = { fullscreenImageIndex = index },
+                                        onLongClick = { openMenu() },
+                                    )
+                                } else {
+                                    Modifier
+                                },
+                            ),
+                        onState = { state ->
+                            if (
+                                interactive &&
+                                state is AsyncImagePainter.State.Success
+                            ) {
+                                onImageLoad()
+                            }
+                        },
+                    )
+                }
+            }
+            if (text.isNotBlank()) {
+                Text(
+                    text = text,
+                    color = colors.textHeaders,
+                    fontSize = 13.sp,
+                    lineHeight = 17.sp,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+            MessageFooter(item)
+        }
+    }
 
     MessageRow(
         item = item,
@@ -124,67 +212,11 @@ fun ImageMessageView(
         navController = navController,
     ) {
         Box {
-            Column(
-                modifier = Modifier
-                    .widthIn(max = 300.dp)
-                    .background(
-                        if (item.isOwn) colors.messageOwnBackground else colors.messageBackground,
-                        messageBubbleShape(item.isOwn),
-                    )
-                    .pointerInput(item.uuid) {
-                        detectTapGestures(onLongPress = { menuExpanded = true })
-                    }
-                    .semantics {
-                        onLongClick(label = "Действия с сообщением") {
-                            menuExpanded = true
-                            true
-                        }
-                    }
-                    .padding(10.dp),
-            ) {
-                MessageHeader(item, viewModel)
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    imageRequests.forEachIndexed { index, imageRequest ->
-                        AsyncImage(
-                            model = imageRequest,
-                            contentDescription = "Изображение в сообщении",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier
-                                .width(230.dp)
-                                .then(
-                                    if (imageRequests.size == 1) {
-                                        Modifier.heightIn(min = 120.dp, max = 280.dp)
-                                    } else {
-                                        Modifier.height(150.dp)
-                                    },
-                                )
-                                .clip(RoundedCornerShape(9.dp))
-                                .background(colors.background, RoundedCornerShape(9.dp))
-                                .combinedClickable(
-                                    onClick = { fullscreenImageIndex = index },
-                                    onLongClick = { menuExpanded = true },
-                                ),
-                            onState = { state ->
-                                if (state is AsyncImagePainter.State.Success) onImageLoad()
-                            },
-                        )
-                    }
-                }
-                if (text.isNotBlank()) {
-                    Text(
-                        text = text,
-                        color = colors.textHeaders,
-                        fontSize = 13.sp,
-                        lineHeight = 17.sp,
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
-                }
-                MessageFooter(item)
-            }
+            messageBubble(true)
             MessageActionsMenu(
                 expanded = menuExpanded,
                 item = item,
-                onDismiss = { menuExpanded = false },
+                onDismiss = closeMenu,
                 onReaction = { reaction ->
                     viewModel.onMessageReactionTap(
                         messageUuid = item.uuid,
@@ -192,28 +224,28 @@ fun ImageMessageView(
                         equivalentEmojiNames =
                             reaction.equivalentEmojiNames,
                     )
-                    menuExpanded = false
+                    closeMenu()
                 },
                 onOpenReactionPicker = {
-                    menuExpanded = false
+                    closeMenu()
                     viewModel.openMessageReactionPicker(item.uuid)
                 },
                 onEdit = {
                     viewModel.onEditMessageClicked(item)
-                    menuExpanded = false
+                    closeMenu()
                 },
                 isDeleting = item.uuid in deletingMessages,
                 onDelete = {
                     viewModel.deleteMessage(item)
-                    menuExpanded = false
+                    closeMenu()
                 },
                 onCopy = {
                     viewModel.copyMessageText(context, item)
-                    menuExpanded = false
+                    closeMenu()
                 },
                 onQuote = {
                     viewModel.onQuoteMessageClicked(item)
-                    menuExpanded = false
+                    closeMenu()
                 },
                 onQuoteFragment = { fragment ->
                     viewModel.onQuoteMessageClicked(item, fragment)
@@ -221,19 +253,28 @@ fun ImageMessageView(
                 canAddReply = hasReplySession,
                 onAddQuote = {
                     viewModel.onAddQuoteMessageClicked(item)
-                    menuExpanded = false
+                    closeMenu()
                 },
                 onAddQuoteFragment = { fragment ->
                     viewModel.onAddQuoteMessageClicked(item, fragment)
                 },
                 onForward = {
                     viewModel.beginForward(item)
-                    menuExpanded = false
+                    closeMenu()
                 },
                 isSelected = isSelected,
                 onToggleSelection = {
                     onToggleSelection()
-                    menuExpanded = false
+                    closeMenu()
+                },
+                highlightedMessage = {
+                    MessageRow(
+                        item = item,
+                        viewModel = viewModel,
+                        navController = navController,
+                    ) {
+                        messageBubble(false)
+                    }
                 },
             )
         }

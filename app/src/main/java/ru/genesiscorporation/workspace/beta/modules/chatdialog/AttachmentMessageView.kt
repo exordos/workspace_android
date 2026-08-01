@@ -46,6 +46,14 @@ fun AttachmentMessageView(
     onToggleSelection: () -> Unit = {},
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
+    val openMenu = {
+        menuExpanded = true
+        viewModel.openMessageMenu(item.uuid)
+    }
+    val closeMenu = {
+        menuExpanded = false
+        viewModel.closeMessageMenu(item.uuid)
+    }
     val downloadingUuid by viewModel.downloadingAttachmentUuid.collectAsStateWithLifecycle()
     val deletingMessages by
         viewModel.deletingMessageUuids.collectAsStateWithLifecycle()
@@ -53,6 +61,101 @@ fun AttachmentMessageView(
         viewModel.hasReplySession.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val colors = LocalWorkspaceColorsPalette.current
+    val messageBubble: @Composable (Boolean) -> Unit = { interactive ->
+        val interactionModifier = if (interactive) {
+            Modifier
+                .pointerInput(item.uuid) {
+                    detectTapGestures(onLongPress = { openMenu() })
+                }
+                .semantics {
+                    onLongClick(label = "Действия с сообщением") {
+                        openMenu()
+                        true
+                    }
+                }
+        } else {
+            Modifier
+        }
+        Column(
+            modifier = Modifier
+                .widthIn(max = 310.dp)
+                .background(
+                    if (item.isOwn) {
+                        colors.messageOwnBackground
+                    } else {
+                        colors.messageBackground
+                    },
+                    messageBubbleShape(item.isOwn),
+                )
+                .then(interactionModifier)
+                .padding(10.dp),
+        ) {
+            MessageHeader(item, viewModel)
+            attachments.forEach { attachment ->
+                val downloading = downloadingUuid == attachment.uuid
+                Row(
+                    modifier = Modifier
+                        .padding(vertical = 3.dp)
+                        .background(colors.background, RoundedCornerShape(9.dp))
+                        .then(
+                            if (interactive) {
+                                Modifier.combinedClickable(
+                                    enabled = downloadingUuid == null,
+                                    onClick = {
+                                        viewModel.openAttachment(context, attachment)
+                                    },
+                                    onLongClick = { openMenu() },
+                                )
+                            } else {
+                                Modifier
+                            },
+                        )
+                        .padding(horizontal = 10.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.attach_file),
+                        contentDescription = null,
+                        tint = colors.iconBase,
+                        modifier = Modifier.size(30.dp),
+                    )
+                    Spacer(Modifier.size(8.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = attachment.fileName,
+                            color = colors.textHeaders,
+                            fontSize = 13.sp,
+                            lineHeight = 17.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = if (downloading) {
+                                "Загрузка…"
+                            } else {
+                                attachment.sizeBytes?.let(::formatAttachmentSize)
+                                    ?: attachment.contentType
+                            },
+                            color = colors.textAdditional50,
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+            if (text.isNotBlank()) {
+                Text(
+                    text = text,
+                    color = colors.textHeaders,
+                    fontSize = 13.sp,
+                    lineHeight = 17.sp,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+            }
+            MessageFooter(item)
+        }
+    }
 
     MessageRow(
         item = item,
@@ -60,87 +163,11 @@ fun AttachmentMessageView(
         navController = navController,
     ) {
         androidx.compose.foundation.layout.Box {
-            Column(
-                modifier = Modifier
-                    .widthIn(max = 310.dp)
-                    .background(
-                        if (item.isOwn) colors.messageOwnBackground else colors.messageBackground,
-                        messageBubbleShape(item.isOwn),
-                    )
-                    .pointerInput(item.uuid) {
-                        detectTapGestures(onLongPress = { menuExpanded = true })
-                    }
-                    .semantics {
-                        onLongClick(label = "Действия с сообщением") {
-                            menuExpanded = true
-                            true
-                        }
-                    }
-                    .padding(10.dp),
-            ) {
-                MessageHeader(item, viewModel)
-                attachments.forEach { attachment ->
-                    val downloading = downloadingUuid == attachment.uuid
-                    Row(
-                        modifier = Modifier
-                            .padding(vertical = 3.dp)
-                            .background(colors.background, RoundedCornerShape(9.dp))
-                            .combinedClickable(
-                                enabled = downloadingUuid == null,
-                                onClick = {
-                                    viewModel.openAttachment(context, attachment)
-                                },
-                                onLongClick = { menuExpanded = true },
-                            )
-                            .padding(horizontal = 10.dp, vertical = 9.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            painter = painterResource(R.drawable.attach_file),
-                            contentDescription = null,
-                            tint = colors.iconBase,
-                            modifier = Modifier.size(30.dp),
-                        )
-                        Spacer(Modifier.size(8.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = attachment.fileName,
-                                color = colors.textHeaders,
-                                fontSize = 13.sp,
-                                lineHeight = 17.sp,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                text = if (downloading) {
-                                    "Загрузка…"
-                                } else {
-                                    attachment.sizeBytes?.let(::formatAttachmentSize)
-                                        ?: attachment.contentType
-                                },
-                                color = colors.textAdditional50,
-                                fontSize = 11.sp,
-                                maxLines = 1,
-                            )
-                        }
-                    }
-                }
-                if (text.isNotBlank()) {
-                    Text(
-                        text = text,
-                        color = colors.textHeaders,
-                        fontSize = 13.sp,
-                        lineHeight = 17.sp,
-                        modifier = Modifier.padding(top = 6.dp),
-                    )
-                }
-                MessageFooter(item)
-            }
+            messageBubble(true)
             MessageActionsMenu(
                 expanded = menuExpanded,
                 item = item,
-                onDismiss = { menuExpanded = false },
+                onDismiss = closeMenu,
                 onReaction = { reaction ->
                     viewModel.onMessageReactionTap(
                         messageUuid = item.uuid,
@@ -148,28 +175,28 @@ fun AttachmentMessageView(
                         equivalentEmojiNames =
                             reaction.equivalentEmojiNames,
                     )
-                    menuExpanded = false
+                    closeMenu()
                 },
                 onOpenReactionPicker = {
-                    menuExpanded = false
+                    closeMenu()
                     viewModel.openMessageReactionPicker(item.uuid)
                 },
                 onEdit = {
                     viewModel.onEditMessageClicked(item)
-                    menuExpanded = false
+                    closeMenu()
                 },
                 isDeleting = item.uuid in deletingMessages,
                 onDelete = {
                     viewModel.deleteMessage(item)
-                    menuExpanded = false
+                    closeMenu()
                 },
                 onCopy = {
                     viewModel.copyMessageText(context, item)
-                    menuExpanded = false
+                    closeMenu()
                 },
                 onQuote = {
                     viewModel.onQuoteMessageClicked(item)
-                    menuExpanded = false
+                    closeMenu()
                 },
                 onQuoteFragment = { fragment ->
                     viewModel.onQuoteMessageClicked(item, fragment)
@@ -177,19 +204,28 @@ fun AttachmentMessageView(
                 canAddReply = hasReplySession,
                 onAddQuote = {
                     viewModel.onAddQuoteMessageClicked(item)
-                    menuExpanded = false
+                    closeMenu()
                 },
                 onAddQuoteFragment = { fragment ->
                     viewModel.onAddQuoteMessageClicked(item, fragment)
                 },
                 onForward = {
                     viewModel.beginForward(item)
-                    menuExpanded = false
+                    closeMenu()
                 },
                 isSelected = isSelected,
                 onToggleSelection = {
                     onToggleSelection()
-                    menuExpanded = false
+                    closeMenu()
+                },
+                highlightedMessage = {
+                    MessageRow(
+                        item = item,
+                        viewModel = viewModel,
+                        navController = navController,
+                    ) {
+                        messageBubble(false)
+                    }
                 },
             )
         }

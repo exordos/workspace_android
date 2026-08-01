@@ -56,6 +56,8 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
@@ -177,6 +179,8 @@ fun ChatDialogScreen(
         viewModel.forwardDialogState.collectAsStateWithLifecycle()
     val selectedMessageUuids by
         viewModel.selectedMessageUuids.collectAsStateWithLifecycle()
+    val activeMessageMenuUuid by
+        viewModel.activeMessageMenuUuid.collectAsStateWithLifecycle()
     val reactionPickerMessageUuid by
         viewModel.reactionPickerMessageUuid.collectAsStateWithLifecycle()
     val currentTopic by viewModel.currentTopic.collectAsStateWithLifecycle()
@@ -609,6 +613,16 @@ fun ChatDialogScreen(
     }
 
     Scaffold(
+        modifier = Modifier.then(
+            if (activeMessageMenuUuid == null) {
+                Modifier
+            } else {
+                Modifier.blur(
+                    radius = MESSAGE_BACKGROUND_BLUR_RADIUS,
+                    edgeTreatment = BlurredEdgeTreatment.Unbounded,
+                )
+            },
+        ),
         containerColor = LocalWorkspaceColorsPalette.current.background,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {

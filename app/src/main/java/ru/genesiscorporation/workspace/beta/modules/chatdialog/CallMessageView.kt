@@ -43,6 +43,14 @@ fun CallMessageView(
     onToggleSelection: () -> Unit = {},
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
+    val openMenu = {
+        menuExpanded = true
+        viewModel.openMessageMenu(item.uuid)
+    }
+    val closeMenu = {
+        menuExpanded = false
+        viewModel.closeMessageMenu(item.uuid)
+    }
     val deletingMessages by
         viewModel.deletingMessageUuids.collectAsStateWithLifecycle()
     val hasReplySession by
@@ -65,6 +73,73 @@ fun CallMessageView(
         null
     }
     val canJoin = joinTarget != null
+    val messageBubble: @Composable (Boolean) -> Unit = { interactive ->
+        Column(
+            modifier = Modifier
+                .widthIn(max = 310.dp)
+                .background(
+                    colors.messageActiveCallBackground,
+                    messageBubbleShape(item.isOwn),
+                )
+                .then(
+                    if (interactive) {
+                        Modifier.combinedClickable(
+                            onClick = {
+                                joinTarget?.let { (serverUrl, targetRoomName) ->
+                                    val options = JitsiMeetConferenceOptions.Builder()
+                                        .setServerURL(serverUrl)
+                                        .setRoom(targetRoomName)
+                                        .build()
+                                    JitsiMeetActivity.launch(context, options)
+                                } ?: openMenu()
+                            },
+                            onLongClick = { openMenu() },
+                        )
+                    } else {
+                        Modifier
+                    },
+                )
+                .padding(horizontal = 11.dp, vertical = 9.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Звонок",
+                    color = colors.indicatorGreen,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = itemUrl?.path?.drop(1).orEmpty().ifBlank { "Workspace" },
+                    color = colors.textHeaders,
+                    fontSize = 13.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(horizontal = 12.dp),
+                )
+                Icon(
+                    painter = painterResource(R.drawable.call),
+                    contentDescription = if (canJoin) {
+                        "Присоединиться к звонку"
+                    } else {
+                        "Звонок недоступен"
+                    },
+                    tint = if (canJoin) {
+                        colors.indicatorGreen
+                    } else {
+                        colors.iconDisable
+                    },
+                )
+            }
+            Spacer(Modifier.padding(top = 2.dp))
+            MessageHeader(item, viewModel)
+            MessageFooter(item)
+        }
+    }
 
     MessageRow(
         item = item,
@@ -72,67 +147,11 @@ fun CallMessageView(
         navController = navController,
     ) {
         Box {
-            Column(
-                modifier = Modifier
-                    .widthIn(max = 310.dp)
-                    .background(
-                        colors.messageActiveCallBackground,
-                        messageBubbleShape(item.isOwn),
-                    )
-                    .combinedClickable(
-                        onClick = {
-                            joinTarget?.let { (serverUrl, targetRoomName) ->
-                                val options = JitsiMeetConferenceOptions.Builder()
-                                    .setServerURL(serverUrl)
-                                    .setRoom(targetRoomName)
-                                    .build()
-                                JitsiMeetActivity.launch(context, options)
-                            } ?: run {
-                                menuExpanded = true
-                            }
-                        },
-                        onLongClick = { menuExpanded = true },
-                    )
-                    .padding(horizontal = 11.dp, vertical = 9.dp),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = "Звонок",
-                        color = colors.indicatorGreen,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        text = itemUrl?.path?.drop(1).orEmpty().ifBlank { "Workspace" },
-                        color = colors.textHeaders,
-                        fontSize = 13.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(horizontal = 12.dp),
-                    )
-                    Icon(
-                        painter = painterResource(R.drawable.call),
-                        contentDescription = if (canJoin) {
-                            "Присоединиться к звонку"
-                        } else {
-                            "Звонок недоступен"
-                        },
-                        tint = if (canJoin) colors.indicatorGreen else colors.iconDisable,
-                    )
-                }
-                Spacer(Modifier.padding(top = 2.dp))
-                MessageHeader(item, viewModel)
-                MessageFooter(item)
-            }
+            messageBubble(true)
             MessageActionsMenu(
                 expanded = menuExpanded,
                 item = item,
-                onDismiss = { menuExpanded = false },
+                onDismiss = closeMenu,
                 onReaction = { reaction ->
                     viewModel.onMessageReactionTap(
                         messageUuid = item.uuid,
@@ -140,28 +159,28 @@ fun CallMessageView(
                         equivalentEmojiNames =
                             reaction.equivalentEmojiNames,
                     )
-                    menuExpanded = false
+                    closeMenu()
                 },
                 onOpenReactionPicker = {
-                    menuExpanded = false
+                    closeMenu()
                     viewModel.openMessageReactionPicker(item.uuid)
                 },
                 onEdit = {
                     viewModel.onEditMessageClicked(item)
-                    menuExpanded = false
+                    closeMenu()
                 },
                 isDeleting = item.uuid in deletingMessages,
                 onDelete = {
                     viewModel.deleteMessage(item)
-                    menuExpanded = false
+                    closeMenu()
                 },
                 onCopy = {
                     viewModel.copyMessageText(context, item)
-                    menuExpanded = false
+                    closeMenu()
                 },
                 onQuote = {
                     viewModel.onQuoteMessageClicked(item)
-                    menuExpanded = false
+                    closeMenu()
                 },
                 onQuoteFragment = { fragment ->
                     viewModel.onQuoteMessageClicked(item, fragment)
@@ -169,19 +188,28 @@ fun CallMessageView(
                 canAddReply = hasReplySession,
                 onAddQuote = {
                     viewModel.onAddQuoteMessageClicked(item)
-                    menuExpanded = false
+                    closeMenu()
                 },
                 onAddQuoteFragment = { fragment ->
                     viewModel.onAddQuoteMessageClicked(item, fragment)
                 },
                 onForward = {
                     viewModel.beginForward(item)
-                    menuExpanded = false
+                    closeMenu()
                 },
                 isSelected = isSelected,
                 onToggleSelection = {
                     onToggleSelection()
-                    menuExpanded = false
+                    closeMenu()
+                },
+                highlightedMessage = {
+                    MessageRow(
+                        item = item,
+                        viewModel = viewModel,
+                        navController = navController,
+                    ) {
+                        messageBubble(false)
+                    }
                 },
             )
         }
