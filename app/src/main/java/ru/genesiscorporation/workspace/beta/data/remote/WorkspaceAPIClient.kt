@@ -33,9 +33,9 @@ import io.ktor.utils.io.readAvailable
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
@@ -71,6 +71,7 @@ class WorkspaceAPIClient(
     val sessionCookieStore: SessionCookieStore
 ): APIClient {
     private val refreshMutex = Mutex()
+    private val refreshRetryGate = RefreshRetryGate()
     @OptIn(ExperimentalSerializationApi::class)
     suspend inline fun <reified RequestData : Any, reified Response : Any, reified ResponseError : Any> performRequest(
         request: ApiRequest<RequestData, Response, ResponseError>,
@@ -801,87 +802,106 @@ class WorkspaceAPIClient(
     suspend fun refreshToken(
         failedSession: ActiveCredentialSnapshot,
         failedAccessToken: String?,
-    ): ApiResult<String, ApiError> = refreshMutex.withLock {
+    ): ApiResult<String, ApiError> {
         val expectedOwnerKey = failedSession.ownerKey
-            ?: return@withLock ApiResult.Error(accountChangedError())
-        val currentSession = userViewModel.repo.activeCredentialSnapshot()
-        if (currentSession.ownerKey != expectedOwnerKey) {
-            return@withLock ApiResult.Error(accountChangedError())
-        }
-        val currentAccessToken = currentSession.accessToken
-        if (
-            !currentAccessToken.isNullOrBlank() &&
-            currentAccessToken != failedAccessToken
-        ) {
-            return@withLock ApiResult.Success(currentAccessToken)
-        }
+            ?: return ApiResult.Error(accountChangedError())
+        while (true) {
+            var retryDelayMillis = 0L
+            refreshMutex.lock()
+            try {
+                val currentSession = userViewModel.repo.activeCredentialSnapshot()
+                if (currentSession.ownerKey != expectedOwnerKey) {
+                    return ApiResult.Error(accountChangedError())
+                }
+                val currentAccessToken = currentSession.accessToken
+                if (
+                    !currentAccessToken.isNullOrBlank() &&
+                    currentAccessToken != failedAccessToken
+                ) {
+                    refreshRetryGate.clear(expectedOwnerKey)
+                    return ApiResult.Success(currentAccessToken)
+                }
 
-        val storedRefreshToken = currentSession.refreshToken
-        if (storedRefreshToken.isNullOrBlank()) {
-            userViewModel.removeActiveAccountIfOwnerAndWait(expectedOwnerKey)
-            return@withLock ApiResult.Error(
-                ApiError(
-                    "Authentication expired",
-                    "401",
-                    ApiErrorKind.UNAUTHORIZED,
-                ),
-            )
-        }
+                val storedRefreshToken = currentSession.refreshToken
+                if (storedRefreshToken.isNullOrBlank()) {
+                    refreshRetryGate.clear(expectedOwnerKey)
+                    userViewModel.removeActiveAccountIfOwnerAndWait(expectedOwnerKey)
+                    return ApiResult.Error(authenticationExpiredError())
+                }
 
-        val baseUrl = currentSession.baseUrl
-            ?: return@withLock ApiResult.Error(accountChangedError())
-        when (
-            val refreshResponse = performTokenRefresh(baseUrl, storedRefreshToken)
-        ) {
-                is ApiResult.Success -> {
-                    val userResponse = refreshResponse.value
-                    val expectedUserId = currentSession.userId
-                    val expectedProjectId = currentSession.projectId
-                    if (
-                        expectedUserId.isNullOrBlank() ||
-                        expectedProjectId.isNullOrBlank() ||
-                        !accessTokenMatchesAccount(
-                            accessToken = userResponse.accessToken,
-                            expectedUserId = expectedUserId,
-                            expectedProjectId = expectedProjectId,
+                retryDelayMillis = refreshRetryGate.remainingDelayMillis(
+                    ownerKey = expectedOwnerKey,
+                    nowMillis = monotonicMillis(),
+                )
+                if (retryDelayMillis == 0L) {
+                    val baseUrl = currentSession.baseUrl
+                        ?: return ApiResult.Error(accountChangedError())
+                    when (
+                        val refreshResponse = performTokenRefresh(
+                            baseUrl,
+                            storedRefreshToken,
                         )
                     ) {
-                        return@withLock ApiResult.Error(
-                            ApiError(
-                                errorMessage = "Token owner does not match the active account",
-                                code = "TOKEN_IDENTITY_MISMATCH",
-                                kind = ApiErrorKind.MALFORMED_RESPONSE,
-                            ),
-                        )
+                        is ApiResult.Success -> {
+                            val userResponse = refreshResponse.value
+                            val expectedUserId = currentSession.userId
+                            val expectedProjectId = currentSession.projectId
+                            if (
+                                expectedUserId.isNullOrBlank() ||
+                                expectedProjectId.isNullOrBlank() ||
+                                !accessTokenMatchesAccount(
+                                    accessToken = userResponse.accessToken,
+                                    expectedUserId = expectedUserId,
+                                    expectedProjectId = expectedProjectId,
+                                )
+                            ) {
+                                val mismatch = tokenIdentityMismatchError()
+                                refreshRetryGate.recordFailure(
+                                    ownerKey = expectedOwnerKey,
+                                    error = mismatch,
+                                    nowMillis = monotonicMillis(),
+                                )
+                                return ApiResult.Error(mismatch)
+                            }
+                            val saved = userViewModel.repo.saveRefreshedTokensIfActive(
+                                expectedOwnerKey = expectedOwnerKey,
+                                accessToken = userResponse.accessToken,
+                                refreshToken = userResponse.refreshToken,
+                            )
+                            if (!saved) {
+                                return ApiResult.Error(accountChangedError())
+                            }
+                            refreshRetryGate.clear(expectedOwnerKey)
+                            return ApiResult.Success(userResponse.accessToken)
+                        }
+                        is ApiResult.Error -> {
+                            if (shouldRemoveAccountAfterRefresh(refreshResponse.error)) {
+                                refreshRetryGate.clear(expectedOwnerKey)
+                                userViewModel.removeActiveAccountIfOwnerAndWait(
+                                    expectedOwnerKey,
+                                )
+                            } else {
+                                refreshRetryGate.recordFailure(
+                                    ownerKey = expectedOwnerKey,
+                                    error = refreshResponse.error,
+                                    nowMillis = monotonicMillis(),
+                                )
+                            }
+                            return ApiResult.Error(refreshResponse.error)
+                        }
                     }
-                    val saved = userViewModel.repo.saveRefreshedTokensIfActive(
-                        expectedOwnerKey = expectedOwnerKey,
-                        accessToken = userResponse.accessToken,
-                        refreshToken = userResponse.refreshToken,
-                    )
-                    if (!saved) {
-                        return@withLock ApiResult.Error(accountChangedError())
-                    }
-                    ApiResult.Success(userResponse.accessToken)
                 }
-                is ApiResult.Error -> {
-                    if (
-                        refreshResponse.error.kind == ApiErrorKind.UNAUTHORIZED ||
-                        refreshResponse.error.kind == ApiErrorKind.FORBIDDEN
-                    ) {
-                        userViewModel.removeActiveAccountIfOwnerAndWait(
-                            expectedOwnerKey,
-                        )
-                    }
-                    ApiResult.Error(refreshResponse.error)
-                }
+            } finally {
+                refreshMutex.unlock()
             }
+            delay(retryDelayMillis)
+        }
     }
 
     private suspend fun performTokenRefresh(
         baseUrl: String,
         refreshToken: String,
-    ): ApiResult<LoginResponse, ApiError> {
+    ): ApiResult<LoginResponse, ApiError> = try {
         val request = TokenRefreshRequest(refreshToken)
         val response = client.request(
             workspaceRequestBuilder(
@@ -891,13 +911,43 @@ class WorkspaceAPIClient(
             ),
         )
         val responseString = response.readTextWithLimit()
-        return if (response.status.isSuccess()) {
+        if (response.status.isSuccess()) {
             ApiResult.Success(
                 ERROR_RESPONSE_JSON.decodeFromString<LoginResponse>(responseString),
             )
         } else {
-            ApiResult.Error(httpApiError(response.status.value, responseString))
+            ApiResult.Error(
+                httpApiError(
+                    response.status.value,
+                    responseString,
+                    response.headers,
+                ),
+            )
         }
+    } catch (cancellation: CancellationException) {
+        throw cancellation
+    } catch (tooLarge: ResponseBodyTooLargeException) {
+        ApiResult.Error(responseBodyTooLargeError())
+    } catch (timeout: HttpRequestTimeoutException) {
+        ApiResult.Error(ApiError("Request timed out", "TIMEOUT", ApiErrorKind.TIMEOUT))
+    } catch (timeout: ConnectTimeoutException) {
+        ApiResult.Error(ApiError("Connection timed out", "TIMEOUT", ApiErrorKind.TIMEOUT))
+    } catch (timeout: SocketTimeoutException) {
+        ApiResult.Error(ApiError("Connection timed out", "TIMEOUT", ApiErrorKind.TIMEOUT))
+    } catch (serialization: SerializationException) {
+        ApiResult.Error(
+            ApiError(
+                "Invalid server response",
+                "MALFORMED_RESPONSE",
+                ApiErrorKind.MALFORMED_RESPONSE,
+            ),
+        )
+    } catch (network: UnresolvedAddressException) {
+        ApiResult.Error(ApiError("Network unavailable", "NETWORK", ApiErrorKind.NETWORK))
+    } catch (network: IOException) {
+        ApiResult.Error(ApiError("Network unavailable", "NETWORK", ApiErrorKind.NETWORK))
+    } catch (exception: Exception) {
+        ApiResult.Error(ApiError("Request failed", "REQUEST_FAILED", ApiErrorKind.UNKNOWN))
     }
 
     suspend fun readUriBytes(
@@ -1132,12 +1182,106 @@ internal fun shouldAttemptTokenRefresh(
 ): Boolean = statusCode == 401 && requiresApiKey
 
 @PublishedApi
+internal fun authenticationExpiredError(): ApiError =
+    ApiError(
+        errorMessage = "Authentication expired. Sign in again",
+        code = "AUTHENTICATION_EXPIRED",
+        kind = ApiErrorKind.UNAUTHORIZED,
+        httpStatus = 401,
+    )
+
+@PublishedApi
 internal fun accountChangedError(): ApiError =
     ApiError(
         errorMessage = "The active account changed while the request was running",
         code = "ACCOUNT_CHANGED",
         kind = ApiErrorKind.CONFLICT,
     )
+
+@PublishedApi
+internal fun tokenIdentityMismatchError(): ApiError =
+    ApiError(
+        errorMessage = "Workspace returned credentials for another account",
+        code = "TOKEN_IDENTITY_MISMATCH",
+        kind = ApiErrorKind.MALFORMED_RESPONSE,
+    )
+
+internal fun shouldRemoveAccountAfterRefresh(error: ApiError): Boolean =
+    error.kind == ApiErrorKind.UNAUTHORIZED ||
+        error.kind == ApiErrorKind.FORBIDDEN ||
+        normalizeRefreshErrorCode(error.code) in TERMINAL_REFRESH_ERROR_CODES
+
+internal fun shouldBackoffRefresh(error: ApiError): Boolean =
+    !shouldRemoveAccountAfterRefresh(error) && error.code != "ACCOUNT_CHANGED"
+
+private fun normalizeRefreshErrorCode(code: String): String =
+    code.lowercase().filter(Char::isLetterOrDigit)
+
+private val TERMINAL_REFRESH_ERROR_CODES = setOf(
+    "invalidgrant",
+    "invalidrefreshtoken",
+    "invalidrefreshtokenerror",
+)
+
+internal fun monotonicMillis(): Long = System.nanoTime() / 1_000_000L
+
+internal class RefreshRetryGate(
+    retryDelaysMillis: LongArray = DEFAULT_REFRESH_RETRY_DELAYS_MILLIS,
+) {
+    private data class RetryState(
+        val failureCount: Int,
+        val retryAtMillis: Long,
+    )
+
+    private val retryDelaysMillis = retryDelaysMillis.copyOf()
+    private val retryStates = mutableMapOf<String, RetryState>()
+
+    init {
+        require(this.retryDelaysMillis.isNotEmpty())
+        require(this.retryDelaysMillis.all { it > 0L })
+    }
+
+    fun remainingDelayMillis(
+        ownerKey: String,
+        nowMillis: Long,
+    ): Long {
+        val retryAtMillis = retryStates[ownerKey]?.retryAtMillis ?: return 0L
+        return if (nowMillis >= retryAtMillis) {
+            0L
+        } else {
+            retryAtMillis - nowMillis
+        }
+    }
+
+    fun recordFailure(
+        ownerKey: String,
+        error: ApiError,
+        nowMillis: Long,
+    ) {
+        if (!shouldBackoffRefresh(error)) {
+            clear(ownerKey)
+            return
+        }
+        val previousFailureCount = retryStates[ownerKey]?.failureCount ?: 0
+        val delayIndex = previousFailureCount.coerceAtMost(retryDelaysMillis.lastIndex)
+        val delayMillis = retryDelaysMillis[delayIndex]
+        retryStates[ownerKey] = RetryState(
+            failureCount = (previousFailureCount + 1)
+                .coerceAtMost(retryDelaysMillis.size),
+            retryAtMillis = saturatingAdd(nowMillis, delayMillis),
+        )
+    }
+
+    fun clear(ownerKey: String) {
+        retryStates.remove(ownerKey)
+    }
+
+    private fun saturatingAdd(value: Long, increment: Long): Long =
+        if (value > Long.MAX_VALUE - increment) Long.MAX_VALUE else value + increment
+}
+
+private val DEFAULT_REFRESH_RETRY_DELAYS_MILLIS =
+    longArrayOf(1_000L, 2_000L, 4_000L, 8_000L, 16_000L, 30_000L)
 
 @PublishedApi
 internal fun requestOwnerMatches(
