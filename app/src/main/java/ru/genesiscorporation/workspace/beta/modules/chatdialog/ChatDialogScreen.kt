@@ -65,6 +65,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -615,7 +616,9 @@ fun ChatDialogScreen(
                 viewModel = viewModel,
                 memberCount = memberCount,
                 topicAsPrimaryTitle = topicAsPrimaryTitle,
+                selectedCount = selectedMessageUuids.size,
                 onBack = { navController.popBackStack() },
+                onCancelSelection = viewModel::clearMessageSelection,
                 onInfo = {
                     if (!viewModel.isDirectMessages) {
                         navController.navigate(ChatFlow.ChannelInfo(viewModel.chatId))
@@ -915,27 +918,34 @@ fun ChatDialogScreen(
                     onDelete = viewModel::deleteConflictedDraft,
                 )
             }
-            MessageSelectionBar(
-                selectedCount = selectedMessageUuids.size,
-                onForward = {
-                    viewModel.beginForwardSelected(messages)
-                },
-                onCancel = viewModel::clearMessageSelection,
-            )
-            if (currentTopic?.isDone == true) {
-                ResolvedTopicBanner(
-                    updating = updatingTopicDone,
-                    onReopen = viewModel::toggleCurrentTopicDone,
-                )
-            } else {
-                SendMessageView(
-                    viewModel = viewModel,
-                    onOpenDrafts = {
-                        navController.navigate(ChatFlow.Drafts) {
-                            launchSingleTop = true
-                        }
-                    },
-                )
+            when {
+                selectionMode -> {
+                    MessageSelectionBar(
+                        selectedCount = selectedMessageUuids.size,
+                        onForward = {
+                            viewModel.beginForwardSelected(messages)
+                        },
+                        onCancel = viewModel::clearMessageSelection,
+                    )
+                }
+
+                currentTopic?.isDone == true -> {
+                    ResolvedTopicBanner(
+                        updating = updatingTopicDone,
+                        onReopen = viewModel::toggleCurrentTopicDone,
+                    )
+                }
+
+                else -> {
+                    SendMessageView(
+                        viewModel = viewModel,
+                        onOpenDrafts = {
+                            navController.navigate(ChatFlow.Drafts) {
+                                launchSingleTop = true
+                            }
+                        },
+                    )
+                }
             }
         }
     }
@@ -1273,7 +1283,9 @@ private fun ConversationHeader(
     viewModel: ChatDialogViewModel,
     memberCount: Int,
     topicAsPrimaryTitle: Boolean,
+    selectedCount: Int,
     onBack: () -> Unit,
+    onCancelSelection: () -> Unit,
     onInfo: () -> Unit,
 ) {
     val colors = LocalWorkspaceColorsPalette.current
@@ -1284,7 +1296,9 @@ private fun ConversationHeader(
     val topic = viewModel.topicName?.takeIf(String::isNotBlank)
     val showTopicAsPrimary =
         topic != null && !viewModel.isDirectMessages && topicAsPrimaryTitle
+    val selectionMode = selectedCount > 0
     val targetHeight = when {
+        selectionMode -> 50.dp
         topic == null || viewModel.isDirectMessages -> 50.dp
         showTopicAsPrimary -> 50.dp
         else -> 70.dp
@@ -1311,12 +1325,16 @@ private fun ConversationHeader(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(
-            onClick = onBack,
+            onClick = if (selectionMode) onCancelSelection else onBack,
             modifier = Modifier.size(40.dp),
         ) {
             Icon(
                 painter = painterResource(R.drawable.arrow_back),
-                contentDescription = "Назад",
+                contentDescription = if (selectionMode) {
+                    stringResource(R.string.message_selection_cancel)
+                } else {
+                    "Назад"
+                },
                 tint = colors.iconBase,
             )
         }
@@ -1330,6 +1348,25 @@ private fun ConversationHeader(
             verticalArrangement = Arrangement.Center,
         ) {
             when {
+                selectionMode -> {
+                    Text(
+                        text = pluralStringResource(
+                            R.plurals.message_selected_count,
+                            selectedCount,
+                            selectedCount,
+                        ),
+                        color = colors.textHeaders,
+                        fontSize = 14.sp,
+                        lineHeight = 18.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.semantics {
+                            liveRegion = LiveRegionMode.Polite
+                        },
+                    )
+                }
+
                 topic != null && showTopicAsPrimary -> {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
@@ -1411,50 +1448,52 @@ private fun ConversationHeader(
                 }
             }
         }
-        val callServerUrl = viewModel.repo.jitsiServerUrl
-            .takeIf(String::isNotBlank)
-            ?.let { runCatching { URL(it) }.getOrNull() }
-            ?.takeIf { it.protocol == "https" && it.host.isNotBlank() }
-        if (callServerUrl != null) {
-            LaunchedEffect(viewModel, callServerUrl) {
-                viewModel.callLaunchEvents.collect { event ->
-                    val options = JitsiMeetConferenceOptions.Builder()
-                        .setServerURL(callServerUrl)
-                        .setRoom(event.roomName)
-                        .build()
-                    JitsiMeetActivity.launch(context, options)
+        if (!selectionMode) {
+            val callServerUrl = viewModel.repo.jitsiServerUrl
+                .takeIf(String::isNotBlank)
+                ?.let { runCatching { URL(it) }.getOrNull() }
+                ?.takeIf { it.protocol == "https" && it.host.isNotBlank() }
+            if (callServerUrl != null) {
+                LaunchedEffect(viewModel, callServerUrl) {
+                    viewModel.callLaunchEvents.collect { event ->
+                        val options = JitsiMeetConferenceOptions.Builder()
+                            .setServerURL(callServerUrl)
+                            .setRoom(event.roomName)
+                            .build()
+                        JitsiMeetActivity.launch(context, options)
+                    }
+                }
+                IconButton(
+                    onClick = {
+                        val roomName = JitsiStyleRoomNameGenerator.generate()
+                        viewModel.startCall(
+                            callUrl = "$callServerUrl/$roomName",
+                            roomName = roomName,
+                        )
+                    },
+                    enabled = conversationStateReady && !sending,
+                    modifier = Modifier.size(40.dp),
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_figma_channel_call),
+                        contentDescription = "Начать звонок",
+                        tint = colors.iconBase,
+                        modifier = Modifier.size(28.dp),
+                    )
                 }
             }
-            IconButton(
-                onClick = {
-                    val roomName = JitsiStyleRoomNameGenerator.generate()
-                    viewModel.startCall(
-                        callUrl = "$callServerUrl/$roomName",
-                        roomName = roomName,
+            if (!viewModel.isDirectMessages) {
+                IconButton(
+                    onClick = onInfo,
+                    modifier = Modifier.size(40.dp),
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_figma_profile_more),
+                        contentDescription = "Информация о чате",
+                        tint = colors.iconBase,
+                        modifier = Modifier.size(32.dp),
                     )
-                },
-                enabled = conversationStateReady && !sending,
-                modifier = Modifier.size(40.dp),
-            ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_figma_channel_call),
-                    contentDescription = "Начать звонок",
-                    tint = colors.iconBase,
-                    modifier = Modifier.size(28.dp),
-                )
-            }
-        }
-        if (!viewModel.isDirectMessages) {
-            IconButton(
-                onClick = onInfo,
-                modifier = Modifier.size(40.dp),
-            ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_figma_profile_more),
-                    contentDescription = "Информация о чате",
-                    tint = colors.iconBase,
-                    modifier = Modifier.size(32.dp),
-                )
+                }
             }
         }
     }
@@ -1669,26 +1708,23 @@ fun ChatMessage(
                     R.string.message_select
                 },
             )
-            Row(
+            Box(
                 modifier = Modifier
-                    .heightIn(min = 48.dp)
+                    .size(32.dp)
                     .toggleable(
                         value = isSelected,
                         role = Role.Checkbox,
                         onValueChange = { onToggleSelection() },
                     )
-                    .padding(horizontal = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                    .semantics {
+                        contentDescription = selectionLabel
+                    },
+                contentAlignment = Alignment.Center,
             ) {
                 Checkbox(
                     checked = isSelected,
                     onCheckedChange = null,
-                )
-                Text(
-                    text = selectionLabel,
-                    color = colors.textAdditional50,
-                    fontSize = 12.sp,
+                    modifier = Modifier.size(28.dp),
                 )
             }
         }

@@ -23,12 +23,8 @@ class MessageSelectionBarInstrumentedTest {
     @Test
     fun selectionBarExposesOnlyFunctionalForwardAndCancelActions() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val selectedLabel = context.resources.getQuantityString(
-            R.plurals.message_selected_count,
-            2,
-            2,
-        )
         val forwardLabel = context.getString(R.string.message_selection_forward)
+        val forwardSelectionLabel = "$forwardLabel (2)"
         val cancelLabel = context.getString(R.string.message_selection_cancel)
         var selectedCount by mutableIntStateOf(2)
         var forwardCalls = 0
@@ -42,14 +38,14 @@ class MessageSelectionBarInstrumentedTest {
             }
         }
 
-        composeRule.onNodeWithText(selectedLabel).assertExists()
+        composeRule.onNodeWithText(forwardSelectionLabel).assertExists()
         composeRule.onNodeWithText("Delete").assertDoesNotExist()
         composeRule.onNodeWithText("Удалить").assertDoesNotExist()
-        composeRule.onNodeWithText(forwardLabel).performClick()
+        composeRule.onNodeWithText(forwardSelectionLabel).performClick()
         composeRule.runOnIdle {
             assertEquals(1, forwardCalls)
         }
         composeRule.onNodeWithText(cancelLabel).performClick()
-        composeRule.onNodeWithText(forwardLabel).assertDoesNotExist()
+        composeRule.onNodeWithText(forwardSelectionLabel).assertDoesNotExist()
     }
 }
