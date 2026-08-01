@@ -146,6 +146,7 @@ fun LoginScreen(
                 canSubmit = viewModel.canSubmitCredentials,
                 onLogoutOrganization = {
                     scope.launch {
+                        viewModel.onFlowCancelled()
                         user.cancelPendingLoginAndWait()
                         navController.popBackStack()
                     }

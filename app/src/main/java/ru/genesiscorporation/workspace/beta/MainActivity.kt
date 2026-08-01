@@ -109,6 +109,8 @@ import ru.genesiscorporation.workspace.beta.modules.chooseserver.ChooseServerVie
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 import ru.genesiscorporation.workspace.beta.modules.login.LoginScreen
 import ru.genesiscorporation.workspace.beta.modules.login.LoginViewModel
+import ru.genesiscorporation.workspace.beta.modules.login.LocalLoginProcessState
+import ru.genesiscorporation.workspace.beta.modules.login.LoginProcessStateViewModel
 import ru.genesiscorporation.workspace.beta.modules.inbox.InboxScreen
 import ru.genesiscorporation.workspace.beta.modules.feed.FeedScreen
 import ru.genesiscorporation.workspace.beta.modules.feed.FeedViewModel
@@ -161,6 +163,7 @@ class MainActivity : ComponentActivity() {
     private val networkState by viewModels<WorkspaceNetworkViewModel> {
         WorkspaceNetworkViewModelFactory(userState, applicationContext)
     }
+    private val loginProcessState by viewModels<LoginProcessStateViewModel>()
     private val workspaceApiClient: WorkspaceAPIClient
         get() = networkState.apiClient
     private val eventsRepository: EventsRepository
@@ -246,7 +249,10 @@ class MainActivity : ComponentActivity() {
                 WorkspaceThemeMode.DARK -> true
             }
             WokspaceTheme(darkTheme = darkTheme) {
-                CompositionLocalProvider(LocalUserState provides userState) {
+                CompositionLocalProvider(
+                    LocalUserState provides userState,
+                    LocalLoginProcessState provides loginProcessState,
+                ) {
                     ApplicationSwitcher(
                         workspaceApiClient = workspaceApiClient,
                         eventsRepository = eventsRepository,
@@ -455,6 +461,7 @@ fun ApplicationSwitcher(
     onIncomingShareHandled: () -> Unit,
 ) {
     val user = LocalUserState.current
+    val loginProcessState = LocalLoginProcessState.current
     val accessToken by user.accessToken.collectAsState()
     val activeAccountId by user.activeAccountId.collectAsState()
     val uiPreferencesOwnerKey by user.uiPreferencesOwnerKey.collectAsState()
@@ -468,6 +475,12 @@ fun ApplicationSwitcher(
     val uiPreferencesReady =
         accessToken == null ||
             (activeAccountId != null && uiPreferencesOwnerKey == activeAccountId)
+
+    LaunchedEffect(accessToken) {
+        if (accessToken != null) {
+            loginProcessState.processState.clear()
+        }
+    }
 
     val workspaceViewModelFactory = remember {
         WorkspaceViewModelFactory(
@@ -1421,6 +1434,7 @@ fun ChatNavigation(
 @Composable
 fun LoginNavigation(workspaceApiClient: WorkspaceAPIClient) {
     val user = LocalUserState.current
+    val loginProcessState = LocalLoginProcessState.current
     val baseUrl by user.baseUrl.collectAsState()
     val navController = rememberNavController()
     val startDestination = remember(baseUrl) {
@@ -1434,7 +1448,13 @@ fun LoginNavigation(workspaceApiClient: WorkspaceAPIClient) {
         }
         composable<LoginFlow.Login> {
 
-            val loginViewModelFactory = remember { LoginViewModelFactory(workspaceApiClient, user) }
+            val loginViewModelFactory = remember {
+                LoginViewModelFactory(
+                    workspaceApiClient,
+                    user,
+                    loginProcessState.processState,
+                )
+            }
             val loginViewModel: LoginViewModel = viewModel(factory = loginViewModelFactory)
             LoginScreen(loginViewModel, navController)
         }
@@ -1452,6 +1472,7 @@ fun ProfileNavigation(
 ) {
     val navController = rememberNavController()
     val user = LocalUserState.current
+    val loginProcessState = LocalLoginProcessState.current
     val appContext = LocalContext.current.applicationContext
     NavHost(navController = navController, startDestination = ProfileFlow.Main) {
         composable<ProfileFlow.Main> {
@@ -1529,7 +1550,13 @@ fun ProfileNavigation(
             LaunchedEffect(Unit) {
                 onBottomNavigationVisibilityChange(false)
             }
-            val loginViewModelFactory = remember { LoginViewModelFactory(workspaceApiClient, user) }
+            val loginViewModelFactory = remember {
+                LoginViewModelFactory(
+                    workspaceApiClient,
+                    user,
+                    loginProcessState.processState,
+                )
+            }
             val loginViewModel: LoginViewModel = viewModel(factory = loginViewModelFactory)
             LoginScreen(loginViewModel, navController)
         }

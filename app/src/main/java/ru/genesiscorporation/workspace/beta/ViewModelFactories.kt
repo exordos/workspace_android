@@ -26,6 +26,7 @@ import ru.genesiscorporation.workspace.beta.modules.feed.FeedViewModel
 import ru.genesiscorporation.workspace.beta.modules.externalintegrations.ExternalIntegrationsViewModel
 import ru.genesiscorporation.workspace.beta.modules.feed.MessageTimelineKind
 import ru.genesiscorporation.workspace.beta.modules.drafts.DraftsViewModel
+import ru.genesiscorporation.workspace.beta.modules.login.LoginProcessState
 import ru.genesiscorporation.workspace.beta.modules.login.LoginViewModel
 import ru.genesiscorporation.workspace.beta.modules.profile.ProfileViewModel
 import ru.genesiscorporation.workspace.beta.modules.topics.TopicsViewModel
@@ -106,11 +107,15 @@ class ChooseServerViewModelFactory(private val client: WorkspaceAPIClient, priva
     }
 }
 
-class LoginViewModelFactory(private val client: WorkspaceAPIClient, private val userViewModel: UserViewModel) : ViewModelProvider.Factory {
+internal class LoginViewModelFactory(
+    private val client: WorkspaceAPIClient,
+    private val userViewModel: UserViewModel,
+    private val loginProcessState: LoginProcessState,
+) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(LoginViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return LoginViewModel(client, userViewModel) as T
+            return LoginViewModel(client, userViewModel, loginProcessState) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
