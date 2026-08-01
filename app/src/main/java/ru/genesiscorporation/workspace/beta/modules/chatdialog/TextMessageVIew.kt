@@ -7,10 +7,11 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -18,9 +19,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -31,18 +29,22 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.semantics.onLongClick
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import ru.genesiscorporation.workspace.beta.ChatFlow
@@ -311,155 +313,182 @@ internal fun MessageActionsMenu(
     var fragmentAdding by remember(item.uuid) {
         mutableStateOf<Boolean?>(null)
     }
-    DropdownMenu(
-        expanded = expanded,
-        onDismissRequest = onDismiss,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 4.dp),
+    val moreReactionDescription =
+        stringResource(R.string.message_reaction_more)
+    if (expanded) {
+        val colors = LocalWorkspaceColorsPalette.current
+        val actionEnabled = !isDeleting
+        Dialog(
+            onDismissRequest = onDismiss,
+            properties = DialogProperties(
+                dismissOnBackPress = true,
+                dismissOnClickOutside = true,
+                usePlatformDefaultWidth = false,
+            ),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
             ) {
-                QUICK_REACTIONS.take(4).forEach { reaction ->
-                    QuickReactionButton(
-                        reaction = reaction,
-                        enabled = !isDeleting,
-                        onReaction = onReaction,
-                    )
-                }
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                QUICK_REACTIONS.drop(4).forEach { reaction ->
-                    QuickReactionButton(
-                        reaction = reaction,
-                        enabled = !isDeleting,
-                        onReaction = onReaction,
-                    )
-                }
-                TextButton(
-                    onClick = {
-                        onDismiss()
-                        onOpenReactionPicker()
-                    },
-                    enabled = !isDeleting,
-                    modifier = Modifier.size(
-                        width = 104.dp,
-                        height = 48.dp,
-                    ),
-                    contentPadding = PaddingValues(horizontal = 8.dp),
+                Column(
+                    modifier = Modifier
+                        .width(MESSAGE_ACTION_MENU_WIDTH)
+                        .clip(MESSAGE_ACTION_MENU_SHAPE)
+                        .background(colors.cardBackgroundActive)
+                        .padding(vertical = 4.dp),
                 ) {
-                    Text(stringResource(R.string.message_reaction_more))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        QUICK_REACTIONS.forEach { reaction ->
+                            QuickReactionButton(
+                                reaction = reaction,
+                                enabled = actionEnabled,
+                                onReaction = onReaction,
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .size(width = 34.dp, height = 40.dp)
+                                .clickable(
+                                    enabled = actionEnabled,
+                                    role = Role.Button,
+                                ) {
+                                    onDismiss()
+                                    onOpenReactionPicker()
+                                }
+                                .semantics {
+                                    contentDescription = moreReactionDescription
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = "+",
+                                color = colors.iconBase,
+                                fontSize = 22.sp,
+                                lineHeight = 22.sp,
+                            )
+                        }
+                    }
+
+                    MessageMenuActionRow(
+                        label = stringResource(R.string.workspace_reply_action),
+                        iconResource = R.drawable.ic_message_reply,
+                        enabled = actionEnabled,
+                        onClick = {
+                            onDismiss()
+                            onQuote()
+                        },
+                    )
+                    if (canMutateNativeMessage(item)) {
+                        MessageMenuActionRow(
+                            label = "Изменить",
+                            iconResource = R.drawable.ic_message_edit,
+                            enabled = actionEnabled,
+                            onClick = {
+                                onDismiss()
+                                onEdit()
+                            },
+                        )
+                    }
+                    if (item.payload.content.isNotBlank()) {
+                        MessageMenuActionRow(
+                            label = "Копировать текст",
+                            iconResource = R.drawable.ic_copy,
+                            enabled = actionEnabled,
+                            onClick = {
+                                onDismiss()
+                                onCopy()
+                            },
+                        )
+                    }
+                    if (canForwardMessage(item)) {
+                        MessageMenuActionRow(
+                            label = stringResource(
+                                R.string.message_selection_forward,
+                            ),
+                            iconResource = R.drawable.ic_message_forward,
+                            enabled = actionEnabled,
+                            onClick = {
+                                onDismiss()
+                                onForward()
+                            },
+                        )
+                    }
+                    if (item.payload.content.isNotBlank()) {
+                        MessageMenuActionRow(
+                            label = stringResource(
+                                R.string.workspace_reply_fragment_action,
+                            ),
+                            iconResource = R.drawable.ic_message_reply,
+                            enabled = actionEnabled,
+                            onClick = {
+                                onDismiss()
+                                fragmentAdding = false
+                            },
+                        )
+                    }
+                    if (canAddReply) {
+                        MessageMenuActionRow(
+                            label = stringResource(
+                                R.string.workspace_reply_add_action,
+                            ),
+                            iconResource = R.drawable.ic_message_reply,
+                            enabled = actionEnabled,
+                            onClick = {
+                                onDismiss()
+                                onAddQuote()
+                            },
+                        )
+                        if (item.payload.content.isNotBlank()) {
+                            MessageMenuActionRow(
+                                label = stringResource(
+                                    R.string.workspace_reply_add_fragment_action,
+                                ),
+                                iconResource = R.drawable.ic_message_reply,
+                                enabled = actionEnabled,
+                                onClick = {
+                                    onDismiss()
+                                    fragmentAdding = true
+                                },
+                            )
+                        }
+                    }
+                    if (canMutateNativeMessage(item)) {
+                        MessageMenuActionRow(
+                            label = if (isDeleting) "Удаляется…" else "Удалить",
+                            iconResource = R.drawable.ic_message_delete,
+                            enabled = actionEnabled,
+                            iconTint = colors.indicatorRed,
+                            onClick = {
+                                onDismiss()
+                                confirmDelete = true
+                            },
+                        )
+                    }
+                    if (canForwardMessage(item)) {
+                        MessageMenuActionRow(
+                            label = stringResource(
+                                if (isSelected) {
+                                    R.string.message_unselect
+                                } else {
+                                    R.string.message_select
+                                },
+                            ),
+                            iconResource = R.drawable.ic_message_select,
+                            enabled = actionEnabled,
+                            onClick = {
+                                onDismiss()
+                                onToggleSelection()
+                            },
+                        )
+                    }
                 }
             }
-        }
-        HorizontalDivider()
-        if (canMutateNativeMessage(item)) {
-            DropdownMenuItem(
-                text = { Text("Редактировать") },
-                onClick = onEdit,
-                enabled = !isDeleting,
-            )
-            DropdownMenuItem(
-                text = {
-                    Text(if (isDeleting) "Удаляется…" else "Удалить")
-                },
-                onClick = {
-                    onDismiss()
-                    confirmDelete = true
-                },
-                enabled = !isDeleting,
-            )
-        }
-        if (item.payload.content.isNotBlank()) {
-            DropdownMenuItem(
-                text = { Text("Копировать текст") },
-                onClick = onCopy,
-                enabled = !isDeleting,
-            )
-        }
-        DropdownMenuItem(
-            text = {
-                Text(stringResource(R.string.workspace_reply_action))
-            },
-            onClick = onQuote,
-            enabled = !isDeleting,
-        )
-        if (item.payload.content.isNotBlank()) {
-            DropdownMenuItem(
-                text = {
-                    Text(
-                        stringResource(
-                            R.string.workspace_reply_fragment_action,
-                        ),
-                    )
-                },
-                onClick = {
-                    onDismiss()
-                    fragmentAdding = false
-                },
-                enabled = !isDeleting,
-            )
-        }
-        if (canAddReply) {
-            DropdownMenuItem(
-                text = {
-                    Text(
-                        stringResource(
-                            R.string.workspace_reply_add_action,
-                        ),
-                    )
-                },
-                onClick = onAddQuote,
-                enabled = !isDeleting,
-            )
-            if (item.payload.content.isNotBlank()) {
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            stringResource(
-                                R.string.workspace_reply_add_fragment_action,
-                            ),
-                        )
-                    },
-                    onClick = {
-                        onDismiss()
-                        fragmentAdding = true
-                    },
-                    enabled = !isDeleting,
-                )
-            }
-        }
-        if (canForwardMessage(item)) {
-            DropdownMenuItem(
-                text = {
-                    Text(stringResource(R.string.message_selection_forward))
-                },
-                onClick = onForward,
-                enabled = !isDeleting,
-            )
-            DropdownMenuItem(
-                text = {
-                    Text(
-                        stringResource(
-                            if (isSelected) {
-                                R.string.message_unselect
-                            } else {
-                                R.string.message_select
-                            },
-                        ),
-                    )
-                },
-                onClick = onToggleSelection,
-                enabled = !isDeleting,
-            )
         }
     }
     fragmentAdding?.let { adding ->
@@ -508,30 +537,74 @@ internal fun MessageActionsMenu(
 }
 
 @Composable
+private fun MessageMenuActionRow(
+    label: String,
+    iconResource: Int,
+    enabled: Boolean,
+    iconTint: Color = Color.Unspecified,
+    onClick: () -> Unit,
+) {
+    val colors = LocalWorkspaceColorsPalette.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(36.dp)
+            .clickable(
+                enabled = enabled,
+                role = Role.Button,
+                onClick = onClick,
+            )
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            painter = painterResource(iconResource),
+            contentDescription = null,
+            tint = if (iconTint == Color.Unspecified) {
+                colors.iconBase
+            } else {
+                iconTint
+            },
+            modifier = Modifier.size(20.dp),
+        )
+        Spacer(Modifier.width(10.dp))
+        Text(
+            text = label,
+            color = if (enabled) colors.textHeaders else colors.textAdditional30,
+            fontSize = 14.sp,
+            lineHeight = 18.sp,
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
 private fun QuickReactionButton(
     reaction: QuickReaction,
     enabled: Boolean,
     onReaction: (WorkspaceReactionSelection) -> Unit,
 ) {
     val description = stringResource(reaction.descriptionRes)
-    TextButton(
-        onClick = {
+    Box(
+        modifier = Modifier
+            .size(width = 34.dp, height = 40.dp)
+            .clickable(
+                enabled = enabled,
+                role = Role.Button,
+            ) {
             onReaction(
                 WorkspaceReactionSelection(
                     emojiName = reaction.emojiName,
                     equivalentEmojiNames = reaction.aliases,
                 ),
             )
-        },
-        enabled = enabled,
-        contentPadding = PaddingValues(0.dp),
-        modifier = Modifier
-            .size(48.dp)
+            }
             .semantics {
                 contentDescription = description
             },
+        contentAlignment = Alignment.Center,
     ) {
-        Text(text = reaction.glyph, fontSize = 20.sp)
+        Text(text = reaction.glyph, fontSize = 22.sp)
     }
 }
 
@@ -556,16 +629,16 @@ private val QUICK_REACTIONS = listOf(
         descriptionRes = R.string.message_reaction_like,
     ),
     QuickReaction(
-        glyph = "😂",
-        emojiName = "joy",
-        aliases = setOf("joy", "lmao", "tears_of_joy"),
+        glyph = "😁",
+        emojiName = "grin",
+        aliases = setOf("grin", "beaming_face_with_smiling_eyes"),
         descriptionRes = R.string.message_reaction_laughter,
     ),
     QuickReaction(
-        glyph = "😮",
-        emojiName = "open_mouth",
-        aliases = setOf("face_with_open_mouth", "open_mouth"),
-        descriptionRes = R.string.message_reaction_surprise,
+        glyph = "👌",
+        emojiName = "ok_hand",
+        aliases = setOf("ok_hand", "okay"),
+        descriptionRes = R.string.message_reaction_ok,
     ),
     QuickReaction(
         glyph = "😢",
@@ -573,13 +646,10 @@ private val QUICK_REACTIONS = listOf(
         aliases = setOf("cry", "crying_face"),
         descriptionRes = R.string.message_reaction_sadness,
     ),
-    QuickReaction(
-        glyph = "👏",
-        emojiName = "clap",
-        aliases = setOf("clap", "clapping_hands"),
-        descriptionRes = R.string.message_reaction_applause,
-    ),
 )
+
+private val MESSAGE_ACTION_MENU_WIDTH = 226.dp
+private val MESSAGE_ACTION_MENU_SHAPE = RoundedCornerShape(10.dp)
 
 internal fun canMutateNativeMessage(item: MessageResponse): Boolean =
         item.isOwn &&

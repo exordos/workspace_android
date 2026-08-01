@@ -16,6 +16,7 @@
     <string name="message_reaction_heart">Реакция: сердце</string>
     <string name="message_reaction_like">Реакция: нравится</string>
     <string name="message_reaction_laughter">Реакция: смех</string>
+    <string name="message_reaction_ok">Реакция: хорошо</string>
     <string name="message_reaction_surprise">Реакция: удивление</string>
     <string name="message_reaction_sadness">Реакция: грусть</string>
     <string name="message_reaction_applause">Реакция: аплодисменты</string>

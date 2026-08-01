@@ -17,6 +17,7 @@
     <string name="message_reaction_heart">Reaction: heart</string>
     <string name="message_reaction_like">Reaction: like</string>
     <string name="message_reaction_laughter">Reaction: laughter</string>
+    <string name="message_reaction_ok">Reaction: OK</string>
     <string name="message_reaction_surprise">Reaction: surprise</string>
     <string name="message_reaction_sadness">Reaction: sadness</string>
     <string name="message_reaction_applause">Reaction: applause</string>

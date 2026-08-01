@@ -1560,13 +1560,21 @@ fun ChatMessage(
 
         if (outboxEntry == null && reactionCounts.isNotEmpty()) {
             Row(
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                horizontalArrangement = if (item.isOwn) {
+                    Arrangement.End
+                } else {
+                    Arrangement.Start
+                },
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(
-                        start =
-                            if (
+                    .fillMaxWidth(),
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    modifier = Modifier
+                        .widthIn(max = 310.dp)
+                        .horizontalScroll(rememberScrollState())
+                        .padding(
+                            start = if (
                                 !item.isOwn &&
                                 !viewModel.isDirectMessages
                             ) {
@@ -1574,66 +1582,80 @@ fun ChatMessage(
                             } else {
                                 0.dp
                             },
-                        top = 3.dp,
-                    ),
-            ) {
-                reactionCounts
-                    .toSortedMap()
-                    .forEach { (emojiName, count) ->
-                    val equivalentEmojiNames =
-                        reactionEmojiResolver(emojiName)
-                            ?.let(reactionAliasesByGlyph::get)
-                            .orEmpty() + emojiName
-                    val selected =
-                        equivalentEmojiNames.any(
-                            myReactionEmojiNames::contains,
-                        )
-                    val displayEmoji = workspaceReactionDisplayText(
-                        emojiName,
-                        reactionEmojiResolver,
-                    )
-                    val reactionContentDescription = stringResource(
-                        R.string.message_reaction_count_description,
-                        displayEmoji,
-                        count,
-                    )
-                    Row(
-                        modifier = Modifier
-                            .border(
-                                width = 1.dp,
-                                color = if (selected) colors.primary else colors.iconDisable,
-                                shape = CircleShape,
+                            top = 3.dp,
+                        ),
+                ) {
+                    reactionCounts
+                        .toSortedMap()
+                        .forEach { (emojiName, count) ->
+                            val equivalentEmojiNames =
+                                reactionEmojiResolver(emojiName)
+                                    ?.let(reactionAliasesByGlyph::get)
+                                    .orEmpty() + emojiName
+                            val selected =
+                                equivalentEmojiNames.any(
+                                    myReactionEmojiNames::contains,
+                                )
+                            val displayEmoji = workspaceReactionDisplayText(
+                                emojiName,
+                                reactionEmojiResolver,
                             )
-                            .background(
-                                if (selected) colors.primary.copy(alpha = 0.16f) else colors.surface,
-                                CircleShape,
+                            val reactionContentDescription = stringResource(
+                                R.string.message_reaction_count_description,
+                                displayEmoji,
+                                count,
                             )
-                            .clickable(role = Role.Button) {
-                                viewModel.onMessageReactionTap(
-                                    item.uuid,
-                                    emojiName,
-                                    equivalentEmojiNames,
+                            Row(
+                                modifier = Modifier
+                                    .border(
+                                        width = 1.dp,
+                                        color = if (selected) {
+                                            colors.primary
+                                        } else {
+                                            colors.cardBackgroundActive
+                                        },
+                                        shape = CircleShape,
+                                    )
+                                    .background(
+                                        if (selected) {
+                                            colors.primary.copy(alpha = 0.16f)
+                                        } else {
+                                            colors.cardBackgroundActive
+                                        },
+                                        CircleShape,
+                                    )
+                                    .clickable(role = Role.Button) {
+                                        viewModel.onMessageReactionTap(
+                                            item.uuid,
+                                            emojiName,
+                                            equivalentEmojiNames,
+                                        )
+                                    }
+                                    .height(26.dp)
+                                    .semantics {
+                                        this.selected = selected
+                                        contentDescription =
+                                            reactionContentDescription
+                                    }
+                                    .padding(horizontal = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = displayEmoji,
+                                    fontSize = 14.sp,
+                                    lineHeight = 16.sp,
+                                )
+                                Text(
+                                    text = count.toString(),
+                                    color = colors.textAdditional50,
+                                    fontSize = 11.sp,
+                                    lineHeight = 14.sp,
+                                    modifier = Modifier.padding(start = 3.dp),
                                 )
                             }
-                            .heightIn(min = 48.dp)
-                            .semantics {
-                                this.selected = selected
-                                contentDescription =
-                                    reactionContentDescription
-                            }
-                            .padding(horizontal = 7.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(text = displayEmoji, fontSize = 16.sp)
-                        Text(
-                            text = count.toString(),
-                            color = colors.textAdditional50,
-                            fontSize = 12.sp,
-                            modifier = Modifier.padding(start = 3.dp),
-                        )
+                        }
                     }
                 }
-            }
         }
         if (
             selectionMode &&
