@@ -58,6 +58,7 @@ ktor-serialization = { group = "io.ktor", name = "ktor-serialization-kotlinx-jso
 ktor-client-negotiation = { group = "io.ktor", name = "ktor-client-content-negotiation", version.ref = "ktor" }
 ktor-client-logging = { group = "io.ktor", name = "ktor-client-logging", version.ref = "ktor" }
 ktor-client-websockets = { group = "io.ktor", name = "ktor-client-websockets", version.ref = "ktor" }
+ktor-client-mock = { group = "io.ktor", name = "ktor-client-mock", version.ref = "ktor" }
 jetbrains-kotlin-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "jsonSerialization" }
 androidx-data-store-preferencies = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "dataStore" }
 jitsi-meet = { group = "org.jitsi.react", name = "jitsi-meet-sdk", version.ref = "jitsi" }
