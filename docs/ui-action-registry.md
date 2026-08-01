@@ -38,8 +38,8 @@ Compose semantics traversal on every supported role and account.
 | CAT-A04 | New direct chat | Opens real-user selector; selected user creates/reuses private stream | Selector exposes loading/error/retry; create error remains visible | CAT-003 |
 | CAT-A05 | Catalog search field | Filters current authoritative streams by name | Empty query/result has explicit state | Component test |
 | CAT-A06 | Folder tab | Selects a real folder and projects only its folder items | Missing items reconcile from folder refresh/realtime | CAT-011/012 |
-| CAT-A07 | Add-folder tab | Opens folder-name dialog | Dialog is dismissible | CAT-011 |
-| CAT-A08 | Create folder | POSTs trimmed nonblank title, reloads authoritative folders | Button disabled for blank input; API error banner is dismissible | CAT-011 |
+| CAT-A07 | Add-folder tab or Profile folder-display row | Opens the dedicated Figma folder list and its full-screen create route | Back/Close/Cancel are real and no mutation occurs before submit | CAT-011/021 |
+| CAT-A08 | Create folder with selected chats | POSTs one trimmed 1–64 character title, then POSTs each ordered de-duplicated selected chat with its canonical chat type and reloads authoritative folders | Blank/oversized names disable submit; owner change fails closed; a partially assigned accepted folder is retained with an exact added/selected count instead of destructive rollback | CAT-011/012/013/019/021 |
 | CAT-A09 | Chat row tap | Opens direct chat or loads channel topics | Loading/empty/error state leaves navigation usable | CAT-001/003 |
 | CAT-A10 | Chat row long press in All | Opens assignment picker | Gesture is absent until a folder context exists | Component semantics test |
 | CAT-A11 | Assign chat to folder | POSTs canonical folder item and reloads folders | API/reload error banner; realtime later reconciles | CAT-012 |
@@ -180,7 +180,7 @@ Compose semantics traversal on every supported role and account.
 | SET-A10 | Figma Profile/Settings shell and Back | Opens the maintained compact mobile hierarchy; subview Back returns to the settings root and root Back returns to Chats | Loading keeps the same hierarchy and disables owner-bound actions; no legacy desktop button grid or dead chevron is exposed | SET-042/044/045 |
 | SET-A11 | Organizations/current-server rows | Expands saved organizations, labels the active owner, switches only to a selected saved account, and opens the real Add organization authentication route | Current owner cannot be reselected; operations are disabled during account/profile mutation and late results stay owner-fenced | SET-043 |
 | SET-A12 | Personal information row | Opens authoritative current-user identity details with the existing exact copy, status and avatar upload/reset actions | Missing optional values are omitted; unavailable mutation controls remain hidden and Back performs no mutation | SET-044 |
-| SET-A13 | Language and folder-display rows | Language reports the current Russian UI as read-only; Folder display returns to the real chat/folder surface | No inert language picker or speculative folder option is exposed until resource-backed contracts exist | SET-045 |
+| SET-A13 | Language and folder-display rows | Language reports the current Russian UI as read-only; Folder display opens Figma frames `12169:30283` / `12169:30552`, and choosing a folder returns to its real filtered chat projection | No inert language picker or speculative folder option is exposed; account change aborts owner-bound folder mutations | SET-045/046 + CAT-021 |
 
 ## External integrations
 

@@ -31,6 +31,9 @@ object ChatFlow {
     object Drafts
 
     @Serializable
+    object FolderDisplay
+
+    @Serializable
     data class ChatDialog(
         val title: String,
         val chatId: String,
@@ -71,6 +74,9 @@ object ProfileFlow {
 
     @Serializable
     object ExternalIntegrations
+
+    @Serializable
+    object FolderDisplay
 
     @Serializable
     object Login

@@ -125,7 +125,9 @@ fun ChatWithTopics(
         uiPreferences.prioritizeUnmutedUnreadChannels,
     ) {
         val folderItems = currentlySelectedFolder?.items
-        val folderStreams = if (folderItems == null || currentlySelectedFolder?.systemType == "all") {
+        val folderStreams = if (
+            folderItems == null || currentlySelectedFolder?.isAllChatsFolder() == true
+        ) {
             streams
         } else {
             folderItems.mapNotNull { item ->

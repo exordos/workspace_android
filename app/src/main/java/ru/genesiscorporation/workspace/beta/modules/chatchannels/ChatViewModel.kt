@@ -107,6 +107,22 @@ data class CatalogActionResult(
     val success: Boolean,
 )
 
+data class FolderCreationResult(
+    val requestId: Long,
+    val createdFolderUuid: String? = null,
+    val requestedChatCount: Int = 0,
+    val addedChatCount: Int = 0,
+    val message: String? = null,
+) {
+    val folderCreated: Boolean
+        get() = createdFolderUuid != null
+}
+
+data class FolderDraft(
+    val name: String,
+    val streams: List<Stream>,
+)
+
 class ChatViewModel(
     val client: WorkspaceAPIClient,
     val userViewModel: UserViewModel,
@@ -173,6 +189,10 @@ class ChatViewModel(
         MutableStateFlow<CatalogActionResult?>(null)
     val lastCatalogActionResult: StateFlow<CatalogActionResult?> =
         _lastCatalogActionResult
+    private val _folderCreationResult =
+        MutableStateFlow<FolderCreationResult?>(null)
+    val folderCreationResult: StateFlow<FolderCreationResult?> =
+        _folderCreationResult
     private val topicMutationMutex = Mutex()
     private val streamMutationMutex = Mutex()
     private val createMutationMutex = Mutex()
@@ -200,11 +220,18 @@ class ChatViewModel(
                 }
         }
         viewModelScope.launch {
-            repo.folders.collectLatest { currentFolders ->
-                val selectedUuid = _currentlySelectedFolder.value?.uuid
+            combine(
+                repo.folders,
+                repo.selectedFolderUuid,
+            ) { currentFolders, selectedFolderUuid ->
+                currentFolders to selectedFolderUuid
+            }.collectLatest { (currentFolders, sharedSelectedUuid) ->
+                val selectedUuid = sharedSelectedUuid
+                    ?: _currentlySelectedFolder.value?.uuid
                 _currentlySelectedFolder.value =
                     currentFolders.firstOrNull { it.uuid == selectedUuid }
                         ?: currentFolders.firstOrNull()
+                repo.selectFolder(_currentlySelectedFolder.value?.uuid)
             }
         }
         viewModelScope.launch {
@@ -230,6 +257,7 @@ class ChatViewModel(
         if (newFolder.uuid != currentlySelectedFolder.value?.uuid) {
             _currentlySelectedFolder.update { newFolder }
         }
+        repo.selectFolder(newFolder.uuid)
     }
 
     fun onSearchQueryChange(query: String) {
@@ -614,9 +642,10 @@ class ChatViewModel(
                         parseTime(folder.creationDate)
                     },
                 )
-                if (!folders.value.isEmpty()) {
-                    _currentlySelectedFolder.value = folders.value.first()
-                }
+                _currentlySelectedFolder.value = folders.value.firstOrNull {
+                    it.uuid == repo.selectedFolderUuid.value
+                } ?: folders.value.firstOrNull()
+                repo.selectFolder(_currentlySelectedFolder.value?.uuid)
                 loadSubscribedChannels()
             }
 
@@ -1124,6 +1153,129 @@ class ChatViewModel(
         viewModelScope.launch { addFolderInternal(name) }
     }
 
+    fun createFolderWithChats(
+        name: String,
+        selectedStreams: List<Stream>,
+    ): Long {
+        val requestId = nextCatalogActionRequestId.incrementAndGet()
+        viewModelScope.launch {
+            createFolderWithChatsInternal(
+                requestId = requestId,
+                name = name,
+                selectedStreams = selectedStreams,
+            )
+        }
+        return requestId
+    }
+
+    private suspend fun createFolderWithChatsInternal(
+        requestId: Long,
+        name: String,
+        selectedStreams: List<Stream>,
+    ) {
+        val draft = validateFolderDraft(name, selectedStreams)
+        if (draft == null) {
+            val message = folderDraftError(name)
+            _actionError.value = message
+            _folderCreationResult.value = FolderCreationResult(
+                requestId = requestId,
+                message = message,
+            )
+            return
+        }
+        if (!folderMutationMutex.tryLock()) {
+            _folderCreationResult.value = FolderCreationResult(
+                requestId = requestId,
+                requestedChatCount = draft.streams.size,
+                message = "Дождитесь завершения предыдущего действия",
+            )
+            return
+        }
+        _folderActionInProgress.value = true
+        _actionError.value = null
+        try {
+            val ownerKey = userViewModel.repo
+                .activeCredentialSnapshot()
+                .ownerKey
+                ?.takeIf(String::isNotBlank)
+            if (ownerKey == null) {
+                val message = "Не удалось определить активную учётную запись"
+                _actionError.value = message
+                _folderCreationResult.value = FolderCreationResult(
+                    requestId = requestId,
+                    requestedChatCount = draft.streams.size,
+                    message = message,
+                )
+                return
+            }
+            val createResponse = client.performRequest(
+                AddFolderRequest(draft.name),
+                expectedOwnerKey = ownerKey,
+            )
+            val createdFolderUuid = when (createResponse) {
+                is ApiResult.Success -> createResponse.value.uuid
+                is ApiResult.Error -> {
+                    val message = createResponse.error.message
+                        ?: "Не удалось создать папку"
+                    _actionError.value = message
+                    _folderCreationResult.value = FolderCreationResult(
+                        requestId = requestId,
+                        requestedChatCount = draft.streams.size,
+                        message = message,
+                    )
+                    return
+                }
+            }
+            var addedChatCount = 0
+            var assignmentError: String? = null
+            for ((index, stream) in draft.streams.withIndex()) {
+                if (!userViewModel.repo.isActiveCredentialOwner(ownerKey)) {
+                    assignmentError =
+                        "Учётная запись изменилась во время создания папки"
+                    break
+                }
+                when (
+                    val addResponse = client.performRequest(
+                        AddChatToFolderRequest(
+                            folderUuid = createdFolderUuid,
+                            streamUuid = stream.uuid,
+                            chatType = stream.folderItemChatType(),
+                            orderIndex = index,
+                        ),
+                        expectedOwnerKey = ownerKey,
+                    )
+                ) {
+                    is ApiResult.Success -> addedChatCount += 1
+                    is ApiResult.Error -> {
+                        assignmentError = addResponse.error.message
+                            ?: "Не удалось добавить один из чатов"
+                    }
+                }
+            }
+            refreshFolders(expectedOwnerKey = ownerKey)
+            val message = when {
+                addedChatCount == draft.streams.size ->
+                    "Папка создана"
+                assignmentError != null ->
+                    "Папка создана: добавлено $addedChatCount из ${draft.streams.size} чатов"
+                else -> "Папка создана"
+            }
+            if (addedChatCount != draft.streams.size) {
+                _actionError.value = message
+            }
+            _folderCreationResult.value = FolderCreationResult(
+                requestId = requestId,
+                createdFolderUuid = createdFolderUuid,
+                requestedChatCount = draft.streams.size,
+                addedChatCount = addedChatCount,
+                message = message,
+            )
+        } finally {
+            _folderActionInProgress.value = false
+            folderMutationMutex.unlock()
+        }
+    }
+
     private suspend fun addFolderInternal(name: String) {
         val normalizedName = name.trim()
         if (normalizedName.isEmpty()) {
@@ -1560,14 +1712,21 @@ class ChatViewModel(
         return requestId
     }
 
-    private suspend fun refreshFolders() {
-        when (val foldersResponse = client.performRequest(FoldersRequest())) {
+    private suspend fun refreshFolders(expectedOwnerKey: String? = null) {
+        when (
+            val foldersResponse = client.performRequest(
+                FoldersRequest(),
+                expectedOwnerKey = expectedOwnerKey,
+            )
+        ) {
             is ApiResult.Success -> {
                 repo.setInitialFolders(foldersResponse.value)
-                val selectedUuid = currentlySelectedFolder.value?.uuid
+                val selectedUuid = repo.selectedFolderUuid.value
+                    ?: currentlySelectedFolder.value?.uuid
                 _currentlySelectedFolder.value = foldersResponse.value
                     .firstOrNull { it.uuid == selectedUuid }
                     ?: foldersResponse.value.firstOrNull()
+                repo.selectFolder(_currentlySelectedFolder.value?.uuid)
                 _queryState.value = QueryState.Success
             }
 
@@ -1907,6 +2066,39 @@ internal fun resolveCreatedStreamDefaultTopicUuid(
 
 internal fun FolderResponseData.isUserManaged(): Boolean =
     systemType == null || systemType == "created"
+
+internal fun FolderResponseData.isAllChatsFolder(): Boolean =
+    uuid == ALL_CHATS_FOLDER_UUID
+
+internal const val FOLDER_TITLE_MAX_LENGTH = 64
+internal const val ALL_CHATS_FOLDER_UUID =
+    "00000000-0000-0000-0000-000000000000"
+
+internal fun validateFolderDraft(
+    name: String,
+    selectedStreams: List<Stream>,
+): FolderDraft? {
+    val normalizedName = name.trim()
+    if (
+        normalizedName.isEmpty() ||
+        normalizedName.length > FOLDER_TITLE_MAX_LENGTH
+    ) {
+        return null
+    }
+    return FolderDraft(
+        name = normalizedName,
+        streams = selectedStreams
+            .filter { it.uuid.isNotBlank() }
+            .distinctBy(Stream::uuid),
+    )
+}
+
+internal fun folderDraftError(name: String): String =
+    if (name.trim().length > FOLDER_TITLE_MAX_LENGTH) {
+        "Название папки должно быть не длиннее $FOLDER_TITLE_MAX_LENGTH символов"
+    } else {
+        "Введите название папки"
+    }
 
 @Serializable
 data class TopicHeader(

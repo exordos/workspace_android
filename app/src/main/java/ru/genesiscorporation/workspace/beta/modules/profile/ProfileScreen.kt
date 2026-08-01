@@ -75,6 +75,7 @@ import java.net.URI
 fun ProfileScreen(
     viewModel: ProfileViewModel,
     onBackToChats: () -> Unit,
+    onOpenFolderDisplay: () -> Unit,
     onOpenAbout: () -> Unit,
     onOpenExternalIntegrations: () -> Unit,
 ) {
@@ -534,7 +535,7 @@ fun ProfileScreen(
                         subtitle = "Управление в списке чатов",
                         enabled = true,
                         testTag = PROFILE_FIGMA_FOLDER_ROW_TAG,
-                        onClick = onBackToChats,
+                        onClick = onOpenFolderDisplay,
                     )
                 }
                 item(key = "additional-header") {

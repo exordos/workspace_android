@@ -77,7 +77,6 @@ fun ChatScreen(
     var showUserList by rememberSaveable { mutableStateOf(false) }
     var showNewChatChooser by rememberSaveable { mutableStateOf(false) }
     var showCreateChannel by rememberSaveable { mutableStateOf(false) }
-    var showAddFolderView by rememberSaveable { mutableStateOf(false) }
     var folderMenuUuid by rememberSaveable { mutableStateOf<String?>(null) }
     var folderToRenameUuid by rememberSaveable { mutableStateOf<String?>(null) }
     var folderToDeleteUuid by rememberSaveable { mutableStateOf<String?>(null) }
@@ -227,7 +226,11 @@ fun ChatScreen(
                 scope.launch { chatViewModel.updateSelectedChat(null) }
                 chatViewModel.updateCurrentlySelectedFolder(folder)
             },
-            onAddFolder = { showAddFolderView = true },
+            onAddFolder = {
+                navController.navigate(ChatFlow.FolderDisplay) {
+                    launchSingleTop = true
+                }
+            },
             onManageFolder = { folderMenuUuid = it.uuid },
             onOpenFeed = {
                 navController.navigate(ChatFlow.Feed) {
@@ -315,16 +318,6 @@ fun ChatScreen(
                     memberUserUuids = input.memberUserUuids,
                 )
             },
-        )
-    }
-    if (showAddFolderView) {
-        ModalScrim { showAddFolderView = false }
-        CreateFolder(
-            onCreateButtonTap = { folderName ->
-                chatViewModel.addFolder(folderName)
-                showAddFolderView = false
-            },
-            onDismiss = { showAddFolderView = false },
         )
     }
     folderMenu?.let { folder ->

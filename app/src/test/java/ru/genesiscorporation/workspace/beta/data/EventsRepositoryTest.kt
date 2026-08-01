@@ -24,6 +24,26 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 
 class EventsRepositoryTest {
     @Test
+    fun `selected folder follows authoritative catalog and account reset`() {
+        val repository = EventsRepository()
+        val first = folder("Первая")
+        val second = folder("Вторая").copy(uuid = "folder-2")
+
+        repository.setInitialFolders(listOf(first, second))
+        assertEquals(first.uuid, repository.selectedFolderUuid.value)
+
+        repository.selectFolder(second.uuid)
+        repository.setInitialFolders(listOf(first, second))
+        assertEquals(second.uuid, repository.selectedFolderUuid.value)
+
+        repository.removeFolder(second.uuid)
+        assertEquals(first.uuid, repository.selectedFolderUuid.value)
+
+        repository.resetAccountState()
+        assertEquals(null, repository.selectedFolderUuid.value)
+    }
+
+    @Test
     fun `message realtime actions publish feed projection deltas`() = runBlocking {
         val repository = EventsRepository()
         val events = async(start = CoroutineStart.UNDISPATCHED) {

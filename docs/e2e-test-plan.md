@@ -143,6 +143,7 @@ not on a personal physical device.
 | CAT-018 | Cancel channel form after recreation | Name, description, visibility, announcement and selected members restore, then Cancel closes with zero create/member requests |
 | CAT-019 | Activity recreation during catalog mutation | The retained ViewModel owns the request; request-ID completion closes only the matching restored dialog; no duplicate POST/PUT/DELETE is possible |
 | CAT-020 | Create accepted, follow-up topic/catalog fetch fails | Existing server stream is retained, default topic is recovered from response/topic/refetch when possible, partial success is explicit, and retry cannot create a duplicate channel |
+| CAT-021 | Figma folder list → create with selected sandbox chat → open → delete | Frames `12169:30283` / `12169:30552` remain visually aligned; one validated folder is created, only the selected `песочница` stream is assigned and shown after returning to Chats, then the temporary folder is deleted without touching the chat | Compose instrumentation + physical Pixel 5 / Android 14 passed; temporary `cassi-*` folder removed |
 
 ### Current M2 acceptance coverage
 
@@ -1158,7 +1159,8 @@ commit that file or its credentials.
 | SET-042 | Open Profile from bottom navigation and compare it with Figma frame `12052:41584` | A compact 44 dp centred title, 64 dp identity summary, Organizations, Description and Settings sections render in the maintained order without legacy desktop-style button cards | Compose geometry + physical Pixel dark portrait comparison passed |
 | SET-043 | Expand Organizations, select another saved account and choose Add organization | The adjacent Figma hierarchy appears; the active row is explicit, another row invokes one owner-fenced switch and Add opens the real authentication route | Compose callbacks + one-account physical expansion passed; two-account switch remains open |
 | SET-044 | Open Personal information, copy identity and use Back | Only authoritative current-user values and real avatar/status actions render in the adjacent Figma hierarchy; copy is exact and Back returns to Profile without mutation | Existing identity/clipboard contracts + physical Pixel visual/navigation/copy invocation passed |
-| SET-045 | Traverse Profile rows and rotate portrait/landscape/portrait | Every chevron or switch has a real handler; Language is explicitly read-only, Folder display returns to the real chat folder surface, and the selected subview survives safely without clipping or duplicate navigation | Static action registry + physical Pixel portrait/landscape/portrait and folder-route checks passed |
+| SET-045 | Traverse Profile rows and rotate portrait/landscape/portrait | Every chevron or switch has a real handler; Language is explicitly read-only, Folder display opens the dedicated Figma folder surface, and the selected subview survives safely without clipping or duplicate navigation | Static action registry + physical Pixel portrait/landscape/portrait and folder-route checks passed |
+| SET-046 | Compare folder display/create with Figma and complete the sandbox-only round trip | The list and create form preserve the maintained hierarchy, compact rows, search, checkboxes and bottom actions; selecting the created folder returns to Chats with only `песочница`; the temporary folder is deleted afterward | Three Compose instrumentation tests + physical Pixel 5 dark-theme screenshots and reversible server mutation passed |
 
 ### About and licenses matrix
 

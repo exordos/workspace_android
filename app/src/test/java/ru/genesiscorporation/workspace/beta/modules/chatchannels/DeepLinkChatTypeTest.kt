@@ -123,7 +123,12 @@ class DeepLinkChatTypeTest {
     fun folderMenuOnlyExposesBackendSupportedMutations() {
         assertEquals(
             FolderChatMenuAction.ADD,
-            folderChatMenuAction(folder(systemType = "all")),
+            folderChatMenuAction(
+                folder(
+                    systemType = "all",
+                    uuid = ALL_CHATS_FOLDER_UUID,
+                ),
+            ),
         )
         assertEquals(
             FolderChatMenuAction.REMOVE,
@@ -135,6 +140,15 @@ class DeepLinkChatTypeTest {
         )
         assertTrue(folder(systemType = null).isUserManaged())
         assertFalse(folder(systemType = "all").isUserManaged())
+        assertEquals(
+            null,
+            folderChatMenuAction(
+                folder(
+                    systemType = "all",
+                    uuid = "00000000-0000-0000-0000-000000000001",
+                ),
+            ),
+        )
         assertEquals(null, folderChatMenuAction(folder(systemType = "personal")))
         assertEquals(null, folderChatMenuAction(null))
     }
@@ -159,8 +173,11 @@ class DeepLinkChatTypeTest {
         },
     )
 
-    private fun folder(systemType: String?) = FolderResponseData(
-        uuid = "44444444-4444-4444-8444-444444444444",
+    private fun folder(
+        systemType: String?,
+        uuid: String = "44444444-4444-4444-8444-444444444444",
+    ) = FolderResponseData(
+        uuid = uuid,
         title = "Folder",
         unreadCount = 0,
         systemType = systemType,

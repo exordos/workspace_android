@@ -268,6 +268,7 @@ class EventsRepository(
             usersProjectionInitialized = false
             streamBindingsProjectionInitialized = false
             _folders.value = emptyList()
+            _selectedFolderUuid.value = null
             _users.value = emptyList()
             _streamBindings.value = emptyList()
         }
@@ -1672,6 +1673,14 @@ class EventsRepository(
 
     private val _folders = MutableStateFlow<List<FolderResponseData>>(emptyList())
     val folders: StateFlow<List<FolderResponseData>> = _folders.asStateFlow()
+    private val _selectedFolderUuid = MutableStateFlow<String?>(null)
+    val selectedFolderUuid: StateFlow<String?> =
+        _selectedFolderUuid.asStateFlow()
+
+    fun selectFolder(folderUuid: String?) {
+        _selectedFolderUuid.value = folderUuid
+    }
+
     fun updateFolder(updatedFolder: FolderResponseData) {
         mutateFolders { current ->
             current.map { folder ->
@@ -1698,11 +1707,17 @@ class EventsRepository(
         mutateFolders {
             newList
         }
+        if (newList.none { it.uuid == _selectedFolderUuid.value }) {
+            _selectedFolderUuid.value = newList.firstOrNull()?.uuid
+        }
     }
 
     fun removeFolder(folderUuid: String) {
         mutateFolders { current ->
             current.filterNot { it.uuid == folderUuid }
+        }
+        if (_selectedFolderUuid.value == folderUuid) {
+            _selectedFolderUuid.value = _folders.value.firstOrNull()?.uuid
         }
     }
 

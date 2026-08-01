@@ -120,6 +120,7 @@ import ru.genesiscorporation.workspace.beta.modules.externalintegrations.Externa
 import ru.genesiscorporation.workspace.beta.modules.externalintegrations.ExternalIntegrationsViewModel
 import ru.genesiscorporation.workspace.beta.modules.profile.ProfileScreen
 import ru.genesiscorporation.workspace.beta.modules.profile.ProfileViewModel
+import ru.genesiscorporation.workspace.beta.modules.profile.FolderDisplayScreen
 import ru.genesiscorporation.workspace.beta.modules.share.IncomingShareDialog
 import ru.genesiscorporation.workspace.beta.modules.share.IncomingShareRequest
 import ru.genesiscorporation.workspace.beta.modules.share.toIncomingShareRequestOrNull
@@ -934,6 +935,7 @@ fun WokspaceApp(
                             workspaceApiClient,
                             eventsRepository,
                             pushDeviceRegistrationManager,
+                            conversationStateStore,
                             onBackToChats = {
                                 currentDestination = 0
                                 navController.navigate(Chat.route) {
@@ -1327,6 +1329,15 @@ fun ChatNavigation(
                 navController,
             )
         }
+        composable<ChatFlow.FolderDisplay> {
+            LaunchedEffect(Unit) { onBottomNavigationVisibilityChange(true) }
+            FolderDisplayScreen(
+                viewModel = chatViewModel,
+                onBack = navController::popBackStack,
+                onClose = navController::popBackStack,
+                onFolderSelected = navController::popBackStack,
+            )
+        }
         composable<ChatFlow.ChatDialog> {
             LaunchedEffect(Unit) { onBottomNavigationVisibilityChange(false) }
             val args = it.toRoute<ChatFlow.ChatDialog>()
@@ -1435,6 +1446,7 @@ fun ProfileNavigation(
     workspaceApiClient: WorkspaceAPIClient,
     eventsRepository: EventsRepository,
     pushDeviceRegistrationManager: PushDeviceRegistrationManager,
+    conversationStateStore: ConversationStateStore,
     onBackToChats: () -> Unit,
     onBottomNavigationVisibilityChange: (Boolean) -> Unit,
 ) {
@@ -1458,10 +1470,35 @@ fun ProfileNavigation(
             ProfileScreen(
                 viewModel = profileViewModel,
                 onBackToChats = onBackToChats,
+                onOpenFolderDisplay = {
+                    navController.navigate(ProfileFlow.FolderDisplay)
+                },
                 onOpenAbout = { navController.navigate(ProfileFlow.About) },
                 onOpenExternalIntegrations = {
                     navController.navigate(ProfileFlow.ExternalIntegrations)
                 },
+            )
+        }
+        composable<ProfileFlow.FolderDisplay> {
+            LaunchedEffect(Unit) {
+                onBottomNavigationVisibilityChange(true)
+            }
+            val chatViewModelFactory = remember {
+                ChatViewModelFactory(
+                    workspaceApiClient,
+                    user,
+                    eventsRepository,
+                    conversationStateStore,
+                )
+            }
+            val chatViewModel: ChatViewModel = viewModel(
+                factory = chatViewModelFactory,
+            )
+            FolderDisplayScreen(
+                viewModel = chatViewModel,
+                onBack = navController::popBackStack,
+                onClose = navController::popBackStack,
+                onFolderSelected = onBackToChats,
             )
         }
         composable<ProfileFlow.About> {

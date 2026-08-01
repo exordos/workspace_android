@@ -248,10 +248,10 @@ internal enum class FolderChatMenuAction {
 
 internal fun folderChatMenuAction(
     folder: FolderResponseData?,
-): FolderChatMenuAction? = when (folder?.systemType) {
-    null -> if (folder == null) null else FolderChatMenuAction.REMOVE
-    "all" -> FolderChatMenuAction.ADD
-    "created" -> FolderChatMenuAction.REMOVE
+): FolderChatMenuAction? = when {
+    folder == null -> null
+    folder.isAllChatsFolder() -> FolderChatMenuAction.ADD
+    folder.isUserManaged() -> FolderChatMenuAction.REMOVE
     else -> null
 }
 
