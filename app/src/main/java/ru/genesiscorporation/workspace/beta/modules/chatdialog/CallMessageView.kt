@@ -39,6 +39,7 @@ fun CallMessageView(
     item: MessageResponse,
     viewModel: ChatDialogViewModel,
     navController: NavHostController,
+    selectionMode: Boolean = false,
     isSelected: Boolean = false,
     onToggleSelection: () -> Unit = {},
 ) {
@@ -147,7 +148,7 @@ fun CallMessageView(
         navController = navController,
     ) {
         Box {
-            messageBubble(true)
+            messageBubble(!selectionMode)
             MessageActionsMenu(
                 expanded = menuExpanded,
                 item = item,
@@ -201,15 +202,6 @@ fun CallMessageView(
                 onToggleSelection = {
                     onToggleSelection()
                     closeMenu()
-                },
-                highlightedMessage = {
-                    MessageRow(
-                        item = item,
-                        viewModel = viewModel,
-                        navController = navController,
-                    ) {
-                        messageBubble(false)
-                    }
                 },
             )
         }

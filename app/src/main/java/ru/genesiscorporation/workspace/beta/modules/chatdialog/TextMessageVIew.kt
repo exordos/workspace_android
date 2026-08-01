@@ -65,6 +65,7 @@ fun TextMessageView(
     item: MessageResponse,
     viewModel: ChatDialogViewModel,
     navController: NavHostController,
+    selectionMode: Boolean = false,
     isSelected: Boolean = false,
     onToggleSelection: () -> Unit = {},
 ) {
@@ -93,7 +94,7 @@ fun TextMessageView(
                 item = item,
                 viewModel = viewModel,
                 navController = navController,
-                onOpenMenu = openMenu,
+                onOpenMenu = if (selectionMode) null else openMenu,
             )
             MessageActionsMenu(
                 expanded = menuExpanded,
@@ -148,20 +149,6 @@ fun TextMessageView(
                 onToggleSelection = {
                     onToggleSelection()
                     closeMenu()
-                },
-                highlightedMessage = {
-                    MessageRow(
-                        item = item,
-                        viewModel = viewModel,
-                        navController = navController,
-                    ) {
-                        TextMessageBubble(
-                            item = item,
-                            viewModel = viewModel,
-                            navController = navController,
-                            onOpenMenu = null,
-                        )
-                    }
                 },
             )
         }
@@ -357,7 +344,6 @@ internal fun MessageActionsMenu(
     onForward: () -> Unit,
     isSelected: Boolean,
     onToggleSelection: () -> Unit,
-    highlightedMessage: (@Composable () -> Unit)? = null,
 ) {
     var confirmDelete by remember(item.uuid) { mutableStateOf(false) }
     var fragmentAdding by remember(item.uuid) {
@@ -557,18 +543,6 @@ internal fun MessageActionsMenu(
                                 onToggleSelection()
                             },
                         )
-                    }
-                }
-                highlightedMessage?.let { message ->
-                    Spacer(Modifier.height(4.dp))
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .semantics {
-                                contentDescription = "Выбранное сообщение"
-                            },
-                    ) {
-                        message()
                     }
                 }
             }

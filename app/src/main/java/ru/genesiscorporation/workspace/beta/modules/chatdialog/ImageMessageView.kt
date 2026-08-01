@@ -64,6 +64,7 @@ fun ImageMessageView(
     item: MessageResponse,
     navController: NavHostController,
     onImageLoad: () -> Unit,
+    selectionMode: Boolean = false,
     isSelected: Boolean = false,
     onToggleSelection: () -> Unit = {},
 ) {
@@ -212,7 +213,7 @@ fun ImageMessageView(
         navController = navController,
     ) {
         Box {
-            messageBubble(true)
+            messageBubble(!selectionMode)
             MessageActionsMenu(
                 expanded = menuExpanded,
                 item = item,
@@ -266,15 +267,6 @@ fun ImageMessageView(
                 onToggleSelection = {
                     onToggleSelection()
                     closeMenu()
-                },
-                highlightedMessage = {
-                    MessageRow(
-                        item = item,
-                        viewModel = viewModel,
-                        navController = navController,
-                    ) {
-                        messageBubble(false)
-                    }
                 },
             )
         }

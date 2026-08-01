@@ -42,6 +42,7 @@ fun AttachmentMessageView(
     viewModel: ChatDialogViewModel,
     item: MessageResponse,
     navController: NavHostController,
+    selectionMode: Boolean = false,
     isSelected: Boolean = false,
     onToggleSelection: () -> Unit = {},
 ) {
@@ -163,7 +164,7 @@ fun AttachmentMessageView(
         navController = navController,
     ) {
         androidx.compose.foundation.layout.Box {
-            messageBubble(true)
+            messageBubble(!selectionMode)
             MessageActionsMenu(
                 expanded = menuExpanded,
                 item = item,
@@ -217,15 +218,6 @@ fun AttachmentMessageView(
                 onToggleSelection = {
                     onToggleSelection()
                     closeMenu()
-                },
-                highlightedMessage = {
-                    MessageRow(
-                        item = item,
-                        viewModel = viewModel,
-                        navController = navController,
-                    ) {
-                        messageBubble(false)
-                    }
                 },
             )
         }

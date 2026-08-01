@@ -29,11 +29,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -613,32 +611,37 @@ fun ChatDialogScreen(
     }
 
     Scaffold(
-        modifier = Modifier.then(
-            if (activeMessageMenuUuid == null) {
-                Modifier
-            } else {
-                Modifier.blur(
-                    radius = MESSAGE_BACKGROUND_BLUR_RADIUS,
-                    edgeTreatment = BlurredEdgeTreatment.Unbounded,
-                )
-            },
-        ),
         containerColor = LocalWorkspaceColorsPalette.current.background,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
-            ConversationHeader(
-                viewModel = viewModel,
-                memberCount = memberCount,
-                topicAsPrimaryTitle = topicAsPrimaryTitle,
-                selectedCount = selectedMessageUuids.size,
-                onBack = { navController.popBackStack() },
-                onCancelSelection = viewModel::clearMessageSelection,
-                onInfo = {
-                    if (!viewModel.isDirectMessages) {
-                        navController.navigate(ChatFlow.ChannelInfo(viewModel.chatId))
-                    }
-                },
-            )
+            Box(
+                modifier = Modifier.then(
+                    if (activeMessageMenuUuid == null) {
+                        Modifier
+                    } else {
+                        Modifier.blur(
+                            radius = MESSAGE_BACKGROUND_BLUR_RADIUS,
+                            edgeTreatment = BlurredEdgeTreatment.Unbounded,
+                        )
+                    },
+                ),
+            ) {
+                ConversationHeader(
+                    viewModel = viewModel,
+                    memberCount = memberCount,
+                    topicAsPrimaryTitle = topicAsPrimaryTitle,
+                    selectedCount = selectedMessageUuids.size,
+                    onBack = { navController.popBackStack() },
+                    onCancelSelection = viewModel::clearMessageSelection,
+                    onInfo = {
+                        if (!viewModel.isDirectMessages) {
+                            navController.navigate(
+                                ChatFlow.ChannelInfo(viewModel.chatId),
+                            )
+                        }
+                    },
+                )
+            }
         },
     ) { innerPadding ->
         Column(
@@ -771,6 +774,13 @@ fun ChatDialogScreen(
                                         isSelected =
                                             message.uuid in
                                                 selectedMessageUuidSet,
+                                        blurred = shouldBlurMessage(
+                                            messageUuid = message.uuid,
+                                            activeMessageMenuUuid =
+                                                activeMessageMenuUuid,
+                                            selectedMessageUuids =
+                                                selectedMessageUuidSet,
+                                        ),
                                         onToggleSelection = {
                                             viewModel.toggleMessageSelection(
                                                 message,
@@ -1526,6 +1536,7 @@ fun ChatMessage(
     isVerifyingOutbox: Boolean = false,
     selectionMode: Boolean = false,
     isSelected: Boolean = false,
+    blurred: Boolean = false,
     onToggleSelection: () -> Unit = {},
     onImageLoad: () -> Unit,
 ) {
@@ -1536,214 +1547,253 @@ fun ChatMessage(
         messageLocalDate(it.createdAt)
     }
     val locale = LocalLocale.current.platformLocale
+    val selectableInSelectionMode =
+        selectionMode && outboxEntry == null && canForwardMessage(item)
+    val selectionLabel = if (selectableInSelectionMode) {
+        stringResource(
+            if (isSelected) {
+                R.string.message_unselect
+            } else {
+                R.string.message_select
+            },
+        )
+    } else {
+        ""
+    }
 
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = if (item.isOwn) Alignment.End else Alignment.Start,
-    ) {
-        if (currentDate != null && currentDate != previousDate) {
-            Text(
-                text = currentDate.format(DateTimeFormatter.ofPattern("d MMM", locale)),
-                color = colors.textAdditional50,
-                fontSize = 13.sp,
-                modifier = Modifier
-                    .align(Alignment.CenterHorizontally)
-                    .padding(vertical = 12.dp)
-                    .background(colors.surface, CircleShape)
-                    .padding(horizontal = 12.dp, vertical = 4.dp),
-            )
-        }
-
-        val upload = item.payload.content.parseWorkspaceAttachmentsOrNull()
-        val jitsiBaseUrl = viewModel.repo.jitsiServerUrl
-        when {
-            outboxEntry != null ->
-                OutboxMessageView(
-                    item = item,
-                    outboxEntry = outboxEntry,
-                    isVerifying = isVerifyingOutbox,
-                    viewModel = viewModel,
-                    navController = navController,
-                )
-
-            jitsiBaseUrl.isNotBlank() &&
-                Patterns.WEB_URL.matcher(item.payload.content).matches() &&
-                item.payload.content.startsWith(jitsiBaseUrl) ->
-                CallMessageView(
-                    item = item,
-                    viewModel = viewModel,
-                    navController = navController,
-                    isSelected = isSelected,
-                    onToggleSelection = onToggleSelection,
-                )
-
-            upload != null &&
-                upload.attachments.all { it.kind == WorkspaceAttachmentKind.IMAGE } ->
-                ImageMessageView(
-                    text = upload.caption,
-                    imageUrls = upload.attachments.map { it.urn },
-                    viewModel = viewModel,
-                    item = item,
-                    navController = navController,
-                    isSelected = isSelected,
-                    onToggleSelection = onToggleSelection,
-                    onImageLoad = onImageLoad,
-                )
-
-            upload != null ->
-                AttachmentMessageView(
-                    text = upload.caption,
-                    attachments = upload.attachments,
-                    viewModel = viewModel,
-                    item = item,
-                    navController = navController,
-                    isSelected = isSelected,
-                    onToggleSelection = onToggleSelection,
-                )
-
-            else ->
-                TextMessageView(
-                    item = item,
-                    viewModel = viewModel,
-                    navController = navController,
-                    isSelected = isSelected,
-                    onToggleSelection = onToggleSelection,
-                )
-        }
-
-        if (outboxEntry == null && reactionCounts.isNotEmpty()) {
-            Row(
-                horizontalArrangement = if (item.isOwn) {
-                    Arrangement.End
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (blurred) {
+                    Modifier.blur(
+                        radius = MESSAGE_BACKGROUND_BLUR_RADIUS,
+                        edgeTreatment = BlurredEdgeTreatment.Unbounded,
+                    )
                 } else {
-                    Arrangement.Start
+                    Modifier
                 },
-                modifier = Modifier
-                    .fillMaxWidth(),
-            ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+            )
+            .messageSelectionTarget(
+                enabled = selectableInSelectionMode,
+                isSelected = isSelected,
+                selectionLabel = selectionLabel,
+                onToggleSelection = onToggleSelection,
+            ),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = if (item.isOwn) Alignment.End else Alignment.Start,
+        ) {
+            if (currentDate != null && currentDate != previousDate) {
+                Text(
+                    text = currentDate.format(
+                        DateTimeFormatter.ofPattern("d MMM", locale),
+                    ),
+                    color = colors.textAdditional50,
+                    fontSize = 13.sp,
                     modifier = Modifier
-                        .widthIn(max = 310.dp)
-                        .horizontalScroll(rememberScrollState())
-                        .padding(
-                            start = if (
-                                !item.isOwn &&
-                                !viewModel.isDirectMessages
-                            ) {
-                                44.dp
-                            } else {
-                                0.dp
-                            },
-                            top = 3.dp,
-                        ),
+                        .align(Alignment.CenterHorizontally)
+                        .padding(vertical = 12.dp)
+                        .background(colors.surface, CircleShape)
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                )
+            }
+
+            val upload = item.payload.content.parseWorkspaceAttachmentsOrNull()
+            val jitsiBaseUrl = viewModel.repo.jitsiServerUrl
+            when {
+                outboxEntry != null ->
+                    OutboxMessageView(
+                        item = item,
+                        outboxEntry = outboxEntry,
+                        isVerifying = isVerifyingOutbox,
+                        viewModel = viewModel,
+                        navController = navController,
+                    )
+
+                jitsiBaseUrl.isNotBlank() &&
+                    Patterns.WEB_URL.matcher(item.payload.content).matches() &&
+                    item.payload.content.startsWith(jitsiBaseUrl) ->
+                    CallMessageView(
+                        item = item,
+                        viewModel = viewModel,
+                        navController = navController,
+                        selectionMode = selectionMode,
+                        isSelected = isSelected,
+                        onToggleSelection = onToggleSelection,
+                    )
+
+                upload != null &&
+                    upload.attachments.all {
+                        it.kind == WorkspaceAttachmentKind.IMAGE
+                    } ->
+                    ImageMessageView(
+                        text = upload.caption,
+                        imageUrls = upload.attachments.map { it.urn },
+                        viewModel = viewModel,
+                        item = item,
+                        navController = navController,
+                        selectionMode = selectionMode,
+                        isSelected = isSelected,
+                        onToggleSelection = onToggleSelection,
+                        onImageLoad = onImageLoad,
+                    )
+
+                upload != null ->
+                    AttachmentMessageView(
+                        text = upload.caption,
+                        attachments = upload.attachments,
+                        viewModel = viewModel,
+                        item = item,
+                        navController = navController,
+                        selectionMode = selectionMode,
+                        isSelected = isSelected,
+                        onToggleSelection = onToggleSelection,
+                    )
+
+                else ->
+                    TextMessageView(
+                        item = item,
+                        viewModel = viewModel,
+                        navController = navController,
+                        selectionMode = selectionMode,
+                        isSelected = isSelected,
+                        onToggleSelection = onToggleSelection,
+                    )
+            }
+
+            if (outboxEntry == null && reactionCounts.isNotEmpty()) {
+                Row(
+                    horizontalArrangement = if (item.isOwn) {
+                        Arrangement.End
+                    } else {
+                        Arrangement.Start
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth(),
                 ) {
-                    reactionCounts
-                        .toSortedMap()
-                        .forEach { (emojiName, count) ->
-                            val equivalentEmojiNames =
-                                reactionEmojiResolver(emojiName)
-                                    ?.let(reactionAliasesByGlyph::get)
-                                    .orEmpty() + emojiName
-                            val selected =
-                                equivalentEmojiNames.any(
-                                    myReactionEmojiNames::contains,
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        modifier = Modifier
+                            .widthIn(max = 310.dp)
+                            .horizontalScroll(rememberScrollState())
+                            .padding(
+                                start = if (
+                                    !item.isOwn &&
+                                    !viewModel.isDirectMessages
+                                ) {
+                                    44.dp
+                                } else {
+                                    0.dp
+                                },
+                                top = 3.dp,
+                            ),
+                    ) {
+                        reactionCounts
+                            .toSortedMap()
+                            .forEach { (emojiName, count) ->
+                                val equivalentEmojiNames =
+                                    reactionEmojiResolver(emojiName)
+                                        ?.let(reactionAliasesByGlyph::get)
+                                        .orEmpty() + emojiName
+                                val selected =
+                                    equivalentEmojiNames.any(
+                                        myReactionEmojiNames::contains,
+                                    )
+                                val displayEmoji = workspaceReactionDisplayText(
+                                    emojiName,
+                                    reactionEmojiResolver,
                                 )
-                            val displayEmoji = workspaceReactionDisplayText(
-                                emojiName,
-                                reactionEmojiResolver,
-                            )
-                            val reactionContentDescription = stringResource(
-                                R.string.message_reaction_count_description,
-                                displayEmoji,
-                                count,
-                            )
-                            Row(
-                                modifier = Modifier
-                                    .border(
-                                        width = 1.dp,
-                                        color = if (selected) {
-                                            colors.primary
-                                        } else {
-                                            colors.cardBackgroundActive
-                                        },
-                                        shape = CircleShape,
-                                    )
-                                    .background(
-                                        if (selected) {
-                                            colors.primary.copy(alpha = 0.16f)
-                                        } else {
-                                            colors.cardBackgroundActive
-                                        },
-                                        CircleShape,
-                                    )
-                                    .clickable(role = Role.Button) {
-                                        viewModel.onMessageReactionTap(
-                                            item.uuid,
-                                            emojiName,
-                                            equivalentEmojiNames,
+                                val reactionContentDescription = stringResource(
+                                    R.string.message_reaction_count_description,
+                                    displayEmoji,
+                                    count,
+                                )
+                                Row(
+                                    modifier = Modifier
+                                        .border(
+                                            width = 1.dp,
+                                            color = if (selected) {
+                                                colors.primary
+                                            } else {
+                                                colors.cardBackgroundActive
+                                            },
+                                            shape = CircleShape,
                                         )
-                                    }
-                                    .height(26.dp)
-                                    .semantics {
-                                        this.selected = selected
-                                        contentDescription =
-                                            reactionContentDescription
-                                    }
-                                    .padding(horizontal = 7.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    text = displayEmoji,
-                                    fontSize = 14.sp,
-                                    lineHeight = 16.sp,
-                                )
-                                Text(
-                                    text = count.toString(),
-                                    color = colors.textAdditional50,
-                                    fontSize = 11.sp,
-                                    lineHeight = 14.sp,
-                                    modifier = Modifier.padding(start = 3.dp),
-                                )
+                                        .background(
+                                            if (selected) {
+                                                colors.primary.copy(alpha = 0.16f)
+                                            } else {
+                                                colors.cardBackgroundActive
+                                            },
+                                            CircleShape,
+                                        )
+                                        .clickable(
+                                            enabled = !selectionMode,
+                                            role = Role.Button,
+                                        ) {
+                                            viewModel.onMessageReactionTap(
+                                                item.uuid,
+                                                emojiName,
+                                                equivalentEmojiNames,
+                                            )
+                                        }
+                                        .height(26.dp)
+                                        .semantics {
+                                            this.selected = selected
+                                            contentDescription =
+                                                reactionContentDescription
+                                        }
+                                        .padding(horizontal = 7.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = displayEmoji,
+                                        fontSize = 14.sp,
+                                        lineHeight = 16.sp,
+                                    )
+                                    Text(
+                                        text = count.toString(),
+                                        color = colors.textAdditional50,
+                                        fontSize = 11.sp,
+                                        lineHeight = 14.sp,
+                                        modifier = Modifier.padding(start = 3.dp),
+                                    )
+                                }
                             }
-                        }
                     }
                 }
-        }
-        if (
-            selectionMode &&
-            outboxEntry == null &&
-            canForwardMessage(item)
-        ) {
-            val selectionLabel = stringResource(
-                if (isSelected) {
-                    R.string.message_unselect
-                } else {
-                    R.string.message_select
-                },
-            )
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .toggleable(
-                        value = isSelected,
-                        role = Role.Checkbox,
-                        onValueChange = { onToggleSelection() },
-                    )
-                    .semantics {
-                        contentDescription = selectionLabel
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                Checkbox(
-                    checked = isSelected,
-                    onCheckedChange = null,
-                    modifier = Modifier.size(28.dp),
-                )
             }
         }
     }
 }
+
+internal fun Modifier.messageSelectionTarget(
+    enabled: Boolean,
+    isSelected: Boolean,
+    selectionLabel: String,
+    onToggleSelection: () -> Unit,
+): Modifier = if (enabled) {
+    clickable(
+        role = Role.Button,
+        onClick = onToggleSelection,
+    ).semantics {
+        selected = isSelected
+        contentDescription = selectionLabel
+    }
+} else {
+    this
+}
+
+internal fun shouldBlurMessage(
+    messageUuid: String,
+    activeMessageMenuUuid: String?,
+    selectedMessageUuids: Set<String>,
+): Boolean =
+    (activeMessageMenuUuid != null || selectedMessageUuids.isNotEmpty()) &&
+        messageUuid != activeMessageMenuUuid &&
+        messageUuid !in selectedMessageUuids
 
 @Composable
 private fun OutboxMessageView(
