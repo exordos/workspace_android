@@ -2,14 +2,18 @@ package ru.genesiscorporation.workspace.beta.modules.chatchannels
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -45,6 +49,7 @@ fun ChatChannel(
     baseUrl: String,
     showDetail: Boolean,
     currentlySelectedFolder: FolderResponseData?,
+    latestTopicName: String?,
     density: ChatListDensity,
     onChatNumberToAddChange: (Stream?) -> Unit,
     onClick: () -> Unit,
@@ -57,6 +62,7 @@ fun ChatChannel(
     val folderMenuAction = folderChatMenuAction(currentlySelectedFolder)
     val folderItem = currentlySelectedFolder?.items
         ?.firstOrNull { it.streamUuid == item.uuid }
+    val pinned = folderItem?.pinnedAt != null
     val hasMenuActions =
         folderMenuAction != null || folderItem != null || item.unreadCount > 0
     val avatarUrn = if (isDirect) {
@@ -69,10 +75,10 @@ fun ChatChannel(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = if (compact) 52.dp else 65.dp)
+                .heightIn(min = if (compact) 52.dp else 64.dp)
                 .clip(RoundedCornerShape(8.dp))
                 .background(
-                    if (showDetail) colors.cardBackgroundActive else colors.cardBackgroundBase,
+                    if (showDetail) colors.cardBackgroundActive else colors.background,
                 )
                 .combinedClickable(
                     onClick = onClick,
@@ -97,7 +103,11 @@ fun ChatChannel(
             Column(
                 modifier = Modifier
                     .weight(1f)
-                    .padding(start = if (compact) 10.dp else 12.dp),
+                    .heightIn(min = 40.dp)
+                    .padding(
+                        start = if (compact) 10.dp else 12.dp,
+                        end = if (compact) 10.dp else 12.dp,
+                    ),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (!isDirect && item.isPrivate) {
@@ -109,17 +119,9 @@ fun ChatChannel(
                                 .padding(end = 8.dp)
                                 .size(16.dp),
                         )
-                    } else if (!isDirect) {
-                        Text(
-                            text = "#",
-                            color = colors.iconBase,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(end = 8.dp),
-                        )
                     }
                     Text(
-                        text = item.name,
+                        text = streamTitle(item.name, latestTopicName, isDirect),
                         color = colors.textHeaders,
                         fontSize = 14.sp,
                         lineHeight = 20.sp,
@@ -128,56 +130,69 @@ fun ChatChannel(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
                     )
-                    if (lastMessage != null) {
-                        Text(
-                            text = formatMessageTime(lastMessage.createdAt),
-                        color = colors.messageTimeColor,
-                        fontSize = 12.sp,
-                        lineHeight = 20.sp,
-                            modifier = Modifier.padding(start = 8.dp),
-                        )
-                    }
                 }
-                if (!compact && !isDirect && lastMessage?.user != null) {
-                    Text(
-                        text = lastMessage.user?.displayableName().orEmpty(),
-                        color = colors.primary,
-                        fontSize = 12.sp,
-                        lineHeight = 20.sp,
-                        fontWeight = FontWeight.Normal,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                if (compact) {
-                    if (item.unreadCount > 0) {
-                        UnreadBadge(
-                            count = item.unreadCount,
-                            modifier = Modifier.align(Alignment.End),
-                        )
-                    }
-                } else {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (!isDirect && lastMessage?.user != null) {
                         Text(
-                            text = lastMessage?.payload?.content?.let(::messagePreview)
-                                ?: "Сообщений пока нет",
-                            color = colors.textAdditional50,
+                            text = lastMessage.user?.displayableName().orEmpty(),
+                            color = colors.primary,
                             fontSize = 12.sp,
                             lineHeight = 20.sp,
+                            fontWeight = FontWeight.Normal,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.widthIn(max = 96.dp),
                         )
-                        if (item.unreadCount > 0) {
-                            UnreadBadge(
-                                count = item.unreadCount,
-                                modifier = Modifier.padding(start = 8.dp),
-                            )
-                        } else {
-                            Spacer(Modifier.size(1.dp))
-                        }
+                        Spacer(Modifier.width(4.dp))
                     }
+                    Text(
+                        text = lastMessage?.payload?.content
+                            ?.let(::messagePreview)
+                            ?.takeIf(String::isNotBlank)
+                            ?: "Сообщений пока нет",
+                        color = colors.textAdditional50,
+                        fontSize = 12.sp,
+                        lineHeight = 20.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
                 }
+            }
+            Column(
+                modifier = Modifier
+                    .width(44.dp)
+                    .heightIn(min = if (compact) 42.dp else 48.dp),
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(20.dp),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (pinned) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_pin),
+                            contentDescription = "Закреплено",
+                            tint = colors.iconBase,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                    if (pinned && item.unreadCount > 0) {
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    UnreadBadge(count = item.unreadCount)
+                }
+                Text(
+                    text = lastMessage?.createdAt?.let(::formatMessageTime).orEmpty(),
+                    color = colors.messageTimeColor,
+                    fontSize = 12.sp,
+                    lineHeight = 20.sp,
+                    maxLines = 1,
+                )
             }
         }
         DropdownMenu(
@@ -264,6 +279,16 @@ internal fun messagePreview(content: String): String =
         .firstOrNull { it.isNotBlank() }
         ?.trim()
         .orEmpty()
+
+internal fun streamTitle(
+    streamName: String,
+    latestTopicName: String?,
+    isDirect: Boolean,
+): String = if (isDirect || latestTopicName.isNullOrBlank()) {
+    streamName
+} else {
+    "$streamName  # ${latestTopicName.trim()}"
+}
 
 internal fun formatMessageTime(value: String): String {
     val instant = parseTime(value)

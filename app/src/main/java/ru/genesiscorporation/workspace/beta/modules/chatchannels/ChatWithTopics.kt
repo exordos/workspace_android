@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
@@ -40,6 +41,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.ChatFlow
+import ru.genesiscorporation.workspace.beta.data.ChatListDensity
 import ru.genesiscorporation.workspace.beta.data.WorkspaceUiPreferences
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderItem
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
@@ -175,16 +177,24 @@ fun ChatWithTopics(
             state = streamListState,
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 12.dp, vertical = 4.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+                .padding(horizontal = 12.dp),
         ) {
-            items(visibleStreams, key = { it.uuid }) { stream ->
+            itemsIndexed(
+                items = visibleStreams,
+                key = { _, stream -> stream.uuid },
+            ) { index, stream ->
                 ChatChannel(
                     item = stream,
                     viewModel = chatViewModel,
                     baseUrl = baseUrl.orEmpty(),
                     showDetail = false,
                     currentlySelectedFolder = currentlySelectedFolder,
+                    latestTopicName = stream.lastMessage?.topicUuid?.let { topicUuid ->
+                        streamTopics[stream.uuid]
+                            .orEmpty()
+                            .firstOrNull { it.uuid == topicUuid }
+                            ?.name
+                    },
                     density = uiPreferences.chatListDensity,
                     onChatNumberToAddChange = chatViewModel::onChatToAddChange,
                     onClick = {
@@ -208,6 +218,25 @@ fun ChatWithTopics(
                         }
                     },
                 )
+                if (index < visibleStreams.lastIndex) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(
+                                start = if (
+                                    uiPreferences.chatListDensity == ChatListDensity.COMPACT
+                                ) {
+                                    52.dp
+                                } else {
+                                    60.dp
+                                },
+                            )
+                            .height(1.dp)
+                            .background(
+                                LocalWorkspaceColorsPalette.current.cardBackgroundActive,
+                            ),
+                    )
+                }
             }
         }
         return

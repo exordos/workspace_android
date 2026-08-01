@@ -629,7 +629,7 @@ private fun FolderTabs(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = folder.title,
+                        text = folder.localizedTitle(),
                         color = if (isSelected) colors.textHeaders else colors.textAdditional30,
                         fontSize = 14.sp,
                         lineHeight = 20.sp,

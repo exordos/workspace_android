@@ -34,4 +34,20 @@ class MessengerUiFormattingTest {
         val preview = messagePreview("[photo.png](urn:image:1234)")
         assertTrue(preview == "Вложение" || preview == "photo.png")
     }
+
+    @Test
+    fun `stream title includes the latest topic only for channel rows`() {
+        assertEquals(
+            "Команда  # Общий чат",
+            streamTitle("Команда", " Общий чат ", isDirect = false),
+        )
+        assertEquals(
+            "Анна",
+            streamTitle("Анна", "Личные сообщения", isDirect = true),
+        )
+        assertEquals(
+            "Команда",
+            streamTitle("Команда", null, isDirect = false),
+        )
+    }
 }

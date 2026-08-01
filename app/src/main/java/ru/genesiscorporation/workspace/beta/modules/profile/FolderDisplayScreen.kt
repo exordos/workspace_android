@@ -56,6 +56,7 @@ import ru.genesiscorporation.workspace.beta.modules.chatchannels.ChatViewModel
 import ru.genesiscorporation.workspace.beta.modules.chatchannels.FOLDER_TITLE_MAX_LENGTH
 import ru.genesiscorporation.workspace.beta.modules.chatchannels.folderDraftError
 import ru.genesiscorporation.workspace.beta.modules.chatchannels.isAllChatsFolder
+import ru.genesiscorporation.workspace.beta.modules.chatchannels.localizedTitle
 import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.UnreadBadge
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
@@ -702,7 +703,7 @@ internal fun folderStreamPreview(stream: Stream): String =
         ?: "Сообщений пока нет"
 
 internal fun folderDisplayTitle(folder: FolderResponseData): String =
-    if (folder.isAllChatsFolder()) "Все чаты" else folder.title
+    folder.localizedTitle()
 
 internal fun folderStreamTime(stream: Stream): String {
     val source = stream.lastMessage?.createdAt ?: stream.updatedAt

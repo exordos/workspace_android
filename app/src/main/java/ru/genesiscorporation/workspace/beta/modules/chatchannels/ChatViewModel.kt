@@ -2070,6 +2070,9 @@ internal fun FolderResponseData.isUserManaged(): Boolean =
 internal fun FolderResponseData.isAllChatsFolder(): Boolean =
     uuid == ALL_CHATS_FOLDER_UUID
 
+internal fun FolderResponseData.localizedTitle(): String =
+    if (isAllChatsFolder()) "Все чаты" else title
+
 internal const val FOLDER_TITLE_MAX_LENGTH = 64
 internal const val ALL_CHATS_FOLDER_UUID =
     "00000000-0000-0000-0000-000000000000"
