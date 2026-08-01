@@ -62,7 +62,6 @@ import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 import ru.genesiscorporation.workspace.beta.modules.users.UsersViewModel
 import ru.genesiscorporation.workspace.beta.ui.AddChatToFolder
 import ru.genesiscorporation.workspace.beta.ui.CreateFolder
-import ru.genesiscorporation.workspace.beta.ui.CreateChannelDialog
 import ru.genesiscorporation.workspace.beta.ui.UnreadBadge
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import ru.genesiscorporation.workspace.beta.ui.theme.NavigationFontFamily
@@ -76,7 +75,6 @@ fun ChatScreen(
     var chatCreationPage by rememberSaveable {
         mutableStateOf<ChatCreationPage?>(null)
     }
-    var showCreateChannel by rememberSaveable { mutableStateOf(false) }
     var folderMenuUuid by rememberSaveable { mutableStateOf<String?>(null) }
     var folderToRenameUuid by rememberSaveable { mutableStateOf<String?>(null) }
     var folderToDeleteUuid by rememberSaveable { mutableStateOf<String?>(null) }
@@ -119,16 +117,17 @@ fun ChatScreen(
     val colors = LocalWorkspaceColorsPalette.current
 
     BackHandler(enabled = chatCreationPage != null || showDetail) {
-        chatCreationPage = when (chatCreationPage) {
-            ChatCreationPage.DIRECT -> if (createState is QueryState.Loading) {
-                ChatCreationPage.DIRECT
-            } else {
-                ChatCreationPage.CHOOSER
+        when (chatCreationPage) {
+            ChatCreationPage.DIRECT,
+            ChatCreationPage.STREAM,
+            -> if (createState !is QueryState.Loading) {
+                chatViewModel.consumeCreatedStream()
+                chatViewModel.clearActionError()
+                chatCreationPage = ChatCreationPage.CHOOSER
             }
-            ChatCreationPage.CHOOSER -> null
+            ChatCreationPage.CHOOSER -> chatCreationPage = null
             null -> {
                 showDetail = false
-                null
             }
         }
     }
@@ -154,7 +153,6 @@ fun ChatScreen(
                     ),
                 )
             }
-            showCreateChannel = false
             chatCreationPage = null
             chatViewModel.consumeCreatedStream()
         }
@@ -180,10 +178,7 @@ fun ChatScreen(
             currentUserUuid = currentUserUuid,
             onBack = { chatCreationPage = null },
             onStartDirect = { chatCreationPage = ChatCreationPage.DIRECT },
-            onCreateChannel = {
-                chatCreationPage = null
-                showCreateChannel = true
-            },
+            onCreateChannel = { chatCreationPage = ChatCreationPage.STREAM },
             onOpenChannel = { stream ->
                 chatCreationPage = null
                 navController.navigate(ChatFlow.ChannelInfo(stream.uuid))
@@ -195,10 +190,46 @@ fun ChatScreen(
             catalogState = availableUsersState,
             createState = createState,
             baseUrl = baseUrl.orEmpty(),
-            onBack = { chatCreationPage = ChatCreationPage.CHOOSER },
-            onClose = { chatCreationPage = null },
+            onBack = {
+                chatViewModel.consumeCreatedStream()
+                chatViewModel.clearActionError()
+                chatCreationPage = ChatCreationPage.CHOOSER
+            },
+            onClose = {
+                chatViewModel.consumeCreatedStream()
+                chatViewModel.clearActionError()
+                chatCreationPage = null
+            },
             onRetry = usersViewModel::retry,
             onUserSelected = chatViewModel::createPrivateStream,
+        )
+
+        ChatCreationPage.STREAM -> CreateStreamFlowScreen(
+            users = availableUsers,
+            catalogState = availableUsersState,
+            createState = createState,
+            currentUserUuid = currentUserUuid,
+            baseUrl = baseUrl.orEmpty(),
+            onBack = {
+                chatViewModel.consumeCreatedStream()
+                chatViewModel.clearActionError()
+                chatCreationPage = ChatCreationPage.CHOOSER
+            },
+            onClose = {
+                chatViewModel.consumeCreatedStream()
+                chatViewModel.clearActionError()
+                chatCreationPage = null
+            },
+            onRetry = usersViewModel::retry,
+            onSubmit = { input ->
+                chatViewModel.createChannel(
+                    name = input.name,
+                    description = input.description,
+                    inviteOnly = input.inviteOnly,
+                    announce = input.announce,
+                    memberUserUuids = input.memberUserUuids,
+                )
+            },
         )
 
         null -> Column(
@@ -222,7 +253,11 @@ fun ChatScreen(
                             users = users,
                         )
                     },
-                onNewChat = { chatCreationPage = ChatCreationPage.CHOOSER },
+                onNewChat = {
+                    chatViewModel.consumeCreatedStream()
+                    chatViewModel.clearActionError()
+                    chatCreationPage = ChatCreationPage.CHOOSER
+                },
             )
             actionError?.let { error ->
                 Row(
@@ -278,26 +313,6 @@ fun ChatScreen(
                 onShowDetailChange = { showDetail = it },
             )
         }
-    }
-    if (showCreateChannel) {
-        CreateChannelDialog(
-            users = availableUsers,
-            currentUserUuid = currentUserUuid,
-            busy = createState is QueryState.Loading,
-            error = (createState as? QueryState.Error)?.message,
-            onDismiss = {
-                if (createState !is QueryState.Loading) showCreateChannel = false
-            },
-            onSubmit = { input ->
-                chatViewModel.createChannel(
-                    name = input.name,
-                    description = input.description,
-                    inviteOnly = input.inviteOnly,
-                    announce = input.announce,
-                    memberUserUuids = input.memberUserUuids,
-                )
-            },
-        )
     }
     folderMenu?.let { folder ->
         AlertDialog(

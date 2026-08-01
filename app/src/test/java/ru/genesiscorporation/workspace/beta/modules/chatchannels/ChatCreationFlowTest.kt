@@ -76,6 +76,76 @@ class ChatCreationFlowTest {
         )
     }
 
+    @Test
+    fun streamPickerExcludesCurrentUserAndSearchesEveryVisibleIdentityField() {
+        val users = listOf(
+            user(
+                uuid = "current",
+                username = "cassi",
+                firstName = "Кассандра",
+                email = "cassi@example.test",
+            ),
+            user(
+                uuid = "beta",
+                username = "runner",
+                firstName = "Бета",
+                email = "team@example.test",
+            ),
+            user(
+                uuid = "alpha",
+                username = "alpha-login",
+                firstName = "Альфа",
+                email = "alpha@example.test",
+            ),
+        )
+
+        assertEquals(
+            listOf("alpha", "beta"),
+            streamCreationCandidates(users, "current", "").map(UserResponseData::uuid),
+        )
+        assertEquals(
+            listOf("alpha"),
+            streamCreationCandidates(users, "current", "alpha-login")
+                .map(UserResponseData::uuid),
+        )
+        assertEquals(
+            listOf("beta"),
+            streamCreationCandidates(users, "current", "TEAM@EXAMPLE.TEST")
+                .map(UserResponseData::uuid),
+        )
+    }
+
+    @Test
+    fun streamInputRequiresTrimmedNameAndKeepsOnlySelectableUniqueMembers() {
+        val users = listOf(
+            user("current", "cassi", "Кассандра", "cassi@example.test"),
+            user("member", "member", "Участник", "member@example.test"),
+        )
+
+        assertEquals(
+            null,
+            buildCreateStreamInput(
+                name = "   ",
+                selectedUserUuids = listOf("member"),
+                users = users,
+                currentUserUuid = "current",
+            ),
+        )
+
+        val input = buildCreateStreamInput(
+            name = "  Команда CASSI  ",
+            selectedUserUuids = listOf("member", "member", "current", "missing", " "),
+            users = users,
+            currentUserUuid = "current",
+        )
+
+        assertEquals("Команда CASSI", input?.name)
+        assertEquals(setOf("member"), input?.memberUserUuids)
+        assertEquals("", input?.description)
+        assertEquals(false, input?.inviteOnly)
+        assertEquals(false, input?.announce)
+    }
+
     private fun stream(
         uuid: String,
         name: String,

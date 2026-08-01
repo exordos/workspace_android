@@ -54,6 +54,7 @@ import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 internal enum class ChatCreationPage {
     CHOOSER,
     DIRECT,
+    STREAM,
 }
 
 internal enum class ChannelBrowseFilter {
@@ -338,7 +339,7 @@ private fun ChatCreationBackHeader(onBack: () -> Unit) {
 }
 
 @Composable
-private fun ChatCreationTitleHeader(
+internal fun ChatCreationTitleHeader(
     title: String,
     enabled: Boolean,
     onBack: () -> Unit,
@@ -509,9 +510,10 @@ private fun ChannelBrowseRow(
 }
 
 @Composable
-private fun ComposerStyleSearchField(
+internal fun ComposerStyleSearchField(
     value: String,
     enabled: Boolean,
+    testTag: String = DIRECT_CHAT_SEARCH_TAG,
     onValueChange: (String) -> Unit,
 ) {
     val colors = LocalWorkspaceColorsPalette.current
@@ -543,7 +545,7 @@ private fun ComposerStyleSearchField(
             modifier = Modifier
                 .weight(1f)
                 .padding(start = 8.dp)
-                .testTag(DIRECT_CHAT_SEARCH_TAG),
+                .testTag(testTag),
             decorationBox = { innerTextField ->
                 Box(contentAlignment = Alignment.CenterStart) {
                     if (value.isEmpty()) {
