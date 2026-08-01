@@ -94,6 +94,8 @@ class MessengerUiFormattingTest {
             "0 участников, 0 в сети",
             channelMembersSubtitle("missing", bindings, users),
         )
+        assertEquals(2, channelMemberCount("stream", bindings))
+        assertEquals(0, channelMemberCount("missing", bindings))
     }
 
     @Test

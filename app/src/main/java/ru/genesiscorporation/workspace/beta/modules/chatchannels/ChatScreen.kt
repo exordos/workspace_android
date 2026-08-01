@@ -480,11 +480,7 @@ internal fun channelMembersSubtitle(
     bindings: List<StreamBindingResponseData>,
     users: List<UserResponseData>,
 ): String {
-    val memberUuids = bindings
-        .asSequence()
-        .filter { it.streamUuid == streamUuid }
-        .map(StreamBindingResponseData::userUuid)
-        .toSet()
+    val memberUuids = channelMemberUuids(streamUuid, bindings)
     val onlineCount = users
         .asSequence()
         .filter { user ->
@@ -497,7 +493,21 @@ internal fun channelMembersSubtitle(
     return "${memberUuids.size} ${memberWord(memberUuids.size)}, $onlineCount в сети"
 }
 
-private fun memberWord(count: Int): String {
+internal fun channelMemberCount(
+    streamUuid: String,
+    bindings: List<StreamBindingResponseData>,
+): Int = channelMemberUuids(streamUuid, bindings).size
+
+private fun channelMemberUuids(
+    streamUuid: String,
+    bindings: List<StreamBindingResponseData>,
+): Set<String> = bindings
+    .asSequence()
+    .filter { it.streamUuid == streamUuid }
+    .map(StreamBindingResponseData::userUuid)
+    .toSet()
+
+internal fun memberWord(count: Int): String {
     val mod100 = count % 100
     val mod10 = count % 10
     return when {

@@ -1,6 +1,9 @@
 package ru.genesiscorporation.workspace.beta.modules.chatdialog
 
 import android.util.Patterns
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -18,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -28,8 +32,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
@@ -54,7 +56,10 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalAccessibilityManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
@@ -67,9 +72,13 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -88,6 +97,8 @@ import ru.genesiscorporation.workspace.beta.data.PersistedDraftSyncStatus
 import ru.genesiscorporation.workspace.beta.data.PersistedOutboxEntry
 import ru.genesiscorporation.workspace.beta.data.PersistedOutboxStatus
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
+import ru.genesiscorporation.workspace.beta.modules.chatchannels.channelMemberCount
+import ru.genesiscorporation.workspace.beta.modules.chatchannels.memberWord
 import ru.genesiscorporation.workspace.beta.ui.AnimatedGif
 import ru.genesiscorporation.workspace.beta.ui.EnhancedMarkdown
 import ru.genesiscorporation.workspace.beta.ui.LocalWorkspaceMentionCatalog
@@ -167,6 +178,11 @@ fun ChatDialogScreen(
         viewModel.selectedMessageUuids.collectAsStateWithLifecycle()
     val reactionPickerMessageUuid by
         viewModel.reactionPickerMessageUuid.collectAsStateWithLifecycle()
+    val currentTopic by viewModel.currentTopic.collectAsStateWithLifecycle()
+    val updatingTopicDone by
+        viewModel.updatingTopicDone.collectAsStateWithLifecycle()
+    val streamBindings by
+        viewModel.repo.streamBindings.collectAsStateWithLifecycle()
     val users by viewModel.repo.users.collectAsStateWithLifecycle()
     val mentionCandidates = remember(users) {
         users.map { user ->
@@ -220,6 +236,33 @@ fun ChatDialogScreen(
     }
     var userScrollSeen by rememberSaveable(key, "read-scroll") {
         mutableStateOf(false)
+    }
+    var topicAsPrimaryTitle by rememberSaveable(key, "topic-header") {
+        mutableStateOf(true)
+    }
+    val topicHeaderScrollConnection = remember(
+        key,
+        viewModel.isDirectMessages,
+        viewModel.topicName,
+    ) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(
+                available: Offset,
+                source: NestedScrollSource,
+            ): Offset {
+                if (
+                    source == NestedScrollSource.UserInput &&
+                    !viewModel.isDirectMessages &&
+                    !viewModel.topicName.isNullOrBlank()
+                ) {
+                    topicAsPrimaryTitle = topicAsPrimaryTitleAfterDrag(
+                        deltaY = available.y,
+                        currentValue = topicAsPrimaryTitle,
+                    )
+                }
+                return Offset.Zero
+            }
+        }
     }
     val messages = remember(streamTopicMessages[key]) {
         streamTopicMessages[key].orEmpty()
@@ -560,12 +603,18 @@ fun ChatDialogScreen(
         pendingHistoryViewportAnchor = null
     }
 
+    val memberCount = remember(viewModel.chatId, streamBindings) {
+        channelMemberCount(viewModel.chatId, streamBindings)
+    }
+
     Scaffold(
         containerColor = LocalWorkspaceColorsPalette.current.background,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             ConversationHeader(
                 viewModel = viewModel,
+                memberCount = memberCount,
+                topicAsPrimaryTitle = topicAsPrimaryTitle,
                 onBack = { navController.popBackStack() },
                 onInfo = {
                     if (!viewModel.isDirectMessages) {
@@ -634,6 +683,7 @@ fun ChatDialogScreen(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth()
+                            .nestedScroll(topicHeaderScrollConnection)
                             .padding(horizontal = 14.dp, vertical = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(
                             space = 5.dp,
@@ -872,14 +922,21 @@ fun ChatDialogScreen(
                 },
                 onCancel = viewModel::clearMessageSelection,
             )
-            SendMessageView(
-                viewModel = viewModel,
-                onOpenDrafts = {
-                    navController.navigate(ChatFlow.Drafts) {
-                        launchSingleTop = true
-                    }
-                },
-            )
+            if (currentTopic?.isDone == true) {
+                ResolvedTopicBanner(
+                    updating = updatingTopicDone,
+                    onReopen = viewModel::toggleCurrentTopicDone,
+                )
+            } else {
+                SendMessageView(
+                    viewModel = viewModel,
+                    onOpenDrafts = {
+                        navController.navigate(ChatFlow.Drafts) {
+                            launchSingleTop = true
+                        }
+                    },
+                )
+            }
         }
     }
     forwardDialogState?.let { state ->
@@ -1112,6 +1169,15 @@ internal fun historyViewportCorrection(
     return correction.takeIf { abs(it) > 1 } ?: 0
 }
 
+internal fun topicAsPrimaryTitleAfterDrag(
+    deltaY: Float,
+    currentValue: Boolean,
+): Boolean = when {
+    deltaY < -1f -> false
+    deltaY > 1f -> true
+    else -> currentValue
+}
+
 private data class HistoryViewportAnchor(
     val messageUuid: String,
     val offsetFromViewportStart: Int,
@@ -1143,8 +1209,70 @@ private const val OLDER_HISTORY_STATUS_KEY = "message-history-status-older"
 private const val NEWER_HISTORY_STATUS_KEY = "message-history-status-newer"
 
 @Composable
+private fun ResolvedTopicBanner(
+    updating: Boolean,
+    onReopen: () -> Unit,
+) {
+    val colors = LocalWorkspaceColorsPalette.current
+    val message = if (updating) {
+        buildAnnotatedString { append("Возвращаем тему в работу…") }
+    } else {
+        buildAnnotatedString {
+            append("Эта тема решена. ")
+            withStyle(
+                SpanStyle(
+                    color = colors.indicatorOrange,
+                    textDecoration = TextDecoration.Underline,
+                ),
+            ) {
+                append("Снимите отметку")
+            }
+            append(", чтобы отправить сообщение")
+        }
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(colors.background)
+            .navigationBarsPadding(),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(colors.textAdditional50.copy(alpha = 0.35f)),
+        )
+        Text(
+            text = message,
+            color = colors.textHeaders,
+            fontSize = 14.sp,
+            lineHeight = 18.sp,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 54.dp)
+                .clickable(
+                    enabled = !updating,
+                    role = Role.Button,
+                    onClick = onReopen,
+                )
+                .padding(horizontal = 28.dp, vertical = 10.dp)
+                .semantics {
+                    contentDescription = if (updating) {
+                        "Возвращаем тему в работу"
+                    } else {
+                        "Эта тема решена. Снять отметку и снова разрешить сообщения"
+                    }
+                },
+        )
+    }
+}
+
+@Composable
 private fun ConversationHeader(
     viewModel: ChatDialogViewModel,
+    memberCount: Int,
+    topicAsPrimaryTitle: Boolean,
     onBack: () -> Unit,
     onInfo: () -> Unit,
 ) {
@@ -1153,19 +1281,39 @@ private fun ConversationHeader(
     val sending by viewModel.sending.collectAsStateWithLifecycle()
     val conversationStateReady by
         viewModel.conversationStateReady.collectAsStateWithLifecycle()
+    val topic = viewModel.topicName?.takeIf(String::isNotBlank)
+    val showTopicAsPrimary =
+        topic != null && !viewModel.isDirectMessages && topicAsPrimaryTitle
+    val targetHeight = when {
+        topic == null || viewModel.isDirectMessages -> 50.dp
+        showTopicAsPrimary -> 50.dp
+        else -> 70.dp
+    }
+    val headerHeight by animateDpAsState(
+        targetValue = targetHeight,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMedium,
+        ),
+        label = "conversation-header-height",
+    )
+    val memberLabel = "$memberCount ${memberWord(memberCount)}"
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(74.dp)
+            .height(headerHeight)
             .background(
                 colors.chatHeaderBackground,
-                RoundedCornerShape(bottomStart = 13.dp, bottomEnd = 13.dp),
+                RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp),
             )
-            .padding(horizontal = 6.dp, vertical = 7.dp),
+            .padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = onBack) {
+        IconButton(
+            onClick = onBack,
+            modifier = Modifier.size(40.dp),
+        ) {
             Icon(
                 painter = painterResource(R.drawable.arrow_back),
                 contentDescription = "Назад",
@@ -1179,29 +1327,84 @@ private fun ConversationHeader(
                     enabled = !viewModel.isDirectMessages,
                     onClick = onInfo,
                 ),
+            verticalArrangement = Arrangement.Center,
         ) {
-            Text(
-                text = viewModel.chatTitle,
-                color = colors.textHeaders,
-                fontSize = 16.sp,
-                lineHeight = 20.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            viewModel.topicName?.takeIf { it.isNotBlank() }?.let { topic ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        Modifier
-                            .padding(end = 6.dp)
-                            .size(width = 3.dp, height = 18.dp)
-                            .background(colors.indicatorYellow, RoundedCornerShape(4.dp)),
-                    )
+            when {
+                topic != null && showTopicAsPrimary -> {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            Modifier
+                                .padding(end = 6.dp)
+                                .size(width = 3.dp, height = 18.dp)
+                                .background(
+                                    colors.indicatorYellow,
+                                    RoundedCornerShape(4.dp),
+                                ),
+                        )
+                        Text(
+                            text = "# $topic",
+                            color = colors.textHeaders,
+                            fontSize = 14.sp,
+                            lineHeight = 18.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                     Text(
-                        text = "# $topic",
+                        text = memberLabel,
                         color = colors.textAdditional50,
                         fontSize = 12.sp,
                         lineHeight = 16.sp,
+                        maxLines = 1,
+                    )
+                }
+
+                topic != null -> {
+                    Text(
+                        text = viewModel.chatTitle,
+                        color = colors.textHeaders,
+                        fontSize = 14.sp,
+                        lineHeight = 18.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            Modifier
+                                .padding(end = 6.dp)
+                                .size(width = 3.dp, height = 14.dp)
+                                .background(
+                                    colors.indicatorYellow,
+                                    RoundedCornerShape(4.dp),
+                                ),
+                        )
+                        Text(
+                            text = "# $topic",
+                            color = colors.textAdditional50,
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Text(
+                        text = memberLabel,
+                        color = colors.textAdditional50,
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp,
+                        maxLines = 1,
+                    )
+                }
+
+                else -> {
+                    Text(
+                        text = viewModel.chatTitle,
+                        color = colors.textHeaders,
+                        fontSize = 14.sp,
+                        lineHeight = 18.sp,
+                        fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -1222,7 +1425,7 @@ private fun ConversationHeader(
                     JitsiMeetActivity.launch(context, options)
                 }
             }
-            Button(
+            IconButton(
                 onClick = {
                     val roomName = JitsiStyleRoomNameGenerator.generate()
                     viewModel.startCall(
@@ -1231,17 +1434,26 @@ private fun ConversationHeader(
                     )
                 },
                 enabled = conversationStateReady && !sending,
-                modifier = Modifier.size(44.dp),
-                shape = CircleShape,
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(10.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color.Transparent,
-                    contentColor = colors.indicatorGreen,
-                ),
+                modifier = Modifier.size(40.dp),
             ) {
                 Icon(
-                    painter = painterResource(R.drawable.call),
+                    painter = painterResource(R.drawable.ic_figma_channel_call),
                     contentDescription = "Начать звонок",
+                    tint = colors.iconBase,
+                    modifier = Modifier.size(28.dp),
+                )
+            }
+        }
+        if (!viewModel.isDirectMessages) {
+            IconButton(
+                onClick = onInfo,
+                modifier = Modifier.size(40.dp),
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_figma_profile_more),
+                    contentDescription = "Информация о чате",
+                    tint = colors.iconBase,
+                    modifier = Modifier.size(32.dp),
                 )
             }
         }

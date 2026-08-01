@@ -12,6 +12,23 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponsePayload
 
 class MessagePaginationTest {
+
+    @Test
+    fun `topic becomes secondary while scrolling toward newer messages`() {
+        assertFalse(topicAsPrimaryTitleAfterDrag(-24f, true))
+    }
+
+    @Test
+    fun `topic returns as primary while scrolling toward older messages`() {
+        assertTrue(topicAsPrimaryTitleAfterDrag(24f, false))
+    }
+
+    @Test
+    fun `stationary list preserves topic header state`() {
+        assertTrue(topicAsPrimaryTitleAfterDrag(0.5f, true))
+        assertFalse(topicAsPrimaryTitleAfterDrag(-0.5f, false))
+    }
+
     @Test
     fun `conversation positioning keeps restored history after recreation`() {
         assertTrue(

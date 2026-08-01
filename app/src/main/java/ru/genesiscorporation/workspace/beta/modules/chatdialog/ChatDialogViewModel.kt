@@ -84,6 +84,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ToggleTopicDoneRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UpdateDraftRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UsersRequest
@@ -170,6 +171,17 @@ class ChatDialogViewModel(
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = 0,
     )
+    val currentTopic: StateFlow<TopicsResponseData?> = repo.streamTopics
+        .map { topicsByStream ->
+            topicsByStream[chatId]
+                ?.singleOrNull { topic -> topic.uuid == topicUuid }
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = repo.streamTopics.value[chatId]
+                ?.singleOrNull { topic -> topic.uuid == topicUuid },
+        )
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading
@@ -184,6 +196,8 @@ class ChatDialogViewModel(
     val readError: StateFlow<String?> = _readError
     private val _sending = MutableStateFlow(false)
     val sending: StateFlow<Boolean> = _sending
+    private val _updatingTopicDone = MutableStateFlow(false)
+    val updatingTopicDone: StateFlow<Boolean> = _updatingTopicDone
     private val _focusedMessageUuid = MutableStateFlow<String?>(null)
     val focusedMessageUuid: StateFlow<String?> = _focusedMessageUuid
     var editingMessage: MessageResponse? = null
@@ -249,6 +263,7 @@ class ChatDialogViewModel(
     internal val forwardQuoteResolutions:
         StateFlow<Map<String, ForwardQuoteResolution>> = _forwardQuoteResolutions
     private val reactionOperationsMutex = Mutex()
+    private val topicDoneMutex = Mutex()
     private val reactionOperations = mutableSetOf<String>()
     private val messageDeletionMutex = Mutex()
     private val forwardQuoteLoadMutex = Mutex()
@@ -4820,6 +4835,47 @@ class ChatDialogViewModel(
 
     fun clearActionError() {
         _actionError.value = null
+    }
+
+    fun toggleCurrentTopicDone() {
+        val topic = currentTopic.value ?: return
+        if (!topicDoneMutex.tryLock()) return
+        viewModelScope.launch {
+            _updatingTopicDone.value = true
+            _actionError.value = null
+            _actionNotice.value = null
+            try {
+                when (
+                    val response = client.performRequest(
+                        ToggleTopicDoneRequest(topic.uuid),
+                    )
+                ) {
+                    is ApiResult.Success -> {
+                        repo.updateTopic(response.value)
+                        _actionNotice.value = ChatActionNotice(
+                            eventId = ++nextActionNoticeEventId,
+                            message = if (response.value.isDone) {
+                                "Тема отмечена как решённая"
+                            } else {
+                                "Тема снова открыта для сообщений"
+                            },
+                        )
+                    }
+
+                    is ApiResult.Error -> {
+                        _actionError.value = response.error.message
+                            ?: if (topic.isDone) {
+                                "Не удалось вернуть тему в работу"
+                            } else {
+                                "Не удалось отметить тему решённой"
+                            }
+                    }
+                }
+            } finally {
+                _updatingTopicDone.value = false
+                topicDoneMutex.unlock()
+            }
+        }
     }
 
     fun copyMessageText(
