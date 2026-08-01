@@ -176,6 +176,7 @@ Compose semantics traversal on every supported role and account.
 | SET-A06 | Clear attachment cache | Shows the exact active-account byte count, requires confirmation and deletes only that account's temporary attachment directory | Empty state is disabled and explicit; failure is dismissible; credentials, drafts, outbox and sibling accounts are outside the deletion boundary | CACHE-001–010 |
 | SET-A07 | Share diagnostics | Collects a fresh allowlisted local snapshot and opens the real Android `text/plain` chooser | No identity/content fields exist in the report model; missing share handler produces a dismissible error | DIAG-001–010 |
 | SET-A08 | About app and open-source licenses | Opens an offline screen with the exact version name/code/build type plus a searchable catalog generated from the current runtime dependency graph; every component opens details, bundled terms are readable, and Close/Back return safely | Empty search is explicit and clearable; missing license metadata is stated instead of leaving an inert row; generated-resource parsing is an instrumented build gate; no update action is exposed until Android has a verified distribution contract | ABOUT-001–010 |
+| SET-A09 | Auto sign-out after inactivity | Opens the Figma-derived compact setting row, persists one account-scoped 6h/12h/24h/3d/7d/Never choice, checkpoints real interaction without a write per touch, and owner-fences automatic removal across foreground, background and process restoration; every account-removal path clears only that owner's checkpoint | Unknown settings use 3 days; future/corrupt checkpoints normalize safely; Never schedules nothing; push deletion is best effort, an owner mismatch cannot remove the new account, and a failed cleanup/removal starts a fresh bounded retry window | SET-034–041 |
 
 ## External integrations
 
@@ -244,6 +245,10 @@ end-to-end behavior exists:
   read-only Starred destination is functional and remains visible.
 - Hamburger menu without a navigation destination.
 - Mail, calendar, services, and calls-list placeholders.
+- Password-recovery controls while the maintained desktop has no live action and
+  the current public IAM client cannot send a reset code.
+- Typing indicators and message-reader details while desktop adapters are
+  explicit no-op/empty implementations and the backend has no data contract.
 
 Mock channel memberships, mock shared channels, phone numbers, work profiles,
 managers, birthdays, local times, and fallback message previews are prohibited.

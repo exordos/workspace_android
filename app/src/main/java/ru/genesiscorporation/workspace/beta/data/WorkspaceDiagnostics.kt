@@ -38,6 +38,7 @@ data class WorkspaceDiagnosticsSnapshot(
     val themeMode: WorkspaceThemeMode,
     val chatListDensity: ChatListDensity,
     val notificationSound: WorkspaceNotificationSound,
+    val authIdleTimeout: WorkspaceAuthIdleTimeout,
     val prioritizePersonalUnread: Boolean,
     val prioritizeUnmutedUnreadChannels: Boolean,
 )
@@ -80,6 +81,7 @@ fun collectWorkspaceDiagnostics(
         themeMode = preferences.themeMode,
         chatListDensity = preferences.chatListDensity,
         notificationSound = preferences.notificationSound,
+        authIdleTimeout = preferences.authIdleTimeout,
         prioritizePersonalUnread = preferences.prioritizePersonalUnread,
         prioritizeUnmutedUnreadChannels =
             preferences.prioritizeUnmutedUnreadChannels,
@@ -128,6 +130,9 @@ fun renderWorkspaceDiagnostics(
     appendLine("chat_density=${snapshot.chatListDensity.name.lowercase()}")
     appendLine(
         "notification_sound=${snapshot.notificationSound.name.lowercase()}",
+    )
+    appendLine(
+        "auth_idle_timeout=${snapshot.authIdleTimeout.name.lowercase()}",
     )
     appendLine(
         "prioritize_personal_unread=${

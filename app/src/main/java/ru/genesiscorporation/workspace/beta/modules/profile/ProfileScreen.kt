@@ -6,7 +6,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,10 +30,12 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -50,6 +55,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -62,6 +68,7 @@ import ru.genesiscorporation.workspace.beta.BuildConfig
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.data.ChatListDensity
 import ru.genesiscorporation.workspace.beta.data.WorkspaceAccount
+import ru.genesiscorporation.workspace.beta.data.WorkspaceAuthIdleTimeout
 import ru.genesiscorporation.workspace.beta.data.WorkspaceNetworkStatus
 import ru.genesiscorporation.workspace.beta.data.WorkspaceNotificationSound
 import ru.genesiscorporation.workspace.beta.data.WorkspaceThemeMode
@@ -97,6 +104,7 @@ fun ProfileScreen(
     val colors = LocalWorkspaceColorsPalette.current
     var confirmLogout by rememberSaveable { mutableStateOf(false) }
     var confirmCacheClear by rememberSaveable { mutableStateOf(false) }
+    var showAuthIdleTimeoutPicker by rememberSaveable { mutableStateOf(false) }
     var diagnosticsError by rememberSaveable { mutableStateOf(false) }
     var showStatusEditor by rememberSaveable { mutableStateOf(false) }
     var statusDraft by rememberSaveable { mutableStateOf("") }
@@ -269,6 +277,20 @@ fun ProfileScreen(
                         }
                     }
                 }
+                item(key = "notification-sound") {
+                    NotificationSoundPreference(
+                        selected = uiPreferences.notificationSound,
+                        enabled = !settingsSaving && activeAccount != null,
+                        onSelected = viewModel::setNotificationSound,
+                    )
+                }
+                item(key = "auth-idle-timeout") {
+                    AuthIdleTimeoutPreference(
+                        selected = uiPreferences.authIdleTimeout,
+                        enabled = !settingsSaving && activeAccount != null,
+                        onOpen = { showAuthIdleTimeoutPicker = true },
+                    )
+                }
                 item(key = "theme-mode") {
                     ThemeModePreference(
                         selected = uiPreferences.themeMode,
@@ -281,13 +303,6 @@ fun ProfileScreen(
                         selected = uiPreferences.chatListDensity,
                         enabled = !settingsSaving && activeAccount != null,
                         onSelected = viewModel::setChatListDensity,
-                    )
-                }
-                item(key = "notification-sound") {
-                    NotificationSoundPreference(
-                        selected = uiPreferences.notificationSound,
-                        enabled = !settingsSaving && activeAccount != null,
-                        onSelected = viewModel::setNotificationSound,
                     )
                 }
                 item(key = "personal-unread-priority") {
@@ -538,6 +553,18 @@ fun ProfileScreen(
                 ) {
                     Text("Очистить")
                 }
+            },
+        )
+    }
+
+    if (showAuthIdleTimeoutPicker) {
+        AuthIdleTimeoutDialog(
+            selected = uiPreferences.authIdleTimeout,
+            enabled = !settingsSaving && activeAccount != null,
+            onDismiss = { showAuthIdleTimeoutPicker = false },
+            onSelected = { timeout ->
+                showAuthIdleTimeoutPicker = false
+                viewModel.setAuthIdleTimeout(timeout)
             },
         )
     }
@@ -877,6 +904,151 @@ private fun ExternalIntegrationsPreference(
         }
     }
 }
+
+@Composable
+internal fun AuthIdleTimeoutPreference(
+    selected: WorkspaceAuthIdleTimeout,
+    enabled: Boolean,
+    onOpen: () -> Unit,
+) {
+    val colors = LocalWorkspaceColorsPalette.current
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(
+                    enabled = enabled,
+                    role = Role.Button,
+                    onClick = onOpen,
+                )
+                .testTag(AUTH_IDLE_TIMEOUT_ROW_TAG)
+                .padding(vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_refresh),
+                contentDescription = null,
+                tint = if (enabled) colors.textAdditional50 else colors.iconDisable,
+                modifier = Modifier.size(22.dp),
+            )
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 12.dp),
+            ) {
+                Text(
+                    text = "Автовыход",
+                    color = if (enabled) {
+                        colors.textHeaders
+                    } else {
+                        colors.textAdditional30
+                    },
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+                Text(
+                    text = "После неактивности",
+                    color = colors.textAdditional50,
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
+                )
+            }
+            Text(
+                text = selected.authIdleTimeoutLabel(),
+                color = colors.textAdditional50,
+                fontSize = 13.sp,
+                modifier = Modifier.padding(start = 8.dp),
+            )
+            Icon(
+                painter = painterResource(R.drawable.arrow_back),
+                contentDescription = null,
+                tint = colors.textAdditional30,
+                modifier = Modifier
+                    .padding(start = 4.dp)
+                    .size(18.dp)
+                    .graphicsLayer(rotationZ = 180f),
+            )
+        }
+        HorizontalDivider(
+            thickness = 1.dp,
+            color = colors.cardBackgroundActive,
+        )
+    }
+}
+
+@Composable
+internal fun AuthIdleTimeoutDialog(
+    selected: WorkspaceAuthIdleTimeout,
+    enabled: Boolean,
+    onDismiss: () -> Unit,
+    onSelected: (WorkspaceAuthIdleTimeout) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Автовыход") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .testTag(AUTH_IDLE_TIMEOUT_DIALOG_TAG)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                Text(
+                    text = "Выйти из текущего аккаунта после периода неактивности",
+                    color = LocalWorkspaceColorsPalette.current.textAdditional50,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+                WorkspaceAuthIdleTimeout.entries.forEach { timeout ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .selectable(
+                                selected = selected == timeout,
+                                enabled = enabled,
+                                role = Role.RadioButton,
+                                onClick = { onSelected(timeout) },
+                            )
+                            .testTag("$AUTH_IDLE_TIMEOUT_OPTION_TAG_PREFIX${timeout.name}")
+                            .padding(vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(
+                            selected = selected == timeout,
+                            enabled = enabled,
+                            onClick = null,
+                        )
+                        Text(
+                            text = timeout.authIdleTimeoutLabel(),
+                            modifier = Modifier.padding(start = 8.dp),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Закрыть")
+            }
+        },
+    )
+}
+
+private fun WorkspaceAuthIdleTimeout.authIdleTimeoutLabel(): String = when (this) {
+    WorkspaceAuthIdleTimeout.SIX_HOURS -> "6 часов"
+    WorkspaceAuthIdleTimeout.TWELVE_HOURS -> "12 часов"
+    WorkspaceAuthIdleTimeout.ONE_DAY -> "24 часа"
+    WorkspaceAuthIdleTimeout.THREE_DAYS -> "3 дня"
+    WorkspaceAuthIdleTimeout.SEVEN_DAYS -> "7 дней"
+    WorkspaceAuthIdleTimeout.NEVER -> "Никогда"
+}
+
+internal const val AUTH_IDLE_TIMEOUT_ROW_TAG = "profile.auth_idle_timeout"
+internal const val AUTH_IDLE_TIMEOUT_DIALOG_TAG = "profile.auth_idle_timeout.dialog"
+internal const val AUTH_IDLE_TIMEOUT_OPTION_TAG_PREFIX =
+    "profile.auth_idle_timeout.option."
 
 @Composable
 private fun ThemeModePreference(

@@ -81,6 +81,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -88,6 +89,9 @@ import androidx.navigation.toRoute
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.data.WorkspaceAccount
 import ru.genesiscorporation.workspace.beta.data.WorkspaceThemeMode
+import ru.genesiscorporation.workspace.beta.data.WorkspaceIdleSessionCoordinator
+import ru.genesiscorporation.workspace.beta.data.WorkspaceIdleSessionStore
+import ru.genesiscorporation.workspace.beta.data.durationMillis
 import ru.genesiscorporation.workspace.beta.data.navigation.WorkspaceDeepLink
 import ru.genesiscorporation.workspace.beta.data.navigation.WorkspaceDeepLinkTarget
 import ru.genesiscorporation.workspace.beta.data.navigation.parseWorkspaceDeepLink
@@ -135,10 +139,13 @@ import ru.genesiscorporation.workspace.beta.data.push.PushDeviceRegistrationMana
 import ru.genesiscorporation.workspace.beta.data.push.PushNavigationRequest
 import ru.genesiscorporation.workspace.beta.data.push.resolvePushAccountTarget
 import ru.genesiscorporation.workspace.beta.ui.IncomingCall
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 
 class MainActivity : ComponentActivity() {
@@ -161,9 +168,53 @@ class MainActivity : ComponentActivity() {
         get() = networkState.pushDeviceRegistrationManager
     private val conversationStateStore: ConversationStateStore
         get() = networkState.conversationStateStore
+    private lateinit var idleSessionCoordinator: WorkspaceIdleSessionCoordinator
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        idleSessionCoordinator = WorkspaceIdleSessionCoordinator(
+            scope = lifecycleScope,
+            store = WorkspaceIdleSessionStore(applicationContext),
+            onSessionExpired = { ownerKey ->
+                try {
+                    withTimeoutOrNull(PUSH_CLEANUP_TIMEOUT_MILLIS) {
+                        pushDeviceRegistrationManager.deleteRegistration(ownerKey)
+                    }
+                } catch (exception: Exception) {
+                    if (exception is CancellationException) throw exception
+                }
+                userState.removeActiveAccountIfOwnerAndWait(ownerKey)
+            },
+        )
+        lifecycleScope.launch {
+            combine(
+                userState.isAccessTokenLoaded,
+                userState.activeAccountId,
+                userState.uiPreferencesOwnerKey,
+                userState.uiPreferences,
+            ) { loaded, activeOwnerKey, preferencesOwnerKey, preferences ->
+                IdleSessionBinding(
+                    loaded = loaded,
+                    activeOwnerKey = activeOwnerKey,
+                    preferencesOwnerKey = preferencesOwnerKey,
+                    timeoutMillis = preferences.authIdleTimeout.durationMillis(),
+                )
+            }.collectLatest { binding ->
+                if (!binding.loaded) return@collectLatest
+                when {
+                    binding.activeOwnerKey == null -> {
+                        idleSessionCoordinator.activate(null, null)
+                    }
+
+                    binding.preferencesOwnerKey == binding.activeOwnerKey -> {
+                        idleSessionCoordinator.activate(
+                            binding.activeOwnerKey,
+                            binding.timeoutMillis,
+                        )
+                    }
+                }
+            }
+        }
         val incomingShare = intent.toIncomingShareRequestOrNull(
             savedRequestId = savedInstanceState
                 ?.getString(SAVED_INCOMING_SHARE_REQUEST_ID),
@@ -237,6 +288,35 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (::idleSessionCoordinator.isInitialized) {
+            idleSessionCoordinator.setForeground(true)
+        }
+    }
+
+    override fun onPause() {
+        if (::idleSessionCoordinator.isInitialized) {
+            idleSessionCoordinator.setForeground(false)
+            idleSessionCoordinator.flush()
+        }
+        super.onPause()
+    }
+
+    override fun onUserInteraction() {
+        super.onUserInteraction()
+        if (::idleSessionCoordinator.isInitialized) {
+            idleSessionCoordinator.recordInteraction()
+        }
+    }
+
+    override fun onDestroy() {
+        if (::idleSessionCoordinator.isInitialized) {
+            idleSessionCoordinator.close()
+        }
+        super.onDestroy()
+    }
+
     override fun onSaveInstanceState(outState: Bundle) {
         pendingIncomingShare?.requestId?.let { requestId ->
             outState.putString(SAVED_INCOMING_SHARE_REQUEST_ID, requestId)
@@ -259,8 +339,16 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+private data class IdleSessionBinding(
+    val loaded: Boolean,
+    val activeOwnerKey: String?,
+    val preferencesOwnerKey: String?,
+    val timeoutMillis: Long?,
+)
+
 private const val SAVED_INCOMING_SHARE_REQUEST_ID =
     "workspace.saved_incoming_share_request_id"
+private const val PUSH_CLEANUP_TIMEOUT_MILLIS = 5_000L
 private const val SAVED_PUSH_REALM_URL =
     "workspace.saved_push_realm_url"
 private const val SAVED_PUSH_PROVIDER_CHAT_KEY =

@@ -87,7 +87,7 @@ not on a personal physical device.
 | AUTH-010 | Multi-organization/project switch | Two projects on one server; warm switch; independent cold starts; account-aware message link | State and jobs switch atomically; no old data flash; each project restores its own catalog; the link activates the owning account before fetching/focusing the message | Instrumented + physical Pixel (passed for catalog, cold start, and message link) |
 | AUTH-011 | Logout current organization | Push registered, cached messages, retained draft/outbox | Push registration is removed; encrypted conversation state and private cache for only that account are cleared before account removal | Backend E2E + instrumented |
 | AUTH-012 | Process death during login/OTP | `am force-stop` | Safe resumable screen; no secret in saved state | Instrumented |
-| AUTH-013 | Password recovery | Valid, unknown, throttled address | Non-enumerating result and verified reset flow | Backend E2E |
+| AUTH-013 | Password recovery contract audit | Maintained desktop login plus current public-client IAM permissions | No mobile control is exposed: desktop has no live action and the public client cannot send a reset code | Unavailable until backend/client contract changes |
 | AUTH-014 | Cancel adding another account | Existing authenticated account, server-discovery screen | Previous account and navigation restore without reauthentication or data loss | Unit + physical device |
 | AUTH-015 | Stale request completes after account switch | Delay original response/refresh until a second account is active | Result is discarded; no token, logout, cache file, or event mutates the new account | MockEngine + instrumented |
 | AUTH-016 | Account attachment-cache isolation | Same attachment UUID under two accounts, switch/logout/offline | Distinct opaque cache paths; logout clears only the removed account | Unit + instrumented |
@@ -1114,14 +1114,14 @@ commit that file or its credentials.
 
 | ID | Scenario | Expected result | Current coverage |
 | --- | --- | --- | --- |
-| SET-001 | First launch for account A | System theme, standard rows, Default sound and both unread priorities off | Unit + physical passed |
+| SET-001 | First launch for account A | System theme, standard rows, Default sound, 3-day inactivity timeout and both unread priorities off | Unit + physical passed |
 | SET-002 | Select light, dark and system modes | Whole app and system bars change immediately; System follows OS mode | Physical passed |
 | SET-003 | Force-stop/cold-start after each theme selection | Exact selected mode restores before normal navigation becomes interactive | Light plus compact cold restore passed; remaining matrix open |
 | SET-004 | Rotate/profile-chat-profile while changing theme | No Activity crash, stale palette, duplicate navigation or lost selection | Physical pending |
 | SET-005 | Switch A → B → A with different preferences | B never receives A's transient or persisted values; A restores exactly | Owner-scoped contract + two-account physical pending |
 | SET-006 | Remove and later reconnect the same account | Non-secret UI preferences remain owner-scoped and restore; credentials remain independently cleared | Instrumented/physical pending |
-| SET-007 | Corrupt JSON, missing fields, unknown future enum | Each unsupported field, including sound, falls back safely without discarding valid independent fields | Unit covered; file-level corruption handler compiled |
-| SET-008 | Concurrent edits to different preferences | Atomic edits merge; the later edit cannot reset another field, including sound, to a stale snapshot | Instrumented device runner passed |
+| SET-007 | Corrupt JSON, missing fields, unknown future enum | Each unsupported field, including sound and inactivity timeout, falls back safely without discarding valid independent fields | Unit covered; file-level corruption handler compiled |
+| SET-008 | Concurrent edits to different preferences | Atomic edits merge; the later edit cannot reset another field, including sound or inactivity timeout, to a stale snapshot | Instrumented device runner passed |
 | SET-009 | Storage I/O failure while changing a setting | Old value remains active, saving ends, dismissible error is shown, controls become usable | Fault injection pending |
 | SET-010 | Standard density | Avatar, sender and single-line message preview are visible with normal row height | Physical passed |
 | SET-011 | Compact density | Row/avatar shrink and sender/message preview disappear; title/time/unread and actions remain usable | Physical + cold restore passed |
@@ -1133,10 +1133,10 @@ commit that file or its credentials.
 | SET-017 | A pinned chat conflicts with either unread preference | Pin remains first; enabled preference overrides only ordinary folder/activity order | Unit covered |
 | SET-018 | Change sorting while a filtered/custom folder is selected | Same membership remains, only eligible row order changes, selection and scroll stay valid | Physical pending |
 | SET-019 | Rapid repeated taps while save is in progress | At most one visible write is active; disabled state prevents accidental reversal; no stuck spinner | ViewModel/source + stress pending |
-| SET-020 | Offline theme/density/sort/sound changes | Local settings remain fully usable and persist; no network request is required | Architecture + sound physical passed; full matrix pending |
+| SET-020 | Offline theme/density/sort/sound/inactivity changes | Local settings remain fully usable and persist; no network request is required | Architecture + sound physical passed; full matrix pending |
 | SET-021 | Inspect on-device preference file and logs | No raw server/project/user owner key, credential or message content is stored/logged | Physical DataStore inspection passed for raw owner identifiers; log audit pending |
 | SET-022 | TalkBack traverses all setting controls | Section labels, selected choice, switch state and saving/error state are understandable and actionable | Physical accessibility tree exposes checked state; spoken TalkBack traversal pending |
-| SET-023 | Functional-control traversal | Every visible setting produces the declared effect; language/layout/idle controls are absent until real implementations exist | Static gate + all five setting groups physically exercised; injected-failure traversal pending |
+| SET-023 | Functional-control traversal | Every visible setting produces the declared effect; inactivity is enforced while unsupported language/layout controls remain absent | Static gate + existing setting groups physically exercised; inactivity and injected-failure traversal pending |
 | SET-024 | 10k-row synthetic catalog and repeated toggles | Reordering remains bounded, scrolling has no sustained jank, no recomposition or DataStore write loop | Benchmark/soak pending |
 | SET-025 | Select Default/Subtle/Digital/Glass/Pulse | Exact account-scoped value persists, a bounded preview uses notification audio usage, and a stable named-resource channel is created immediately | Unit + physical selection/channel/audio-path passed |
 | SET-026 | Select None | Notification remains visual, but the selected channel has no sound and no vibration; no preview player starts | Unit + physical channel inspection passed; real push pending |
@@ -1147,6 +1147,14 @@ commit that file or its credentials.
 | SET-031 | Notification permission denied while changing sound | Local selection, preview and channel setup remain usable; no notification is posted until Android permission is granted | Permission/sound combined physical pending |
 | SET-032 | Channel creation or preview failure | Saved state remains explicit, saving unlocks, and a dismissible channel-preparation error appears; later push retries channel creation with Default fallback | Source path covered; injected platform failure pending |
 | SET-033 | Rapid sound changes during persistence | Disabled chips prevent overlapping writes; every accepted value owns one preview attempt and the final accepted value survives restart | Source + sequential physical passed; stress/fault injection pending |
+| SET-034 | Inactivity preset mapping and safe default | 6h/12h/24h/3d/7d map to exact durations, Never has no deadline, and absent/unknown persisted values resolve to 3 days | Unit covered |
+| SET-035 | Inactivity owner isolation | A and B have different checkpoints/settings, then switch A → B → A or remove A | Only the active owner's deadline is scheduled; changing or expiring A never removes B; account cleanup deletes only A's checkpoint | Coordinator unit + DataStore instrumentation covered; two-account physical pending |
+| SET-036 | Foreground inactivity and interaction | Keep the app foregrounded across a deadline; interact just before a second deadline | Expiry removes the still-active owner once; every real user interaction restarts the deadline without a write-per-touch loop | Coordinator source/unit + bounded-clock instrumentation pending |
+| SET-037 | Background and cold-resume expiry | Pause or force-stop before the deadline and return after it | Persisted checkpoint is evaluated before normal use and the expired current owner is removed; no background timer is required | Source + process-death physical pending |
+| SET-038 | Never | Select Never, rotate, background, force-stop and reopen | Selection persists and no expiry job or automatic account removal occurs | Unit + physical Pixel cold restart and rotation passed; long background soak pending |
+| SET-039 | Future/corrupt checkpoint and wall-clock rollback | Persist a future, missing or invalid checkpoint | Session restarts from the current bounded time instead of gaining an unbounded grace period or crashing | Unit covered for missing/future; file corruption instrumentation pending |
+| SET-040 | Expiry cleanup/removal failure | Inject push cleanup failure, owner mismatch, credential-store failure and retry | Push cleanup is best effort; owner-fenced removal cannot affect another account; a failed removal starts one fresh bounded retry window | Coordinator unit for failed removal; storage/push faults pending |
+| SET-041 | Inactivity picker UI | Open the Figma-derived row, inspect all six options, choose one, rotate/restart and return to Profile | Row shows `Автовыход` / `После неактивности` plus the exact selected value; all options are actionable and the selection restores | Compose instrumentation + physical Pixel passed for all options, 7-day/Never cold restore and scrollable landscape rotation |
 
 ### About and licenses matrix
 

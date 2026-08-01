@@ -27,6 +27,7 @@ class WorkspaceDiagnosticsTest {
                 themeMode = WorkspaceThemeMode.DARK,
                 chatListDensity = ChatListDensity.COMPACT,
                 notificationSound = WorkspaceNotificationSound.GLASS,
+                authIdleTimeout = WorkspaceAuthIdleTimeout.SEVEN_DAYS,
                 prioritizePersonalUnread = true,
                 prioritizeUnmutedUnreadChannels = false,
             ),
@@ -42,6 +43,7 @@ class WorkspaceDiagnosticsTest {
             "saved_accounts=2",
             "attachment_cache_bytes=1572864",
             "notification_sound=glass",
+            "auth_idle_timeout=seven_days",
         ).forEach { expected ->
             assertTrue(report.contains(expected))
         }
@@ -80,6 +82,7 @@ class WorkspaceDiagnosticsTest {
                 themeMode = WorkspaceThemeMode.SYSTEM,
                 chatListDensity = ChatListDensity.STANDARD,
                 notificationSound = WorkspaceNotificationSound.DEFAULT,
+                authIdleTimeout = WorkspaceAuthIdleTimeout.THREE_DAYS,
                 prioritizePersonalUnread = false,
                 prioritizeUnmutedUnreadChannels = false,
             ),

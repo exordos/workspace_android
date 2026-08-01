@@ -14,6 +14,7 @@ import kotlinx.coroutines.withContext
 import ru.genesiscorporation.workspace.beta.UserViewModel
 import ru.genesiscorporation.workspace.beta.data.ChatListDensity
 import ru.genesiscorporation.workspace.beta.data.WorkspaceNotificationSound
+import ru.genesiscorporation.workspace.beta.data.WorkspaceAuthIdleTimeout
 import ru.genesiscorporation.workspace.beta.data.WorkspaceThemeMode
 import ru.genesiscorporation.workspace.beta.data.WorkspaceUiPreferences
 import ru.genesiscorporation.workspace.beta.data.remote.ApiError
@@ -269,6 +270,14 @@ class ProfileViewModel(
                     _actionError.value =
                         "Настройка сохранена, но Android не создал канал уведомлений"
                 }
+            },
+        )
+    }
+
+    fun setAuthIdleTimeout(timeout: WorkspaceAuthIdleTimeout) {
+        updatePreference(
+            transform = { current ->
+                current.copy(authIdleTimeout = timeout)
             },
         )
     }

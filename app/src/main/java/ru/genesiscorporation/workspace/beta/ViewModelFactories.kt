@@ -10,6 +10,7 @@ import ru.genesiscorporation.workspace.beta.data.ExternalIntegrationRepository
 import ru.genesiscorporation.workspace.beta.data.RoomWorkspaceSnapshotStore
 import ru.genesiscorporation.workspace.beta.data.TinkConversationStateStore
 import ru.genesiscorporation.workspace.beta.data.TinkRealtimeCursorStore
+import ru.genesiscorporation.workspace.beta.data.WorkspaceIdleSessionStore
 import ru.genesiscorporation.workspace.beta.data.WorkspaceNotificationSoundController
 import ru.genesiscorporation.workspace.beta.data.WorkspaceUiPreferencesRepository
 import ru.genesiscorporation.workspace.beta.data.accountAttachmentCacheSizeBytes
@@ -50,6 +51,7 @@ class UserViewModelFactory(
                         conversationStateStore.clearAccount(ownerKey)
                         realtimeCursorStore.clearAccount(ownerKey)
                         workspaceSnapshotStore.clearAccount(ownerKey)
+                        WorkspaceIdleSessionStore(appContext).clear(ownerKey)
                     },
                 ),
                 conversationStateStore = conversationStateStore,

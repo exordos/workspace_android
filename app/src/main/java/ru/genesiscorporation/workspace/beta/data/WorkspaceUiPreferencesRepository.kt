@@ -48,6 +48,8 @@ data class WorkspaceUiPreferences(
     val chatListDensity: ChatListDensity = ChatListDensity.STANDARD,
     val notificationSound: WorkspaceNotificationSound =
         WorkspaceNotificationSound.DEFAULT,
+    val authIdleTimeout: WorkspaceAuthIdleTimeout =
+        WorkspaceAuthIdleTimeout.THREE_DAYS,
 )
 
 class WorkspaceUiPreferencesRepository(
@@ -98,6 +100,7 @@ private data class PersistedWorkspaceUiPreferences(
     val prioritizeUnmutedUnreadChannels: Boolean? = null,
     val chatListDensity: String? = null,
     val notificationSound: String? = null,
+    val authIdleTimeout: String? = null,
 )
 
 private val workspaceUiPreferencesJson = Json {
@@ -134,6 +137,11 @@ internal fun decodeWorkspaceUiPreferences(
                 WorkspaceNotificationSound.entries.firstOrNull { it.name == value }
             }
             ?: WorkspaceNotificationSound.DEFAULT,
+        authIdleTimeout = persisted.authIdleTimeout
+            ?.let { value ->
+                WorkspaceAuthIdleTimeout.entries.firstOrNull { it.name == value }
+            }
+            ?: WorkspaceAuthIdleTimeout.THREE_DAYS,
     )
 }
 
@@ -147,5 +155,6 @@ internal fun encodeWorkspaceUiPreferences(
             preferences.prioritizeUnmutedUnreadChannels,
         chatListDensity = preferences.chatListDensity.name,
         notificationSound = preferences.notificationSound.name,
+        authIdleTimeout = preferences.authIdleTimeout.name,
     ),
 )

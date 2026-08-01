@@ -28,6 +28,7 @@ class WorkspaceUiPreferencesRepositoryTest {
               "prioritizeUnmutedUnreadChannels": true,
               "chatListDensity": "FUTURE_DENSITY",
               "notificationSound": "FUTURE_SOUND",
+              "authIdleTimeout": "FUTURE_TIMEOUT",
               "futureField": "retained-by-newer-client"
             }
             """.trimIndent(),
@@ -41,6 +42,10 @@ class WorkspaceUiPreferencesRepositoryTest {
             WorkspaceNotificationSound.DEFAULT,
             decoded.notificationSound,
         )
+        assertEquals(
+            WorkspaceAuthIdleTimeout.THREE_DAYS,
+            decoded.authIdleTimeout,
+        )
     }
 
     @Test
@@ -51,6 +56,7 @@ class WorkspaceUiPreferencesRepositoryTest {
             prioritizeUnmutedUnreadChannels = false,
             chatListDensity = ChatListDensity.COMPACT,
             notificationSound = WorkspaceNotificationSound.GLASS,
+            authIdleTimeout = WorkspaceAuthIdleTimeout.SEVEN_DAYS,
         )
 
         val actual = decodeWorkspaceUiPreferences(
@@ -60,5 +66,6 @@ class WorkspaceUiPreferencesRepositoryTest {
         assertEquals(expected, actual)
         assertFalse(actual.prioritizeUnmutedUnreadChannels)
         assertEquals(WorkspaceNotificationSound.GLASS, actual.notificationSound)
+        assertEquals(WorkspaceAuthIdleTimeout.SEVEN_DAYS, actual.authIdleTimeout)
     }
 }
