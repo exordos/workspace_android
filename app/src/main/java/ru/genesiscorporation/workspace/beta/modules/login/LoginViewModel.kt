@@ -69,16 +69,24 @@ class LoginViewModel(
         get() = _otpText.value.length == OTP_LENGTH
 
     fun onLoginChange(newText: String) {
+        val changed = newText != _loginText.value
         _loginText.value = newText
         loginProcessState.updateLogin(newText)
         _loginFieldError.value = null
-        clearQueryError()
+        if (changed) {
+            loginProcessState.markPhase(LoginPhase.CREDENTIALS)
+            clearQueryError()
+        }
     }
 
     fun onPasswordChange(newText: String) {
+        val changed = newText != _passwordText.value
         _passwordText.value = newText
         _passwordFieldError.value = null
-        clearQueryError()
+        if (changed) {
+            loginProcessState.markPhase(LoginPhase.CREDENTIALS)
+            clearQueryError()
+        }
     }
 
     fun onOtpTextChange(newText: String) {

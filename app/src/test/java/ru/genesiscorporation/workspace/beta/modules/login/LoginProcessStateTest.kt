@@ -46,7 +46,8 @@ class LoginProcessStateTest {
 
             assertTrue("Expected $phase to be interrupted", restored.interrupted)
             assertEquals("cassi@example.invalid", restored.login)
-            assertEquals("CREDENTIALS", recreatedHandle["login.phase"])
+            assertEquals(phase.name, recreatedHandle["login.phase"])
+            assertTrue(LoginProcessState(recreatedHandle).restore().interrupted)
         }
     }
 
@@ -62,7 +63,8 @@ class LoginProcessStateTest {
         val restored = LoginProcessState(handle).restore()
 
         assertTrue(restored.interrupted)
-        assertEquals("CREDENTIALS", handle["login.phase"])
+        assertEquals("FUTURE_SECRET_STEP", handle["login.phase"])
+        assertTrue(LoginProcessState(handle).restore().interrupted)
     }
 
     @Test

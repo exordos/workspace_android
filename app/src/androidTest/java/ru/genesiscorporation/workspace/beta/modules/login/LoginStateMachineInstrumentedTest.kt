@@ -215,7 +215,14 @@ class LoginStateMachineInstrumentedTest {
             harness.viewModel.onLoginClick()
             assertTrue(harness.viewModel.needsOtp.value)
 
+            val firstRecreated = harness.recreateViewModel()
+            firstRecreated.onLoginChange(firstRecreated.loginText.value)
+            firstRecreated.onPasswordChange(firstRecreated.passwordText.value)
+            assertTrue(firstRecreated.queryState.value is QueryState.Error)
+
             val recreated = harness.recreateViewModel()
+            recreated.onLoginChange(recreated.loginText.value)
+            recreated.onPasswordChange(recreated.passwordText.value)
 
             assertFalse(recreated.needsOtp.value)
             assertFalse(recreated.needsProject.value)
@@ -226,6 +233,11 @@ class LoginStateMachineInstrumentedTest {
                 "Вход был прерван. Введите пароль ещё раз",
                 (recreated.queryState.value as QueryState.Error).message,
             )
+            assertEquals("OTP", harness.savedState["login.phase"])
+            assertSavedStateContainsNoSecrets(harness.savedState)
+
+            recreated.onPasswordChange(SYNTHETIC_PASSWORD)
+            assertEquals(QueryState.Idle, recreated.queryState.value)
             assertEquals("CREDENTIALS", harness.savedState["login.phase"])
             assertSavedStateContainsNoSecrets(harness.savedState)
         }
@@ -251,7 +263,14 @@ class LoginStateMachineInstrumentedTest {
             harness.viewModel.onLoginClick()
             assertTrue(harness.viewModel.needsProject.value)
 
+            val firstRecreated = harness.recreateViewModel()
+            firstRecreated.onLoginChange(firstRecreated.loginText.value)
+            firstRecreated.onPasswordChange(firstRecreated.passwordText.value)
+            assertTrue(firstRecreated.queryState.value is QueryState.Error)
+
             val recreated = harness.recreateViewModel()
+            recreated.onLoginChange(recreated.loginText.value)
+            recreated.onPasswordChange(recreated.passwordText.value)
 
             assertFalse(recreated.needsOtp.value)
             assertFalse(recreated.needsProject.value)
@@ -261,6 +280,11 @@ class LoginStateMachineInstrumentedTest {
                 "Вход был прерван. Введите пароль ещё раз",
                 (recreated.queryState.value as QueryState.Error).message,
             )
+            assertEquals("PROJECT", harness.savedState["login.phase"])
+            assertSavedStateContainsNoSecrets(harness.savedState)
+
+            recreated.onPasswordChange(SYNTHETIC_PASSWORD)
+            assertEquals(QueryState.Idle, recreated.queryState.value)
             assertEquals("CREDENTIALS", harness.savedState["login.phase"])
             assertSavedStateContainsNoSecrets(harness.savedState)
         }

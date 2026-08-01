@@ -44,7 +44,6 @@ class LoginProcessState(
         } else {
             savedStateHandle[LOGIN_KEY] = login
         }
-        savedStateHandle[PHASE_KEY] = LoginPhase.CREDENTIALS.name
         return RestoredLoginProcessState(
             login = login,
             interrupted = storedPhase != null && restoredPhase != LoginPhase.CREDENTIALS,
