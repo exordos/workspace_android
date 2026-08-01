@@ -56,6 +56,8 @@ import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.UsersViewModelFactory
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
+import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamBindingResponseData
+import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 import ru.genesiscorporation.workspace.beta.modules.users.UsersScreen
 import ru.genesiscorporation.workspace.beta.modules.users.UsersViewModel
@@ -101,6 +103,10 @@ fun ChatScreen(
         chatViewModel.lastCatalogActionResult.collectAsStateWithLifecycle()
     val chatToAdd by chatViewModel.chatToAdd.collectAsState()
     val actionError by chatViewModel.actionError.collectAsStateWithLifecycle()
+    val currentlySelectedStream by
+        chatViewModel.currentlySelectedStream.collectAsStateWithLifecycle()
+    val streamBindings by chatViewModel.streamBindings.collectAsStateWithLifecycle()
+    val users by chatViewModel.users.collectAsStateWithLifecycle()
     val usersViewModelFactory = remember { UsersViewModelFactory(chatViewModel.client) }
     val usersViewModel: UsersViewModel = viewModel(factory = usersViewModelFactory)
     val availableUsers by usersViewModel.users.collectAsStateWithLifecycle()
@@ -110,7 +116,6 @@ fun ChatScreen(
 
     BackHandler(enabled = showDetail) {
         showDetail = false
-        scope.launch { chatViewModel.updateSelectedChat(null) }
     }
 
     LaunchedEffect(createState) {
@@ -161,12 +166,19 @@ fun ChatScreen(
     ) {
         MessengerTopBar(
             detailOpen = showDetail,
-            onNavigationClick = {
-                if (showDetail) {
-                    showDetail = false
-                    scope.launch { chatViewModel.updateSelectedChat(null) }
-                }
-            },
+            title = currentlySelectedStream
+                ?.name
+                ?.takeIf { showDetail }
+                ?: "Мессенджер",
+            subtitle = currentlySelectedStream
+                ?.takeIf { showDetail }
+                ?.let { selected ->
+                    channelMembersSubtitle(
+                        streamUuid = selected.uuid,
+                        bindings = streamBindings,
+                        users = users,
+                    )
+                },
             onNewChat = { showNewChatChooser = true },
         )
         actionError?.let { error ->
@@ -207,7 +219,6 @@ fun ChatScreen(
             selected = currentlySelectedFolder,
             onSelected = { folder ->
                 showDetail = false
-                scope.launch { chatViewModel.updateSelectedChat(null) }
                 chatViewModel.updateCurrentlySelectedFolder(folder)
             },
             onAddFolder = {
@@ -401,7 +412,8 @@ fun ChatScreen(
 @Composable
 private fun MessengerTopBar(
     detailOpen: Boolean,
-    onNavigationClick: () -> Unit,
+    title: String,
+    subtitle: String?,
     onNewChat: () -> Unit,
 ) {
     val colors = LocalWorkspaceColorsPalette.current
@@ -412,31 +424,34 @@ private fun MessengerTopBar(
             .background(colors.background)
             .padding(horizontal = 12.dp),
     ) {
-        if (detailOpen) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.CenterStart)
-                    .size(48.dp)
-                    .clickable(onClick = onNavigationClick),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    painter = painterResource(R.drawable.arrow_back),
-                    contentDescription = "Назад к чатам",
-                    tint = colors.primary,
-                    modifier = Modifier.size(24.dp),
+        Column(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .padding(horizontal = 44.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = title,
+                color = colors.textHeaders,
+                fontSize = if (detailOpen) 14.sp else 16.sp,
+                lineHeight = 20.sp,
+                fontFamily = NavigationFontFamily,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (detailOpen && !subtitle.isNullOrBlank()) {
+                Text(
+                    text = subtitle,
+                    color = colors.textAdditional50,
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
+                    fontFamily = NavigationFontFamily,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
-        Text(
-            text = "Мессенджер",
-            color = colors.textHeaders,
-            fontSize = 16.sp,
-            lineHeight = 20.sp,
-            fontFamily = NavigationFontFamily,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier.align(Alignment.Center),
-        )
         Row(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
@@ -457,6 +472,39 @@ private fun MessengerTopBar(
                 )
             }
         }
+    }
+}
+
+internal fun channelMembersSubtitle(
+    streamUuid: String,
+    bindings: List<StreamBindingResponseData>,
+    users: List<UserResponseData>,
+): String {
+    val memberUuids = bindings
+        .asSequence()
+        .filter { it.streamUuid == streamUuid }
+        .map(StreamBindingResponseData::userUuid)
+        .toSet()
+    val onlineCount = users
+        .asSequence()
+        .filter { user ->
+            user.uuid in memberUuids &&
+                (user.status == "active" || user.status == "online")
+        }
+        .map(UserResponseData::uuid)
+        .toSet()
+        .size
+    return "${memberUuids.size} ${memberWord(memberUuids.size)}, $onlineCount в сети"
+}
+
+private fun memberWord(count: Int): String {
+    val mod100 = count % 100
+    val mod10 = count % 10
+    return when {
+        mod100 in 11..14 -> "участников"
+        mod10 == 1 -> "участник"
+        mod10 in 2..4 -> "участника"
+        else -> "участников"
     }
 }
 

@@ -1,40 +1,44 @@
 package ru.genesiscorporation.workspace.beta.modules.chatchannels
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -48,13 +52,12 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.forwardTopicLabel
 import ru.genesiscorporation.workspace.beta.ui.AnimatedGif
-import ru.genesiscorporation.workspace.beta.ui.Avatar
-import ru.genesiscorporation.workspace.beta.ui.UnreadBadge
 import ru.genesiscorporation.workspace.beta.ui.TopicActionsDialog
 import ru.genesiscorporation.workspace.beta.ui.TopicNameDialog
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.time.Instant
 import java.time.OffsetDateTime
+import kotlin.math.roundToInt
 
 @Composable
 fun ChatWithTopics(
@@ -169,10 +172,31 @@ fun ChatWithTopics(
     }
 
     val selectedStream = currentlySelectedStream
-    if (!showDetail || selectedStream == null) {
-        LaunchedEffect(searchQuery, currentlySelectedFolder?.uuid) {
-            streamListState.scrollToItem(0)
+    LaunchedEffect(searchQuery, currentlySelectedFolder?.uuid) {
+        streamListState.scrollToItem(0)
+    }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val colors = LocalWorkspaceColorsPalette.current
+        val density = LocalDensity.current
+        val screenWidthPx = with(density) { maxWidth.toPx() }
+        val openOffsetPx = with(density) { TOPIC_PANEL_RAIL_WIDTH.toPx() }
+        val closedOffsetPx = screenWidthPx
+        var draggingPanel by remember { mutableStateOf(false) }
+        var dragOffsetPx by remember(screenWidthPx) {
+            mutableFloatStateOf(closedOffsetPx)
         }
+        val targetOffsetPx = if (showDetail && selectedStream != null) {
+            openOffsetPx
+        } else {
+            closedOffsetPx
+        }
+        val animatedOffsetPx by animateFloatAsState(
+            targetValue = if (draggingPanel) dragOffsetPx else targetOffsetPx,
+            animationSpec = spring(dampingRatio = 0.9f, stiffness = 400f),
+            label = "topic-panel-offset",
+        )
+        val currentAnimatedOffsetPx by rememberUpdatedState(animatedOffsetPx)
+
         LazyColumn(
             state = streamListState,
             modifier = Modifier
@@ -187,7 +211,7 @@ fun ChatWithTopics(
                     item = stream,
                     viewModel = chatViewModel,
                     baseUrl = baseUrl.orEmpty(),
-                    showDetail = false,
+                    showDetail = showDetail && selectedStream?.uuid == stream.uuid,
                     currentlySelectedFolder = currentlySelectedFolder,
                     latestTopicName = stream.lastMessage?.topicUuid?.let { topicUuid ->
                         streamTopics[stream.uuid]
@@ -200,6 +224,7 @@ fun ChatWithTopics(
                     onClick = {
                         val defaultTopic = stream.defaultTopicUuid
                         if (stream.isDirectProviderChat() && defaultTopic != null) {
+                            onShowDetailChange(false)
                             navController.navigate(
                                 ChatFlow.ChatDialog(
                                     stream.name,
@@ -212,8 +237,8 @@ fun ChatWithTopics(
                             )
                         } else {
                             scope.launch {
-                                chatViewModel.updateSelectedChat(stream)
                                 onShowDetailChange(true)
+                                chatViewModel.updateSelectedChat(stream)
                             }
                         }
                     },
@@ -232,91 +257,117 @@ fun ChatWithTopics(
                                 },
                             )
                             .height(1.dp)
-                            .background(
-                                LocalWorkspaceColorsPalette.current.cardBackgroundActive,
-                            ),
+                            .background(colors.cardBackgroundActive),
                     )
                 }
             }
         }
-        return
-    }
 
-    Row(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(top = 2.dp),
-    ) {
-        StreamRail(
-            streams = visibleStreams,
-            selected = selectedStream,
-            baseUrl = baseUrl.orEmpty(),
-            onSelected = { stream ->
-                scope.launch {
-                    chatViewModel.updateSelectedChat(stream)
-                }
-            },
-        )
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxHeight(),
-        ) {
-            Row(
+        selectedStream?.let { stream ->
+            Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = "Топики",
-                    color = LocalWorkspaceColorsPalette.current.textHeaders,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.weight(1f),
-                )
-                TextButton(
-                    onClick = { createTopicForStreamUuid = selectedStream.uuid },
-                ) {
-                    Text("Новый топик")
-                }
-            }
-            val topics = streamTopics[selectedStream.uuid].orEmpty()
-            if (topics.isEmpty()) {
-                if (state is QueryState.Error) {
-                    MessengerErrorState(
-                        message = (state as QueryState.Error).message,
-                        onRetry = { scope.launch { chatViewModel.loadTopics(selectedStream) } },
-                        modifier = Modifier.weight(1f),
-                    )
-                } else {
-                    EmptyMessengerState(
-                        loading = state is QueryState.Loading,
-                        text = "Список топиков пуст",
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .padding(start = 8.dp, end = 12.dp, bottom = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    items(
-                        topics.sortedByDescending {
-                            parseTime(it.lastMessage?.createdAt ?: it.updatedAt)
-                        },
-                        key = { it.uuid },
-                    ) { topic ->
-                        ChatTopic(
-                            viewModel = chatViewModel,
-                            item = topic,
-                            displayName = forwardTopicLabel(topic, topics),
-                            stream = selectedStream,
-                            navController = navController,
-                            onLongClick = { topicToManageUuid = topic.uuid },
+                    .fillMaxHeight()
+                    .width(maxWidth - TOPIC_PANEL_RAIL_WIDTH)
+                    .offset { IntOffset(animatedOffsetPx.roundToInt(), 0) }
+                    .background(colors.surface)
+                    .pointerInput(
+                        stream.uuid,
+                        openOffsetPx,
+                        closedOffsetPx,
+                        targetOffsetPx,
+                    ) {
+                        detectHorizontalDragGestures(
+                            onDragStart = {
+                                draggingPanel = true
+                                dragOffsetPx = currentAnimatedOffsetPx
+                            },
+                            onHorizontalDrag = { change, dragAmount ->
+                                change.consume()
+                                dragOffsetPx = (dragOffsetPx + dragAmount)
+                                    .coerceIn(openOffsetPx, closedOffsetPx)
+                            },
+                            onDragCancel = {
+                                draggingPanel = false
+                                dragOffsetPx = targetOffsetPx
+                            },
+                            onDragEnd = {
+                                val shouldStayOpen = topicPanelShouldStayOpen(
+                                    offsetPx = dragOffsetPx,
+                                    openOffsetPx = openOffsetPx,
+                                    closedOffsetPx = closedOffsetPx,
+                                )
+                                dragOffsetPx = if (shouldStayOpen) {
+                                    openOffsetPx
+                                } else {
+                                    closedOffsetPx
+                                }
+                                draggingPanel = false
+                                onShowDetailChange(shouldStayOpen)
+                            },
                         )
+                    },
+            ) {
+                val topics = streamTopics[stream.uuid].orEmpty()
+                if (topics.isEmpty()) {
+                    if (state is QueryState.Error) {
+                        MessengerErrorState(
+                            message = (state as QueryState.Error).message,
+                            onRetry = { scope.launch { chatViewModel.loadTopics(stream) } },
+                        )
+                    } else {
+                        EmptyMessengerState(
+                            loading = state is QueryState.Loading,
+                            text = "Список тем пуст",
+                        )
+                    }
+                } else {
+                    val orderedTopics = topics.sortedByDescending {
+                        parseTime(it.lastMessage?.createdAt ?: it.updatedAt)
+                    }
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(end = 12.dp),
+                    ) {
+                        itemsIndexed(
+                            items = orderedTopics,
+                            key = { _, topic -> topic.uuid },
+                        ) { _, topic ->
+                            ChatTopic(
+                                viewModel = chatViewModel,
+                                item = topic,
+                                displayName = forwardTopicLabel(topic, topics),
+                                stream = stream,
+                                navController = navController,
+                                selected = topic.uuid == stream.lastMessage?.topicUuid,
+                                onLongClick = { topicToManageUuid = topic.uuid },
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 12.dp)
+                                    .height(1.dp)
+                                    .background(colors.cardBackgroundActive),
+                            )
+                        }
+                        item(key = "create-topic") {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(38.dp)
+                                    .clickable {
+                                        createTopicForStreamUuid = stream.uuid
+                                    },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = "+ Новая тема",
+                                    color = colors.primary,
+                                    fontSize = 14.sp,
+                                    lineHeight = 20.sp,
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -325,7 +376,7 @@ fun ChatWithTopics(
 
     createTopicForStream?.let { stream ->
         TopicNameDialog(
-            title = "Новый топик в «${stream.name}»",
+            title = "Новая тема в «${stream.name}»",
             initialName = "",
             busy = topicActionBusy,
             submitLabel = "Создать",
@@ -379,7 +430,7 @@ fun ChatWithTopics(
             .firstOrNull { it.uuid == selected.uuid }
             ?: selected
         TopicNameDialog(
-            title = "Переименовать топик",
+            title = "Переименовать тему",
             initialName = currentTopic.name,
             busy = topicActionBusy,
             onSubmit = { name ->
@@ -392,65 +443,6 @@ fun ChatWithTopics(
                 if (!topicActionBusy) topicToRenameUuid = null
             },
         )
-    }
-}
-
-@Composable
-private fun StreamRail(
-    streams: List<Stream>,
-    selected: Stream,
-    baseUrl: String,
-    onSelected: (Stream) -> Unit,
-) {
-    val colors = LocalWorkspaceColorsPalette.current
-    LazyColumn(
-        modifier = Modifier
-            .width(64.dp)
-            .fillMaxHeight(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        items(streams, key = { it.uuid }) { stream ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .width(3.dp)
-                        .height(28.dp)
-                        .background(
-                            if (stream.uuid == selected.uuid) colors.textHeaders
-                            else androidx.compose.ui.graphics.Color.Transparent,
-                        ),
-                )
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clickable { onSelected(stream) }
-                        .padding(vertical = 3.dp)
-                        .height(46.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Avatar(
-                        avatarUrn = streamAvatar(stream),
-                        baseUrl = baseUrl,
-                        color = stream.color,
-                        name = stream.name,
-                        size = 40,
-                        hasPadding = false,
-                    )
-                    if (stream.unreadCount > 0) {
-                        UnreadBadge(
-                            count = stream.unreadCount,
-                            modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .padding(end = 2.dp),
-                        )
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -512,12 +504,13 @@ private fun MessengerErrorState(
     }
 }
 
-private fun streamAvatar(stream: Stream): String? =
-    if (stream.isDirectProviderChat()) {
-        stream.lastMessage?.user?.avatar ?: stream.avatar
-    } else {
-        stream.avatar
-    }
+internal fun topicPanelShouldStayOpen(
+    offsetPx: Float,
+    openOffsetPx: Float,
+    closedOffsetPx: Float,
+): Boolean = offsetPx < (openOffsetPx + closedOffsetPx) / 2f
+
+private val TOPIC_PANEL_RAIL_WIDTH = 74.dp
 
 private fun streamSortTime(stream: Stream): Instant =
     parseTime(stream.lastMessage?.createdAt ?: stream.updatedAt)

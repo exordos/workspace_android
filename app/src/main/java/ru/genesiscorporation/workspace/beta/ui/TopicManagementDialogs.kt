@@ -45,7 +45,7 @@ fun TopicNameDialog(
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !busy,
                 singleLine = true,
-                label = { Text("Название топика") },
+                label = { Text("Название темы") },
             )
         },
         confirmButton = {

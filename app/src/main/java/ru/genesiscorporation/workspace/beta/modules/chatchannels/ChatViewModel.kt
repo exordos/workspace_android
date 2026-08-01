@@ -52,6 +52,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.RenameTopicRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ServerSettingsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
+import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamBindingResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamBindingsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
@@ -146,6 +147,12 @@ class ChatViewModel(
             initialValue = emptyMap()
         )
     val users: StateFlow<List<UserResponseData>> = repo.users
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList(),
+        )
+    val streamBindings: StateFlow<List<StreamBindingResponseData>> = repo.streamBindings
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
