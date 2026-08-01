@@ -51,7 +51,7 @@ class FolderDisplayFormattingTest {
     }
 
     @Test
-    fun `only the authoritative all folder gets the Figma Russian label`() {
+    fun `system folders use the same Russian labels as the desktop UI`() {
         val all = folder(
             title = "All chats",
             systemType = "all",
@@ -62,10 +62,18 @@ class FolderDisplayFormattingTest {
             systemType = "all",
             uuid = "00000000-0000-0000-0000-000000000001",
         )
+        val channels = folder(
+            title = "Channels",
+            systemType = "all",
+            uuid = "00000000-0000-0000-0000-000000000002",
+        )
+        val namedLikeSystemFolder = folder("Personal", "created")
         val user = folder("Папка", "created")
 
         assertEquals("Все чаты", folderDisplayTitle(all))
-        assertEquals("Personal", folderDisplayTitle(personal))
+        assertEquals("Личные", folderDisplayTitle(personal))
+        assertEquals("Каналы", folderDisplayTitle(channels))
+        assertEquals("Personal", folderDisplayTitle(namedLikeSystemFolder))
         assertEquals("Папка", folderDisplayTitle(user))
     }
 

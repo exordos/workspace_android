@@ -57,8 +57,6 @@ import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.UsersViewModelFactory
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
-import ru.genesiscorporation.workspace.beta.modules.inbox.buildInboxGroups
-import ru.genesiscorporation.workspace.beta.modules.inbox.inboxUnreadCount
 import ru.genesiscorporation.workspace.beta.modules.users.UsersScreen
 import ru.genesiscorporation.workspace.beta.modules.users.UsersViewModel
 import ru.genesiscorporation.workspace.beta.ui.AddChatToFolder
@@ -85,14 +83,6 @@ fun ChatScreen(
     }
     val scope = rememberCoroutineScope()
     val folders by chatViewModel.folders.collectAsStateWithLifecycle()
-    val streams by chatViewModel.streams.collectAsStateWithLifecycle()
-    val topicsByStream by chatViewModel.streamTopics.collectAsStateWithLifecycle()
-    val catalogUsers by chatViewModel.users.collectAsStateWithLifecycle()
-    val inboxCount = remember(streams, topicsByStream, catalogUsers) {
-        inboxUnreadCount(
-            buildInboxGroups(streams, topicsByStream, catalogUsers),
-        )
-    }
     val folderMenu = folderMenuUuid?.let { uuid ->
         folders.firstOrNull { it.uuid == uuid }
     }
@@ -177,12 +167,6 @@ fun ChatScreen(
                     scope.launch { chatViewModel.updateSelectedChat(null) }
                 }
             },
-            inboxCount = inboxCount,
-            onOpenInbox = {
-                navController.navigate(ChatFlow.Inbox) {
-                    launchSingleTop = true
-                }
-            },
             onNewChat = { showNewChatChooser = true },
         )
         actionError?.let { error ->
@@ -232,21 +216,6 @@ fun ChatScreen(
                 }
             },
             onManageFolder = { folderMenuUuid = it.uuid },
-            onOpenFeed = {
-                navController.navigate(ChatFlow.Feed) {
-                    launchSingleTop = true
-                }
-            },
-            onOpenStarred = {
-                navController.navigate(ChatFlow.Starred) {
-                    launchSingleTop = true
-                }
-            },
-            onOpenDrafts = {
-                navController.navigate(ChatFlow.Drafts) {
-                    launchSingleTop = true
-                }
-            },
         )
         ChatWithTopics(
             chatViewModel = chatViewModel,
@@ -433,15 +402,13 @@ fun ChatScreen(
 private fun MessengerTopBar(
     detailOpen: Boolean,
     onNavigationClick: () -> Unit,
-    inboxCount: Int,
-    onOpenInbox: () -> Unit,
     onNewChat: () -> Unit,
 ) {
     val colors = LocalWorkspaceColorsPalette.current
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(50.dp)
+            .height(40.dp)
             .background(colors.background)
             .padding(horizontal = 12.dp),
     ) {
@@ -473,33 +440,12 @@ private fun MessengerTopBar(
         Row(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
-                .height(48.dp),
+                .height(40.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
                 modifier = Modifier
-                    .size(48.dp)
-                    .clickable(onClick = onOpenInbox),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_notifications),
-                    contentDescription = if (inboxCount > 0) {
-                        "Входящие, непрочитанных: $inboxCount"
-                    } else {
-                        "Входящие"
-                    },
-                    tint = colors.textAdditional50,
-                    modifier = Modifier.size(24.dp),
-                )
-                UnreadBadge(
-                    count = inboxCount,
-                    modifier = Modifier.align(Alignment.TopEnd),
-                )
-            }
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
+                    .size(40.dp)
                     .clickable(onClick = onNewChat),
                 contentAlignment = Alignment.Center,
             ) {
@@ -507,7 +453,7 @@ private fun MessengerTopBar(
                     painter = painterResource(R.drawable.ic_figma_new_chat),
                     contentDescription = "Новый чат",
                     tint = colors.textAdditional50,
-                    modifier = Modifier.size(28.dp),
+                    modifier = Modifier.size(32.dp),
                 )
             }
         }
@@ -574,9 +520,6 @@ private fun FolderTabs(
     onSelected: (FolderResponseData) -> Unit,
     onAddFolder: () -> Unit,
     onManageFolder: (FolderResponseData) -> Unit,
-    onOpenFeed: () -> Unit,
-    onOpenStarred: () -> Unit,
-    onOpenDrafts: () -> Unit,
 ) {
     val colors = LocalWorkspaceColorsPalette.current
     LazyRow(
@@ -586,30 +529,6 @@ private fun FolderTabs(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        item(key = "workspace-feed") {
-            MessageCollectionTab(
-                drawable = R.drawable.ic_feed,
-                label = "Лента",
-                description = "Открыть ленту сообщений",
-                onClick = onOpenFeed,
-            )
-        }
-        item(key = "workspace-starred") {
-            MessageCollectionTab(
-                drawable = R.drawable.ic_star,
-                label = "Избранное",
-                description = "Открыть избранные сообщения",
-                onClick = onOpenStarred,
-            )
-        }
-        item(key = "workspace-drafts") {
-            MessageCollectionTab(
-                drawable = R.drawable.ic_draft,
-                label = "Черновики",
-                description = "Открыть черновики",
-                onClick = onOpenDrafts,
-            )
-        }
         items(folders, key = { it.uuid }) { folder ->
             val isSelected = folder.uuid == selected?.uuid
             Column(
@@ -672,47 +591,6 @@ private fun FolderTabs(
                 )
             }
         }
-    }
-}
-
-@Composable
-private fun MessageCollectionTab(
-    drawable: Int,
-    label: String,
-    description: String,
-    onClick: () -> Unit,
-) {
-    val colors = LocalWorkspaceColorsPalette.current
-    Column(
-        modifier = Modifier
-            .height(48.dp)
-            .clickable(
-                role = androidx.compose.ui.semantics.Role.Button,
-                onClick = onClick,
-            )
-            .padding(horizontal = 12.dp)
-            .semantics { contentDescription = description },
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                painter = painterResource(drawable),
-                contentDescription = null,
-                tint = colors.textAdditional30,
-                modifier = Modifier.size(18.dp),
-            )
-            Text(
-                text = label,
-                color = colors.textAdditional30,
-                fontSize = 14.sp,
-                lineHeight = 20.sp,
-                fontFamily = NavigationFontFamily,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.padding(start = 5.dp),
-            )
-        }
-        Spacer(Modifier.height(8.dp))
     }
 }
 
