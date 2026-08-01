@@ -1163,6 +1163,14 @@ commit that file or its credentials.
 | SET-045 | Traverse Profile rows and rotate portrait/landscape/portrait | Every chevron or switch has a real handler; Language is explicitly read-only, Folder display opens the dedicated Figma folder surface, and the selected subview survives safely without clipping or duplicate navigation | Static action registry + physical Pixel portrait/landscape/portrait and folder-route checks passed |
 | SET-046 | Compare folder display/create with Figma and complete the sandbox-only round trip | The list and create form preserve the maintained hierarchy, compact rows, search, checkboxes and bottom actions; selecting the created folder returns to Chats with only `песочница`; the temporary folder is deleted afterward | Three Compose instrumentation tests + physical Pixel 5 dark-theme screenshots and reversible server mutation passed |
 
+## Main navigation and planned groupware
+
+| ID | Scenario | Expected result | Current coverage |
+| --- | --- | --- | --- |
+| NAV-001 | Compare the signed-in bottom panel with the maintained mobile Figma shell | The order is Feed, Messenger, Calendar, Mail, Settings; every tab has one selected semantic state and a 54 dp target inside the 102 dp rounded panel | Source geometry + physical Pixel dark portrait passed |
+| NAV-002 | Switch Feed → Messenger → Calendar → Mail → Settings → Feed and use system Back | The selected state follows the visible surface; Feed, Messenger and Settings restore their real stacks, while Calendar and Mail show the intentional native coming-soon state without blank content or fake controls | Source navigation + physical Pixel sequence passed; process-death restoration pending |
+| SOON-001 | Open Calendar and Mail in light and dark themes | Both screens show the correct icon and label, exact "Уже скоро!" / "В разработке!" copy, readable theme-bound contrast and no non-functional controls | Physical Pixel dark portrait passed; light theme, font scaling and TalkBack pending |
+
 ### About and licenses matrix
 
 The catalog is generated at build time from the selected Android variant's

@@ -107,6 +107,8 @@ import ru.genesiscorporation.workspace.beta.modules.chatuserinfo.ChatUserInfoVie
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.ChooseServerScreen
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.ChooseServerViewModel
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
+import ru.genesiscorporation.workspace.beta.modules.comingsoon.ComingSoonDestination
+import ru.genesiscorporation.workspace.beta.modules.comingsoon.WorkspaceComingSoonScreen
 import ru.genesiscorporation.workspace.beta.modules.login.LoginScreen
 import ru.genesiscorporation.workspace.beta.modules.login.LoginViewModel
 import ru.genesiscorporation.workspace.beta.modules.login.LocalLoginProcessState
@@ -856,6 +858,15 @@ fun WokspaceApp(
     }
     var currentDestination by rememberSaveable { mutableIntStateOf(0) }
     var showBottomNavigation by rememberSaveable { mutableStateOf(true) }
+    fun navigateTopLevel(destination: Destinations) {
+        navController.navigate(destination.route) {
+            popUpTo(Chat.route) {
+                saveState = true
+            }
+            launchSingleTop = true
+            restoreState = true
+        }
+    }
 
     LaunchedEffect(realtimeConnectionState) {
         val nextBanner =
@@ -920,8 +931,27 @@ fun WokspaceApp(
                                 if (showBottomNavigation) 102.dp else 0.dp,
                         ),
                 ) {
-                    composable(Chat.route) {
+                    composable(Feed.route) {
                         currentDestination = 0
+                        ChatNavigation(
+                            workspaceApiClient = workspaceApiClient,
+                            eventsRepository = eventsRepository,
+                            conversationStateStore = conversationStateStore,
+                            pendingPushNavigation = null,
+                            onPushNavigationHandled = {},
+                            pendingDeepLink = null,
+                            onDeepLinkHandled = {},
+                            pendingIncomingShare = null,
+                            onIncomingShareHandled = {},
+                            onBottomNavigationVisibilityChange = {
+                                showBottomNavigation = it
+                            },
+                            startDestination = ChatFlow.Feed,
+                            onFeedBack = { navigateTopLevel(Chat) },
+                        )
+                    }
+                    composable(Chat.route) {
+                        currentDestination = 1
                         ChatNavigation(
                             workspaceApiClient = workspaceApiClient,
                             eventsRepository = eventsRepository,
@@ -939,22 +969,33 @@ fun WokspaceApp(
                             },
                         )
                     }
+                    composable(Calendar.route) {
+                        LaunchedEffect(Unit) {
+                            showBottomNavigation = true
+                        }
+                        currentDestination = 2
+                        WorkspaceComingSoonScreen(ComingSoonDestination.CALENDAR)
+                    }
+                    composable(Mail.route) {
+                        LaunchedEffect(Unit) {
+                            showBottomNavigation = true
+                        }
+                        currentDestination = 3
+                        WorkspaceComingSoonScreen(ComingSoonDestination.MAIL)
+                    }
                     composable(Profile.route) {
                         LaunchedEffect(Unit) {
                             showBottomNavigation = true
                         }
-                        currentDestination = 1
+                        currentDestination = 4
                         ProfileNavigation(
                             workspaceApiClient,
                             eventsRepository,
                             pushDeviceRegistrationManager,
                             conversationStateStore,
                             onBackToChats = {
-                                currentDestination = 0
-                                navController.navigate(Chat.route) {
-                                    popUpTo(Chat.route)
-                                    launchSingleTop = true
-                                }
+                                currentDestination = 1
+                                navigateTopLevel(Chat)
                             },
                             onBottomNavigationVisibilityChange = {
                                 showBottomNavigation = it
@@ -965,19 +1006,25 @@ fun WokspaceApp(
                 if (showBottomNavigation) {
                     WorkspaceBottomNavigation(
                         selectedDestination = currentDestination,
-                        onChatClick = {
+                        onFeedClick = {
                             currentDestination = 0
-                            navController.navigate(Chat.route) {
-                                popUpTo(Chat.route)
-                                launchSingleTop = true
-                            }
+                            navigateTopLevel(Feed)
+                        },
+                        onChatClick = {
+                            currentDestination = 1
+                            navigateTopLevel(Chat)
+                        },
+                        onCalendarClick = {
+                            currentDestination = 2
+                            navigateTopLevel(Calendar)
+                        },
+                        onMailClick = {
+                            currentDestination = 3
+                            navigateTopLevel(Mail)
                         },
                         onProfileClick = {
-                            currentDestination = 1
-                            navController.navigate(Profile.route) {
-                                popUpTo(Chat.route)
-                                launchSingleTop = true
-                            }
+                            currentDestination = 4
+                            navigateTopLevel(Profile)
                         },
                         modifier =
                             Modifier.align(Alignment.BottomCenter),
@@ -1055,7 +1102,10 @@ private const val CONNECTION_BANNER_CONNECTING_DELAY_MILLIS = 1_500L
 @Composable
 private fun WorkspaceBottomNavigation(
     selectedDestination: Int,
+    onFeedClick: () -> Unit,
     onChatClick: () -> Unit,
+    onCalendarClick: () -> Unit,
+    onMailClick: () -> Unit,
     onProfileClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -1063,6 +1113,11 @@ private fun WorkspaceBottomNavigation(
     val user = LocalUserState.current
     val baseUrl by user.baseUrl.collectAsState()
     val profile = user.userData
+    val activeAccount by user.activeAccount.collectAsState()
+    val avatarUrn = profile?.avatar ?: activeAccount?.avatarUrn
+    val avatarName = profile?.displayableName()
+        ?: activeAccount?.displayName
+        ?: activeAccount?.login
 
     Box(
         modifier = modifier
@@ -1079,86 +1134,121 @@ private fun WorkspaceBottomNavigation(
                     RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp),
                 )
                 .navigationBarsPadding()
-                .padding(horizontal = 24.dp, vertical = 8.dp),
+                .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.Top,
             horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceAround,
         ) {
+            WorkspaceBottomNavigationIcon(
+                selected = selectedDestination == 0,
+                label = "Лента",
+                onClick = onFeedClick,
+                drawable = R.drawable.ic_nav_feed,
+                iconSize = 32,
+            )
+            WorkspaceBottomNavigationIcon(
+                selected = selectedDestination == 1,
+                label = "Мессенджер",
+                onClick = onChatClick,
+                drawable = R.drawable.chat_bubble,
+                iconSize = 32,
+            )
+            WorkspaceBottomNavigationIcon(
+                selected = selectedDestination == 2,
+                label = "Календарь",
+                onClick = onCalendarClick,
+                drawable = R.drawable.ic_nav_calendar,
+                iconSize = 32,
+            )
+            WorkspaceBottomNavigationIcon(
+                selected = selectedDestination == 3,
+                label = "Почта",
+                onClick = onMailClick,
+                drawable = R.drawable.ic_mail,
+                iconSize = 32,
+            )
             Box(
-                modifier = Modifier
-                    .size(54.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(
-                        if (selectedDestination == 0) colors.cardBackgroundActive
-                        else Color.Transparent,
-                    )
-                    .selectable(
-                        selected = selectedDestination == 0,
-                        role = Role.Tab,
-                        onClick = onChatClick,
-                    )
-                    .clearAndSetSemantics {
-                        contentDescription = "Чаты"
-                        selected = selectedDestination == 0
-                        role = Role.Tab
-                        onClick(label = "Открыть чаты") {
-                            onChatClick()
-                            true
-                        }
-                    },
+                modifier = Modifier.bottomNavigationItem(
+                    selected = selectedDestination == 4,
+                    label = "Настройки",
+                    onClick = onProfileClick,
+                    activeBackground =
+                        colors.bottomNavigationSelectedBackground,
+                ),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(
-                    painter = painterResource(R.drawable.chat_bubble),
-                    contentDescription = null,
-                    tint = if (selectedDestination == 0) colors.iconActive else colors.iconBase,
-                    modifier = Modifier.size(36.dp),
-                )
-            }
-            Box(
-                modifier = Modifier
-                    .size(54.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(
-                        if (selectedDestination == 1) colors.cardBackgroundActive
-                        else Color.Transparent,
-                    )
-                    .selectable(
-                        selected = selectedDestination == 1,
-                        role = Role.Tab,
-                        onClick = onProfileClick,
-                    )
-                    .clearAndSetSemantics {
-                        contentDescription = "Профиль"
-                        selected = selectedDestination == 1
-                        role = Role.Tab
-                        onClick(label = "Открыть профиль") {
-                            onProfileClick()
-                            true
-                        }
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                if (profile != null) {
+                if (!avatarName.isNullOrBlank()) {
                     Avatar(
-                        avatarUrn = profile.avatar,
+                        avatarUrn = avatarUrn,
                         baseUrl = baseUrl.orEmpty(),
                         color = null,
-                        name = profile.displayableName(),
+                        name = avatarName,
                         size = 36,
                         hasPadding = false,
+                        ownerAccountId = activeAccount?.accountId,
                     )
                 } else {
                     Icon(
                         painter = painterResource(R.drawable.ic_profile),
                         contentDescription = null,
-                        tint = if (selectedDestination == 1) colors.iconActive else colors.iconBase,
-                        modifier = Modifier.size(36.dp),
+                        tint = if (selectedDestination == 4) colors.iconActive else colors.iconBase,
+                        modifier = Modifier.size(32.dp),
                     )
                 }
             }
         }
     }
 }
+
+@Composable
+private fun WorkspaceBottomNavigationIcon(
+    selected: Boolean,
+    label: String,
+    onClick: () -> Unit,
+    drawable: Int,
+    iconSize: Int,
+) {
+    val colors = LocalWorkspaceColorsPalette.current
+    Box(
+        modifier = Modifier.bottomNavigationItem(
+            selected = selected,
+            label = label,
+            onClick = onClick,
+            activeBackground = colors.bottomNavigationSelectedBackground,
+        ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            painter = painterResource(drawable),
+            contentDescription = null,
+            tint = if (selected) colors.iconActive else colors.iconBase,
+            modifier = Modifier.size(iconSize.dp),
+        )
+    }
+}
+
+private fun Modifier.bottomNavigationItem(
+    selected: Boolean,
+    label: String,
+    onClick: () -> Unit,
+    activeBackground: Color,
+): Modifier = this
+    .size(54.dp)
+    .clip(RoundedCornerShape(12.dp))
+    .background(if (selected) activeBackground else Color.Transparent)
+    .selectable(
+        selected = selected,
+        role = Role.Tab,
+        onClick = onClick,
+    )
+    .clearAndSetSemantics {
+        contentDescription = label
+        this.selected = selected
+        role = Role.Tab
+        onClick(label = "Открыть $label") {
+            onClick()
+            true
+        }
+    }
 
 @Composable
 fun ChatNavigation(
@@ -1172,6 +1262,8 @@ fun ChatNavigation(
     pendingIncomingShare: IncomingShareRequest?,
     onIncomingShareHandled: () -> Unit,
     onBottomNavigationVisibilityChange: (Boolean) -> Unit,
+    startDestination: Any = ChatFlow.ChatList,
+    onFeedBack: (() -> Unit)? = null,
 ) {
     val navController = rememberNavController()
     val user = LocalUserState.current
@@ -1273,7 +1365,7 @@ fun ChatNavigation(
             onPushNavigationHandled()
         }
     }
-    NavHost(navController = navController, startDestination = ChatFlow.ChatList) {
+    NavHost(navController = navController, startDestination = startDestination) {
         composable<ChatFlow.ChatList> {
             LaunchedEffect(Unit) { onBottomNavigationVisibilityChange(true) }
             ChatScreen(chatViewModel, navController)
@@ -1300,6 +1392,7 @@ fun ChatNavigation(
                 chatViewModel,
                 navController,
                 MessageTimelineKind.FEED,
+                onBack = onFeedBack,
             )
         }
         composable<ChatFlow.Starred> {

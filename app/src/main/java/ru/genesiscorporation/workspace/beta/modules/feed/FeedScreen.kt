@@ -73,6 +73,7 @@ fun FeedScreen(
     chatViewModel: ChatViewModel,
     navController: NavHostController,
     kind: MessageTimelineKind = MessageTimelineKind.FEED,
+    onBack: (() -> Unit)? = null,
 ) {
     val state by feedViewModel.state.collectAsStateWithLifecycle()
     val streams by chatViewModel.streams.collectAsStateWithLifecycle()
@@ -152,7 +153,11 @@ fun FeedScreen(
         feedViewModel.refresh()
     }
 
-    BackHandler { navController.popBackStack() }
+    val navigateBack = onBack ?: {
+        navController.popBackStack()
+        Unit
+    }
+    BackHandler(onBack = navigateBack)
     LaunchedEffect(
         state.ownerKey,
         state.hasLoaded,
@@ -236,7 +241,7 @@ fun FeedScreen(
             refreshDescription = kind.refreshDescription,
             busyDescription = kind.busyDescription,
             busy = state.initialLoading || state.refreshing || state.loadingOlder,
-            onBack = { navController.popBackStack() },
+            onBack = navigateBack,
             onRefresh = ::refresh,
         )
         if (state.refreshing && state.messages.isNotEmpty()) {

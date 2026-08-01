@@ -14,6 +14,24 @@ object Chat: Destinations {
     override val title = "Chat"
 }
 
+object Feed: Destinations {
+    override val route = "Feed"
+    override val icon = R.drawable.ic_nav_feed
+    override val title = "Feed"
+}
+
+object Calendar: Destinations {
+    override val route = "Calendar"
+    override val icon = R.drawable.ic_nav_calendar
+    override val title = "Calendar"
+}
+
+object Mail: Destinations {
+    override val route = "Mail"
+    override val icon = R.drawable.ic_mail
+    override val title = "Mail"
+}
+
 object ChatFlow {
     @Serializable
     object ChatList
@@ -91,5 +109,5 @@ object Calls: Destinations {
 object Profile: Destinations {
     override val route = "Profile"
     override val icon = R.drawable.ic_profile
-    override val title = "Profile"
+    override val title = "Settings"
 }

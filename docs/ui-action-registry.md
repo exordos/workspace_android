@@ -28,12 +28,20 @@ Compose semantics traversal on every supported role and account.
 | AUTH-A11 | Project confirm | Refreshes into project scope and atomically stores the session | Typed error; no partial DataStore session | AUTH-008/010 |
 | AUTH-A12 | Back from project | Discards temporary base tokens and returns to credentials | No external failure | Compose state test |
 
+## Main navigation
+
+| ID | Screen / interaction | Handler and effect | Failure/recovery | Acceptance |
+| --- | --- | --- | --- | --- |
+| NAV-A01 | Bottom-nav Feed | Restores the real cross-conversation Feed stack without duplicating its root | Cached rows remain usable through recoverable refresh failures | NAV-001/002 + Feed suite |
+| NAV-A02 | Bottom-nav Messenger | Restores the chat catalog; push, deep-link and Android Share ingress always target this owner-bound stack | Back stack remains valid and no other tab consumes pending ingress | NAV-001/002 + navigation suite |
+| NAV-A03 | Bottom-nav Calendar | Opens the intentional native Calendar coming-soon state | No fake events or non-functional secondary controls are exposed | NAV-001/002 + SOON-001 |
+| NAV-A04 | Bottom-nav Mail | Opens the intentional native Mail coming-soon state | No fake mailbox or non-functional secondary controls are exposed | NAV-001/002 + SOON-001 |
+| NAV-A05 | Bottom-nav Settings avatar | Opens the real signed-in profile/settings hierarchy | Back stack remains valid; missing profile data uses the settings icon without inventing identity | NAV-001/002 + SET-042–045 |
+
 ## Messenger catalog and folders
 
 | ID | Screen / interaction | Handler and effect | Failure/recovery | Acceptance |
 | --- | --- | --- | --- | --- |
-| CAT-A01 | Bottom-nav Chats | Restores the chat-list destination without duplicating it and exposes one labeled selected-tab semantic node | Back stack remains valid | Navigation suite + physical accessibility dump |
-| CAT-A02 | Bottom-nav Profile | Opens the real signed-in profile and exposes one labeled selected-tab semantic node | Back stack remains valid | Navigation suite + physical accessibility dump |
 | CAT-A03 | Back from channel detail | Clears selected stream and restores catalog | No external failure | Navigation suite |
 | CAT-A04 | New direct chat | Opens real-user selector; selected user creates/reuses private stream | Selector exposes loading/error/retry; create error remains visible | CAT-003 |
 | CAT-A05 | Catalog search field | Filters current authoritative streams by name | Empty query/result has explicit state | Component test |
@@ -51,7 +59,7 @@ Compose semantics traversal on every supported role and account.
 | CAT-A17 | Rename/delete folder | PUTs or DELETEs the exact folder UUID, then refreshes the authoritative folder list | Retained single-flight request, request-ID completion after recreation, confirmation and recoverable error | CAT-011/014/019 |
 | CAT-A18 | Pin/unpin chat in folder | Invokes the exact folder-item action and refreshes ordering | Missing item or API failure is visible | CAT-012/013 |
 | CAT-A19 | Mark channel read | POSTs stream read action and reconciles stream/folder unread totals | Single-flight mutation and error banner | CAT-010/013 |
-| CAT-A20 | New channel | Opens a scrollable form for name, description, private/public mode, announcement and real-user selection | Blank name disables submit; form survives Activity recreation; a server-accepted create is never blindly retried when follow-up topic/catalog loading fails | CAT-004/014/018/020 + physical rotation |
+| CAT-A20 | New stream | Opens the maintained full-screen mobile name/member flow; desktop-only description/private/announcement values stay safely defaulted because no mobile design exists | Blank name disables submit; loading/error/retry are explicit; a server-accepted create is never blindly retried when follow-up topic/catalog loading fails | CAT-004/014/018/020 + physical rotation |
 | CAT-A21 | New topic | POSTs a nonblank name for the exact stream and upserts the returned topic | Retained single-flight request; request-ID completion closes only the matching restored form; error preserves retry context | CAT-005/013/019 |
 | CAT-A22 | Topic long press | Opens desktop-parity notification/read/rename/done actions | No backend-only placeholder or unsupported action is rendered | CAT-005/006/009/010 |
 | CAT-A23 | Topic rename/done/notification/read | Invokes the exact topic action and updates the shared stream/topic projection | Retained single-flight request survives recreation; request-ID completion and recoverable inline error | CAT-005/006/009/010/013/019 |
@@ -70,7 +78,7 @@ Compose semantics traversal on every supported role and account.
 
 | ID | Screen / interaction | Handler and effect | Failure/recovery | Acceptance |
 | --- | --- | --- | --- | --- |
-| FEED-A01 | Catalog Feed tab | Opens the real cross-conversation message projection | Route is stable across Back and configuration recreation; no placeholder destination exists | FEED-001/011 |
+| FEED-A01 | Bottom-nav Feed | Opens the real cross-conversation message projection | Route is stable across Back and configuration recreation; no placeholder destination exists | FEED-001/011 + NAV-001/002 |
 | FEED-A02 | Feed back | Pops to the prior messenger catalog route | Back stack and retained feed position remain valid | FEED-011 |
 | FEED-A03 | Feed refresh/retry | Refreshes one owner-bound global newest page; missing navigation targets are resolved lazily by exact UUID | Existing cached/realtime rows survive network/server/malformed/journal-overflow failure; duplicate input is single-flight | FEED-009/010/013–015 |
 | FEED-A04 | Message preview/open action | Opens the exact canonical stream/topic/message route | Missing/deleted catalog target produces a visible recovery instruction, never a guessed route | FEED-002/003 |
@@ -248,7 +256,9 @@ end-to-end behavior exists:
   desktop/backend explicitly report those paths unsupported. The supported
   read-only Starred destination is functional and remains visible.
 - Hamburger menu without a navigation destination.
-- Mail, calendar, services, and calls-list placeholders.
+- Services and calls-list placeholders. Calendar and Mail are the explicit
+  product-approved exception: their required navigation positions open native
+  "Уже скоро! В разработке!" states until working surfaces are designed.
 - Password-recovery controls while the maintained desktop has no live action and
   the current public IAM client cannot send a reset code.
 - Typing indicators and message-reader details while desktop adapters are
