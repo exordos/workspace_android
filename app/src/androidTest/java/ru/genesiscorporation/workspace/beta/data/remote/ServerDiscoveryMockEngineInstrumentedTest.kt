@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.ktor.client.HttpClient
+import io.ktor.client.engine.cio.FailToConnectException
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.MockRequestHandleScope
 import io.ktor.client.engine.mock.respond
@@ -12,6 +13,7 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import java.security.cert.CertificateExpiredException
 import javax.net.ssl.SSLHandshakeException
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -138,6 +140,24 @@ class ServerDiscoveryMockEngineInstrumentedTest {
         }
         assertDiscoveryError(
             tlsFailure,
+            expectedKind = ApiErrorKind.NETWORK,
+            expectedCode = "NETWORK",
+        )
+
+        val expiredCertificate = performDiscovery {
+            throw CertificateExpiredException("injected expired certificate")
+        }
+        assertDiscoveryError(
+            expiredCertificate,
+            expectedKind = ApiErrorKind.NETWORK,
+            expectedCode = "NETWORK",
+        )
+
+        val cioConnectFailure = performDiscovery {
+            throw FailToConnectException()
+        }
+        assertDiscoveryError(
+            cioConnectFailure,
             expectedKind = ApiErrorKind.NETWORK,
             expectedCode = "NETWORK",
         )

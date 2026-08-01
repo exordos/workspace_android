@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import io.ktor.client.HttpClient
+import io.ktor.client.engine.cio.FailToConnectException
 import io.ktor.client.network.sockets.ConnectTimeoutException
 import io.ktor.client.network.sockets.SocketTimeoutException
 import io.ktor.client.plugins.HttpRequestTimeoutException
@@ -58,6 +59,7 @@ import java.io.IOException
 import java.io.ByteArrayOutputStream
 import java.net.URI
 import java.nio.channels.UnresolvedAddressException
+import java.security.cert.CertificateException
 import java.util.UUID
 
 @PublishedApi
@@ -243,6 +245,10 @@ class WorkspaceAPIClient(
         } catch (network: UnresolvedAddressException) {
             ApiResult.Error(ApiError("Network unavailable", "NETWORK", ApiErrorKind.NETWORK))
         } catch (network: IOException) {
+            ApiResult.Error(ApiError("Network unavailable", "NETWORK", ApiErrorKind.NETWORK))
+        } catch (network: FailToConnectException) {
+            ApiResult.Error(ApiError("Network unavailable", "NETWORK", ApiErrorKind.NETWORK))
+        } catch (network: CertificateException) {
             ApiResult.Error(ApiError("Network unavailable", "NETWORK", ApiErrorKind.NETWORK))
         } catch (exception: Exception) {
             val error = ApiError("Request failed", "REQUEST_FAILED", ApiErrorKind.UNKNOWN)
