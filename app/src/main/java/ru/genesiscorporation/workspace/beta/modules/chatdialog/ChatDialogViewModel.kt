@@ -9,6 +9,7 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
@@ -34,6 +35,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import ru.genesiscorporation.workspace.beta.BuildConfig
 import ru.genesiscorporation.workspace.beta.ChatFlow
+import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.UserViewModel
 import ru.genesiscorporation.workspace.beta.data.ConversationPaginationState
 import ru.genesiscorporation.workspace.beta.data.ConversationStateStore
@@ -283,6 +285,7 @@ class ChatDialogViewModel(
             ConversationWindowMode.CONTEXT
         }
     private var olderMessagesJob: Job? = null
+    private var composerSendJob: Job? = null
     private var refreshHistoryBeforeOlderRetry = false
     private var nextNewerPageMarker: String? = null
     private var newerMessagesJob: Job? = null
@@ -383,6 +386,22 @@ class ChatDialogViewModel(
                         "не удалось очистить"
             }
         }
+    }
+
+    fun dismissAttachment(context: Context, uri: Uri) {
+        if (_uploadingAttachmentUri.value == uri) {
+            val activeJob = composerSendJob
+            if (activeJob?.isActive == true) {
+                _actionError.value = context.getString(
+                    R.string.message_composer_upload_cancelled,
+                )
+                activeJob.cancel(
+                    CancellationException("Attachment upload cancelled"),
+                )
+            }
+            return
+        }
+        removeAttachment(context, uri)
     }
 
     fun nextMessageByUuid(currentUuid: String): MessageResponse? {
@@ -2075,7 +2094,7 @@ class ChatDialogViewModel(
         _sending.value = true
         _actionError.value = null
         val appContext = context.applicationContext
-        viewModelScope.launch {
+        val sendJob = viewModelScope.launch(start = CoroutineStart.LAZY) {
             try {
                 val edit = snapshot.editingMessage
                 if (edit != null) {
@@ -2096,8 +2115,11 @@ class ChatDialogViewModel(
                     "Не удалось сохранить сообщение в очередь отправки"
             } finally {
                 _sending.value = false
+                composerSendJob = null
             }
         }
+        composerSendJob = sendJob
+        sendJob.start()
     }
 
     fun startCall(callUrl: String, roomName: String) {

@@ -25,8 +25,9 @@ class SelectedAttachmentPreviewInstrumentedTest {
     val composeRule = createComposeRule()
 
     @Test
-    fun usesFigmaDimensionsAndExposesPerAttachmentUploadState() {
+    fun usesFigmaDimensionsAndExposesUploadCancellation() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
+        var cancelled = false
         val attachment = SelectedLocalAttachment(
             uri = Uri.parse("content://workspace/photo.jpg"),
             fileName = "photo.jpg",
@@ -37,6 +38,10 @@ class SelectedAttachmentPreviewInstrumentedTest {
             R.string.message_composer_attachment_uploading,
             attachment.fileName,
         )
+        val cancelLabel = context.getString(
+            R.string.message_composer_cancel_attachment_upload,
+            attachment.fileName,
+        )
 
         composeRule.setContent {
             WokspaceTheme(darkTheme = true) {
@@ -44,7 +49,7 @@ class SelectedAttachmentPreviewInstrumentedTest {
                     attachment = attachment,
                     uploading = true,
                     enabled = true,
-                    onRemove = {},
+                    onRemove = { cancelled = true },
                 )
             }
         }
@@ -56,7 +61,10 @@ class SelectedAttachmentPreviewInstrumentedTest {
         composeRule.onNodeWithTag(SELECTED_ATTACHMENT_REMOVE_TAG)
             .assertWidthIsEqualTo(48.dp)
             .assertHeightIsEqualTo(48.dp)
-            .assertIsNotEnabled()
+            .assertIsEnabled()
+            .performClick()
+        composeRule.onNodeWithContentDescription(cancelLabel).assertExists()
+        composeRule.runOnIdle { assertTrue(cancelled) }
     }
 
     @Test

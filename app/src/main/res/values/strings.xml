@@ -70,7 +70,9 @@
     <string name="message_composer_preview_attachments_only">Selected attachments are shown above; there is no message text yet</string>
     <string name="message_composer_attach_files">Attach files</string>
     <string name="message_composer_remove_attachment">Remove %1$s</string>
+    <string name="message_composer_cancel_attachment_upload">Cancel upload of %1$s</string>
     <string name="message_composer_attachment_uploading">Uploading %1$s</string>
+    <string name="message_composer_upload_cancelled">File upload cancelled</string>
     <string name="message_composer_formatting_toolbar">Message formatting</string>
     <string name="message_composer_bold">Bold</string>
     <string name="message_composer_italic">Italic</string>

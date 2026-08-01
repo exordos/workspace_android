@@ -32,6 +32,8 @@ import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.readAvailable
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -911,6 +913,7 @@ class WorkspaceAPIClient(
                 val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
                 var total = 0
                 while (true) {
+                    currentCoroutineContext().ensureActive()
                     val count = it.read(buffer)
                     if (count < 0) break
                     total += count

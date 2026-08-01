@@ -153,12 +153,13 @@ fun SendMessageView(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 items(attachments, key = { it.uri.toString() }) { attachment ->
+                    val uploading = uploadingAttachmentUri == attachment.uri
                     SelectedAttachmentPreview(
                         attachment = attachment,
-                        uploading = uploadingAttachmentUri == attachment.uri,
-                        enabled = !sending,
+                        uploading = uploading,
+                        enabled = !sending || uploading,
                         onRemove = {
-                            viewModel.removeAttachment(context, attachment.uri)
+                            viewModel.dismissAttachment(context, attachment.uri)
                         },
                     )
                 }
@@ -431,6 +432,14 @@ internal fun SelectedAttachmentPreview(
         R.string.message_composer_attachment_uploading,
         attachment.fileName,
     )
+    val dismissDescription = stringResource(
+        if (uploading) {
+            R.string.message_composer_cancel_attachment_upload
+        } else {
+            R.string.message_composer_remove_attachment
+        },
+        attachment.fileName,
+    )
     Box(
         modifier = Modifier
             .width(144.dp)
@@ -493,17 +502,14 @@ internal fun SelectedAttachmentPreview(
                 .size(48.dp)
                 .testTag(SELECTED_ATTACHMENT_REMOVE_TAG)
                 .clickable(
-                    enabled = enabled && !uploading,
+                    enabled = enabled,
                     onClick = onRemove,
                 ),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 painter = painterResource(R.drawable.ic_close_small),
-                contentDescription = stringResource(
-                    R.string.message_composer_remove_attachment,
-                    attachment.fileName,
-                ),
+                contentDescription = dismissDescription,
                 tint = Color.White,
                 modifier = Modifier
                     .size(20.dp)
