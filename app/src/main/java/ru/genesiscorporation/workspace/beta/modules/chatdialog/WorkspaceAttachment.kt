@@ -28,6 +28,14 @@ data class SelectedLocalAttachment(
     val fileName: String,
     val contentType: String,
     val sizeBytes: Long?,
+    val uploaded: UploadedAttachmentCheckpoint? = null,
+)
+
+data class UploadedAttachmentCheckpoint(
+    val uuid: String,
+    val name: String,
+    val contentType: String,
+    val sizeBytes: Long?,
 )
 
 data class UserUploadMarkdownParts(
@@ -65,6 +73,50 @@ fun buildWorkspaceAttachmentMarkdown(upload: UploadFileResponseData): String {
     } else {
         "[$label]($urn)"
     }
+}
+
+internal fun createUploadedAttachmentCheckpoint(
+    upload: UploadFileResponseData,
+    fallbackName: String,
+    fallbackContentType: String,
+    fallbackSizeBytes: Long?,
+): UploadedAttachmentCheckpoint? {
+    val uuid = canonicalAttachmentUuid(upload.uuid) ?: return null
+    val name = safeLocalFileName(upload.name.ifBlank { fallbackName })
+    val contentType = normalizedAttachmentContentType(
+        upload.contentType.ifBlank { fallbackContentType },
+    ) ?: normalizedAttachmentContentType(fallbackContentType)
+        ?: "application/octet-stream"
+    val sizeBytes = upload.sizeBytes
+        ?.takeIf(::isValidAttachmentSize)
+        ?: fallbackSizeBytes?.takeIf(::isValidAttachmentSize)
+    return UploadedAttachmentCheckpoint(
+        uuid = uuid,
+        name = name,
+        contentType = contentType,
+        sizeBytes = sizeBytes,
+    )
+}
+
+internal fun UploadedAttachmentCheckpoint.toUploadResponseOrNull():
+    UploadFileResponseData? {
+    val canonicalUuid = canonicalAttachmentUuid(uuid) ?: return null
+    val canonicalName = name
+        .takeIf {
+            it.isNotBlank() &&
+                it.length <= MAX_ATTACHMENT_FILE_NAME_CHARS &&
+                safeLocalFileName(it) == it
+        }
+        ?: return null
+    val canonicalContentType = normalizedAttachmentContentType(contentType)
+        ?: return null
+    if (sizeBytes != null && !isValidAttachmentSize(sizeBytes)) return null
+    return UploadFileResponseData(
+        uuid = canonicalUuid,
+        name = canonicalName,
+        contentType = canonicalContentType,
+        sizeBytes = sizeBytes,
+    )
 }
 
 fun String.parseWorkspaceAttachmentsOrNull(): UserUploadMarkdownParts? {
@@ -159,6 +211,22 @@ internal fun safeLocalFileName(value: String): String =
         .take(180)
         .ifBlank { "file" }
 
+internal fun canonicalAttachmentUuid(value: String): String? =
+    runCatching { UUID.fromString(value).toString() }
+        .getOrNull()
+        ?.takeIf { canonical -> canonical.equals(value, ignoreCase = true) }
+
+private fun normalizedAttachmentContentType(value: String): String? =
+    value
+        .substringBefore(';')
+        .trim()
+        .lowercase()
+        .takeIf { it.length <= MAX_ATTACHMENT_CONTENT_TYPE_CHARS }
+        ?.takeIf { it.matches(ATTACHMENT_CONTENT_TYPE) }
+
+private fun isValidAttachmentSize(value: Long): Boolean =
+    value in 1..MAX_ATTACHMENT_UPLOAD_BYTES
+
 internal fun pruneAttachmentCache(
     directory: File,
     incomingBytes: Long,
@@ -190,6 +258,13 @@ internal fun pruneAttachmentCache(
 private const val ATTACHMENT_CACHE_MAX_FILES = 8
 private const val ATTACHMENT_CACHE_MAX_BYTES = 100L * 1024L * 1024L
 private const val ATTACHMENT_CACHE_MAX_AGE_MS = 24L * 60L * 60L * 1000L
+private const val MAX_ATTACHMENT_FILE_NAME_CHARS = 255
+private const val MAX_ATTACHMENT_CONTENT_TYPE_CHARS = 127
+private const val MAX_ATTACHMENT_UPLOAD_BYTES = 25L * 1024L * 1024L
+
+private val ATTACHMENT_CONTENT_TYPE = Regex(
+    """[a-z0-9.+-]+/[a-z0-9.+-]+""",
+)
 
 private val WORKSPACE_ATTACHMENT_MARKDOWN = Regex(
     """(!?)\[((?:\\.|[^\]])*)]\((urn:(image|video|file):([0-9a-fA-F-]{36})(?:\?[^)\s]*)?)\)""",

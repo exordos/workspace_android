@@ -20,11 +20,20 @@ import java.security.MessageDigest
 import java.util.UUID
 
 @Serializable
+data class PersistedAttachmentUpload(
+    val uuid: String,
+    val name: String,
+    val contentType: String,
+    val sizeBytes: Long? = null,
+)
+
+@Serializable
 data class PersistedAttachment(
     val uri: String,
     val fileName: String,
     val contentType: String,
     val sizeBytes: Long? = null,
+    val uploaded: PersistedAttachmentUpload? = null,
 )
 
 @Serializable

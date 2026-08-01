@@ -3,6 +3,7 @@ package ru.genesiscorporation.workspace.beta.modules.chatdialog
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
@@ -70,6 +71,71 @@ class ChatDialogFormattingTest {
                     sizeBytes = 1024,
                 ),
             ),
+        )
+    }
+
+    @Test
+    fun `uploaded attachment checkpoint preserves normalized server identity`() {
+        val checkpoint = createUploadedAttachmentCheckpoint(
+            upload = UploadFileResponseData(
+                uuid = "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA",
+                name = "",
+            ),
+            fallbackName = "report.pdf",
+            fallbackContentType = "application/pdf",
+            fallbackSizeBytes = 1024,
+        )
+
+        assertEquals(
+            UploadedAttachmentCheckpoint(
+                uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                name = "report.pdf",
+                contentType = "application/pdf",
+                sizeBytes = 1024,
+            ),
+            checkpoint,
+        )
+        assertEquals(
+            "[report.pdf](urn:file:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" +
+                "?name=report.pdf&content_type=application%2Fpdf&size=1024)",
+            checkpoint?.toUploadResponseOrNull()
+                ?.let(::buildWorkspaceAttachmentMarkdown),
+        )
+    }
+
+    @Test
+    fun `malformed uploaded attachment identity cannot be reused`() {
+        assertNull(
+            createUploadedAttachmentCheckpoint(
+                upload = UploadFileResponseData(
+                    uuid = "not-a-uuid",
+                    name = "report.pdf",
+                    contentType = "application/pdf",
+                ),
+                fallbackName = "report.pdf",
+                fallbackContentType = "application/pdf",
+                fallbackSizeBytes = 1024,
+            ),
+        )
+        assertNull(
+            createUploadedAttachmentCheckpoint(
+                upload = UploadFileResponseData(
+                    uuid = "1-1-1-1-1",
+                    name = "report.pdf",
+                    contentType = "application/pdf",
+                ),
+                fallbackName = "report.pdf",
+                fallbackContentType = "application/pdf",
+                fallbackSizeBytes = 1024,
+            ),
+        )
+        assertNull(
+            UploadedAttachmentCheckpoint(
+                uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                name = "report.pdf",
+                contentType = "not a mime type",
+                sizeBytes = 1024,
+            ).toUploadResponseOrNull(),
         )
     }
 

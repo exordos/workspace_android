@@ -804,6 +804,22 @@ and never the active task-reporting topic.
 - Expired/forbidden/deleted file and partial download.
 - Zoom/pan large images without OOM; release decoded resources after closing.
 
+| ID | Scenario | Acceptance oracle |
+| --- | --- | --- |
+| FILE-001 | Select up to ten supported or unknown-MIME documents | Every distinct URI remains local until Send and uses the Figma-defined selected-media strip |
+| FILE-002 | Send one or multiple files | Uploads remain sequential and the message contains exact desktop-compatible, server-returned `urn:image/video/file` identities |
+| FILE-003 | Upload failure before a server identity exists | The exact file remains selected, progress clears, the error is visible and Retry safely uploads it again |
+| FILE-004 | Cancel the active attachment upload | The close affordance cancels the active local read/network job, retains all selections and creates no message; Retry remains available |
+| FILE-005 | Process death after file N succeeds while file N+1 uploads | Every completed server identity was already stored in the encrypted conversation draft; cold restoration skips those files, resumes with the first incomplete file and emits each identity exactly once in the eventual message |
+| FILE-006 | Corrupt or hostile persisted checkpoint | Invalid UUID/name/MIME/size metadata is discarded independently while the local selection remains and is uploaded again instead of producing an untrusted URN |
+
+FILE-004/005 passed on the physical Android 14 Pixel with two generated 24 MiB
+fixtures: the process was force-stopped while the second upload was active,
+both selections returned after a cold start, and Retry began with the second
+file. The visible desktop sandbox then contained one message row with exactly
+one button for each generated filename. Both generated device fixtures were
+removed after the check.
+
 ### Android incoming share
 
 `ACTION_SEND` and `ACTION_SEND_MULTIPLE` are accepted only as an explicit

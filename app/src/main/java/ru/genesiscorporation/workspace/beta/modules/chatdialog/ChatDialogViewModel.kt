@@ -44,6 +44,7 @@ import ru.genesiscorporation.workspace.beta.data.EventsRepository
 import ru.genesiscorporation.workspace.beta.data.MessageProjectionEvent
 import ru.genesiscorporation.workspace.beta.data.OwnedMessageProjectionEvent
 import ru.genesiscorporation.workspace.beta.data.PersistedAttachment
+import ru.genesiscorporation.workspace.beta.data.PersistedAttachmentUpload
 import ru.genesiscorporation.workspace.beta.data.PersistedComposerDraft
 import ru.genesiscorporation.workspace.beta.data.PersistedConversationRoute
 import ru.genesiscorporation.workspace.beta.data.PersistedConversationState
@@ -2167,6 +2168,21 @@ class ChatDialogViewModel(
             if (snapshot.attachments.isNotEmpty()) {
                 val links = mutableListOf<String>()
                 for (attachment in snapshot.attachments) {
+                    val restoredCheckpoint = attachment.uploaded
+                    val restoredUpload = restoredCheckpoint
+                        ?.toUploadResponseOrNull()
+                    if (restoredCheckpoint != null && restoredUpload != null) {
+                        if (
+                            !persistUploadedAttachmentCheckpoint(
+                                attachment,
+                                restoredCheckpoint,
+                            )
+                        ) {
+                            return null
+                        }
+                        links += buildWorkspaceAttachmentMarkdown(restoredUpload)
+                        continue
+                    }
                     _uploadingAttachmentUri.value = attachment.uri
                     when (
                         val response = client.uploadFile(
@@ -2175,14 +2191,29 @@ class ChatDialogViewModel(
                             chatId,
                         )
                     ) {
-                        is ApiResult.Success -> links += buildWorkspaceAttachmentMarkdown(
-                            response.value.copy(
-                                contentType = response.value.contentType
-                                    .ifBlank { attachment.contentType },
-                                sizeBytes = response.value.sizeBytes
-                                    ?: attachment.sizeBytes,
-                            ),
-                        )
+                        is ApiResult.Success -> {
+                            val checkpoint = createUploadedAttachmentCheckpoint(
+                                upload = response.value,
+                                fallbackName = attachment.fileName,
+                                fallbackContentType = attachment.contentType,
+                                fallbackSizeBytes = attachment.sizeBytes,
+                            )
+                            val uploaded = checkpoint?.toUploadResponseOrNull()
+                            if (checkpoint == null || uploaded == null) {
+                                _actionError.value =
+                                    "Сервер вернул некорректные данные файла"
+                                return null
+                            }
+                            if (
+                                !persistUploadedAttachmentCheckpoint(
+                                    attachment,
+                                    checkpoint,
+                                )
+                            ) {
+                                return null
+                            }
+                            links += buildWorkspaceAttachmentMarkdown(uploaded)
+                        }
 
                         is ApiResult.Error -> {
                             _actionError.value = response.error.message
@@ -2203,6 +2234,38 @@ class ChatDialogViewModel(
             return null
         }
         return content.takeIf(String::isNotBlank)
+    }
+
+    private suspend fun persistUploadedAttachmentCheckpoint(
+        attachment: SelectedLocalAttachment,
+        checkpoint: UploadedAttachmentCheckpoint,
+    ): Boolean {
+        if (_attachments.value.none { it.uri == attachment.uri }) return true
+        _attachments.update { current ->
+            current.map { selected ->
+                if (selected.uri == attachment.uri) {
+                    selected.copy(uploaded = checkpoint)
+                } else {
+                    selected
+                }
+            }
+        }
+        draftPersistenceJob?.cancelAndJoin()
+        if (ensureConversationOwnerKey().isNullOrBlank()) {
+            _actionError.value = "Активный аккаунт недоступен"
+            return false
+        }
+        return try {
+            persistConversationState()
+            true
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (_: Exception) {
+            _actionError.value =
+                "Файл загружен, но прогресс не удалось сохранить. " +
+                "Повторите отправку."
+            false
+        }
     }
 
     private suspend fun enqueueAndSend(
@@ -2688,6 +2751,14 @@ class ChatDialogViewModel(
                 fileName = attachment.fileName,
                 contentType = attachment.contentType,
                 sizeBytes = attachment.sizeBytes,
+                uploaded = attachment.uploaded?.let { upload ->
+                    PersistedAttachmentUpload(
+                        uuid = upload.uuid,
+                        name = upload.name,
+                        contentType = upload.contentType,
+                        sizeBytes = upload.sizeBytes,
+                    )
+                },
             )
         }
 
@@ -2701,6 +2772,14 @@ class ChatDialogViewModel(
             fileName = attachment.fileName,
             contentType = attachment.contentType,
             sizeBytes = attachment.sizeBytes,
+            uploaded = attachment.uploaded?.let { upload ->
+                UploadedAttachmentCheckpoint(
+                    uuid = upload.uuid,
+                    name = upload.name,
+                    contentType = upload.contentType,
+                    sizeBytes = upload.sizeBytes,
+                ).takeIf { it.toUploadResponseOrNull() != null }
+            },
         )
     }
 

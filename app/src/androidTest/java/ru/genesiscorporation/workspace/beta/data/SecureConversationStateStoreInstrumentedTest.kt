@@ -58,6 +58,20 @@ class SecureConversationStateStoreInstrumentedTest {
                 ),
                 activeTabId = "reply-tab",
             ),
+            attachments = listOf(
+                PersistedAttachment(
+                    uri = "content://generated/checkpoint",
+                    fileName = "generated.bin",
+                    contentType = "application/octet-stream",
+                    sizeBytes = 1024,
+                    uploaded = PersistedAttachmentUpload(
+                        uuid = UPLOAD_UUID_SENTINEL,
+                        name = UPLOAD_NAME_SENTINEL,
+                        contentType = "application/octet-stream",
+                        sizeBytes = 1024,
+                    ),
+                ),
+            ),
             outbox = listOf(
                 PersistedOutboxEntry(
                     localMessageUuid = "local-message",
@@ -92,6 +106,8 @@ class SecureConversationStateStoreInstrumentedTest {
         assertFalse(persistedValues.contains(READ_BOUNDARY_SENTINEL))
         assertFalse(persistedValues.contains(REPLY_QUOTE_SENTINEL))
         assertFalse(persistedValues.contains(REPLY_ANSWER_SENTINEL))
+        assertFalse(persistedValues.contains(UPLOAD_UUID_SENTINEL))
+        assertFalse(persistedValues.contains(UPLOAD_NAME_SENTINEL))
         assertFalse(persistedValues.contains(ACCOUNT_A))
 
         store.clearAccount(ACCOUNT_A)
@@ -247,6 +263,10 @@ class SecureConversationStateStoreInstrumentedTest {
         const val ROUTE_SENTINEL = "route-plaintext-sentinel"
         const val REPLY_QUOTE_SENTINEL = "reply-quote-plaintext-sentinel"
         const val REPLY_ANSWER_SENTINEL = "reply-answer-plaintext-sentinel"
+        const val UPLOAD_UUID_SENTINEL =
+            "77777777-7777-4777-8777-777777777777"
+        const val UPLOAD_NAME_SENTINEL =
+            "upload-checkpoint-plaintext-sentinel.bin"
         const val READ_BOUNDARY_SENTINEL =
             "33333333-3333-4333-8333-333333333333"
         const val DRAFT_SLOT_A = "11111111-1111-4111-8111-111111111111"

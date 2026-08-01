@@ -1,6 +1,7 @@
 package ru.genesiscorporation.workspace.beta.modules.chatdialog
 
 import ru.genesiscorporation.workspace.beta.data.PersistedAttachment
+import ru.genesiscorporation.workspace.beta.data.PersistedAttachmentUpload
 import ru.genesiscorporation.workspace.beta.data.PersistedComposerDraft
 import ru.genesiscorporation.workspace.beta.data.PersistedConversationRoute
 import ru.genesiscorporation.workspace.beta.data.PersistedConversationState
@@ -293,7 +294,49 @@ private fun sanitizeAttachments(
         }
         .distinctBy(PersistedAttachment::uri)
         .take(PERSISTED_ATTACHMENTS)
+        .map { attachment ->
+            attachment.copy(
+                uploaded = attachment.uploaded
+                    ?.let(::sanitizeAttachmentUpload),
+            )
+        }
         .toList()
+
+private fun sanitizeAttachmentUpload(
+    upload: PersistedAttachmentUpload,
+): PersistedAttachmentUpload? {
+    val uuid = canonicalAttachmentUuid(upload.uuid)
+        ?: return null
+    val name = upload.name
+        .takeIf {
+            it.isNotBlank() &&
+                it.length <= PERSISTED_FILE_NAME_CHARS &&
+                safeLocalFileName(it) == it
+        }
+        ?: return null
+    val contentType = upload.contentType
+        .substringBefore(';')
+        .trim()
+        .lowercase()
+        .takeIf {
+            it.length <= PERSISTED_CONTENT_TYPE_CHARS &&
+                it.matches(PERSISTED_CONTENT_TYPE)
+        }
+        ?: return null
+    val sizeBytes = upload.sizeBytes
+    if (
+        sizeBytes != null &&
+        sizeBytes !in 1..PERSISTED_ATTACHMENT_BYTES
+    ) {
+        return null
+    }
+    return PersistedAttachmentUpload(
+        uuid = uuid,
+        name = name,
+        contentType = contentType,
+        sizeBytes = sizeBytes,
+    )
+}
 
 private fun isReasonableIdentifier(value: String): Boolean =
     value.isNotBlank() && value.length <= PERSISTED_IDENTIFIER_CHARS
@@ -399,3 +442,7 @@ private const val PERSISTED_FILE_NAME_CHARS = 255
 private const val PERSISTED_CONTENT_TYPE_CHARS = 127
 private const val PERSISTED_ERROR_CHARS = 1_000
 private const val PERSISTED_ROUTE_NAME_CHARS = 512
+
+private val PERSISTED_CONTENT_TYPE = Regex(
+    """[a-z0-9.+-]+/[a-z0-9.+-]+""",
+)

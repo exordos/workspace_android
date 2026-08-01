@@ -2,9 +2,11 @@ package ru.genesiscorporation.workspace.beta.modules.chatdialog
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import ru.genesiscorporation.workspace.beta.data.PersistedAttachment
+import ru.genesiscorporation.workspace.beta.data.PersistedAttachmentUpload
 import ru.genesiscorporation.workspace.beta.data.PersistedConversationState
 import ru.genesiscorporation.workspace.beta.data.PersistedConversationRoute
 import ru.genesiscorporation.workspace.beta.data.PersistedOutboxEntry
@@ -231,6 +233,51 @@ class ConversationOutboxTest {
             readBoundary(),
             sanitized.pendingReadBoundary,
         )
+    }
+
+    @Test
+    fun `persisted attachment upload checkpoints are validated independently`() {
+        val sanitized = sanitizePersistedConversationState(
+            PersistedConversationState(
+                attachments = listOf(
+                    PersistedAttachment(
+                        uri = "content://file/valid",
+                        fileName = "valid.png",
+                        contentType = "image/png",
+                        sizeBytes = 42,
+                        uploaded = PersistedAttachmentUpload(
+                            uuid = "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA",
+                            name = "server.png",
+                            contentType = "IMAGE/PNG; charset=binary",
+                            sizeBytes = 42,
+                        ),
+                    ),
+                    PersistedAttachment(
+                        uri = "content://file/invalid",
+                        fileName = "invalid.png",
+                        contentType = "image/png",
+                        sizeBytes = 42,
+                        uploaded = PersistedAttachmentUpload(
+                            uuid = "not-a-uuid",
+                            name = "server.png",
+                            contentType = "image/png",
+                            sizeBytes = 42,
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        assertEquals(
+            PersistedAttachmentUpload(
+                uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                name = "server.png",
+                contentType = "image/png",
+                sizeBytes = 42,
+            ),
+            sanitized.attachments.first().uploaded,
+        )
+        assertNull(sanitized.attachments.last().uploaded)
     }
 
     @Test
