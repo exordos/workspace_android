@@ -64,6 +64,30 @@ class MessagesRequestContractTest {
 
     @OptIn(ExperimentalSerializationApi::class)
     @Test
+    fun `mentions and pinned activity use the real server filters`() {
+        val mentions = Properties.encodeToStringMap(
+            MessagesRequest(
+                pageLimit = DEFAULT_MESSAGE_PAGE_SIZE,
+                sortDirection = MessageSortDirection.DESCENDING,
+                mentioned = true,
+            ).data,
+        )
+        val pinned = Properties.encodeToStringMap(
+            MessagesRequest(
+                pageLimit = DEFAULT_MESSAGE_PAGE_SIZE,
+                sortDirection = MessageSortDirection.DESCENDING,
+                pinned = true,
+            ).data,
+        )
+
+        assertEquals("true", mentions["mentioned"])
+        assertEquals(null, mentions["pinned"])
+        assertEquals("true", pinned["pinned"])
+        assertEquals(null, pinned["mentioned"])
+    }
+
+    @OptIn(ExperimentalSerializationApi::class)
+    @Test
     fun `first unread lookup uses the exact incoming unread filter`() {
         val request = MessagesRequest(
             streamId = STREAM_UUID,

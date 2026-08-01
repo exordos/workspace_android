@@ -586,7 +586,7 @@ private fun SearchField(
 }
 
 @Composable
-private fun FolderTabs(
+internal fun FolderTabs(
     folders: List<FolderResponseData>,
     selected: FolderResponseData?,
     onSelected: (FolderResponseData) -> Unit,

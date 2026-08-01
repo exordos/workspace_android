@@ -14,10 +14,10 @@ object Chat: Destinations {
     override val title = "Chat"
 }
 
-object Feed: Destinations {
-    override val route = "Feed"
+object MyActivity: Destinations {
+    override val route = "Activity"
     override val icon = R.drawable.ic_nav_feed
-    override val title = "Feed"
+    override val title = "My activity"
 }
 
 object Calendar: Destinations {
@@ -34,6 +34,9 @@ object Mail: Destinations {
 
 object ChatFlow {
     @Serializable
+    object Activity
+
+    @Serializable
     object ChatList
 
     @Serializable
@@ -44,6 +47,12 @@ object ChatFlow {
 
     @Serializable
     object Starred
+
+    @Serializable
+    object Pinned
+
+    @Serializable
+    object Mentions
 
     @Serializable
     data class StreamFeed(val streamName: String, val streamUuid: String)

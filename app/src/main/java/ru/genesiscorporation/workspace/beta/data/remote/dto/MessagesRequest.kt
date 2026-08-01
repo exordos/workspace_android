@@ -17,6 +17,8 @@ data class MessagesRequest(
     val read: Boolean? = null,
     val isOwn: Boolean? = null,
     val starred: Boolean? = null,
+    val pinned: Boolean? = null,
+    val mentioned: Boolean? = null,
 ): ApiRequest<MessagesRequestData, List<MessageResponse>, ApiError> {
     init {
         require(topicId == null || streamId != null) {
@@ -49,6 +51,8 @@ data class MessagesRequest(
         read = read,
         isOwn = isOwn,
         starred = starred,
+        pinned = pinned,
+        mentioned = mentioned,
     )
 }
 
@@ -91,6 +95,8 @@ data class MessagesRequestData(
     val read: Boolean?,
     @SerialName("is_own") val isOwn: Boolean?,
     val starred: Boolean?,
+    val pinned: Boolean?,
+    val mentioned: Boolean?,
 )
 
 @Serializable
@@ -112,6 +118,8 @@ data class MessageResponse(
     var reactions: Map<String, Int>,
     val read: Boolean = true,
     val starred: Boolean = false,
+    val pinned: Boolean = false,
+    val mentioned: Boolean = false,
     var user: UserResponseData? = null,
     val provider: ProviderReference? = null,
 )

@@ -149,6 +149,8 @@ class FeedViewModel(
                         pageLimit = FEED_PAGE_SIZE,
                         sortDirection = MessageSortDirection.DESCENDING,
                         starred = true.takeIf { kind.starredOnly },
+                        pinned = true.takeIf { kind.pinnedOnly },
+                        mentioned = true.takeIf { kind.mentionedOnly },
                     ),
                 )
             ) {
@@ -161,6 +163,8 @@ class FeedViewModel(
                         messages = response.value,
                         nextMarkerHeader = response.metadata.nextPageMarker,
                         requireStarred = kind.starredOnly,
+                        requirePinned = kind.pinnedOnly,
+                        requireMentioned = kind.mentionedOnly,
                         requiredStreamUuid = requiredStreamUuid,
                     )
                     val prior = _state.value
@@ -259,6 +263,8 @@ class FeedViewModel(
                         pageMarker = marker,
                         sortDirection = MessageSortDirection.DESCENDING,
                         starred = true.takeIf { kind.starredOnly },
+                        pinned = true.takeIf { kind.pinnedOnly },
+                        mentioned = true.takeIf { kind.mentionedOnly },
                     ),
                 )
             ) {
@@ -275,6 +281,8 @@ class FeedViewModel(
                         nextMarkerHeader = response.metadata.nextPageMarker,
                         previousMarker = marker,
                         requireStarred = kind.starredOnly,
+                        requirePinned = kind.pinnedOnly,
+                        requireMentioned = kind.mentionedOnly,
                         requiredStreamUuid = requiredStreamUuid,
                     )
                     if (page.error != null) {
@@ -369,6 +377,8 @@ class FeedViewModel(
             nextPageMarker = current.nextPageMarker,
             events = listOf(sequenced),
             requireStarred = kind.starredOnly,
+            requirePinned = kind.pinnedOnly,
+            requireMentioned = kind.mentionedOnly,
             requiredStreamUuid = requiredStreamUuid,
         )
         _state.value = current.copy(
@@ -402,6 +412,8 @@ class FeedViewModel(
             nextPageMarker = nextPageMarker,
             events = realtimeJournal.filter { it.sequence > requestSequence },
             requireStarred = kind.starredOnly,
+            requirePinned = kind.pinnedOnly,
+            requireMentioned = kind.mentionedOnly,
             requiredStreamUuid = requiredStreamUuid,
         )
     }
@@ -456,6 +468,8 @@ class FeedViewModel(
     private fun workspaceTimelineKind(): WorkspaceTimelineKind = when (kind) {
         MessageTimelineKind.FEED -> WorkspaceTimelineKind.FEED
         MessageTimelineKind.STARRED -> WorkspaceTimelineKind.STARRED
+        MessageTimelineKind.PINNED,
+        MessageTimelineKind.MENTIONS,
         MessageTimelineKind.STREAM -> error("Stream timelines are not persisted")
     }
 

@@ -8,6 +8,8 @@ import java.util.UUID
 
 enum class MessageTimelineKind(
     val starredOnly: Boolean,
+    val pinnedOnly: Boolean,
+    val mentionedOnly: Boolean,
     val persistent: Boolean,
     val title: String,
     val refreshDescription: String,
@@ -18,6 +20,8 @@ enum class MessageTimelineKind(
 ) {
     FEED(
         starredOnly = false,
+        pinnedOnly = false,
+        mentionedOnly = false,
         persistent = true,
         title = "Лента",
         refreshDescription = "Обновить ленту",
@@ -28,6 +32,8 @@ enum class MessageTimelineKind(
     ),
     STARRED(
         starredOnly = true,
+        pinnedOnly = false,
+        mentionedOnly = false,
         persistent = true,
         title = "Избранное",
         refreshDescription = "Обновить избранные сообщения",
@@ -36,8 +42,34 @@ enum class MessageTimelineKind(
         refreshError = "Не удалось обновить избранные сообщения",
         olderError = "Не удалось загрузить предыдущие избранные сообщения",
     ),
+    PINNED(
+        starredOnly = false,
+        pinnedOnly = true,
+        mentionedOnly = false,
+        persistent = false,
+        title = "Отмеченные сообщения",
+        refreshDescription = "Обновить отмеченные сообщения",
+        busyDescription = "Обновление отмеченных сообщений",
+        emptyMessage = "Отмеченных сообщений пока нет",
+        refreshError = "Не удалось обновить отмеченные сообщения",
+        olderError = "Не удалось загрузить предыдущие отмеченные сообщения",
+    ),
+    MENTIONS(
+        starredOnly = false,
+        pinnedOnly = false,
+        mentionedOnly = true,
+        persistent = false,
+        title = "Упоминания",
+        refreshDescription = "Обновить упоминания",
+        busyDescription = "Обновление упоминаний",
+        emptyMessage = "Упоминаний пока нет",
+        refreshError = "Не удалось обновить упоминания",
+        olderError = "Не удалось загрузить предыдущие упоминания",
+    ),
     STREAM(
         starredOnly = false,
+        pinnedOnly = false,
+        mentionedOnly = false,
         persistent = false,
         title = "Все темы",
         refreshDescription = "Обновить общий поток канала",
@@ -100,6 +132,8 @@ internal fun validateFeedPage(
     nextMarkerHeader: String?,
     previousMarker: String? = null,
     requireStarred: Boolean = false,
+    requirePinned: Boolean = false,
+    requireMentioned: Boolean = false,
     requiredStreamUuid: String? = null,
 ): FeedPageValidation {
     val canonicalRequiredStreamUuid = requiredStreamUuid?.let(::canonicalFeedUuid)
@@ -110,6 +144,12 @@ internal fun validateFeedPage(
         normalizeFeedMessage(message) ?: return malformedFeedPage()
     }
     if (requireStarred && normalizedMessages.any { !it.starred }) {
+        return malformedFeedPage()
+    }
+    if (requirePinned && normalizedMessages.any { !it.pinned }) {
+        return malformedFeedPage()
+    }
+    if (requireMentioned && normalizedMessages.any { !it.mentioned }) {
         return malformedFeedPage()
     }
     if (
@@ -169,6 +209,8 @@ internal fun applyFeedProjectionEvents(
     nextPageMarker: String?,
     events: List<SequencedMessageProjectionEvent>,
     requireStarred: Boolean,
+    requirePinned: Boolean = false,
+    requireMentioned: Boolean = false,
     requiredStreamUuid: String? = null,
     maximumMessages: Int = MAX_FEED_CACHE_MESSAGES,
 ): FeedProjection {
@@ -185,6 +227,8 @@ internal fun applyFeedProjectionEvents(
             projection = projection,
             event = sequencedEvent.event,
             requireStarred = requireStarred,
+            requirePinned = requirePinned,
+            requireMentioned = requireMentioned,
             requiredStreamUuid = canonicalRequiredStreamUuid,
             maximumMessages = maximumMessages,
         )
@@ -195,6 +239,8 @@ private fun applyFeedProjectionEvent(
     projection: FeedProjection,
     event: MessageProjectionEvent,
     requireStarred: Boolean,
+    requirePinned: Boolean,
+    requireMentioned: Boolean,
     requiredStreamUuid: String?,
     maximumMessages: Int,
 ): FeedProjection {
@@ -215,6 +261,8 @@ private fun applyFeedProjectionEvent(
             }
             if (
                 (requireStarred && !incoming.starred) ||
+                (requirePinned && !incoming.pinned) ||
+                (requireMentioned && !incoming.mentioned) ||
                 (requiredStreamUuid != null && incoming.streamUuid != requiredStreamUuid)
             ) {
                 currentByUuid.remove(incoming.uuid)

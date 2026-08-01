@@ -113,6 +113,7 @@ import ru.genesiscorporation.workspace.beta.modules.login.LoginScreen
 import ru.genesiscorporation.workspace.beta.modules.login.LoginViewModel
 import ru.genesiscorporation.workspace.beta.modules.login.LocalLoginProcessState
 import ru.genesiscorporation.workspace.beta.modules.login.LoginProcessStateViewModel
+import ru.genesiscorporation.workspace.beta.modules.activity.MyActivityScreen
 import ru.genesiscorporation.workspace.beta.modules.inbox.InboxScreen
 import ru.genesiscorporation.workspace.beta.modules.feed.FeedScreen
 import ru.genesiscorporation.workspace.beta.modules.feed.FeedViewModel
@@ -860,7 +861,7 @@ fun WokspaceApp(
     var showBottomNavigation by rememberSaveable { mutableStateOf(true) }
     fun navigateTopLevel(destination: Destinations) {
         navController.navigate(destination.route) {
-            popUpTo(Chat.route) {
+            popUpTo(MyActivity.route) {
                 saveState = true
             }
             launchSingleTop = true
@@ -894,7 +895,7 @@ fun WokspaceApp(
             pendingIncomingShare != null
         ) {
             navController.navigate(Chat.route) {
-                popUpTo(Chat.route)
+                popUpTo(MyActivity.route)
                 launchSingleTop = true
             }
         }
@@ -923,7 +924,7 @@ fun WokspaceApp(
                 RequestNotificationPermissionIfNeeded()
                 NavHost(
                     navController = navController,
-                    startDestination = Chat.route,
+                    startDestination = MyActivity.route,
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(
@@ -931,7 +932,7 @@ fun WokspaceApp(
                                 if (showBottomNavigation) 102.dp else 0.dp,
                         ),
                 ) {
-                    composable(Feed.route) {
+                    composable(MyActivity.route) {
                         currentDestination = 0
                         ChatNavigation(
                             workspaceApiClient = workspaceApiClient,
@@ -946,8 +947,8 @@ fun WokspaceApp(
                             onBottomNavigationVisibilityChange = {
                                 showBottomNavigation = it
                             },
-                            startDestination = ChatFlow.Feed,
-                            onFeedBack = { navigateTopLevel(Chat) },
+                            startDestination = ChatFlow.Activity,
+                            onOpenChats = { navigateTopLevel(Chat) },
                         )
                     }
                     composable(Chat.route) {
@@ -1006,9 +1007,9 @@ fun WokspaceApp(
                 if (showBottomNavigation) {
                     WorkspaceBottomNavigation(
                         selectedDestination = currentDestination,
-                        onFeedClick = {
+                        onActivityClick = {
                             currentDestination = 0
-                            navigateTopLevel(Feed)
+                            navigateTopLevel(MyActivity)
                         },
                         onChatClick = {
                             currentDestination = 1
@@ -1102,7 +1103,7 @@ private const val CONNECTION_BANNER_CONNECTING_DELAY_MILLIS = 1_500L
 @Composable
 private fun WorkspaceBottomNavigation(
     selectedDestination: Int,
-    onFeedClick: () -> Unit,
+    onActivityClick: () -> Unit,
     onChatClick: () -> Unit,
     onCalendarClick: () -> Unit,
     onMailClick: () -> Unit,
@@ -1140,8 +1141,8 @@ private fun WorkspaceBottomNavigation(
         ) {
             WorkspaceBottomNavigationIcon(
                 selected = selectedDestination == 0,
-                label = "Лента",
-                onClick = onFeedClick,
+                label = "Моя активность",
+                onClick = onActivityClick,
                 drawable = R.drawable.ic_nav_feed,
                 iconSize = 32,
             )
@@ -1263,7 +1264,7 @@ fun ChatNavigation(
     onIncomingShareHandled: () -> Unit,
     onBottomNavigationVisibilityChange: (Boolean) -> Unit,
     startDestination: Any = ChatFlow.ChatList,
-    onFeedBack: (() -> Unit)? = null,
+    onOpenChats: (() -> Unit)? = null,
 ) {
     val navController = rememberNavController()
     val user = LocalUserState.current
@@ -1366,6 +1367,16 @@ fun ChatNavigation(
         }
     }
     NavHost(navController = navController, startDestination = startDestination) {
+        composable<ChatFlow.Activity> {
+            LaunchedEffect(Unit) { onBottomNavigationVisibilityChange(true) }
+            MyActivityScreen(
+                chatViewModel = chatViewModel,
+                navController = navController,
+                onOpenChats = onOpenChats ?: {
+                    navController.navigate(ChatFlow.ChatList)
+                },
+            )
+        }
         composable<ChatFlow.ChatList> {
             LaunchedEffect(Unit) { onBottomNavigationVisibilityChange(true) }
             ChatScreen(chatViewModel, navController)
@@ -1392,7 +1403,6 @@ fun ChatNavigation(
                 chatViewModel,
                 navController,
                 MessageTimelineKind.FEED,
-                onBack = onFeedBack,
             )
         }
         composable<ChatFlow.Starred> {
@@ -1413,6 +1423,46 @@ fun ChatNavigation(
                 chatViewModel,
                 navController,
                 MessageTimelineKind.STARRED,
+            )
+        }
+        composable<ChatFlow.Pinned> {
+            LaunchedEffect(Unit) { onBottomNavigationVisibilityChange(true) }
+            val pinnedViewModelFactory = remember {
+                FeedViewModelFactory(
+                    workspaceApiClient,
+                    user,
+                    eventsRepository,
+                    MessageTimelineKind.PINNED,
+                )
+            }
+            val pinnedViewModel: FeedViewModel = viewModel(
+                factory = pinnedViewModelFactory,
+            )
+            FeedScreen(
+                pinnedViewModel,
+                chatViewModel,
+                navController,
+                MessageTimelineKind.PINNED,
+            )
+        }
+        composable<ChatFlow.Mentions> {
+            LaunchedEffect(Unit) { onBottomNavigationVisibilityChange(true) }
+            val mentionsViewModelFactory = remember {
+                FeedViewModelFactory(
+                    workspaceApiClient,
+                    user,
+                    eventsRepository,
+                    MessageTimelineKind.MENTIONS,
+                )
+            }
+            val mentionsViewModel: FeedViewModel = viewModel(
+                factory = mentionsViewModelFactory,
+            )
+            FeedScreen(
+                mentionsViewModel,
+                chatViewModel,
+                navController,
+                MessageTimelineKind.MENTIONS,
             )
         }
         composable<ChatFlow.StreamFeed> {
