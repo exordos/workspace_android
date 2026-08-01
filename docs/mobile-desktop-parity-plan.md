@@ -113,7 +113,7 @@ outcome. A screen is not complete merely because it matches a design.
 | Offline | Cache-first desktop state and outbox | Partial: encrypted drafts, realtime cursors and failed/ambiguous outgoing rows survive restart; owner-scoped AES-256-GCM Room snapshots restore bounded catalog/history/member data, Inbox success state, independent Feed/Starred projections, and exact conversation pagination modes/anchors/markers before network success; schema-v1→v4 migration is non-destructive, stale/retry UX is scoped and REST/realtime reconciliation cannot roll back newer rows | Extend the strict persistence contract to remaining sync metadata; add backend idempotency and controlled corruption/storage-pressure/long-outage E2E |
 | User profile | View profile, shared channels, status and contact fields | Partial: authoritative refresh/error/retry, exact status/contact fields, authenticated avatar preview, copyable identity values, bounded external-identity badge, binding-backed non-DM shared channels, and safe reuse/create of a personal chat are wired | Expose calls only after the maintained mobile call bridge has a real profile contract; keep desktop media counters absent until they have a real handler |
 | Personal profile | Avatar, name, timezone, status | Partial: authoritative self-profile refresh, status/away update and clear, bounded gallery preview/upload, and conditional avatar reset are wired; name/timezone controls stay hidden because the maintained desktop mutation is currently a no-op | Add a verified name/timezone backend contract, camera capture/crop, and complete upload/reset/account-switch fault acceptance |
-| Settings | Theme, language, sound, sorting, folder layout, idle timeout | Partial: account-scoped system/light/dark mode, six real notification-sound modes, standard/compact chat rows, personal-unread priority, unmuted-channel priority and the desktop-equivalent inactivity presets are persisted and applied; the default is 3 days, Never disables expiry, foreground interaction resets the deadline, and cold/background resume enforces it; unknown/corrupt values fail to independent safe defaults | Finish resource-backed language, validated mobile folder presentation and the full Profile/Settings shell visual alignment to the maintained mobile frame; keep every unsupported control hidden |
+| Settings | Theme, language, sound, sorting, folder layout, idle timeout | Partial: the Profile/Settings shell now follows maintained mobile Figma frame `12052:41584` for the compact title, identity summary, organizations, description/settings sections and flat rows; saved organizations, current server, personal information, status, sound, auto sign-out, theme and folder routing remain functional. Account-scoped system/light/dark mode, six real notification sounds, standard/compact chat rows, unread priorities and inactivity presets are persisted and applied; unknown/corrupt values fail to independent safe defaults | Finish resource-backed language switching and dedicated folder-presentation choices; the current language is explicitly read-only and folder display routes to the real chat-folder surface instead of exposing dead controls |
 | Diagnostics | Logs, memory/runtime overview, export | Partial: offline redacted snapshot and functional Android share sheet cover build/device/network/notification/settings/cache/account-count state | Add bounded redacted logs, runtime/memory health and support correlation identifiers without identity or content leakage |
 | Cache control | Clear cached data without losing credentials | Partial: exact-account attachment cache size and confirmed deletion are wired; credentials, encrypted Room history, drafts, outbox and sibling-account files are deliberately outside that narrow deletion boundary; logout clears the removed account's Room snapshot | Decide and implement a separately labelled Room/Coil cache policy instead of silently widening attachment deletion; finish physical failure/account-switch acceptance |
 | Version/update | Version/build details, forced update, licenses | Partial / Adapt: exact installed version name/code/build type and a searchable offline license catalog generated from the selected variant's runtime graph are implemented | Add forced/update-required UX only after Android has a verified signed-distribution/version-policy contract; keep speculative update controls hidden |
@@ -498,8 +498,18 @@ text-only close control was replaced with a readable 48 dp icon action. An
 external-user fixture, failed clipboard service and spoken TalkBack remain
 open and are not claimed.
 
-Current settings slice: the signed-in profile exposes five settings whose
-effects are wired end to end. Theme selection rebuilds the application color
+Current settings slice: the signed-in Profile/Settings shell follows maintained
+mobile Figma frame `12052:41584`: a compact centred title, 64 dp identity
+summary, expandable organizations, flat description/settings rows and the same
+section hierarchy. The adjacent maintained Figma states for expanded
+organizations (`12986:37497`) and personal information (`12981:35794`) define
+those subviews. Existing Figma nodes remain unchanged.
+
+Every actionable row is connected to a real handler. Organizations expands the
+saved account set and supports owner-fenced switch/add actions; current server
+opens that same selector; personal information renders authoritative current
+identity values plus the real status/avatar actions; Back returns first to the
+settings root and then to Chats. Theme selection rebuilds the application color
 scheme and system-bar appearance. Compact density removes previews and reduces
 chat-row height/avatar size. The unread sort flags participate in the real
 folder projection after pin priority and before ordinary folder/activity
@@ -518,11 +528,13 @@ malformed JSON and unknown future enum values recover field by field. A switch
 to another saved account emits safe defaults before loading that owner's
 values, preventing transient cross-account reuse.
 
-Language, folder-rail orientation/system-folder visibility and idle timeout
-remain hidden. The Android UI is not yet resource-backed, and idle timeout is
-not yet enforced by a lifecycle/session coordinator. The maintained desktop
-`showSystemFolders` flag currently persists but does not alter its folder
-projection, so copying that control would create a visible no-op.
+The language row reports the app's current Russian UI without a click action;
+the Android UI is not yet resource-backed, so a fake picker is not exposed.
+Folder display routes to the real chat/folder surface while dedicated
+orientation/system-folder choices remain absent: the maintained desktop
+`showSystemFolders` flag currently persists but does not alter its projection.
+Auto sign-out exposes the desktop-equivalent 6h/12h/24h/3d/7d/Never presets,
+persists them per owner and is enforced by the lifecycle/session coordinator.
 
 The full unit/lint/APK/androidTest build gate passes. On the physical Pixel,
 System/Light/Dark, Standard/Compact, both sorting switches, all six sound

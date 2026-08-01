@@ -2,6 +2,9 @@ package ru.genesiscorporation.workspace.beta.modules.profile
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import ru.genesiscorporation.workspace.beta.data.ChatListDensity
+import ru.genesiscorporation.workspace.beta.data.WorkspaceNotificationSound
+import ru.genesiscorporation.workspace.beta.data.WorkspaceThemeMode
 import ru.genesiscorporation.workspace.beta.data.remote.ApiError
 import ru.genesiscorporation.workspace.beta.data.remote.ApiErrorKind
 
@@ -26,6 +29,46 @@ class ProfileFormattingTest {
             profileStatusLabel(" Reviewing ", "do_not_disturb"),
         )
         assertEquals("Статус неизвестен", profileStatusLabel(null, "future"))
+    }
+
+    @Test
+    fun `figma profile presence presentation covers every known state`() {
+        assertEquals(
+            ProfilePresencePresentation("В сети", ProfilePresenceTone.ONLINE),
+            profilePresencePresentation("ACTIVE"),
+        )
+        assertEquals(
+            ProfilePresencePresentation("Нет на месте", ProfilePresenceTone.AWAY),
+            profilePresencePresentation("idle"),
+        )
+        assertEquals(
+            ProfilePresencePresentation("Не беспокоить", ProfilePresenceTone.BUSY),
+            profilePresencePresentation("do_not_disturb"),
+        )
+        assertEquals(
+            ProfilePresencePresentation("Не в сети", ProfilePresenceTone.NEUTRAL),
+            profilePresencePresentation("offline"),
+        )
+        assertEquals(
+            ProfilePresencePresentation("Статус неизвестен", ProfilePresenceTone.NEUTRAL),
+            profilePresencePresentation(null),
+        )
+    }
+
+    @Test
+    fun `figma profile preference labels are localized`() {
+        assertEquals(
+            listOf("Обычный", "Мягкий", "Цифровой", "Стекло", "Импульс", "Без звука"),
+            WorkspaceNotificationSound.entries.map { it.profileSoundLabel() },
+        )
+        assertEquals(
+            listOf("Системная", "Светлая", "Тёмная"),
+            WorkspaceThemeMode.entries.map { it.profileThemeLabel() },
+        )
+        assertEquals(
+            listOf("Стандартная", "Компактная"),
+            ChatListDensity.entries.map { it.profileDensityLabel() },
+        )
     }
 
     @Test

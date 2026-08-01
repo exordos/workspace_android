@@ -934,6 +934,13 @@ fun WokspaceApp(
                             workspaceApiClient,
                             eventsRepository,
                             pushDeviceRegistrationManager,
+                            onBackToChats = {
+                                currentDestination = 0
+                                navController.navigate(Chat.route) {
+                                    popUpTo(Chat.route)
+                                    launchSingleTop = true
+                                }
+                            },
                             onBottomNavigationVisibilityChange = {
                                 showBottomNavigation = it
                             },
@@ -1428,6 +1435,7 @@ fun ProfileNavigation(
     workspaceApiClient: WorkspaceAPIClient,
     eventsRepository: EventsRepository,
     pushDeviceRegistrationManager: PushDeviceRegistrationManager,
+    onBackToChats: () -> Unit,
     onBottomNavigationVisibilityChange: (Boolean) -> Unit,
 ) {
     val navController = rememberNavController()
@@ -1449,6 +1457,7 @@ fun ProfileNavigation(
             var profileViewModel: ProfileViewModel = viewModel(factory = profileViewModelFactory)
             ProfileScreen(
                 viewModel = profileViewModel,
+                onBackToChats = onBackToChats,
                 onOpenAbout = { navController.navigate(ProfileFlow.About) },
                 onOpenExternalIntegrations = {
                     navController.navigate(ProfileFlow.ExternalIntegrations)
