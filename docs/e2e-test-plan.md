@@ -76,7 +76,7 @@ not on a personal physical device.
 | ID | Scenario | Injection/variation | Oracle | Automation |
 | --- | --- | --- | --- | --- |
 | AUTH-001 | Add a valid server | URL with/without scheme and trailing slash | One canonical server, public settings shown | Unit + device |
-| AUTH-002 | Reject invalid or non-Workspace server | DNS failure, timeout, malformed JSON, wrong product | Actionable error; no saved account | MockEngine + device |
+| AUTH-002 | Reject invalid or unsafe server discovery | Invalid/non-origin URL, DNS/TLS failure, timeout, 404, permission, 429/5xx, malformed JSON, unsafe realm/meeting/icon metadata | A content-free actionable category is shown and no pending organization is saved; only bounded credential-free HTTPS public metadata reaches login | URL/settings/error policy unit + Android instrumented passed; MockEngine and physical fault matrix pending |
 | AUTH-003 | Login by nickname | Valid credentials | Tokens stored encrypted; main navigation opens | Backend E2E |
 | AUTH-004 | Login by email | Valid credentials | Same account identity as server response | Backend E2E |
 | AUTH-005 | Invalid credentials | Wrong password | Field-safe error; password not logged or persisted | Backend E2E |
