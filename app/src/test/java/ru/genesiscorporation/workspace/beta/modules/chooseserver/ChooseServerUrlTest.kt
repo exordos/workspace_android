@@ -7,6 +7,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import ru.genesiscorporation.workspace.beta.data.remote.ApiError
 import ru.genesiscorporation.workspace.beta.data.remote.ApiErrorKind
+import ru.genesiscorporation.workspace.beta.data.remote.responseOriginMatchesExpected
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ServerSettingsResponseData
 
 class ChooseServerUrlTest {
@@ -106,6 +107,46 @@ class ChooseServerUrlTest {
         assertEquals(
             "Сервер вернул некорректный ответ Workspace",
             discoveryMessage(ApiErrorKind.MALFORMED_RESPONSE),
+        )
+    }
+
+    @Test
+    fun `discovery accepts same-origin final URLs and rejects redirected origins`() {
+        assertTrue(
+            responseOriginMatchesExpected(
+                responseUrl = "https://workspace.example.com/final/path",
+                expectedOrigin = "https://workspace.example.com",
+            ),
+        )
+        assertTrue(
+            responseOriginMatchesExpected(
+                responseUrl = "https://workspace.example.com:443/final/path",
+                expectedOrigin = "https://workspace.example.com",
+            ),
+        )
+        assertFalse(
+            responseOriginMatchesExpected(
+                responseUrl = "https://redirected.example.com/server_settings",
+                expectedOrigin = "https://workspace.example.com",
+            ),
+        )
+        assertFalse(
+            responseOriginMatchesExpected(
+                responseUrl = "https://workspace.example.com:8443/server_settings",
+                expectedOrigin = "https://workspace.example.com",
+            ),
+        )
+        assertFalse(
+            responseOriginMatchesExpected(
+                responseUrl = "https://user@workspace.example.com/server_settings",
+                expectedOrigin = "https://workspace.example.com",
+            ),
+        )
+        assertFalse(
+            responseOriginMatchesExpected(
+                responseUrl = "/server_settings",
+                expectedOrigin = "/",
+            ),
         )
     }
 

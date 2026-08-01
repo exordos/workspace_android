@@ -14,6 +14,7 @@ class ServerSettingsRequest(
     override val method: HTTPMethod = HTTPMethod.GET
     override val requiresApiKey: Boolean = false
     override val isAbsoluteUrl: Boolean = true
+    override val expectedResponseOrigin: String = baseUrl
     override val url: String = "${baseUrl}/api/workspace/v1/messenger/server_settings/"
     override val data = EmptyRequestData()
 }

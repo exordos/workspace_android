@@ -56,6 +56,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import ru.genesiscorporation.workspace.beta.modules.login.accessTokenMatchesAccount
 import java.io.IOException
 import java.io.ByteArrayOutputStream
+import java.net.URI
 import java.nio.channels.UnresolvedAddressException
 import java.util.UUID
 
@@ -107,6 +108,14 @@ class WorkspaceAPIClient(
         return try {
             val requestBuilder = workspaceRequestBuilder(request, urlString, accessToken)
             val httpResponse: HttpResponse = client.request(requestBuilder)
+            if (
+                !responseOriginMatchesExpected(
+                    responseUrl = httpResponse.call.request.url.toString(),
+                    expectedOrigin = request.expectedResponseOrigin,
+                )
+            ) {
+                return ApiResult.Error(unexpectedResponseOriginError())
+            }
 
             if (httpResponse.status.isSuccess()) {
                 if (
@@ -150,6 +159,14 @@ class WorkspaceAPIClient(
                     refreshedToken,
                 )
                 val httpResponseAfterRefresh: HttpResponse = client.request(retryRequestBuilder)
+                if (
+                    !responseOriginMatchesExpected(
+                        responseUrl = httpResponseAfterRefresh.call.request.url.toString(),
+                        expectedOrigin = request.expectedResponseOrigin,
+                    )
+                ) {
+                    return ApiResult.Error(unexpectedResponseOriginError())
+                }
                 if (httpResponseAfterRefresh.status.isSuccess()) {
                     if (
                         session.ownerKey != null &&
@@ -1296,6 +1313,48 @@ internal fun responseBodyTooLargeError(): ApiError =
         code = "RESPONSE_TOO_LARGE",
         kind = ApiErrorKind.MALFORMED_RESPONSE,
     )
+
+@PublishedApi
+internal fun unexpectedResponseOriginError(): ApiError =
+    ApiError(
+        errorMessage = "Workspace response came from another server",
+        code = "UNEXPECTED_RESPONSE_ORIGIN",
+        kind = ApiErrorKind.MALFORMED_RESPONSE,
+    )
+
+@PublishedApi
+internal fun responseOriginMatchesExpected(
+    responseUrl: String,
+    expectedOrigin: String?,
+): Boolean {
+    if (expectedOrigin == null) return true
+    val response = runCatching { URI(responseUrl) }.getOrNull() ?: return false
+    val expected = runCatching { URI(expectedOrigin) }.getOrNull() ?: return false
+    if (
+        response.userInfo != null ||
+        expected.userInfo != null ||
+        response.host.isNullOrBlank() ||
+        expected.host.isNullOrBlank() ||
+        !response.scheme.isWebScheme() ||
+        !expected.scheme.isWebScheme()
+    ) {
+        return false
+    }
+    return response.scheme.equals(expected.scheme, ignoreCase = true) &&
+        response.host.equals(expected.host, ignoreCase = true) &&
+        effectivePort(response) == effectivePort(expected)
+}
+
+private fun String?.isWebScheme(): Boolean =
+    equals("https", ignoreCase = true) || equals("http", ignoreCase = true)
+
+private fun effectivePort(uri: URI): Int =
+    when {
+        uri.port >= 0 -> uri.port
+        uri.scheme.equals("https", ignoreCase = true) -> 443
+        uri.scheme.equals("http", ignoreCase = true) -> 80
+        else -> -1
+    }
 
 @PublishedApi
 internal fun httpApiError(

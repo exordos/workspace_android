@@ -39,6 +39,8 @@ interface ApiRequest<RequestData, Response, ResponseError> {
         get() = true
     val isAbsoluteUrl: Boolean
         get() = false
+    val expectedResponseOrigin: String?
+        get() = null
 
     val shouldReturnUrl: Boolean
         get() = false

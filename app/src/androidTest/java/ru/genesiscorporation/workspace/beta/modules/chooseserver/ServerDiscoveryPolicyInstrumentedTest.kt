@@ -5,6 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import ru.genesiscorporation.workspace.beta.data.remote.responseOriginMatchesExpected
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ServerSettingsResponseData
 
 @RunWith(AndroidJUnit4::class)
@@ -35,6 +36,16 @@ class ServerDiscoveryPolicyInstrumentedTest {
                     realmUrl = "http://workspace.example.com",
                     realmIcon = null,
                 ),
+            ),
+        )
+    }
+
+    @Test
+    fun redirectedDiscoveryOriginFailsClosedOnAndroidRuntime() {
+        assertFalse(
+            responseOriginMatchesExpected(
+                responseUrl = "https://redirected.example.com/settings",
+                expectedOrigin = "https://workspace.example.com",
             ),
         )
     }
