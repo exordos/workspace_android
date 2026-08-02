@@ -309,6 +309,12 @@ fun ChatWithTopics(
                     },
             ) {
                 val topics = streamTopics[stream.uuid].orEmpty()
+                val orderedTopics = topics.sortedByDescending {
+                    parseTime(it.lastMessage?.createdAt ?: it.updatedAt)
+                }
+                val selectedTopicIndex = orderedTopics
+                    .indexOfFirst { it.uuid == stream.lastMessage?.topicUuid }
+                    .takeIf { it >= 0 }
                 Column(modifier = Modifier.fillMaxSize()) {
                     AllTopicsRow(
                         stream = stream,
@@ -322,13 +328,15 @@ fun ChatWithTopics(
                             )
                         },
                     )
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(start = 12.dp, end = 12.dp)
-                            .height(1.dp)
-                            .background(colors.cardBackgroundActive),
-                    )
+                    if (shouldShowTopicDividerAfter(-1, selectedTopicIndex)) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 12.dp, end = 12.dp)
+                                .height(1.dp)
+                                .background(colors.cardBackgroundActive),
+                        )
+                    }
                     if (topics.isEmpty()) {
                         if (state is QueryState.Error) {
                             MessengerErrorState(
@@ -346,9 +354,6 @@ fun ChatWithTopics(
                             )
                         }
                     } else {
-                        val orderedTopics = topics.sortedByDescending {
-                            parseTime(it.lastMessage?.createdAt ?: it.updatedAt)
-                        }
                         LazyColumn(
                             modifier = Modifier
                                 .weight(1f)
@@ -357,7 +362,7 @@ fun ChatWithTopics(
                             itemsIndexed(
                                 items = orderedTopics,
                                 key = { _, topic -> topic.uuid },
-                            ) { _, topic ->
+                            ) { index, topic ->
                                 ChatTopic(
                                     viewModel = chatViewModel,
                                     item = topic,
@@ -367,13 +372,20 @@ fun ChatWithTopics(
                                     selected = topic.uuid == stream.lastMessage?.topicUuid,
                                     onLongClick = { topicToManageUuid = topic.uuid },
                                 )
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(start = 12.dp)
-                                        .height(1.dp)
-                                        .background(colors.cardBackgroundActive),
-                                )
+                                if (
+                                    shouldShowTopicDividerAfter(
+                                        itemIndex = index,
+                                        selectedTopicIndex = selectedTopicIndex,
+                                    )
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(start = 12.dp)
+                                            .height(1.dp)
+                                            .background(colors.cardBackgroundActive),
+                                    )
+                                }
                             }
                             item(key = "create-topic") {
                                 Box(
@@ -572,6 +584,13 @@ internal fun orderChatStreams(
             .takeIf { it != 0 }
         ?: first.uuid.compareTo(second.uuid)
 }
+
+internal fun shouldShowTopicDividerAfter(
+    itemIndex: Int,
+    selectedTopicIndex: Int?,
+): Boolean = selectedTopicIndex == null || (
+    itemIndex != selectedTopicIndex && itemIndex + 1 != selectedTopicIndex
+)
 
 private fun comparePersonalUnreadPriority(
     first: Stream,
