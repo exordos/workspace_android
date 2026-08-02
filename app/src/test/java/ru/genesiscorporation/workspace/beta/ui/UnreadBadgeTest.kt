@@ -9,4 +9,9 @@ class UnreadBadgeTest {
         assertEquals("5", unreadBadgeLabel(5))
         assertEquals("999", unreadBadgeLabel(1_204))
     }
+
+    @Test
+    fun showsAtSignForUnreadMention() {
+        assertEquals("@", unreadBadgeLabel(37, mentioned = true))
+    }
 }

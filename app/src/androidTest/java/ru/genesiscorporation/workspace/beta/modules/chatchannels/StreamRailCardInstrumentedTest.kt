@@ -45,6 +45,7 @@ class StreamRailCardInstrumentedTest {
             WokspaceTheme(darkTheme = true) {
                 StreamRailCard(
                     item = stream,
+                    hasUnreadMention = false,
                     baseUrl = "",
                     avatarUrn = null,
                     selected = true,
@@ -87,5 +88,65 @@ class StreamRailCardInstrumentedTest {
             assertEquals(1, clickCount)
             assertEquals(1, longClickCount)
         }
+    }
+
+    @Test
+    fun mentionsOnlyUnreadShowsAtSignWhenCurrentUserWasMentioned() {
+        val stream = Stream(
+            uuid = "22222222-2222-4222-8222-222222222222",
+            unreadCount = 23,
+            updatedAt = "2026-08-02T13:00:00Z",
+            name = "Упоминания",
+            isPrivate = false,
+            notificationMode = "mentions_only",
+        )
+
+        composeRule.setContent {
+            WokspaceTheme(darkTheme = true) {
+                StreamRailCard(
+                    item = stream,
+                    hasUnreadMention = true,
+                    baseUrl = "",
+                    avatarUrn = null,
+                    selected = false,
+                    onClick = {},
+                    onLongClick = null,
+                    avatarContent = { Box(Modifier.size(40.dp)) },
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("@", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithText("23", useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun mentionsOnlyOrdinaryUnreadKeepsNumericBadge() {
+        val stream = Stream(
+            uuid = "33333333-3333-4333-8333-333333333333",
+            unreadCount = 23,
+            updatedAt = "2026-08-02T13:00:00Z",
+            name = "Обычные сообщения",
+            isPrivate = false,
+            notificationMode = "mentions_only",
+        )
+
+        composeRule.setContent {
+            WokspaceTheme(darkTheme = true) {
+                StreamRailCard(
+                    item = stream,
+                    hasUnreadMention = false,
+                    baseUrl = "",
+                    avatarUrn = null,
+                    selected = false,
+                    onClick = {},
+                    onLongClick = null,
+                    avatarContent = { Box(Modifier.size(40.dp)) },
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("23", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithText("@", useUnmergedTree = true).assertDoesNotExist()
     }
 }

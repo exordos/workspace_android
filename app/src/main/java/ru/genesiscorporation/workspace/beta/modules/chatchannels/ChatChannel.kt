@@ -54,6 +54,7 @@ import java.time.format.DateTimeFormatter
 @Composable
 fun ChatChannel(
     item: Stream,
+    hasUnreadMention: Boolean,
     viewModel: ChatViewModel,
     baseUrl: String,
     showDetail: Boolean,
@@ -73,6 +74,10 @@ fun ChatChannel(
     val folderItem = currentlySelectedFolder?.items
         ?.firstOrNull { it.streamUuid == item.uuid }
     val pinned = folderItem?.pinnedAt != null
+    val badgeState = streamUnreadBadgeState(
+        notificationMode = item.notificationMode,
+        hasUnreadMention = hasUnreadMention,
+    )
     val avatarUrn = if (isDirect) {
         lastMessage?.user?.avatar ?: item.avatar
     } else {
@@ -83,6 +88,7 @@ fun ChatChannel(
         if (topicRailOpen) {
             StreamRailCard(
                 item = item,
+                hasUnreadMention = hasUnreadMention,
                 baseUrl = baseUrl,
                 avatarUrn = avatarUrn,
                 selected = showDetail,
@@ -202,10 +208,8 @@ fun ChatChannel(
                         }
                         UnreadBadge(
                             count = item.unreadCount,
-                            muted = item.notificationMode.equals(
-                                "muted",
-                                ignoreCase = true,
-                            ),
+                            muted = badgeState.muted,
+                            mentioned = badgeState.mentioned,
                         )
                     }
                     Text(
@@ -292,6 +296,7 @@ fun ChatChannel(
 @Composable
 internal fun StreamRailCard(
     item: Stream,
+    hasUnreadMention: Boolean,
     baseUrl: String,
     avatarUrn: String?,
     selected: Boolean,
@@ -300,6 +305,10 @@ internal fun StreamRailCard(
     avatarContent: (@Composable () -> Unit)? = null,
 ) {
     val colors = LocalWorkspaceColorsPalette.current
+    val badgeState = streamUnreadBadgeState(
+        notificationMode = item.notificationMode,
+        hasUnreadMention = hasUnreadMention,
+    )
     Box(
         modifier = Modifier
             .width(STREAM_RAIL_CARD_WIDTH)
@@ -342,7 +351,8 @@ internal fun StreamRailCard(
             }
             UnreadBadge(
                 count = item.unreadCount,
-                muted = item.notificationMode.equals("muted", ignoreCase = true),
+                muted = badgeState.muted,
+                mentioned = badgeState.mentioned,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .offset(x = 6.dp, y = 6.dp)
@@ -350,6 +360,24 @@ internal fun StreamRailCard(
             )
         }
     }
+}
+
+internal data class StreamUnreadBadgeState(
+    val muted: Boolean,
+    val mentioned: Boolean,
+)
+
+internal fun streamUnreadBadgeState(
+    notificationMode: String,
+    hasUnreadMention: Boolean,
+): StreamUnreadBadgeState {
+    val mentionsOnly = notificationMode.equals("mentions_only", ignoreCase = true)
+    val showMention = mentionsOnly && hasUnreadMention
+    return StreamUnreadBadgeState(
+        muted = notificationMode.equals("muted", ignoreCase = true) ||
+            (mentionsOnly && !showMention),
+        mentioned = showMention,
+    )
 }
 
 internal val STREAM_RAIL_CARD_WIDTH = 56.dp

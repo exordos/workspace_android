@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.dropWhile
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -46,6 +47,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.FoldersRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageReactionsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesByIdsRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.OwnUserRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.PinFolderItemRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.RenameTopicRequest
@@ -131,6 +133,25 @@ data class FolderDraft(
     val streams: List<Stream>,
 )
 
+private data class UnreadMentionRefreshRequest(
+    val ownerKey: String?,
+    val unreadStreamUuids: Set<String>,
+    val recoveryVersion: Long,
+)
+
+internal fun unreadMentionStreamUuids(
+    messages: List<MessageResponse>,
+    unreadStreamUuids: Set<String>,
+): Set<String> = messages
+    .asSequence()
+    .filter { message ->
+        message.mentioned &&
+            !message.read &&
+            message.streamUuid in unreadStreamUuids
+    }
+    .map(MessageResponse::streamUuid)
+    .toSet()
+
 class ChatViewModel(
     val client: WorkspaceAPIClient,
     val userViewModel: UserViewModel,
@@ -143,6 +164,11 @@ class ChatViewModel(
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = emptyList()
         )
+
+    private val _unreadMentionStreamUuids = MutableStateFlow<Set<String>>(emptySet())
+    val unreadMentionStreamUuids: StateFlow<Set<String>> =
+        _unreadMentionStreamUuids
+    private var unreadMentionOwnerKey: String? = null
 
     private val _currentlySelectedStream = MutableStateFlow<Stream?>(null)
     var currentlySelectedStream: StateFlow<Stream?> = _currentlySelectedStream
@@ -258,6 +284,66 @@ class ChatViewModel(
             }
                 .distinctUntilChanged()
                 .collectLatest(::restoreInboxSnapshotAvailability)
+        }
+        viewModelScope.launch {
+            val activeOwnerKey = combine(
+                userViewModel.activeAccountId,
+                userViewModel.baseUrl,
+                userViewModel.accessToken,
+            ) { accountId, baseUrl, accessToken ->
+                if (accessToken == null) null else accountId ?: baseUrl
+            }
+            combine(
+                repo.streams.map { currentStreams ->
+                    currentStreams
+                        .asSequence()
+                        .filter { it.unreadCount > 0 }
+                        .associate { it.uuid to it.unreadCount }
+                },
+                activeOwnerKey,
+                repo.realtimeRecoveryVersion,
+            ) { unreadCounts, ownerKey, recoveryVersion ->
+                UnreadMentionRefreshRequest(
+                    ownerKey = ownerKey,
+                    unreadStreamUuids = unreadCounts.keys,
+                    recoveryVersion = recoveryVersion,
+                )
+            }
+                .distinctUntilChanged()
+                .collectLatest(::refreshUnreadMentionStreams)
+        }
+    }
+
+    private suspend fun refreshUnreadMentionStreams(
+        request: UnreadMentionRefreshRequest,
+    ) {
+        val ownerKey = request.ownerKey?.takeIf(String::isNotBlank)
+        if (ownerKey != unreadMentionOwnerKey) {
+            unreadMentionOwnerKey = ownerKey
+            _unreadMentionStreamUuids.value = emptySet()
+        }
+        if (ownerKey == null || request.unreadStreamUuids.isEmpty()) {
+            _unreadMentionStreamUuids.value = emptySet()
+            return
+        }
+        when (
+            val response = client.performRequest(
+                MessagesRequest(read = false, mentioned = true),
+                expectedOwnerKey = ownerKey,
+            )
+        ) {
+            is ApiResult.Success -> {
+                if (!userViewModel.repo.isActiveCredentialOwner(ownerKey)) return
+                _unreadMentionStreamUuids.value = unreadMentionStreamUuids(
+                    messages = response.value,
+                    unreadStreamUuids = request.unreadStreamUuids,
+                )
+            }
+            is ApiResult.Error -> {
+                _unreadMentionStreamUuids.update { current ->
+                    current.intersect(request.unreadStreamUuids)
+                }
+            }
         }
     }
 

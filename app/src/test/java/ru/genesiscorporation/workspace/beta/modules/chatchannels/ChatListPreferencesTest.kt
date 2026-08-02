@@ -112,6 +112,57 @@ class ChatListPreferencesTest {
     }
 
     @Test
+    fun `mentions only ordinary unread is lower than all messages unread`() {
+        val mentionsOnly = stream(
+            uuid = "mentions-only",
+            updatedAt = "2026-07-30T12:00:00Z",
+            unreadCount = 2,
+            notificationMode = "mentions_only",
+        )
+        val allMessages = stream(
+            uuid = "all-messages",
+            updatedAt = "2026-07-30T11:00:00Z",
+            unreadCount = 1,
+            notificationMode = "all_messages",
+        )
+
+        assertEquals(
+            listOf("all-messages", "mentions-only"),
+            orderChatStreams(
+                streams = listOf(mentionsOnly, allMessages),
+                folderItemsByStream = emptyMap(),
+                preferences = WorkspaceUiPreferences(),
+            ).map(Stream::uuid),
+        )
+    }
+
+    @Test
+    fun `mentions only unread mention keeps attention priority`() {
+        val mentionsOnly = stream(
+            uuid = "mentions-only",
+            updatedAt = "2026-07-30T12:00:00Z",
+            unreadCount = 2,
+            notificationMode = "mentions_only",
+        )
+        val allMessages = stream(
+            uuid = "all-messages",
+            updatedAt = "2026-07-30T11:00:00Z",
+            unreadCount = 1,
+            notificationMode = "all_messages",
+        )
+
+        assertEquals(
+            listOf("mentions-only", "all-messages"),
+            orderChatStreams(
+                streams = listOf(allMessages, mentionsOnly),
+                folderItemsByStream = emptyMap(),
+                preferences = WorkspaceUiPreferences(),
+                unreadMentionStreamUuids = setOf(mentionsOnly.uuid),
+            ).map(Stream::uuid),
+        )
+    }
+
+    @Test
     fun `folder pin remains stronger than preferences`() {
         val personal = stream(
             uuid = "personal",

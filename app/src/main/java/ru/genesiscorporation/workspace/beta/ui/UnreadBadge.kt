@@ -20,6 +20,7 @@ fun UnreadBadge(
     count: Int,
     modifier: Modifier = Modifier,
     muted: Boolean = false,
+    mentioned: Boolean = false,
 ) {
     if (count <= 0) return
 
@@ -29,14 +30,18 @@ fun UnreadBadge(
             .height(18.dp)
             .widthIn(min = 18.dp)
             .background(
-                if (muted) colors.noticeDisable else colors.noticeCounterBadge,
+                if (muted && !mentioned) {
+                    colors.noticeDisable
+                } else {
+                    colors.noticeCounterBadge
+                },
                 CircleShape,
             )
             .padding(horizontal = 5.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            text = unreadBadgeLabel(count),
+            text = unreadBadgeLabel(count, mentioned),
             color = colors.noticeOnBadge,
             fontSize = 12.sp,
             lineHeight = 14.sp,
@@ -46,5 +51,5 @@ fun UnreadBadge(
     }
 }
 
-internal fun unreadBadgeLabel(count: Int): String =
-    count.coerceIn(0, 999).toString()
+internal fun unreadBadgeLabel(count: Int, mentioned: Boolean = false): String =
+    if (mentioned) "@" else count.coerceIn(0, 999).toString()

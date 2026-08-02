@@ -70,6 +70,8 @@ fun ChatWithTopics(
     val currentlySelectedFolder by chatViewModel.currentlySelectedFolder.collectAsState()
     val currentlySelectedStream by chatViewModel.currentlySelectedStream.collectAsState()
     val streamTopics by chatViewModel.streamTopics.collectAsStateWithLifecycle()
+    val unreadMentionStreamUuids by
+        chatViewModel.unreadMentionStreamUuids.collectAsStateWithLifecycle()
     val searchQuery by chatViewModel.searchQuery.collectAsState()
     val state by chatViewModel.queryState.collectAsStateWithLifecycle()
     val baseUrl by chatViewModel.userViewModel.baseUrl.collectAsStateWithLifecycle()
@@ -121,6 +123,7 @@ fun ChatWithTopics(
         currentlySelectedFolder,
         uiPreferences.prioritizePersonalUnread,
         uiPreferences.prioritizeUnmutedUnreadChannels,
+        unreadMentionStreamUuids,
     ) {
         val folderItems = currentlySelectedFolder?.items
         val folderStreams = if (
@@ -142,6 +145,7 @@ fun ChatWithTopics(
                     streams = filtered,
                     folderItemsByStream = folderItemsByStream,
                     preferences = uiPreferences,
+                    unreadMentionStreamUuids = unreadMentionStreamUuids,
                 )
             }
     }
@@ -202,6 +206,7 @@ fun ChatWithTopics(
             ) { index, stream ->
                 ChatChannel(
                     item = stream,
+                    hasUnreadMention = stream.uuid in unreadMentionStreamUuids,
                     viewModel = chatViewModel,
                     baseUrl = baseUrl.orEmpty(),
                     showDetail = showDetail && selectedStream?.uuid == stream.uuid,
@@ -552,6 +557,7 @@ internal fun orderChatStreams(
     streams: List<Stream>,
     folderItemsByStream: Map<String, FolderItem>,
     preferences: WorkspaceUiPreferences,
+    unreadMentionStreamUuids: Set<String> = emptySet(),
 ): List<Stream> = streams.sortedWith { first, second ->
     val firstFolderItem = folderItemsByStream[first.uuid]
     val secondFolderItem = folderItemsByStream[second.uuid]
@@ -569,6 +575,7 @@ internal fun orderChatStreams(
             first,
             second,
             enabled = preferences.prioritizeUnmutedUnreadChannels,
+            unreadMentionStreamUuids = unreadMentionStreamUuids,
         ).takeIf { it != 0 }
         ?: compareValues(
             firstFolderItem?.orderIndex ?: Int.MAX_VALUE,
@@ -603,6 +610,7 @@ private fun compareUnmutedUnreadPriority(
     first: Stream,
     second: Stream,
     enabled: Boolean,
+    unreadMentionStreamUuids: Set<String>,
 ): Int {
     if (
         !enabled ||
@@ -614,9 +622,19 @@ private fun compareUnmutedUnreadPriority(
         return 0
     }
     return comparePriority(
-        !first.notificationMode.equals("muted", ignoreCase = true),
-        !second.notificationMode.equals("muted", ignoreCase = true),
+        streamUnreadRequiresAttention(first, unreadMentionStreamUuids),
+        streamUnreadRequiresAttention(second, unreadMentionStreamUuids),
     )
+}
+
+private fun streamUnreadRequiresAttention(
+    stream: Stream,
+    unreadMentionStreamUuids: Set<String>,
+): Boolean = when {
+    stream.notificationMode.equals("muted", ignoreCase = true) -> false
+    stream.notificationMode.equals("mentions_only", ignoreCase = true) ->
+        stream.uuid in unreadMentionStreamUuids
+    else -> true
 }
 
 private fun comparePriority(first: Boolean, second: Boolean): Int = when {
