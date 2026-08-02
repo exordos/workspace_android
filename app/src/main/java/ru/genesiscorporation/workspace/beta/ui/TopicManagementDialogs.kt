@@ -143,9 +143,9 @@ fun TopicActionsDialog(
                 ) {
                     Text(
                         text = if (topic.isDone) {
-                            "Вернуть в работу"
+                            "Убрать отметку выполненной темы"
                         } else {
-                            "Отметить выполненным"
+                            "Отметить тему как выполненную"
                         },
                         color = colors.textHeaders,
                         modifier = Modifier.fillMaxWidth(),

@@ -14,6 +14,7 @@ import ru.genesiscorporation.workspace.beta.data.EventsRepository
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.modules.chatchannels.TopicHeader
+import ru.genesiscorporation.workspace.beta.modules.chatchannels.orderTopicsForDisplay
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.forwardTopicLabel
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesByIdsRequest
@@ -53,6 +54,7 @@ class TopicsViewModel(
         .map { topicsByStream ->
             topicsByStream[channelStreamId]
                 .orEmpty()
+                .let(::orderTopicsForDisplay)
                 .map { topic ->
                     TopicHeader.from(
                         topic = topic,

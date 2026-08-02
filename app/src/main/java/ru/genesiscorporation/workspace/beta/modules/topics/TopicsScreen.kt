@@ -47,7 +47,10 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -319,6 +322,13 @@ fun ChatOldTopic(
                 },
                 onLongClick = onLongClick,
             )
+            .semantics {
+                stateDescription = if (item.isDone) {
+                    "Тема завершена"
+                } else {
+                    "Тема активна"
+                }
+            }
     ) {
         Column(
             modifier = Modifier
@@ -330,9 +340,18 @@ fun ChatOldTopic(
             ) {
                 Text(
                     text = item.displayTitle,
-                    color = LocalWorkspaceColorsPalette.current.textHeaders,
+                    color = if (item.isDone) {
+                        LocalWorkspaceColorsPalette.current.textAdditional50
+                    } else {
+                        LocalWorkspaceColorsPalette.current.textHeaders
+                    },
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium,
+                    textDecoration = if (item.isDone) {
+                        TextDecoration.LineThrough
+                    } else {
+                        TextDecoration.None
+                    },
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )

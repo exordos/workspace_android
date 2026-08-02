@@ -2127,7 +2127,8 @@ data class TopicHeader(
     val channelName: String,
     val channelId: String,
     val lastMessage: MessageResponse?,
-    val unreadCount: Int
+    val unreadCount: Int,
+    val isDone: Boolean = false,
 ) {
     companion object {
         fun from(
@@ -2145,6 +2146,7 @@ data class TopicHeader(
             channelId = channelId,
             lastMessage = lastMessage,
             unreadCount = topic.unreadCount,
+            isDone = topic.isDone,
         )
     }
 }

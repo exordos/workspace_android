@@ -26,8 +26,10 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -131,6 +133,13 @@ fun ChatTopic(
                 },
                 onLongClick = onLongClick,
             )
+            .semantics {
+                stateDescription = if (item.isDone) {
+                    "Тема завершена"
+                } else {
+                    "Тема активна"
+                }
+            }
             .padding(start = 12.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -148,10 +157,15 @@ fun ChatTopic(
         ) {
             Text(
                 text = "# $displayName",
-                color = colors.textHeaders,
+                color = if (item.isDone) colors.textAdditional50 else colors.textHeaders,
                 fontSize = 14.sp,
                 lineHeight = 20.sp,
                 fontWeight = FontWeight.Medium,
+                textDecoration = if (item.isDone) {
+                    TextDecoration.LineThrough
+                } else {
+                    TextDecoration.None
+                },
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.fillMaxWidth(),

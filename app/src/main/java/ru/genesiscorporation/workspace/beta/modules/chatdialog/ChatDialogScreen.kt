@@ -72,6 +72,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -638,6 +639,7 @@ fun ChatDialogScreen(
                 ConversationHeader(
                     viewModel = viewModel,
                     memberCount = memberCount,
+                    topicCompleted = currentTopic?.isDone == true,
                     topicAsPrimaryTitle = topicAsPrimaryTitle,
                     selectedCount = selectedMessageUuids.size,
                     onBack = { navController.popBackStack() },
@@ -1321,6 +1323,7 @@ private fun ResolvedTopicBanner(
 private fun ConversationHeader(
     viewModel: ChatDialogViewModel,
     memberCount: Int,
+    topicCompleted: Boolean,
     topicAsPrimaryTitle: Boolean,
     selectedCount: Int,
     onBack: () -> Unit,
@@ -1383,7 +1386,12 @@ private fun ConversationHeader(
                 .clickable(
                     enabled = !viewModel.isDirectMessages,
                     onClick = onInfo,
-                ),
+                )
+                .semantics {
+                    if (topic != null && topicCompleted) {
+                        stateDescription = "Тема завершена"
+                    }
+                },
             verticalArrangement = Arrangement.Center,
         ) {
             when {
@@ -1419,10 +1427,19 @@ private fun ConversationHeader(
                         )
                         Text(
                             text = "# $topic",
-                            color = colors.textHeaders,
+                            color = if (topicCompleted) {
+                                colors.textAdditional50
+                            } else {
+                                colors.textHeaders
+                            },
                             fontSize = 14.sp,
                             lineHeight = 18.sp,
                             fontWeight = FontWeight.SemiBold,
+                            textDecoration = if (topicCompleted) {
+                                TextDecoration.LineThrough
+                            } else {
+                                TextDecoration.None
+                            },
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -1461,6 +1478,11 @@ private fun ConversationHeader(
                             color = colors.textAdditional50,
                             fontSize = 12.sp,
                             lineHeight = 16.sp,
+                            textDecoration = if (topicCompleted) {
+                                TextDecoration.LineThrough
+                            } else {
+                                TextDecoration.None
+                            },
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )

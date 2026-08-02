@@ -49,6 +49,7 @@ import ru.genesiscorporation.workspace.beta.data.ChatListDensity
 import ru.genesiscorporation.workspace.beta.data.WorkspaceUiPreferences
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderItem
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
+import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.forwardTopicLabel
 import ru.genesiscorporation.workspace.beta.ui.AnimatedGif
@@ -309,9 +310,7 @@ fun ChatWithTopics(
                     },
             ) {
                 val topics = streamTopics[stream.uuid].orEmpty()
-                val orderedTopics = topics.sortedByDescending {
-                    parseTime(it.lastMessage?.createdAt ?: it.updatedAt)
-                }
+                val orderedTopics = orderTopicsForDisplay(topics)
                 val selectedTopicIndex = orderedTopics
                     .indexOfFirst { it.uuid == stream.lastMessage?.topicUuid }
                     .takeIf { it >= 0 }
@@ -642,3 +641,12 @@ private fun Stream.isPersonalDirectChat(): Boolean {
 
 internal fun parseTime(value: String?): Instant =
     runCatching { OffsetDateTime.parse(value).toInstant() }.getOrDefault(Instant.EPOCH)
+
+internal fun orderTopicsForDisplay(
+    topics: List<TopicsResponseData>,
+): List<TopicsResponseData> =
+    topics.sortedWith(
+        compareBy<TopicsResponseData> { it.isDone }.thenByDescending {
+            parseTime(it.lastMessage?.createdAt ?: it.updatedAt)
+        },
+    )
