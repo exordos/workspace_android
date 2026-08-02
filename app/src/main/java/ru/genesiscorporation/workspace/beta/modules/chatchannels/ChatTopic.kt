@@ -39,6 +39,7 @@ import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.ui.UnreadBadge
+import ru.genesiscorporation.workspace.beta.ui.TopicActionsDialog
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 
 @Composable
@@ -104,129 +105,151 @@ fun ChatTopic(
     stream: Stream,
     navController: NavHostController,
     selected: Boolean,
+    actionsExpanded: Boolean,
+    actionsBusy: Boolean,
     onLongClick: () -> Unit,
+    onDismissActions: () -> Unit,
+    onRename: () -> Unit,
+    onMarkRead: () -> Unit,
+    onToggleDone: () -> Unit,
+    onSetNotificationMode: (String) -> Unit,
 ) {
     val colors = LocalWorkspaceColorsPalette.current
     val lastMessage = item.lastMessage
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(64.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(
-                if (selected) colors.cardBackgroundActive else Color.Transparent,
-            )
-            .combinedClickable(
-                onClick = {
-                    viewModel.currentTopicName = item.name
-                    navController.navigate(
-                        ChatFlow.ChatDialog(
-                            stream.name,
-                            stream.uuid,
-                            item.name,
-                            item.uuid,
-                            stream.isDirectProviderChat(),
-                            null,
-                        ),
-                    )
-                },
-                onLongClick = onLongClick,
-            )
-            .semantics {
-                stateDescription = if (item.isDone) {
-                    "Тема завершена"
-                } else {
-                    "Тема активна"
-                }
-            }
-            .padding(start = 12.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
+    Box {
+        Row(
             modifier = Modifier
-                .width(3.dp)
-                .height(47.dp)
-                .background(topicIndicatorColor(item.color), RoundedCornerShape(10.dp)),
-        )
-        Spacer(Modifier.width(9.dp))
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .height(40.dp),
-        ) {
-            Text(
-                text = "# $displayName",
-                color = if (item.isDone) colors.textAdditional50 else colors.textHeaders,
-                fontSize = 14.sp,
-                lineHeight = 20.sp,
-                fontWeight = FontWeight.Medium,
-                textDecoration = if (item.isDone) {
-                    TextDecoration.LineThrough
-                } else {
-                    TextDecoration.None
-                },
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = lastMessage?.user?.displayableName() ?: "Нет сообщений",
-                    color = colors.primary,
-                    fontSize = 12.sp,
-                    lineHeight = 20.sp,
-                    fontWeight = FontWeight.Normal,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.widthIn(max = 82.dp),
+                .fillMaxWidth()
+                .height(64.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(
+                    if (selected) colors.cardBackgroundActive else Color.Transparent,
                 )
-                val preview = lastMessage?.payload?.content
-                    ?.let(::messagePreview)
-                    .orEmpty()
-                if (preview.isNotBlank()) {
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        text = preview,
-                        color = colors.textAdditional50,
-                        fontSize = 12.sp,
-                        lineHeight = 20.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
+                .combinedClickable(
+                    onClick = {
+                        viewModel.currentTopicName = item.name
+                        navController.navigate(
+                            ChatFlow.ChatDialog(
+                                stream.name,
+                                stream.uuid,
+                                item.name,
+                                item.uuid,
+                                stream.isDirectProviderChat(),
+                                null,
+                            ),
+                        )
+                    },
+                    onLongClick = onLongClick,
+                )
+                .semantics {
+                    stateDescription = if (item.isDone) {
+                        "Тема завершена"
+                    } else {
+                        "Тема активна"
+                    }
                 }
-            }
-        }
-        Spacer(Modifier.width(12.dp))
-        Column(
-            modifier = Modifier
-                .width(24.dp)
-                .height(48.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+                .padding(start = 12.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .height(20.dp),
-                contentAlignment = Alignment.TopCenter,
-            ) {
-                UnreadBadge(count = item.unreadCount)
-            }
-            Icon(
-                painter = painterResource(R.drawable.ic_notifications),
-                contentDescription = topicNotificationDescription(item.notificationMode),
-                tint = if (item.notificationMode == "mute") {
-                    colors.iconDisable
-                } else {
-                    colors.iconBase
-                },
-                modifier = Modifier.size(24.dp),
+                    .width(3.dp)
+                    .height(47.dp)
+                    .background(topicIndicatorColor(item.color), RoundedCornerShape(10.dp)),
             )
+            Spacer(Modifier.width(9.dp))
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(40.dp),
+            ) {
+                Text(
+                    text = "# $displayName",
+                    color = if (item.isDone) colors.textAdditional50 else colors.textHeaders,
+                    fontSize = 14.sp,
+                    lineHeight = 20.sp,
+                    fontWeight = FontWeight.Medium,
+                    textDecoration = if (item.isDone) {
+                        TextDecoration.LineThrough
+                    } else {
+                        TextDecoration.None
+                    },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = lastMessage?.user?.displayableName() ?: "Нет сообщений",
+                        color = colors.primary,
+                        fontSize = 12.sp,
+                        lineHeight = 20.sp,
+                        fontWeight = FontWeight.Normal,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 82.dp),
+                    )
+                    val preview = lastMessage?.payload?.content
+                        ?.let(::messagePreview)
+                        .orEmpty()
+                    if (preview.isNotBlank()) {
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = preview,
+                            color = colors.textAdditional50,
+                            fontSize = 12.sp,
+                            lineHeight = 20.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(
+                modifier = Modifier
+                    .width(24.dp)
+                    .height(48.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(20.dp),
+                    contentAlignment = Alignment.TopCenter,
+                ) {
+                    UnreadBadge(
+                        count = item.unreadCount,
+                        muted = item.notificationMode.equals("mute", ignoreCase = true),
+                    )
+                }
+                Icon(
+                    painter = painterResource(R.drawable.ic_notifications),
+                    contentDescription = topicNotificationDescription(item.notificationMode),
+                    tint = if (item.notificationMode == "mute") {
+                        colors.iconDisable
+                    } else {
+                        colors.iconBase
+                    },
+                    modifier = Modifier.size(24.dp),
+                )
+            }
         }
+        TopicActionsDialog(
+            expanded = actionsExpanded,
+            topic = item,
+            busy = actionsBusy,
+            onDismiss = onDismissActions,
+            onRename = onRename,
+            onMarkRead = onMarkRead,
+            onToggleDone = onToggleDone,
+            onSetNotificationMode = onSetNotificationMode,
+        )
     }
 }
 

@@ -44,6 +44,8 @@ import ru.genesiscorporation.workspace.beta.data.ChatListDensity
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.ui.Avatar
+import ru.genesiscorporation.workspace.beta.ui.NotificationModeSelector
+import ru.genesiscorporation.workspace.beta.ui.STREAM_NOTIFICATION_MODE_OPTIONS
 import ru.genesiscorporation.workspace.beta.ui.UnreadBadge
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.time.ZoneId
@@ -71,8 +73,6 @@ fun ChatChannel(
     val folderItem = currentlySelectedFolder?.items
         ?.firstOrNull { it.streamUuid == item.uuid }
     val pinned = folderItem?.pinnedAt != null
-    val hasMenuActions =
-        folderMenuAction != null || folderItem != null || item.unreadCount > 0
     val avatarUrn = if (isDirect) {
         lastMessage?.user?.avatar ?: item.avatar
     } else {
@@ -87,9 +87,7 @@ fun ChatChannel(
                 avatarUrn = avatarUrn,
                 selected = showDetail,
                 onClick = onClick,
-                onLongClick = if (hasMenuActions) {
-                    { menuExpanded = true }
-                } else null,
+                onLongClick = { menuExpanded = true },
             )
         } else {
             Row(
@@ -102,9 +100,7 @@ fun ChatChannel(
                     )
                     .combinedClickable(
                         onClick = onClick,
-                        onLongClick = if (hasMenuActions) {
-                            { menuExpanded = true }
-                        } else null,
+                        onLongClick = { menuExpanded = true },
                     )
                     .padding(
                         horizontal = 8.dp,
@@ -204,7 +200,13 @@ fun ChatChannel(
                         if (pinned && item.unreadCount > 0) {
                             Spacer(Modifier.width(8.dp))
                         }
-                        UnreadBadge(count = item.unreadCount)
+                        UnreadBadge(
+                            count = item.unreadCount,
+                            muted = item.notificationMode.equals(
+                                "muted",
+                                ignoreCase = true,
+                            ),
+                        )
                     }
                     Text(
                         text = lastMessage?.createdAt?.let(::formatMessageTime).orEmpty(),
@@ -219,7 +221,17 @@ fun ChatChannel(
         DropdownMenu(
             expanded = menuExpanded,
             onDismissRequest = { menuExpanded = false },
+            modifier = Modifier.width(238.dp),
         ) {
+            NotificationModeSelector(
+                options = STREAM_NOTIFICATION_MODE_OPTIONS,
+                selectedMode = item.notificationMode,
+                onModeSelected = { mode ->
+                    menuExpanded = false
+                    viewModel.setStreamNotificationMode(item, mode)
+                },
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+            )
             if (item.unreadCount > 0) {
                 DropdownMenuItem(
                     text = { Text("Отметить чат прочитанным") },
@@ -330,6 +342,7 @@ internal fun StreamRailCard(
             }
             UnreadBadge(
                 count = item.unreadCount,
+                muted = item.notificationMode.equals("muted", ignoreCase = true),
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .offset(x = 6.dp, y = 6.dp)

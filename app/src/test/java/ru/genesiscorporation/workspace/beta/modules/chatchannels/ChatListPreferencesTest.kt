@@ -87,7 +87,7 @@ class ChatListPreferencesTest {
     }
 
     @Test
-    fun `unmuted unread preference lowers muted unread channels`() {
+    fun `muted unread channels are lower by default`() {
         val muted = stream(
             uuid = "muted",
             updatedAt = "2026-07-30T12:00:00Z",
@@ -106,9 +106,7 @@ class ChatListPreferencesTest {
             orderChatStreams(
                 streams = listOf(muted, active),
                 folderItemsByStream = emptyMap(),
-                preferences = WorkspaceUiPreferences(
-                    prioritizeUnmutedUnreadChannels = true,
-                ),
+                preferences = WorkspaceUiPreferences(),
             ).map(Stream::uuid),
         )
     }

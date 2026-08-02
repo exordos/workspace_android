@@ -37,6 +37,31 @@ class TopicStatusPresentationTest {
     }
 
     @Test
+    fun `muted unread topics follow unmuted unread topics`() {
+        val topics = listOf(
+            topic(
+                uuid = "muted-new",
+                isDone = false,
+                updatedAt = "2026-08-02T12:00:00Z",
+                unreadCount = 3,
+                notificationMode = "mute",
+            ),
+            topic(
+                uuid = "active-old",
+                isDone = false,
+                updatedAt = "2026-08-01T12:00:00Z",
+                unreadCount = 1,
+                notificationMode = "default",
+            ),
+        )
+
+        assertEquals(
+            listOf("active-old", "muted-new"),
+            orderTopicsForDisplay(topics).map(TopicsResponseData::uuid),
+        )
+    }
+
+    @Test
     fun `topic header retains completed state for legacy list`() {
         val completed = TopicHeader.from(
             topic = topic("done", isDone = true, updatedAt = "2026-08-02T10:00:00Z"),
@@ -59,12 +84,15 @@ class TopicStatusPresentationTest {
         uuid: String,
         isDone: Boolean,
         updatedAt: String,
+        unreadCount: Int = 0,
+        notificationMode: String = "default",
     ) = TopicsResponseData(
         uuid = uuid,
         name = uuid,
         streamUuid = "stream-id",
         updatedAt = updatedAt,
-        unreadCount = 0,
+        unreadCount = unreadCount,
+        notificationMode = notificationMode,
         isDone = isDone,
         isDefault = false,
     )

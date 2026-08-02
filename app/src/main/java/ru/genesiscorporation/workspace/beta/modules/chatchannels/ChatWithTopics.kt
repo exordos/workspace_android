@@ -53,7 +53,6 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.forwardTopicLabel
 import ru.genesiscorporation.workspace.beta.ui.AnimatedGif
-import ru.genesiscorporation.workspace.beta.ui.TopicActionsDialog
 import ru.genesiscorporation.workspace.beta.ui.TopicNameDialog
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.time.Instant
@@ -93,19 +92,12 @@ fun ChatWithTopics(
     val createTopicForStream = createTopicForStreamUuid?.let { targetUuid ->
         streams.firstOrNull { it.uuid == targetUuid }
     }
-    val topicToManage = topicToManageUuid?.let { targetUuid ->
-        streamTopics.values
-            .asSequence()
-            .flatten()
-            .firstOrNull { it.uuid == targetUuid }
-    }
     val topicToRename = topicToRenameUuid?.let { targetUuid ->
         streamTopics.values
             .asSequence()
             .flatten()
             .firstOrNull { it.uuid == targetUuid }
     }
-
     LaunchedEffect(lastCatalogActionResult, pendingTopicActionRequestId) {
         val result = lastCatalogActionResult ?: return@LaunchedEffect
         if (result.requestId != pendingTopicActionRequestId) {
@@ -369,7 +361,44 @@ fun ChatWithTopics(
                                     stream = stream,
                                     navController = navController,
                                     selected = topic.uuid == stream.lastMessage?.topicUuid,
+                                    actionsExpanded = topic.uuid == topicToManageUuid,
+                                    actionsBusy = topicActionBusy,
                                     onLongClick = { topicToManageUuid = topic.uuid },
+                                    onDismissActions = { topicToManageUuid = null },
+                                    onRename = {
+                                        topicToManageUuid = null
+                                        topicToRenameUuid = topic.uuid
+                                    },
+                                    onMarkRead = {
+                                        if (
+                                            !topicActionBusy &&
+                                            pendingTopicActionRequestId == null
+                                        ) {
+                                            pendingTopicActionRequestId =
+                                                chatViewModel.markTopicRead(topic)
+                                        }
+                                    },
+                                    onToggleDone = {
+                                        if (
+                                            !topicActionBusy &&
+                                            pendingTopicActionRequestId == null
+                                        ) {
+                                            pendingTopicActionRequestId =
+                                                chatViewModel.toggleTopicDone(topic)
+                                        }
+                                    },
+                                    onSetNotificationMode = { mode ->
+                                        if (
+                                            !topicActionBusy &&
+                                            pendingTopicActionRequestId == null
+                                        ) {
+                                            pendingTopicActionRequestId =
+                                                chatViewModel.setTopicNotificationMode(
+                                                    topic,
+                                                    mode,
+                                                )
+                                        }
+                                    },
                                 )
                                 if (
                                     shouldShowTopicDividerAfter(
@@ -425,39 +454,6 @@ fun ChatWithTopics(
             },
             onDismiss = {
                 if (!topicActionBusy) createTopicForStreamUuid = null
-            },
-        )
-    }
-    topicToManage?.let { selected ->
-        val currentTopic = streamTopics[selected.streamUuid]
-            .orEmpty()
-            .firstOrNull { it.uuid == selected.uuid }
-            ?: selected
-        TopicActionsDialog(
-            topic = currentTopic,
-            busy = topicActionBusy,
-            onDismiss = { topicToManageUuid = null },
-            onRename = {
-                topicToManageUuid = null
-                topicToRenameUuid = currentTopic.uuid
-            },
-            onMarkRead = {
-                if (!topicActionBusy && pendingTopicActionRequestId == null) {
-                    pendingTopicActionRequestId =
-                        chatViewModel.markTopicRead(currentTopic)
-                }
-            },
-            onToggleDone = {
-                if (!topicActionBusy && pendingTopicActionRequestId == null) {
-                    pendingTopicActionRequestId =
-                        chatViewModel.toggleTopicDone(currentTopic)
-                }
-            },
-            onSetNotificationMode = { mode ->
-                if (!topicActionBusy && pendingTopicActionRequestId == null) {
-                    pendingTopicActionRequestId =
-                        chatViewModel.setTopicNotificationMode(currentTopic, mode)
-                }
             },
         )
     }
@@ -644,9 +640,22 @@ internal fun parseTime(value: String?): Instant =
 
 internal fun orderTopicsForDisplay(
     topics: List<TopicsResponseData>,
-): List<TopicsResponseData> =
-    topics.sortedWith(
-        compareBy<TopicsResponseData> { it.isDone }.thenByDescending {
-            parseTime(it.lastMessage?.createdAt ?: it.updatedAt)
-        },
+): List<TopicsResponseData> = topics.sortedWith { first, second ->
+    comparePriority(!first.isDone, !second.isDone).takeIf { it != 0 }
+        ?: compareUnmutedTopicUnreadPriority(first, second).takeIf { it != 0 }
+        ?: parseTime(second.lastMessage?.createdAt ?: second.updatedAt)
+            .compareTo(parseTime(first.lastMessage?.createdAt ?: first.updatedAt))
+            .takeIf { it != 0 }
+        ?: first.uuid.compareTo(second.uuid)
+}
+
+private fun compareUnmutedTopicUnreadPriority(
+    first: TopicsResponseData,
+    second: TopicsResponseData,
+): Int {
+    if (first.unreadCount <= 0 || second.unreadCount <= 0) return 0
+    return comparePriority(
+        !first.notificationMode.equals("mute", ignoreCase = true),
+        !second.notificationMode.equals("mute", ignoreCase = true),
     )
+}

@@ -44,7 +44,7 @@ enum class WorkspaceNotificationSound {
 data class WorkspaceUiPreferences(
     val themeMode: WorkspaceThemeMode = WorkspaceThemeMode.SYSTEM,
     val prioritizePersonalUnread: Boolean = false,
-    val prioritizeUnmutedUnreadChannels: Boolean = false,
+    val prioritizeUnmutedUnreadChannels: Boolean = true,
     val chatListDensity: ChatListDensity = ChatListDensity.STANDARD,
     val notificationSound: WorkspaceNotificationSound =
         WorkspaceNotificationSound.DEFAULT,
@@ -126,7 +126,7 @@ internal fun decodeWorkspaceUiPreferences(
             ?: WorkspaceThemeMode.SYSTEM,
         prioritizePersonalUnread = persisted.prioritizePersonalUnread ?: false,
         prioritizeUnmutedUnreadChannels =
-            persisted.prioritizeUnmutedUnreadChannels ?: false,
+            persisted.prioritizeUnmutedUnreadChannels ?: true,
         chatListDensity = persisted.chatListDensity
             ?.let { value ->
                 ChatListDensity.entries.firstOrNull { it.name == value }

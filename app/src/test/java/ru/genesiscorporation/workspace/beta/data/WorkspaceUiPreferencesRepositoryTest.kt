@@ -8,14 +8,13 @@ import org.junit.Test
 class WorkspaceUiPreferencesRepositoryTest {
     @Test
     fun `missing and malformed payloads use safe defaults`() {
-        assertEquals(
-            WorkspaceUiPreferences(),
-            decodeWorkspaceUiPreferences(null),
-        )
-        assertEquals(
-            WorkspaceUiPreferences(),
-            decodeWorkspaceUiPreferences("{not-json"),
-        )
+        val missing = decodeWorkspaceUiPreferences(null)
+        val malformed = decodeWorkspaceUiPreferences("{not-json")
+
+        assertEquals(WorkspaceUiPreferences(), missing)
+        assertEquals(WorkspaceUiPreferences(), malformed)
+        assertTrue(missing.prioritizeUnmutedUnreadChannels)
+        assertTrue(malformed.prioritizeUnmutedUnreadChannels)
     }
 
     @Test

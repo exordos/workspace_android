@@ -19,6 +19,7 @@ import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 fun UnreadBadge(
     count: Int,
     modifier: Modifier = Modifier,
+    muted: Boolean = false,
 ) {
     if (count <= 0) return
 
@@ -27,7 +28,10 @@ fun UnreadBadge(
         modifier = modifier
             .height(18.dp)
             .widthIn(min = 18.dp)
-            .background(colors.noticeCounterBadge, CircleShape)
+            .background(
+                if (muted) colors.noticeDisable else colors.noticeCounterBadge,
+                CircleShape,
+            )
             .padding(horizontal = 5.dp),
         contentAlignment = Alignment.Center,
     ) {

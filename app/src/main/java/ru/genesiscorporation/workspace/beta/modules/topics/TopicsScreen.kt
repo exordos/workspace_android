@@ -244,6 +244,7 @@ fun TopicsScreen(
         ?.let(topicsViewModel::topic)
         ?.let { topic ->
             TopicActionsDialog(
+                expanded = true,
                 topic = topic,
                 busy = actionInProgress,
                 onDismiss = { managedTopicUuid = null },

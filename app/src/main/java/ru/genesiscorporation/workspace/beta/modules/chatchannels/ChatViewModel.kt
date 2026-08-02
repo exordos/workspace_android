@@ -54,6 +54,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamBindingResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamBindingsRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamNotificationsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ToggleTopicDoneRequest
@@ -100,6 +101,12 @@ internal object CatalogActionKind {
     const val RENAME_FOLDER = "rename_folder"
     const val DELETE_FOLDER = "delete_folder"
 }
+
+private val STREAM_NOTIFICATION_MODES = setOf(
+    "mentions_only",
+    "muted",
+    "all_messages",
+)
 
 data class CatalogActionResult(
     val requestId: Long,
@@ -1445,6 +1452,48 @@ class ChatViewModel(
 
     fun markStreamRead(stream: Stream) {
         viewModelScope.launch { markStreamReadInternal(stream) }
+    }
+
+    fun setStreamNotificationMode(
+        stream: Stream,
+        notificationMode: String,
+    ) {
+        viewModelScope.launch {
+            setStreamNotificationModeInternal(stream, notificationMode)
+        }
+    }
+
+    private suspend fun setStreamNotificationModeInternal(
+        stream: Stream,
+        notificationMode: String,
+    ): Boolean {
+        if (notificationMode !in STREAM_NOTIFICATION_MODES) {
+            _actionError.value = "Неизвестный режим уведомлений"
+            return false
+        }
+        if (stream.notificationMode == notificationMode) return true
+        if (!streamMutationMutex.tryLock()) return false
+        _actionError.value = null
+        return try {
+            when (
+                val response = client.performRequest(
+                    StreamNotificationsRequest(stream.uuid, notificationMode),
+                )
+            ) {
+                is ApiResult.Success -> {
+                    repo.updateStream(response.value)
+                    true
+                }
+
+                is ApiResult.Error -> {
+                    _actionError.value = response.error.message
+                        ?: "Не удалось изменить уведомления чата"
+                    false
+                }
+            }
+        } finally {
+            streamMutationMutex.unlock()
+        }
     }
 
     private suspend fun markStreamReadInternal(stream: Stream): Boolean {
