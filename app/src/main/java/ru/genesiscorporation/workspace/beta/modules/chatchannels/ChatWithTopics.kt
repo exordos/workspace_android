@@ -212,6 +212,7 @@ fun ChatWithTopics(
                     viewModel = chatViewModel,
                     baseUrl = baseUrl.orEmpty(),
                     showDetail = showDetail && selectedStream?.uuid == stream.uuid,
+                    topicRailOpen = showDetail,
                     currentlySelectedFolder = currentlySelectedFolder,
                     latestTopicName = stream.lastMessage?.topicUuid?.let { topicUuid ->
                         streamTopics[stream.uuid]
@@ -243,7 +244,7 @@ fun ChatWithTopics(
                         }
                     },
                 )
-                if (index < visibleStreams.lastIndex) {
+                if (!showDetail && index < visibleStreams.lastIndex) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
