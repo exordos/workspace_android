@@ -17,7 +17,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -55,6 +55,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.distinctUntilChanged
+import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
@@ -75,12 +76,15 @@ fun FeedScreen(
     navController: NavHostController,
     kind: MessageTimelineKind = MessageTimelineKind.FEED,
     title: String = kind.title,
+    streamUuid: String? = null,
     onBack: (() -> Unit)? = null,
 ) {
     val state by feedViewModel.state.collectAsStateWithLifecycle()
     val streams by chatViewModel.streams.collectAsStateWithLifecycle()
     val topicsByStream by chatViewModel.streamTopics.collectAsStateWithLifecycle()
     val users by chatViewModel.users.collectAsStateWithLifecycle()
+    val avatarBaseUrl by
+        chatViewModel.userViewModel.baseUrl.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     var actionError by rememberSaveable { mutableStateOf<String?>(null) }
@@ -238,14 +242,27 @@ fun FeedScreen(
             .fillMaxSize()
             .background(colors.background),
     ) {
-        FeedTopBar(
-            title = title,
-            refreshDescription = kind.refreshDescription,
-            busyDescription = kind.busyDescription,
-            busy = state.initialLoading || state.refreshing || state.loadingOlder,
-            onBack = navigateBack,
-            onRefresh = ::refresh,
-        )
+        if (kind == MessageTimelineKind.STREAM && streamUuid != null) {
+            StreamTimelineTopBar(
+                title = title,
+                busyDescription = kind.busyDescription,
+                busy = state.initialLoading || state.refreshing || state.loadingOlder,
+                onBack = navigateBack,
+                onRefresh = ::refresh,
+                onInfo = {
+                    navController.navigate(ChatFlow.ChannelInfo(streamUuid))
+                },
+            )
+        } else {
+            FeedTopBar(
+                title = title,
+                refreshDescription = kind.refreshDescription,
+                busyDescription = kind.busyDescription,
+                busy = state.initialLoading || state.refreshing || state.loadingOlder,
+                onBack = navigateBack,
+                onRefresh = ::refresh,
+            )
+        }
         if (state.refreshing && state.messages.isNotEmpty()) {
             LinearProgressIndicator(
                 modifier = Modifier.fillMaxWidth(),
@@ -275,9 +292,17 @@ fun FeedScreen(
                             start = 12.dp,
                             end = 12.dp,
                             top = 8.dp,
-                            bottom = 76.dp,
+                            bottom = if (kind == MessageTimelineKind.STREAM) {
+                                24.dp
+                            } else {
+                                76.dp
+                            },
                         ),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = if (kind == MessageTimelineKind.STREAM) {
+                            Arrangement.Top
+                        } else {
+                            Arrangement.spacedBy(8.dp)
+                        },
                     ) {
                         item(key = "feed-history-state") {
                             FeedHistoryState(
@@ -287,25 +312,49 @@ fun FeedScreen(
                                 onLoad = ::captureAnchorAndLoadOlder,
                             )
                         }
-                        items(
+                        itemsIndexed(
                             items = state.messages,
-                            key = MessageResponse::uuid,
-                        ) { message ->
-                            FeedMessageCard(
-                                message = message,
-                                stream = streams.firstOrNull {
-                                    it.uuid == message.streamUuid
-                                },
-                                topic = topicsByStream[message.streamUuid]
-                                    .orEmpty()
-                                    .firstOrNull { it.uuid == message.topicUuid },
-                                author = users.firstOrNull {
-                                    it.uuid == message.authorUuid
-                                },
-                                busy = openingMessageUuid == message.uuid,
-                                onOpen = { openMessage(message, false) },
-                                onForward = { openMessage(message, true) },
-                            )
+                            key = { _, message -> message.uuid },
+                        ) { index, message ->
+                            val topic = topicsByStream[message.streamUuid]
+                                .orEmpty()
+                                .firstOrNull { it.uuid == message.topicUuid }
+                            val author = users.firstOrNull {
+                                it.uuid == message.authorUuid
+                            }
+                            if (kind == MessageTimelineKind.STREAM) {
+                                StreamMessageRow(
+                                    message = message,
+                                    topic = topic,
+                                    author = author,
+                                    avatarBaseUrl = avatarBaseUrl.orEmpty(),
+                                    showAvatar = streamMessageGroupEndsAt(
+                                        state.messages,
+                                        index,
+                                    ),
+                                    busy = openingMessageUuid == message.uuid,
+                                    onOpen = { openMessage(message, false) },
+                                    onForward = { openMessage(message, true) },
+                                    modifier = Modifier.padding(
+                                        bottom = streamMessageBottomSpacing(
+                                            state.messages,
+                                            index,
+                                        ).dp,
+                                    ),
+                                )
+                            } else {
+                                FeedMessageCard(
+                                    message = message,
+                                    stream = streams.firstOrNull {
+                                        it.uuid == message.streamUuid
+                                    },
+                                    topic = topic,
+                                    author = author,
+                                    busy = openingMessageUuid == message.uuid,
+                                    onOpen = { openMessage(message, false) },
+                                    onForward = { openMessage(message, true) },
+                                )
+                            }
                         }
                     }
                     if (!isAtBottom) {

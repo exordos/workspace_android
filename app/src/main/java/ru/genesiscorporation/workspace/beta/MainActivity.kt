@@ -1485,7 +1485,8 @@ fun ChatNavigation(
                 chatViewModel = chatViewModel,
                 navController = navController,
                 kind = MessageTimelineKind.STREAM,
-                title = "Все темы · #${args.streamName}",
+                title = args.streamName,
+                streamUuid = args.streamUuid,
             )
         }
         composable<ChatFlow.Drafts> {

@@ -415,6 +415,40 @@ class FeedModelTest {
         )
     }
 
+    @Test
+    fun `stream avatar closes each author and topic group`() {
+        val sameGroupFirst = message(
+            OLDER_MESSAGE_UUID,
+            "2026-07-30T10:01:00Z",
+        )
+        val sameGroupLast = message(
+            NEWER_MESSAGE_UUID,
+            "2026-07-30T10:02:00Z",
+        )
+        val nextTopic = message(
+            "66666666-6666-4666-8666-666666666666",
+            "2026-07-30T10:03:00Z",
+        ).copy(topicUuid = "77777777-7777-4777-8777-777777777777")
+        val messages = listOf(sameGroupFirst, sameGroupLast, nextTopic)
+
+        assertFalse(streamMessageGroupEndsAt(messages, 0))
+        assertTrue(streamMessageGroupEndsAt(messages, 1))
+        assertTrue(streamMessageGroupEndsAt(messages, 2))
+        assertEquals(4, streamMessageBottomSpacing(messages, 0))
+        assertEquals(12, streamMessageBottomSpacing(messages, 1))
+    }
+
+    @Test
+    fun `stream message copy keeps useful text without markdown chrome`() {
+        assertEquals(
+            "Design link and Пересланное сообщение",
+            streamMessageText(
+                "**[Design link](https://example.test)** and " +
+                    "urn:workspace:message:11111111-1111-4111-8111-111111111111",
+            ),
+        )
+    }
+
     private fun message(
         uuid: String,
         createdAt: String,
