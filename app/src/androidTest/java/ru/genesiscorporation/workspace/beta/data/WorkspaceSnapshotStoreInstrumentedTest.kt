@@ -153,6 +153,31 @@ class WorkspaceSnapshotStoreInstrumentedTest {
     }
 
     @Test
+    fun reactionUsersSurviveEncryptedSnapshotRoundTrip() = runBlocking {
+        val reactedMessage = snapshotMessage("reacted").copy(
+            reactions = mapOf("heart" to 1),
+            reactionUsers = mapOf("heart" to listOf(USER_UUID)),
+        )
+        val snapshot = snapshot("reacted").copy(
+            messagesByConversation = mapOf(
+                CONVERSATION_KEY to listOf(reactedMessage),
+            ),
+        )
+
+        store.write(ACCOUNT_A, snapshot)
+
+        val restored = store.read(ACCOUNT_A)
+            .messagesByConversation
+            .getValue(CONVERSATION_KEY)
+            .single()
+        assertEquals(mapOf("heart" to 1), restored.reactions)
+        assertEquals(
+            mapOf("heart" to listOf(USER_UUID)),
+            restored.reactionUsers,
+        )
+    }
+
+    @Test
     fun ciphertextCannotBeMovedWithinAnAccount() = runBlocking {
         store.write(ACCOUNT_A, snapshot("original-position"))
 

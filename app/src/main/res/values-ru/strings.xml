@@ -21,6 +21,7 @@
     <string name="message_reaction_sadness">Реакция: грусть</string>
     <string name="message_reaction_applause">Реакция: аплодисменты</string>
     <string name="message_reaction_count_description">Реакция %1$s, голосов: %2$d</string>
+    <string name="message_reaction_users_description">Реакция %1$s: %2$s</string>
     <string name="reaction_picker_pane_title">Выбор реакции</string>
     <string name="reaction_picker_title">Выберите реакцию</string>
     <string name="reaction_picker_close">Закрыть</string>

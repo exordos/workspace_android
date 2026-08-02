@@ -1,5 +1,8 @@
 package ru.genesiscorporation.workspace.beta.data
 
+import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
+import ru.genesiscorporation.workspace.beta.data.remote.dto.parseCanonicalMessageUuid
+
 internal fun reconcileMessageReactionCounts(
     current: Map<String, Int>,
     emojiName: String,
@@ -38,6 +41,27 @@ internal fun validatedMessageReactionCounts(
         return null
     }
     return counts.toMap()
+}
+
+internal fun completeMessageReactionUsers(
+    reactionUsers: Map<String, List<String>>,
+    emojiName: String,
+    expectedCount: Int,
+    usersByUuid: Map<String, UserResponseData>,
+): List<UserResponseData>? {
+    if (expectedCount <= 0) return null
+    val userUuids = reactionUsers[emojiName] ?: return null
+    if (
+        userUuids.isEmpty() ||
+        userUuids.size != expectedCount ||
+        userUuids.toSet().size != userUuids.size ||
+        userUuids.any { parseCanonicalMessageUuid(it) == null }
+    ) {
+        return null
+    }
+    return userUuids.map { userUuid ->
+        usersByUuid[userUuid] ?: return null
+    }
 }
 
 private const val MAX_MESSAGE_REACTION_KINDS = 256

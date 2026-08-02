@@ -45,6 +45,11 @@ class WorkspaceMessageContrastTest {
             colors.markdownCodeBackground,
             "inline code",
         )
+        assertContrast(
+            colors.messageReactionForeground,
+            colors.messageReactionBackground,
+            "message reaction",
+        )
         assertContrast(colors.messageOwnAccent, colors.messageOwnBackground, "own author")
         listOf(
             colors.messageAccentYellow,

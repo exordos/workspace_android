@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Test
+import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 
 class MessageReactionProjectionTest {
     @Test
@@ -98,5 +99,87 @@ class MessageReactionProjectionTest {
                 (0..256).associate { index -> "reaction_$index" to 1 },
             ),
         )
+    }
+
+    @Test
+    fun `complete reaction users preserve server order`() {
+        val first = user(FIRST_USER_UUID, "cassi")
+        val second = user(SECOND_USER_UUID, "eugene")
+
+        assertEquals(
+            listOf(first, second),
+            completeMessageReactionUsers(
+                reactionUsers = mapOf(
+                    "heart" to listOf(FIRST_USER_UUID, SECOND_USER_UUID),
+                ),
+                emojiName = "heart",
+                expectedCount = 2,
+                usersByUuid = mapOf(
+                    first.uuid to first,
+                    second.uuid to second,
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun `reaction users fall back to count unless the list is complete`() {
+        val first = user(FIRST_USER_UUID, "cassi")
+        val users = mapOf(first.uuid to first)
+
+        assertNull(
+            completeMessageReactionUsers(
+                reactionUsers = emptyMap(),
+                emojiName = "heart",
+                expectedCount = 1,
+                usersByUuid = users,
+            ),
+        )
+        assertNull(
+            completeMessageReactionUsers(
+                reactionUsers = mapOf("heart" to listOf(FIRST_USER_UUID)),
+                emojiName = "heart",
+                expectedCount = 2,
+                usersByUuid = users,
+            ),
+        )
+        assertNull(
+            completeMessageReactionUsers(
+                reactionUsers = mapOf(
+                    "heart" to listOf(FIRST_USER_UUID, FIRST_USER_UUID),
+                ),
+                emojiName = "heart",
+                expectedCount = 2,
+                usersByUuid = users,
+            ),
+        )
+        assertNull(
+            completeMessageReactionUsers(
+                reactionUsers = mapOf("heart" to listOf("not-a-uuid")),
+                emojiName = "heart",
+                expectedCount = 1,
+                usersByUuid = users,
+            ),
+        )
+        assertNull(
+            completeMessageReactionUsers(
+                reactionUsers = mapOf("heart" to listOf(SECOND_USER_UUID)),
+                emojiName = "heart",
+                expectedCount = 1,
+                usersByUuid = users,
+            ),
+        )
+    }
+
+    private fun user(uuid: String, username: String) = UserResponseData(
+        username = username,
+        uuid = uuid,
+        status = "active",
+        avatar = "",
+    )
+
+    private companion object {
+        const val FIRST_USER_UUID = "11111111-1111-4111-8111-111111111111"
+        const val SECOND_USER_UUID = "22222222-2222-4222-8222-222222222222"
     }
 }

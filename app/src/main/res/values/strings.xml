@@ -22,6 +22,7 @@
     <string name="message_reaction_sadness">Reaction: sadness</string>
     <string name="message_reaction_applause">Reaction: applause</string>
     <string name="message_reaction_count_description">Reaction %1$s, votes: %2$d</string>
+    <string name="message_reaction_users_description">Reaction %1$s: %2$s</string>
     <string name="reaction_picker_pane_title">Reaction picker</string>
     <string name="reaction_picker_title">Choose a reaction</string>
     <string name="reaction_picker_close">Close</string>

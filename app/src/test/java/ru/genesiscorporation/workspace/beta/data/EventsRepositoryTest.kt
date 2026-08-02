@@ -892,12 +892,52 @@ class EventsRepositoryTest {
                 action = "updated",
                 content = "after",
                 reactions = """"thumbs_up":2""",
+                reactionUsers =
+                    """"thumbs_up":["$VALID_USER_UUID","$OTHER_VALID_USER_UUID"]""",
             ),
         )
 
         val updated = repository.streamTopicMessages.value[TOPIC_KEY]?.single()
         assertEquals("after", updated?.payload?.content)
         assertEquals(2, updated?.reactions?.get("thumbs_up"))
+        assertEquals(
+            listOf(VALID_USER_UUID, OTHER_VALID_USER_UUID),
+            updated?.reactionUsers?.get("thumbs_up"),
+        )
+    }
+
+    @Test
+    fun `confirmed reaction snapshot replaces users when count is unchanged`() {
+        val repository = EventsRepository()
+        repository.addStreamTopicMessages(
+            VALID_STREAM_UUID,
+            VALID_TOPIC_UUID,
+            listOf(
+                validReactionTargetMessage().copy(
+                    reactions = mapOf("heart" to 1),
+                    reactionUsers = mapOf("heart" to listOf(VALID_USER_UUID)),
+                ),
+            ),
+        )
+
+        assertTrue(
+            repository.applyConfirmedMessageReactionCounts(
+                ownerKey = VALID_OWNER_KEY,
+                messageUuid = VALID_MESSAGE_UUID,
+                reactions = mapOf("heart" to 1),
+                reactionUsers = mapOf(
+                    "heart" to listOf(OTHER_VALID_USER_UUID),
+                ),
+            ),
+        )
+
+        assertEquals(
+            mapOf("heart" to listOf(OTHER_VALID_USER_UUID)),
+            repository.streamTopicMessages.value
+                .getValue("$VALID_STREAM_UUID.$VALID_TOPIC_UUID")
+                .single()
+                .reactionUsers,
+        )
     }
 
     @Test
@@ -1715,6 +1755,7 @@ class EventsRepositoryTest {
         action: String,
         content: String,
         reactions: String = "",
+        reactionUsers: String = "",
         read: Boolean? = null,
     ): String = """
         {
@@ -1733,7 +1774,8 @@ class EventsRepositoryTest {
             "author_uuid": "$USER_UUID",
             "payload": {"kind": "markdown", "content": "$content"},
             "is_own": false,
-            "reactions": {$reactions}
+            "reactions": {$reactions},
+            "reaction_users": {$reactionUsers}
             ${read?.let { ""","read":$it""" }.orEmpty()}
           }
         }

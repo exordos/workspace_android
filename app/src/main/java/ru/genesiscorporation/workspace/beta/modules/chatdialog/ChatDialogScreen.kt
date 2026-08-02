@@ -97,7 +97,9 @@ import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.data.PersistedDraftSyncStatus
 import ru.genesiscorporation.workspace.beta.data.PersistedOutboxEntry
 import ru.genesiscorporation.workspace.beta.data.PersistedOutboxStatus
+import ru.genesiscorporation.workspace.beta.data.completeMessageReactionUsers
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
+import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import ru.genesiscorporation.workspace.beta.modules.chatchannels.channelMemberCount
 import ru.genesiscorporation.workspace.beta.modules.chatchannels.memberWord
 import ru.genesiscorporation.workspace.beta.ui.AnimatedGif
@@ -187,6 +189,13 @@ fun ChatDialogScreen(
     val streamBindings by
         viewModel.repo.streamBindings.collectAsStateWithLifecycle()
     val users by viewModel.repo.users.collectAsStateWithLifecycle()
+    val usersByUuid = remember(users) {
+        users.associateBy(UserResponseData::uuid)
+    }
+    val reactionAvatarBaseUrl by
+        viewModel.userViewModel.baseUrl.collectAsStateWithLifecycle()
+    val reactionAvatarOwnerAccountId by
+        viewModel.userViewModel.activeAccountId.collectAsStateWithLifecycle()
     val mentionCandidates = remember(users) {
         users.map { user ->
             WorkspaceMentionCandidate(
@@ -765,6 +774,12 @@ fun ChatDialogScreen(
                                             reactionCountOverrides[
                                                 message.uuid
                                             ] ?: message.reactions,
+                                        reactionUsers = message.reactionUsers,
+                                        reactionUsersByUuid = usersByUuid,
+                                        reactionAvatarBaseUrl =
+                                            reactionAvatarBaseUrl.orEmpty(),
+                                        reactionAvatarOwnerAccountId =
+                                            reactionAvatarOwnerAccountId,
                                         outboxEntry = outboxEntries.firstOrNull {
                                             it.localMessageUuid == message.uuid
                                         },
@@ -1532,6 +1547,10 @@ fun ChatMessage(
     reactionEmojiResolver: (String) -> String?,
     reactionAliasesByGlyph: Map<String, Set<String>>,
     reactionCounts: Map<String, Int>,
+    reactionUsers: Map<String, List<String>>,
+    reactionUsersByUuid: Map<String, UserResponseData>,
+    reactionAvatarBaseUrl: String,
+    reactionAvatarOwnerAccountId: String?,
     outboxEntry: PersistedOutboxEntry? = null,
     isVerifyingOutbox: Boolean = false,
     selectionMode: Boolean = false,
@@ -1674,7 +1693,7 @@ fun ChatMessage(
                         .fillMaxWidth(),
                 ) {
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
                         modifier = Modifier
                             .widthIn(max = 310.dp)
                             .horizontalScroll(rememberScrollState())
@@ -1705,62 +1724,29 @@ fun ChatMessage(
                                     emojiName,
                                     reactionEmojiResolver,
                                 )
-                                val reactionContentDescription = stringResource(
-                                    R.string.message_reaction_count_description,
-                                    displayEmoji,
-                                    count,
+                                val completeUsers = completeMessageReactionUsers(
+                                    reactionUsers = reactionUsers,
+                                    emojiName = emojiName,
+                                    expectedCount = count,
+                                    usersByUuid = reactionUsersByUuid,
                                 )
-                                Row(
-                                    modifier = Modifier
-                                        .border(
-                                            width = 1.dp,
-                                            color = if (selected) {
-                                                colors.primary
-                                            } else {
-                                                colors.cardBackgroundActive
-                                            },
-                                            shape = CircleShape,
+                                MessageReactionChip(
+                                    displayEmoji = displayEmoji,
+                                    count = count,
+                                    reactionUsers = completeUsers,
+                                    selected = selected,
+                                    enabled = !selectionMode,
+                                    avatarBaseUrl = reactionAvatarBaseUrl,
+                                    avatarOwnerAccountId =
+                                        reactionAvatarOwnerAccountId,
+                                    onClick = {
+                                        viewModel.onMessageReactionTap(
+                                            item.uuid,
+                                            emojiName,
+                                            equivalentEmojiNames,
                                         )
-                                        .background(
-                                            if (selected) {
-                                                colors.primary.copy(alpha = 0.16f)
-                                            } else {
-                                                colors.cardBackgroundActive
-                                            },
-                                            CircleShape,
-                                        )
-                                        .clickable(
-                                            enabled = !selectionMode,
-                                            role = Role.Button,
-                                        ) {
-                                            viewModel.onMessageReactionTap(
-                                                item.uuid,
-                                                emojiName,
-                                                equivalentEmojiNames,
-                                            )
-                                        }
-                                        .height(26.dp)
-                                        .semantics {
-                                            this.selected = selected
-                                            contentDescription =
-                                                reactionContentDescription
-                                        }
-                                        .padding(horizontal = 7.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Text(
-                                        text = displayEmoji,
-                                        fontSize = 14.sp,
-                                        lineHeight = 16.sp,
-                                    )
-                                    Text(
-                                        text = count.toString(),
-                                        color = colors.textAdditional50,
-                                        fontSize = 11.sp,
-                                        lineHeight = 14.sp,
-                                        modifier = Modifier.padding(start = 3.dp),
-                                    )
-                                }
+                                    },
+                                )
                             }
                     }
                 }

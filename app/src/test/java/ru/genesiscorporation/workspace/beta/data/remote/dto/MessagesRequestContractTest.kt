@@ -1,6 +1,7 @@
 package ru.genesiscorporation.workspace.beta.data.remote.dto
 
 import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.properties.Properties
 import kotlinx.serialization.properties.encodeToStringMap
 import org.junit.Assert.assertEquals
@@ -197,6 +198,46 @@ class MessagesRequestContractTest {
         assertEquals(null, params["sort_key"])
         assertEquals(null, params["sort_dir"])
     }
+
+    @Test
+    fun `message response decodes complete reaction user lists`() {
+        val message = Json.decodeFromString<MessageResponse>(
+            messageJson(
+                reactionUsers =
+                    """"heart":["44444444-4444-4444-8444-444444444444"]""",
+            ),
+        )
+
+        assertEquals(
+            mapOf(
+                "heart" to listOf("44444444-4444-4444-8444-444444444444"),
+            ),
+            message.reactionUsers,
+        )
+    }
+
+    @Test
+    fun `message response defaults missing reaction users to count only`() {
+        val message = Json.decodeFromString<MessageResponse>(messageJson())
+
+        assertEquals(emptyMap<String, List<String>>(), message.reactionUsers)
+    }
+
+    private fun messageJson(reactionUsers: String? = null): String = """
+        {
+          "uuid": "$MESSAGE_UUID",
+          "updated_at": "2026-08-02T00:00:00Z",
+          "created_at": "2026-08-02T00:00:00Z",
+          "stream_uuid": "$STREAM_UUID",
+          "topic_uuid": "$TOPIC_UUID",
+          "user_uuid": "44444444-4444-4444-8444-444444444444",
+          "author_uuid": "44444444-4444-4444-8444-444444444444",
+          "payload": {"kind": "markdown", "content": "hello"},
+          "is_own": false,
+          "reactions": {"heart": 1}
+          ${reactionUsers?.let { ",\"reaction_users\":{$it}" }.orEmpty()}
+        }
+    """.trimIndent()
 
     private companion object {
         const val STREAM_UUID = "11111111-1111-4111-8111-111111111111"

@@ -999,17 +999,24 @@ class EventsRepository(
         ownerKey: String?,
         messageUuid: String,
         reactions: Map<String, Int>,
+        reactionUsers: Map<String, List<String>>? = null,
     ): Boolean {
         var updatedMessage: MessageResponse? = null
         var found = false
         fun confirm(message: MessageResponse): MessageResponse {
             if (message.uuid != messageUuid) return message
             found = true
-            if (message.reactions == reactions) {
+            if (
+                message.reactions == reactions &&
+                (reactionUsers == null || message.reactionUsers == reactionUsers)
+            ) {
                 updatedMessage = updatedMessage ?: message
                 return message
             }
-            return message.copy(reactions = reactions).also {
+            return message.copy(
+                reactions = reactions,
+                reactionUsers = reactionUsers ?: message.reactionUsers,
+            ).also {
                 it.user = message.user
                 updatedMessage = updatedMessage ?: it
             }

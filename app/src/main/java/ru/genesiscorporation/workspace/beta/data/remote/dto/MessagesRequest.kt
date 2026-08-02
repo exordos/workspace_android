@@ -116,6 +116,8 @@ data class MessageResponse(
     var payload: MessageResponsePayload,
     @SerialName("is_own") val isOwn: Boolean,
     var reactions: Map<String, Int>,
+    @SerialName("reaction_users")
+    val reactionUsers: Map<String, List<String>> = emptyMap(),
     val read: Boolean = true,
     val starred: Boolean = false,
     val pinned: Boolean = false,

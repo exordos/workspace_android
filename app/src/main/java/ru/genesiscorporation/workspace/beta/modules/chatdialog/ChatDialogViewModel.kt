@@ -5462,6 +5462,7 @@ class ChatDialogViewModel(
                         ownerKey = ownerKey,
                         messageUuid = messageUuid,
                         reactions = confirmedCounts,
+                        reactionUsers = message.reactionUsers,
                     )
                 ) {
                     return@launch
