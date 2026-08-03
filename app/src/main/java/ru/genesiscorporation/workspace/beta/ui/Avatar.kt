@@ -17,31 +17,43 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import coil3.network.NetworkHeaders
+import coil3.network.httpHeaders
 import coil3.request.ImageRequest
 import ru.genesiscorporation.workspace.beta.data.UrnParser
+import ru.genesiscorporation.workspace.beta.data.remote.AuthHeader
+import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 
 @Composable
 fun Avatar(
     avatarUrn: String?,
     baseUrl: String,
+    authHeaders: List<AuthHeader>,
     color: Int?,
     name: String,
-    size: Int,
-    hasPadding: Boolean
+    modifier: Modifier
 ) {
     val avatarUrl = UrnParser.parseUrl(avatarUrn, baseUrl)
     if (avatarUrl != null) {
-        val imageRequest = ImageRequest.Builder(LocalContext.current)
-            .data(avatarUrl)
-            .build()
+        var imageRequest = if (avatarUrn?.contains(":image:") ?: false) {
+            val headers = NetworkHeaders.Builder()
+                .set(authHeaders.first().title, authHeaders.first().value)
+                .build()
+            ImageRequest.Builder(LocalContext.current)
+                .data(avatarUrl)
+                .httpHeaders(headers)
+                .build()
+        } else {
+            ImageRequest.Builder(LocalContext.current)
+                .data(avatarUrl)
+                .build()
+        }
         AsyncImage(
             model = imageRequest,
             contentDescription = null,
             contentScale = ContentScale.Crop,
-            modifier = Modifier
-                .padding(end = if (hasPadding) 12.dp else 0.dp)
-                .size(size.dp)
+            modifier = modifier
                 .clip(CircleShape),
         )
     } else {
@@ -51,14 +63,14 @@ fun Avatar(
             Color.Gray
         }
         Box(
-            modifier = Modifier
-                .size(40.dp)
+            modifier = modifier
                 .background(color = avatarColor, shape = CircleShape),
             contentAlignment = Alignment.Center
         ) {
             Text(text = name.firstOrNull()?.titlecase() ?: "",
                 color = Color.White,
-                fontSize = 24.sp
+                fontSize = 24.sp,
+                fontFamily = InterFontFamily,
             )
         }
     }

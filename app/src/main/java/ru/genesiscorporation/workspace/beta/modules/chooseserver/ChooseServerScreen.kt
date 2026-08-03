@@ -45,6 +45,7 @@ import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.LoginFlow
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.UserState
+import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 
 @Composable
@@ -84,12 +85,14 @@ fun ChooseServerScreen(
                 "Добро пожаловать",
                 color = LocalWorkspaceColorsPalette.current.textHeaders,
                 fontSize = 16.sp,
+                fontFamily = InterFontFamily,
                 fontWeight = FontWeight.Medium
             )
             Text(
                 "Введите адрес вашей организации, \nчтобы продолжить",
                 color = LocalWorkspaceColorsPalette.current.textAdditional50,
                 fontSize = 14.sp,
+                fontFamily = InterFontFamily,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp, bottom = 64.dp )
             )
@@ -100,6 +103,7 @@ fun ChooseServerScreen(
                     "Адрес организации",
                     color = LocalWorkspaceColorsPalette.current.textAdditional30,
                     fontSize = 14.sp,
+                    fontFamily = InterFontFamily,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.padding(horizontal = 20.dp)
                 )
@@ -121,7 +125,8 @@ fun ChooseServerScreen(
                         onValueChange = viewModel::onServerChange,
                         textStyle = TextStyle(
                             color = LocalWorkspaceColorsPalette.current.textHeaders,
-                            fontSize = 14.sp
+                            fontSize = 14.sp,
+                            fontFamily = InterFontFamily,
                         ),
                         cursorBrush = SolidColor(LocalWorkspaceColorsPalette.current.textHeaders),
                         singleLine = true,
@@ -154,7 +159,7 @@ fun ChooseServerScreen(
                     modifier = Modifier.weight(1f)
                         .padding(start = 20.dp),
                     thickness = 1.dp,
-                    color = LocalWorkspaceColorsPalette.current.textAdditional30,
+                    color = LocalWorkspaceColorsPalette.current.divider,
                 )
                 Text(
                     text = "или",
@@ -165,7 +170,7 @@ fun ChooseServerScreen(
                     modifier = Modifier.weight(1f)
                         .padding(end = 20.dp),
                     thickness = 1.dp,
-                    color = LocalWorkspaceColorsPalette.current.textAdditional30,
+                    color = LocalWorkspaceColorsPalette.current.divider,
                 )
             }
             Column(
@@ -175,6 +180,7 @@ fun ChooseServerScreen(
                     "Вы можете подключиться к нашему публичному серверу:",
                     color = LocalWorkspaceColorsPalette.current.textHeaders,
                     fontSize = 14.sp,
+                    fontFamily = InterFontFamily,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.padding(start = 20.dp, top = 20.dp, end = 20.dp, bottom = 8.dp)
                 )

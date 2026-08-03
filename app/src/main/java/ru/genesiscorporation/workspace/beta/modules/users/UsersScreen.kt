@@ -44,6 +44,7 @@ import androidx.compose.ui.window.DialogProperties
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import ru.genesiscorporation.workspace.beta.ui.Avatar
+import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 
 @Composable
 fun UsersScreen(
@@ -113,7 +114,8 @@ fun UsersScreen(
                                 onValueChange = { searchQuery = it },
                                 textStyle = TextStyle(
                                     color = LocalWorkspaceColorsPalette.current.textAdditional30,
-                                    fontSize = 14.sp
+                                    fontSize = 14.sp,
+                                    fontFamily = InterFontFamily,
                                 ),
                                 cursorBrush = SolidColor(LocalWorkspaceColorsPalette.current.textAdditional30),
                                 singleLine = true,
@@ -174,10 +176,10 @@ fun UserCell(
             Avatar(
                 item.avatar,
                 viewModel.client.userViewModel.baseUrl.value ?: "",
+                viewModel.client.authHeaders(),
                 null,
                 item.displayableName(),
-                40,
-                false
+                Modifier.size(40.dp)
             )
             Column(
                 modifier = Modifier
@@ -188,6 +190,7 @@ fun UserCell(
                         text = item.displayableName(),
                         color = LocalWorkspaceColorsPalette.current.textHeaders,
                         fontSize = 14.sp,
+                        fontFamily = InterFontFamily,
                         fontWeight = FontWeight.Medium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -200,6 +203,7 @@ fun UserCell(
                             text = email,
                             color = LocalWorkspaceColorsPalette.current.textAdditional50,
                             fontSize = 12.sp,
+                            fontFamily = InterFontFamily,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )

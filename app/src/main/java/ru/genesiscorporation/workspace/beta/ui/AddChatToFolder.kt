@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
+import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 
 @Composable
@@ -57,6 +58,7 @@ fun AddChatToFolder(
                 "Выберите папку",
                 color = LocalWorkspaceColorsPalette.current.textHeaders,
                 fontSize = 16.sp,
+                fontFamily = InterFontFamily,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.padding(horizontal = 5.dp, vertical = 12.dp)
             )
@@ -82,6 +84,7 @@ fun AddChatToFolder(
                         text = item.title,
                         color = LocalWorkspaceColorsPalette.current.textHeaders,
                         fontSize = 14.sp,
+                        fontFamily = InterFontFamily,
                         fontWeight = FontWeight.Medium
                     )
                 }

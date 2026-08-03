@@ -50,6 +50,7 @@ import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.data.UrnParser
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.ui.Avatar
+import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.time.Instant
 import java.time.LocalDateTime
@@ -111,10 +112,10 @@ fun ImageMessageView(
                         Avatar(
                             item.user?.avatar,
                             viewModel.userViewModel.baseUrl.value ?: "",
+                            viewModel.client.authHeaders(),
                             null,
                             item.user?.displayableName() ?: "",
-                            30,
-                            true
+                            Modifier.size(30.dp)
                         )
                     }
                 } else {
@@ -144,10 +145,10 @@ fun ImageMessageView(
                     Avatar(
                         item.user?.avatar,
                         viewModel.userViewModel.baseUrl.value ?: "",
+                        viewModel.client.authHeaders(),
                         null,
                         item.user?.displayableName() ?: "",
-                        30,
-                        true
+                        Modifier.size(30.dp)
                     )
                 }
             }
@@ -173,12 +174,11 @@ fun ImageMessageView(
                     text = item.user?.displayableName() ?: defaultName,
                     color = if (item.isOwn) LocalWorkspaceColorsPalette.current.indicatorBlue else LocalWorkspaceColorsPalette.current.indicatorPurple,
                     fontSize = 14.sp,
+                    fontFamily = InterFontFamily,
                     fontWeight = FontWeight.Medium
                 )
-                val accessToken by viewModel.userViewModel.repo.accessTokenFlow.collectAsStateWithLifecycle(initialValue = "")
-                val email by viewModel.userViewModel.repo.emailFlow.collectAsStateWithLifecycle(initialValue = "")
                 val baseUrl by viewModel.userViewModel.repo.baseUrlFlow.collectAsStateWithLifecycle(initialValue = "")
-                val authHeaders = viewModel.client.authHeaders(accessToken ?: "", email ?: "")
+                val authHeaders = viewModel.client.authHeaders()
                 val headers = NetworkHeaders.Builder()
                     .set(authHeaders.first().title, authHeaders.first().value)
                     .build()
@@ -213,7 +213,8 @@ fun ImageMessageView(
                         Text(
                             text = text,
                             color = LocalWorkspaceColorsPalette.current.textHeaders,
-                            fontSize = 14.sp
+                            fontSize = 14.sp,
+                            fontFamily = InterFontFamily,
                         )
                     }
                 }
@@ -228,6 +229,7 @@ fun ImageMessageView(
                 text = instant.atZone(zone).format(hhmmFormatter),
                 color = LocalWorkspaceColorsPalette.current.messageTimeColor,
                 fontSize = 14.sp,
+                fontFamily = InterFontFamily,
             )
         }
     }

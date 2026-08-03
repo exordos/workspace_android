@@ -19,6 +19,7 @@ import androidx.navigation.NavHostController
 import dev.jeziellago.compose.markdowntext.MarkdownText
 import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.ChatDialogViewModel
+import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 
 @Composable
@@ -242,6 +243,7 @@ private fun ZulipQuoteBlock(
     val borderColor = colors.textAdditional30.copy(alpha = 0.7f)
     val headerStyle = style.copy(
         fontSize = (style.fontSize.value * 0.85f).sp,
+        fontFamily = InterFontFamily,
         color = colors.textAdditional30,
     )
     Column(

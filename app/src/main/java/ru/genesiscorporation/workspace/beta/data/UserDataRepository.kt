@@ -2,16 +2,21 @@ package ru.genesiscorporation.workspace.beta.data
 
 import android.content.Context
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.serialization.json.Json
 
 private val Context.dataStore by preferencesDataStore(name = "settings")
 
-class ApiKeyRepository(private val context: Context) {
+class ApiKeyRepository(private val context: Context, scope: CoroutineScope) {
 
     companion object {
         private val BASE_URL = stringPreferencesKey("base_url")
@@ -38,6 +43,14 @@ class ApiKeyRepository(private val context: Context) {
                 null
             }
         }
+
+    val accessToken: StateFlow<String?> = accessTokenFlow
+        .stateIn(
+            scope = scope,
+            started = SharingStarted.Eagerly, // or WhileSubscribed(5_000)
+            initialValue = null,
+        )
+    fun getAccessToken(): String? = accessToken.value
 
     val refreshTokenFlow: Flow<String?> = context.dataStore.data
         .map { prefs ->

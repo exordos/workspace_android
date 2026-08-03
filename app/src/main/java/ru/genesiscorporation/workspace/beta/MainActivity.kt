@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
@@ -90,8 +91,20 @@ import ru.genesiscorporation.workspace.beta.ui.IncomingCall
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.serialization.kotlinx.json.*
+import ru.genesiscorporation.workspace.beta.modules.addfolder.AddFolderView
+import ru.genesiscorporation.workspace.beta.modules.addfolder.AddFolderViewModel
+import ru.genesiscorporation.workspace.beta.modules.createdirectstream.CreateDirectStreamView
+import ru.genesiscorporation.workspace.beta.modules.createdirectstream.CreateDirectStreamViewModel
+import ru.genesiscorporation.workspace.beta.modules.createstream.CreateStreamView
+import ru.genesiscorporation.workspace.beta.modules.createstream.CreateStreamViewModel
+import ru.genesiscorporation.workspace.beta.modules.creationbase.CreationBaseView
+import ru.genesiscorporation.workspace.beta.modules.creationbase.CreationBaseViewModel
+import ru.genesiscorporation.workspace.beta.modules.foldersettings.FolderSettingsView
+import ru.genesiscorporation.workspace.beta.modules.foldersettings.FolderSettingsViewModel
 import ru.genesiscorporation.workspace.beta.modules.otp.OtpScreen
 import ru.genesiscorporation.workspace.beta.modules.otp.OtpViewModel
+import ru.genesiscorporation.workspace.beta.modules.ownusersettings.OwnUserSettingsView
+import ru.genesiscorporation.workspace.beta.modules.ownusersettings.OwnUserSettingsViewModel
 
 
 class MainActivity : ComponentActivity() {
@@ -111,7 +124,7 @@ class MainActivity : ComponentActivity() {
         WorkspaceAPIClient(client, userState, sessionCookieStore)
     }
     private val userState by viewModels<UserViewModel>()  {
-        UserViewModelFactory(applicationContext)
+        UserViewModelFactory(applicationContext, lifecycleScope)
     }
     val eventsRepository = EventsRepository()
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -309,6 +322,22 @@ fun ChatNavigation(
             val chatUserInfoViewModel: ChatUserInfoViewModel = viewModel(factory = chatUserInfoViewModelFactory)
             ChatUserInfoScreen(chatUserInfoViewModel, navController)
         }
+
+        composable<ChatFlow.CreateBase> {
+            val creationBaseViewModelFactory = remember { CreationBaseViewModelFactory(eventsRepository) }
+            var creationBaseViewModel: CreationBaseViewModel = viewModel(factory = creationBaseViewModelFactory)
+            CreationBaseView(creationBaseViewModel, navController)
+        }
+        composable<ChatFlow.CreateStream> {
+            val createStreamViewModelFactory = remember { CreateStreamViewModelFactory(workspaceApiClient, eventsRepository) }
+            val createStreamViewModel: CreateStreamViewModel = viewModel(factory = createStreamViewModelFactory)
+            CreateStreamView(createStreamViewModel, navController)
+        }
+        composable<ChatFlow.CreateDirectStream> {
+            val createDirectStreamViewModelFactory = remember { CreateDirectStreamViewModelFactory(workspaceApiClient, eventsRepository) }
+            val createDirectStreamViewModel: CreateDirectStreamViewModel = viewModel(factory = createDirectStreamViewModelFactory)
+            CreateDirectStreamView(createDirectStreamViewModel, navController)
+        }
     }
 }
 
@@ -346,12 +375,44 @@ fun ProfileNavigation(workspaceApiClient: WorkspaceAPIClient, eventsRepository: 
         composable<ProfileFlow.Main> {
             val profileViewModelFactory = remember { ProfileViewModelFactory(workspaceApiClient, user, eventsRepository) }
             var profileViewModel: ProfileViewModel = viewModel(factory = profileViewModelFactory)
-            ProfileScreen(profileViewModel)
+            ProfileScreen(profileViewModel, navController)
         }
-        composable<ProfileFlow.Login> {
-            val loginViewModelFactory = remember { LoginViewModelFactory(workspaceApiClient, user) }
-            val loginViewModel: LoginViewModel = viewModel(factory = loginViewModelFactory)
-            LoginScreen(loginViewModel, navController)
+        composable<ProfileFlow.OwnUserSettings> {
+            val ownUserSettingsViewModelFactory = remember { OwnUserSettingsViewModelFactory(workspaceApiClient,eventsRepository) }
+            val ownUserSettingsViewModel: OwnUserSettingsViewModel = viewModel(factory = ownUserSettingsViewModelFactory)
+            OwnUserSettingsView(ownUserSettingsViewModel, navController)
+        }
+        composable<ProfileFlow.FolderSettings> {
+            val folderSettingsViewModelFactory = remember { FolderSettingsViewModelFactory(eventsRepository) }
+            val folderSettingsViewModel: FolderSettingsViewModel = viewModel(factory = folderSettingsViewModelFactory)
+            FolderSettingsView(folderSettingsViewModel, navController)
+        }
+        composable<ProfileFlow.AddFolder> {
+            val addFolderViewModelFactory = remember { AddFolderViewModelFactory(workspaceApiClient,eventsRepository) }
+            val addFolderViewModel: AddFolderViewModel = viewModel(factory = addFolderViewModelFactory)
+            AddFolderView(addFolderViewModel, navController)
+        }
+    }
+}
+
+@Composable
+fun StreamCreationNavigation(workspaceApiClient: WorkspaceAPIClient, eventsRepository: EventsRepository,) {
+    val navController = rememberNavController()
+    NavHost(navController = navController, startDestination = StreamCreationFlow.CreateBase) {
+        composable<StreamCreationFlow.CreateBase> {
+            val creationBaseViewModelFactory = remember { CreationBaseViewModelFactory(eventsRepository) }
+            var creationBaseViewModel: CreationBaseViewModel = viewModel(factory = creationBaseViewModelFactory)
+            CreationBaseView(creationBaseViewModel, navController)
+        }
+        composable<StreamCreationFlow.CreateStream> {
+            val createStreamViewModelFactory = remember { CreateStreamViewModelFactory(workspaceApiClient, eventsRepository) }
+            val createStreamViewModel: CreateStreamViewModel = viewModel(factory = createStreamViewModelFactory)
+            CreateStreamView(createStreamViewModel, navController)
+        }
+        composable<StreamCreationFlow.CreateDirectStream> {
+            val createDirectStreamViewModelFactory = remember { CreateDirectStreamViewModelFactory(workspaceApiClient, eventsRepository) }
+            val createDirectStreamViewModel: CreateDirectStreamViewModel = viewModel(factory = createDirectStreamViewModelFactory)
+            CreateDirectStreamView(createDirectStreamViewModel, navController)
         }
     }
 }

@@ -33,5 +33,6 @@ data class TopicsResponseData(
     @SerialName("is_done") var isDone: Boolean,
     @SerialName("is_default") val isDefault: Boolean,
     @SerialName("last_message_uuid") var lastMessageUuid: String? = null,
+    @SerialName("notification_mode") var notificationMode: String,
     var lastMessage: MessageResponse? = null
 )

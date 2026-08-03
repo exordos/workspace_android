@@ -26,6 +26,7 @@ import org.jitsi.meet.sdk.JitsiMeetConferenceOptions
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.WorkspaceViewModel
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
+import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.net.URL
 
@@ -57,6 +58,7 @@ fun IncomingCall(
                 "Workspace",
                 color = LocalWorkspaceColorsPalette.current.textHeaders,
                 fontSize = 12.sp,
+                fontFamily = InterFontFamily,
                 modifier = Modifier.padding(horizontal = 5.dp, vertical = 12.dp)
             )
         }
@@ -66,12 +68,14 @@ fun IncomingCall(
                     itemUrl.path.drop(1),
                     color = LocalWorkspaceColorsPalette.current.textHeaders,
                     fontSize = 14.sp,
+                    fontFamily = InterFontFamily,
                     fontWeight = FontWeight.Medium
                 )
                 Text(
                     "Входящий звонок",
                     color = LocalWorkspaceColorsPalette.current.textAdditional50,
-                    fontSize = 14.sp
+                    fontSize = 14.sp,
+                    fontFamily = InterFontFamily,
                 )
             }
             Spacer(modifier = Modifier.weight(1f))

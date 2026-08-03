@@ -165,7 +165,7 @@ class ChatViewModel(
         when(response) {
             is ApiResult.Success -> {
                 userViewModel.userData = response.value
-                repo.currentUser = response.value
+                repo.updateCurrentUser(response.value)
                 loadMessageReactions(response.value.uuid)
             }
 

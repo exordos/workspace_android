@@ -70,6 +70,7 @@ import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.UserState
 import ru.genesiscorporation.workspace.beta.data.UrnParser
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
+import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 
 @Composable
@@ -134,6 +135,7 @@ fun LoginScreen(
                         viewModel.userViewModel.organizationName ?: "Название организации",
                         color = LocalWorkspaceColorsPalette.current.textHeaders,
                         fontSize = 16.sp,
+                        fontFamily = InterFontFamily,
                         fontWeight = FontWeight.Medium,
                         modifier = Modifier.padding(20.dp, 12.dp, 4.dp, 20.dp)
                     )
@@ -141,6 +143,7 @@ fun LoginScreen(
                         viewModel.userViewModel.organizationUrl ?: "",
                         color = LocalWorkspaceColorsPalette.current.textAdditional50,
                         fontSize = 16.sp,
+                        fontFamily = InterFontFamily,
                         fontWeight = FontWeight.Medium,
                         modifier = Modifier.padding(horizontal = 20.dp)
                     )
@@ -150,7 +153,7 @@ fun LoginScreen(
                 modifier = Modifier
                     .padding(20.dp),
                 thickness = 1.dp,
-                color = LocalWorkspaceColorsPalette.current.textAdditional30,
+                color = LocalWorkspaceColorsPalette.current.divider,
             )
             Column(
                 horizontalAlignment = Alignment.Start
@@ -160,6 +163,7 @@ fun LoginScreen(
                     "Логин",
                     color = LocalWorkspaceColorsPalette.current.textAdditional30,
                     fontSize = 14.sp,
+                    fontFamily = InterFontFamily,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.padding(horizontal = 20.dp)
                 )
@@ -181,7 +185,8 @@ fun LoginScreen(
                         onValueChange = viewModel::onLoginChange,
                         textStyle = TextStyle(
                             color = LocalWorkspaceColorsPalette.current.textHeaders,
-                            fontSize = 14.sp
+                            fontSize = 14.sp,
+                            fontFamily = InterFontFamily,
                         ),
                         keyboardOptions = KeyboardOptions(
                             keyboardType = KeyboardType.Email
@@ -196,6 +201,7 @@ fun LoginScreen(
                     "Пароль",
                     color = LocalWorkspaceColorsPalette.current.textAdditional30,
                     fontSize = 14.sp,
+                    fontFamily = InterFontFamily,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.padding(horizontal = 20.dp)
                 )
@@ -217,7 +223,8 @@ fun LoginScreen(
                         onValueChange = viewModel::onPasswordChange,
                         textStyle = TextStyle(
                             color = LocalWorkspaceColorsPalette.current.textHeaders,
-                            fontSize = 14.sp
+                            fontSize = 14.sp,
+                            fontFamily = InterFontFamily,
                         ),
                         cursorBrush = SolidColor(LocalWorkspaceColorsPalette.current.textHeaders),
                         singleLine = true,

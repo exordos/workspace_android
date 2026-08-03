@@ -25,6 +25,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.Parameters
 import io.ktor.http.append
+import io.ktor.http.content.PartData
 import io.ktor.http.content.TextContent
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
@@ -46,6 +47,7 @@ import ru.genesiscorporation.workspace.beta.BuildConfig
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.dto.LoginRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TokenRefreshRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.UploadAvatarResponseData
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 
 class WorkspaceAPIClient(
@@ -54,13 +56,12 @@ class WorkspaceAPIClient(
     val sessionCookieStore: SessionCookieStore
 ): APIClient {
     var baseAccessToken: String? = null
-    var baseEmail: String? = null
     @OptIn(ExperimentalSerializationApi::class)
     suspend inline fun <reified RequestData : Any, reified Response : Any, reified ResponseError : Any> performRequest(
         request: ApiRequest<RequestData, Response, ResponseError>
     ): ApiResult<Response, ApiError> {
         val baseUrl = userViewModel.repo.baseUrlFlow.first()
-        val accessToken = if (baseAccessToken != null) baseAccessToken ?: "" else userViewModel.repo.accessTokenFlow.first() ?: ""
+        val accessToken = if (baseAccessToken != null) baseAccessToken ?: "" else userViewModel.baseUrl.value ?: ""
         val isOidc = accessToken.contains("__Host-sessionid=")
         val urlSuffix = if (request.shouldApplySuffix) {
             if (isOidc) "/json" else "/api/v1"
@@ -218,29 +219,56 @@ class WorkspaceAPIClient(
         }
     }
 
-    suspend fun uploadImage(context: Context, uri: Uri, streamUuid: String): ApiResult<UploadFileResponseData, ApiError> {
+    suspend fun uploadStreamImage(context: Context, uri: Uri, streamUuid: String): ApiResult<UploadFileResponseData, ApiError> {
+        val path = "/api/workspace/v1/messenger/files/"
         val bytes = readUriBytes(context, uri)
         val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
         val fileName = "image.jpg"
+        val parts = formData {
+            append(
+                key = "file",
+                value = bytes,
+                headers = Headers.build {
+                    append(HttpHeaders.ContentType, mime)
+                    append(
+                        HttpHeaders.ContentDisposition,
+                        "filename=\"$fileName\""
+                    )
+                }
+            )
+            append(key = "stream_uuid", value = streamUuid)
+        }
+        return uploadFile(path, parts)
+    }
+
+    suspend fun uploadAvatarImage(context: Context, uri: Uri, userUuid: String): ApiResult<UploadAvatarResponseData, ApiError> {
+        val path = "/api/workspace/v1/users/${userUuid}/actions/avatar_upload/invoke"
+        val bytes = readUriBytes(context, uri)
+        val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
+        val fileName = "image.jpg"
+        val parts = formData {
+            append(
+                key = "file",
+                value = bytes,
+                headers = Headers.build {
+                    append(HttpHeaders.ContentType, mime)
+                    append(
+                        HttpHeaders.ContentDisposition,
+                        "filename=\"$fileName\""
+                    )
+                }
+            )
+        }
+        return uploadFile(path, parts)
+    }
+
+    suspend inline fun <reified T> uploadFile(path: String, parts: List<PartData>): ApiResult<T, ApiError> {
         val baseUrl = userViewModel.repo.baseUrlFlow.first()
         val accessToken = if (baseAccessToken != null) baseAccessToken ?: "" else userViewModel.repo.accessTokenFlow.first() ?: ""
-        val httpResponse: HttpResponse = client.post("${baseUrl}/api/workspace/v1/messenger/files/") {
+        val httpResponse: HttpResponse = client.post("${baseUrl}${path}") {
             setBody(
                 MultiPartFormDataContent(
-                    formData {
-                        append(
-                            key = "file",
-                            value = bytes,
-                            headers = Headers.build {
-                                append(HttpHeaders.ContentType, mime)
-                                append(
-                                    HttpHeaders.ContentDisposition,
-                                    "filename=\"$fileName\""
-                                )
-                            }
-                        )
-                        append(key = "stream_uuid", value = streamUuid)
-                    }
+                    parts
                 )
             )
             header("User-Agent", "Workspace/android/${BuildConfig.VERSION_NAME}")
@@ -250,7 +278,7 @@ class WorkspaceAPIClient(
             val json = Json { ignoreUnknownKeys = true }
 
             val responseString: String = httpResponse.body()
-            val response = json.decodeFromString<UploadFileResponseData>(responseString)
+            val response = json.decodeFromString<T>(responseString)
             return ApiResult.Success(response)
         } else {
             val error = ApiError("Request failed", "REQUEST_FAILED")
@@ -283,9 +311,9 @@ class WorkspaceAPIClient(
                 ?: error("Could not open $uri")
         }
 
-    fun authHeaders(backupApiKey: String, backupEmail: String): List<AuthHeader> {
+    fun authHeaders(): List<AuthHeader> {
         val authHeadersList: MutableList<AuthHeader> = mutableListOf()
-        val accessToken = if (baseAccessToken != null) baseAccessToken ?: "" else backupApiKey
+        val accessToken = if (baseAccessToken != null) baseAccessToken ?: "" else userViewModel.baseUrl.value ?: ""
         authHeadersList += AuthHeader("Authorization", "Bearer $accessToken")
 
         return  authHeadersList

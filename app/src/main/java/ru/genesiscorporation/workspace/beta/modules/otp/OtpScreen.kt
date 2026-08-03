@@ -45,6 +45,7 @@ import ru.genesiscorporation.workspace.beta.LoginFlow
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 import ru.genesiscorporation.workspace.beta.modules.login.LoginViewModel
+import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -106,6 +107,7 @@ fun OtpScreen(
                     "Введите код",
                     color = LocalWorkspaceColorsPalette.current.textHeaders,
                     fontSize = 20.sp,
+                    fontFamily = InterFontFamily,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.padding(top = 200.dp, bottom = 8.dp)
                 )
@@ -113,6 +115,7 @@ fun OtpScreen(
                     "из приложения Google Authenticator",
                     color = LocalWorkspaceColorsPalette.current.textAdditional50,
                     fontSize = 14.sp,
+                    fontFamily = InterFontFamily,
                     modifier = Modifier.padding(bottom = 64.dp)
                 )
                 Box(
@@ -126,7 +129,8 @@ fun OtpScreen(
                         onValueChange = viewModel::onOtpTextChange,
                         textStyle = TextStyle(
                             color = Color.Transparent,
-                            fontSize = 14.sp
+                            fontSize = 14.sp,
+                            fontFamily = InterFontFamily,
                         ),
                         keyboardOptions = KeyboardOptions(
                             keyboardType = KeyboardType.Number

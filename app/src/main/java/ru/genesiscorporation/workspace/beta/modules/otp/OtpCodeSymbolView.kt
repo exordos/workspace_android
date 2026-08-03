@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.sp
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import androidx.compose.ui.unit.dp
+import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 
 @Composable
 fun OtpSymbolView(
@@ -38,6 +39,7 @@ fun OtpSymbolView(
             symbol,
             color = LocalWorkspaceColorsPalette.current.textHeaders,
             fontSize = 20.sp,
+            fontFamily = InterFontFamily,
         )
     }
 }

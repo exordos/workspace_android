@@ -50,6 +50,7 @@ import ru.genesiscorporation.workspace.beta.modules.chatdialog.JitsiStyleRoomNam
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.pastEpochSecondsToRelativeRu
 import ru.genesiscorporation.workspace.beta.modules.profile.ProfileViewModel
 import ru.genesiscorporation.workspace.beta.ui.Avatar
+import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.net.URL
 
@@ -101,15 +102,16 @@ fun ChatUserInfoScreen(
                 Avatar(
                     viewModel.avatarUrl,
                     viewModel.client.userViewModel.baseUrl.value ?: "",
+                    viewModel.client.authHeaders(),
                     null,
                     "",
-                    64,
-                    true
+                    Modifier.size(64.dp)
                 )
                 Text(
                     text = viewModel.userName,
                     color = LocalWorkspaceColorsPalette.current.textHeaders,
                     fontSize = 20.sp,
+                    fontFamily = InterFontFamily,
                     fontWeight = FontWeight.Medium
                 )
             }
@@ -228,12 +230,14 @@ fun ProfileRow(
             Text(
                 text = title,
                 color = LocalWorkspaceColorsPalette.current.textAdditional30,
-                fontSize = 12.sp
+                fontSize = 12.sp,
+                fontFamily = InterFontFamily,
             )
             Text(
                 text = text,
                 color = LocalWorkspaceColorsPalette.current.textHeaders,
-                fontSize = 14.sp
+                fontSize = 14.sp,
+                fontFamily = InterFontFamily,
             )
         }
     }
