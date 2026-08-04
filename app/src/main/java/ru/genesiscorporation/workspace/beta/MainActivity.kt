@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
 import androidx.compose.runtime.Composable
@@ -93,6 +94,8 @@ import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.serialization.kotlinx.json.*
 import ru.genesiscorporation.workspace.beta.modules.addfolder.AddFolderView
 import ru.genesiscorporation.workspace.beta.modules.addfolder.AddFolderViewModel
+import ru.genesiscorporation.workspace.beta.modules.activity.MentionsScreen
+import ru.genesiscorporation.workspace.beta.modules.activity.MyActivityScreen
 import ru.genesiscorporation.workspace.beta.modules.createdirectstream.CreateDirectStreamView
 import ru.genesiscorporation.workspace.beta.modules.createdirectstream.CreateDirectStreamViewModel
 import ru.genesiscorporation.workspace.beta.modules.createstream.CreateStreamView
@@ -215,7 +218,10 @@ fun WokspaceApp(
     val lifecycleOwner = LocalLifecycleOwner.current
     var navController = rememberNavController()
     val destinationList = listOf<Destinations>(
+        MyActivity,
         Chat,
+        Calendar,
+        Mail,
         Profile
     )
     val context = LocalContext.current
@@ -223,6 +229,26 @@ fun WokspaceApp(
     val user = UserState.current
     val currentCallMessage by viewModel.currentCallMessage.collectAsState()
     var currentDestination = rememberSaveable { mutableStateOf(0 ) }
+    val chatViewModelFactory = remember {
+        ChatViewModelFactory(
+            workspaceApiClient,
+            user,
+            eventsRepository,
+            pendingDeepLink,
+            onDeepLinkHandled,
+        )
+    }
+    val chatViewModel: ChatViewModel = viewModel(factory = chatViewModelFactory)
+
+    LaunchedEffect(pendingDeepLink) {
+        if (pendingDeepLink != null) {
+            currentDestination.value = destinationList.indexOf(Chat)
+            navController.navigate(Chat.route) {
+                popUpTo(MyActivity.route)
+                launchSingleTop = true
+            }
+        }
+    }
 
 
     LaunchedEffect(lifecycleOwner) {
@@ -256,8 +282,11 @@ fun WokspaceApp(
                     onClick = {
                         currentDestination.value = index
                         navController.navigate(destinationList[index].route) {
-                            popUpTo(Chat.route)
+                            popUpTo(MyActivity.route) {
+                                saveState = true
+                            }
                             launchSingleTop = true
+                            restoreState = true
                         }
                     }
                 )
@@ -269,11 +298,44 @@ fun WokspaceApp(
                     .windowInsetsPadding(WindowInsets.statusBars)
             ) {
                 RequestNotificationPermissionIfNeeded()
-                NavHost(navController = navController, startDestination = Chat.route) {
+                NavHost(navController = navController, startDestination = MyActivity.route) {
+                    composable(MyActivity.route) {
+                        currentDestination.value = destinationList.indexOf(MyActivity)
+                        ChatNavigation(
+                            workspaceApiClient = workspaceApiClient,
+                            eventsRepository = eventsRepository,
+                            chatViewModel = chatViewModel,
+                            startDestination = ChatFlow.Activity,
+                            onOpenChats = {
+                                currentDestination.value = destinationList.indexOf(Chat)
+                                navController.navigate(Chat.route) {
+                                    popUpTo(MyActivity.route) {
+                                        saveState = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
+                            },
+                        )
+                    }
                     composable(Chat.route) {
-                        ChatNavigation(workspaceApiClient, eventsRepository, pendingDeepLink, onDeepLinkHandled)
+                        currentDestination.value = destinationList.indexOf(Chat)
+                        ChatNavigation(
+                            workspaceApiClient = workspaceApiClient,
+                            eventsRepository = eventsRepository,
+                            chatViewModel = chatViewModel,
+                        )
+                    }
+                    composable(Calendar.route) {
+                        currentDestination.value = destinationList.indexOf(Calendar)
+                        ComingSoonScreen("Календарь")
+                    }
+                    composable(Mail.route) {
+                        currentDestination.value = destinationList.indexOf(Mail)
+                        ComingSoonScreen("Почта")
                     }
                     composable(Profile.route) {
+                        currentDestination.value = destinationList.indexOf(Profile)
                         ProfileNavigation(workspaceApiClient, eventsRepository)
                     }
                 }
@@ -290,16 +352,27 @@ fun WokspaceApp(
 fun ChatNavigation(
     workspaceApiClient: WorkspaceAPIClient,
     eventsRepository: EventsRepository,
-    pendingDeepLink: String?,
-    onDeepLinkHandled: () -> Unit
+    chatViewModel: ChatViewModel,
+    startDestination: Any = ChatFlow.ChatList,
+    onOpenChats: (() -> Unit)? = null,
 ) {
     val navController = rememberNavController()
     val user = UserState.current
-    val chatViewModelFactory = remember { ChatViewModelFactory(workspaceApiClient, user, eventsRepository, pendingDeepLink, onDeepLinkHandled) }
-    val chatViewModel: ChatViewModel = viewModel(factory = chatViewModelFactory)
-    NavHost(navController = navController, startDestination = ChatFlow.ChatList) {
+    NavHost(navController = navController, startDestination = startDestination) {
+        composable<ChatFlow.Activity> {
+            MyActivityScreen(
+                chatViewModel = chatViewModel,
+                navController = navController,
+                onOpenChats = onOpenChats ?: {
+                    navController.navigate(ChatFlow.ChatList)
+                },
+            )
+        }
         composable<ChatFlow.ChatList> {
             ChatScreen(chatViewModel, navController)
+        }
+        composable<ChatFlow.Mentions> {
+            MentionsScreen(chatViewModel, navController)
         }
         composable<ChatFlow.ChatDialog> {
             val args = it.toRoute<ChatFlow.ChatDialog>()
@@ -338,6 +411,21 @@ fun ChatNavigation(
             val createDirectStreamViewModel: CreateDirectStreamViewModel = viewModel(factory = createDirectStreamViewModelFactory)
             CreateDirectStreamView(createDirectStreamViewModel, navController)
         }
+    }
+}
+
+@Composable
+private fun ComingSoonScreen(title: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(LocalWorkspaceColorsPalette.current.surface),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = "$title скоро появится",
+            color = LocalWorkspaceColorsPalette.current.textAdditional50,
+        )
     }
 }
 

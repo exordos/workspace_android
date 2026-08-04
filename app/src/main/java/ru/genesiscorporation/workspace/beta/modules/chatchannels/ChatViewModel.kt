@@ -8,7 +8,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -25,7 +29,9 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FoldersRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageReactionsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageSortDirection
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesByIdsRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.OwnUserRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ServerSettingsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamsRequest
@@ -49,6 +55,52 @@ sealed interface ChatNavEvent {
         val userId: Int
     ) : ChatNavEvent
 }
+
+private data class MentionRefreshRequest(
+    val ownerKey: String?,
+    val unreadStreamVersions: Map<String, Int>,
+    val unreadTopicVersions: Map<String, Int>,
+)
+
+private fun unreadMentionOwnerKey(
+    baseUrl: String?,
+    userId: String?,
+    accessToken: String?
+): String? {
+    val normalizedBaseUrl = baseUrl?.trim()?.trimEnd('/')
+    if (normalizedBaseUrl.isNullOrEmpty() || accessToken.isNullOrBlank()) return null
+    return "$normalizedBaseUrl|${userId?.trim().orEmpty()}|${accessToken.hashCode()}"
+}
+
+internal fun unreadMentionStreamUuids(
+    messages: List<MessageResponse>,
+    unreadStreamUuids: Set<String>,
+): Set<String> = messages
+    .asSequence()
+    .filter { message ->
+        message.mentioned &&
+            !message.read &&
+            message.streamUuid in unreadStreamUuids
+    }
+    .map(MessageResponse::streamUuid)
+    .toSet()
+
+internal fun unreadMentionTopicUuids(
+    messages: List<MessageResponse>,
+    unreadTopicUuids: Set<String>,
+): Set<String> = messages
+    .asSequence()
+    .filter { message ->
+        message.mentioned &&
+            !message.read &&
+            message.topicUuid in unreadTopicUuids
+    }
+    .map(MessageResponse::topicUuid)
+    .toSet()
+
+internal fun unreadMentionCount(messages: List<MessageResponse>): Int =
+    messages.count { it.mentioned && !it.read }
+
 class ChatViewModel(
     val client: WorkspaceAPIClient,
     val userViewModel: UserViewModel,
@@ -63,6 +115,55 @@ class ChatViewModel(
             initialValue = emptyList()
         )
 
+    val mentionedMessages: StateFlow<List<MessageResponse>> = repo.mentionedMessages
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList()
+        )
+
+    val unreadMentionStreamUuids: StateFlow<Set<String>> = combine(
+        repo.mentionedMessages,
+        repo.streams,
+    ) { messages, streams ->
+        unreadMentionStreamUuids(
+            messages = messages,
+            unreadStreamUuids = streams
+                .filter { it.unreadCount > 0 }
+                .mapTo(mutableSetOf(), Stream::uuid),
+        )
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = emptySet(),
+    )
+
+    val unreadMentionTopicUuids: StateFlow<Set<String>> = combine(
+        repo.mentionedMessages,
+        repo.streamTopics,
+    ) { messages, topicsByStream ->
+        unreadMentionTopicUuids(
+            messages = messages,
+            unreadTopicUuids = topicsByStream.values
+                .flatten()
+                .filter { it.unreadCount > 0 }
+                .mapTo(mutableSetOf(), TopicsResponseData::uuid),
+        )
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = emptySet(),
+    )
+
+    val unreadMentionCount: StateFlow<Int> = repo.mentionedMessages
+        .map(::unreadMentionCount)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = 0,
+        )
+    private var lastMentionOwnerKey: String? = null
+
     private val _currentlySelectedStream = MutableStateFlow<Stream?>(null)
     var currentlySelectedStream: StateFlow<Stream?> = _currentlySelectedStream
 
@@ -72,7 +173,12 @@ class ChatViewModel(
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = emptyMap()
         )
-    private var users: List<UserResponseData> = emptyList()
+    val users: StateFlow<List<UserResponseData>> = repo.users
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList(),
+        )
 
     val folders: StateFlow<List<FolderResponseData>> = repo.folders
         .stateIn(
@@ -90,6 +196,8 @@ class ChatViewModel(
     var searchQuery: StateFlow<String> = _searchQuery
     private val _queryState = MutableStateFlow<QueryState>(QueryState.Idle)
     val queryState: StateFlow<QueryState> = _queryState
+    private val _mentionsQueryState = MutableStateFlow<QueryState>(QueryState.Idle)
+    val mentionsQueryState: StateFlow<QueryState> = _mentionsQueryState
 
     var createdStream: Stream? = null
     private val _createQueryState = MutableStateFlow<QueryState>(QueryState.Idle)
@@ -114,6 +222,78 @@ class ChatViewModel(
     init {
         viewModelScope.launch {
             loadServerSettings()
+        }
+        viewModelScope.launch {
+            combine(
+                combine(repo.streams, repo.streamTopics) { streams, topicsByStream ->
+                    val unreadStreams = streams
+                        .filter { it.unreadCount > 0 }
+                        .associate { it.uuid to it.unreadCount }
+                    val unreadTopics = topicsByStream.values
+                        .flatten()
+                        .filter { it.unreadCount > 0 }
+                        .associate { it.uuid to it.unreadCount }
+                    unreadStreams to unreadTopics
+                },
+                userViewModel.baseUrl,
+                userViewModel.userId,
+                userViewModel.accessToken,
+            ) { unreadCatalog, baseUrl, userId, accessToken ->
+                MentionRefreshRequest(
+                    ownerKey = unreadMentionOwnerKey(baseUrl, userId, accessToken),
+                    unreadStreamVersions = unreadCatalog.first,
+                    unreadTopicVersions = unreadCatalog.second,
+                )
+            }
+                .distinctUntilChanged()
+                .collectLatest(::refreshMentions)
+        }
+    }
+
+    private fun currentUnreadMentionOwnerKey(): String? = unreadMentionOwnerKey(
+        baseUrl = userViewModel.baseUrl.value,
+        userId = userViewModel.userId.value,
+        accessToken = userViewModel.accessToken.value
+    )
+
+    private suspend fun refreshMentions(
+        request: MentionRefreshRequest,
+    ) {
+        if (request.ownerKey != lastMentionOwnerKey) {
+            lastMentionOwnerKey = request.ownerKey
+            repo.setMentionedMessages(emptyList())
+        }
+        val ownerKey = request.ownerKey
+        if (ownerKey == null) {
+            repo.setMentionedMessages(emptyList())
+            _mentionsQueryState.value = QueryState.Idle
+            return
+        }
+        if (mentionedMessages.value.isEmpty()) {
+            _mentionsQueryState.value = QueryState.Loading
+        }
+
+        when (
+            val response = client.performRequest(
+                MessagesRequest(
+                    pageLimit = 50,
+                    sortDirection = MessageSortDirection.DESCENDING,
+                    mentioned = true,
+                ),
+            )
+        ) {
+            is ApiResult.Success -> {
+                if (currentUnreadMentionOwnerKey() != ownerKey) return
+                repo.setMentionedMessages(response.value)
+                _mentionsQueryState.value = QueryState.Success
+            }
+            is ApiResult.Error -> {
+                if (currentUnreadMentionOwnerKey() != ownerKey) return
+                // Keep the last owner-scoped snapshot when a refresh fails.
+                _mentionsQueryState.value = QueryState.Error(
+                    "Не удалось загрузить упоминания",
+                )
+            }
         }
     }
 
@@ -193,7 +373,6 @@ class ChatViewModel(
         val response = client.performRequest(UsersRequest())
         when(response) {
             is ApiResult.Success -> {
-                users = response.value
                 repo.setInitialUsers(response.value)
                 loadFolders()
             }

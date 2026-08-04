@@ -249,6 +249,36 @@ class EventsRepository() {
     private val _streams = MutableStateFlow<List<Stream>>(emptyList())
     val streams: StateFlow<List<Stream>> = _streams.asStateFlow()
 
+    private val _mentionedMessages = MutableStateFlow<List<MessageResponse>>(emptyList())
+    val mentionedMessages: StateFlow<List<MessageResponse>> =
+        _mentionedMessages.asStateFlow()
+
+    fun setMentionedMessages(newValue: List<MessageResponse>) {
+        val messagesWithUsers = newValue
+            .filter(MessageResponse::mentioned)
+            .distinctBy(MessageResponse::uuid)
+            .map(::withMessageUser)
+            .sortedByDescending(MessageResponse::createdAt)
+        _mentionedMessages.value = messagesWithUsers
+    }
+
+    private fun upsertMentionedMessage(message: MessageResponse) {
+        _mentionedMessages.update { current ->
+            val withoutMessage = current.filterNot { it.uuid == message.uuid }
+            if (message.mentioned) {
+                (withoutMessage + withMessageUser(message))
+                    .sortedByDescending(MessageResponse::createdAt)
+            } else {
+                withoutMessage
+            }
+        }
+    }
+
+    private fun withMessageUser(message: MessageResponse): MessageResponse =
+        message.apply {
+            user = users.value.firstOrNull { it.uuid == authorUuid }
+        }
+
     fun updateStream(updatedStream: Stream) {
         val message = messagesPool.value.firstOrNull { it.uuid == updatedStream.lastMessageUuid }
         _streams.update { current ->
@@ -257,6 +287,7 @@ class EventsRepository() {
                     stream.copy(
                         lastMessageUuid = updatedStream.lastMessageUuid,
                         unreadCount = updatedStream.unreadCount,
+                        notificationMode = updatedStream.notificationMode,
                         lastMessage = message
                     )
                 } else {
@@ -474,6 +505,7 @@ class EventsRepository() {
                 val message = json.decodeFromString<MessageResponse>(payload)
                 updateMessagesPool(listOf(message))
                 addMessageToStreamTopic(message)
+                upsertMentionedMessage(message)
             }
             "updated" -> {
                 val message = json.decodeFromString<MessageResponse>(payload)

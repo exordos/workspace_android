@@ -42,6 +42,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.formatHHmm
 import ru.genesiscorporation.workspace.beta.ui.Avatar
+import ru.genesiscorporation.workspace.beta.ui.UnreadBadge
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.time.Instant
@@ -52,6 +53,7 @@ import java.time.format.DateTimeFormatter
 @Composable
 fun ChatChannel(
     item: Stream,
+    hasUnreadMention: Boolean,
     viewModel: ChatViewModel,
     showDetail: Boolean,
     currentlySelectedFolder: FolderResponseData?,
@@ -61,6 +63,10 @@ fun ChatChannel(
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val palette = LocalWorkspaceColorsPalette.current
+    val badgeState = streamUnreadBadgeState(
+        notificationMode = item.notificationMode,
+        hasUnreadMention = hasUnreadMention,
+    )
     val targetBackground = if (showDetail) palette.chatHeaderBackground.copy(alpha = 0f) else palette.chatHeaderBackground
 //    val animatedBackground by animateColorAsState(
 //        targetValue = targetBackground,
@@ -158,18 +164,10 @@ fun ChatChannel(
                 verticalArrangement = Arrangement.Center
             ) {
                 if (item.unreadCount > 0) {
-                    Text(
-                        text = "${item.unreadCount}",
-                        color = LocalWorkspaceColorsPalette.current.noticeOnBadge,
-                        fontSize = 14.sp,
-                        fontFamily = InterFontFamily,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier
-                            .background(
-                                color = LocalWorkspaceColorsPalette.current.noticeCounterBadge,
-                                shape = RoundedCornerShape(100.dp)
-                            )
-                            .padding(horizontal = 8.dp)
+                    UnreadBadge(
+                        count = item.unreadCount,
+                        muted = badgeState.muted,
+                        mentioned = badgeState.mentioned,
                     )
                 }
                 if (lastMessage != null) {
@@ -220,4 +218,21 @@ fun ChatChannel(
             )
         }
     }
+}
+
+internal data class StreamUnreadBadgeState(
+    val muted: Boolean,
+    val mentioned: Boolean,
+)
+
+internal fun streamUnreadBadgeState(
+    notificationMode: String,
+    hasUnreadMention: Boolean,
+): StreamUnreadBadgeState {
+    val mentionsOnly = notificationMode.equals("mentions_only", ignoreCase = true)
+    return StreamUnreadBadgeState(
+        muted = !hasUnreadMention &&
+            (notificationMode.equals("muted", ignoreCase = true) || mentionsOnly),
+        mentioned = hasUnreadMention,
+    )
 }
