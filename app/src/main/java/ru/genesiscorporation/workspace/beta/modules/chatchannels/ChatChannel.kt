@@ -55,6 +55,7 @@ fun ChatChannel(
     viewModel: ChatViewModel,
     showDetail: Boolean,
     currentlySelectedFolder: FolderResponseData?,
+    currentlySelectedStream: Stream?,
     onChatNumberToAddChange: (Stream?) -> Unit,
     onClick: () -> Unit
 ) {
@@ -66,7 +67,6 @@ fun ChatChannel(
 //        animationSpec = tween(durationMillis = 250),
 //        label = "chatHeaderBackground"
 //    )
-    val scope = rememberCoroutineScope()
     val zone = ZoneId.systemDefault()
     val HHMMFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
@@ -97,7 +97,11 @@ fun ChatChannel(
                 item.color,
                 item.name,
                 Modifier
-                    .padding(start = 8.dp, end = 12.dp)
+                    .clip(
+                        RoundedCornerShape(8.dp)
+                    )
+                    .background( if (currentlySelectedStream?.uuid == item.uuid) LocalWorkspaceColorsPalette.current.cardBackgroundBase else Color.Transparent)
+                    .padding(start = 8.dp, top = 12.dp, end = 12.dp, bottom = 12.dp)
                     .size(40.dp)
             )
             Column(
@@ -209,9 +213,11 @@ fun ChatChannel(
                 )
             }
         }
-        HorizontalDivider(
-            thickness = 1.dp,
-            color = LocalWorkspaceColorsPalette.current.divider,
-        )
+        if (currentlySelectedStream == null) {
+            HorizontalDivider(
+                thickness = 1.dp,
+                color = LocalWorkspaceColorsPalette.current.divider,
+            )
+        }
     }
 }

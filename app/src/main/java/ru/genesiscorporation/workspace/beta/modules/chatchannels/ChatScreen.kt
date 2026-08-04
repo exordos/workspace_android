@@ -371,67 +371,76 @@ fun FolderList(
     val folders by chatViewModel.folders.collectAsStateWithLifecycle()
     val currentlySelectedFolder by chatViewModel.currentlySelectedFolder.collectAsState()
     val scope = rememberCoroutineScope()
-    LazyRow(modifier = Modifier.padding(vertical = 16.dp)) {
-        items(
-            items = folders
-        ) { folder ->
-            val dividerColor =
-                if (folder.uuid == currentlySelectedFolder?.uuid) {
-                    LocalWorkspaceColorsPalette.current.textHeaders
-                } else {
-                    LocalWorkspaceColorsPalette.current.textAdditional30
-                }
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .drawBehind {
-                        val strokeWidth = 1.dp.toPx()
-                        drawLine(
-                            color = dividerColor,
-                            start = Offset(0f, size.height - strokeWidth / 2f),
-                            end = Offset(size.width, size.height - strokeWidth / 2f),
-                            strokeWidth = strokeWidth
-                        )
+    Box(
+        contentAlignment = Alignment.BottomStart
+    ) {
+
+        HorizontalDivider(
+            thickness = 1.dp,
+            color = LocalWorkspaceColorsPalette.current.divider
+        )
+        LazyRow {
+            items(
+                items = folders
+            ) { folder ->
+                val dividerColor =
+                    if (folder.uuid == currentlySelectedFolder?.uuid) {
+                        LocalWorkspaceColorsPalette.current.textHeaders
+                    } else {
+                        Color.Transparent
                     }
-                    .padding(bottom = 8.dp)
-            ) {
                 val unreadCount = folder.unreadCount
-                val endPadding = if (unreadCount > 0) 0.dp else 4.dp
-                Text(
-                    folder.title,
-                    fontSize = 14.sp,
-                    fontFamily = InterFontFamily,
-                    fontWeight = FontWeight.Medium,
-                    color = if (folder.uuid == currentlySelectedFolder?.uuid) LocalWorkspaceColorsPalette.current.textHeaders else LocalWorkspaceColorsPalette.current.textAdditional30,
+                val endPadding = if (unreadCount > 0) 0f else 4f
+                Row(
                     modifier = Modifier
-                        .padding(start = 16.dp, 0.dp, endPadding, 0.dp)
-                        .clickable(
-                            onClick = {
-                                scope.launch {
-                                    setShowDetail(false)
-                                    chatViewModel.updateSelectedChat(null)
-                                }
-                                chatViewModel.updateCurrentlySelectedFolder(
-                                    folder
-                                )
-                            }
-                        ),
-                )
-                if (unreadCount > 0) {
+                        .fillMaxWidth()
+                        .drawBehind {
+                            val strokeWidth = 1.dp.toPx()
+                            drawLine(
+                                color = dividerColor,
+                                start = Offset(16f, size.height - strokeWidth / 2f),
+                                end = Offset(size.width - endPadding, size.height - strokeWidth / 2f),
+                                strokeWidth = strokeWidth
+                            )
+                        }
+                        .padding(bottom = 8.dp)
+                ) {
                     Text(
-                        text = "${unreadCount}",
-                        color = LocalWorkspaceColorsPalette.current.noticeOnBadge,
+                        folder.title,
                         fontSize = 14.sp,
                         fontFamily = InterFontFamily,
                         fontWeight = FontWeight.Medium,
+                        color = if (folder.uuid == currentlySelectedFolder?.uuid) LocalWorkspaceColorsPalette.current.textHeaders else LocalWorkspaceColorsPalette.current.textAdditional30,
                         modifier = Modifier
-                            .padding(4.dp, 0.dp, 8.dp, 0.dp)
-                            .background(
-                                color = LocalWorkspaceColorsPalette.current.noticeCounterBadge,
-                                shape = RoundedCornerShape(100.dp)
-                            )
-                            .padding(horizontal = 8.dp)
+                            .padding(start = 16.dp, 0.dp, endPadding.dp, 0.dp)
+                            .clickable(
+                                onClick = {
+                                    scope.launch {
+                                        setShowDetail(false)
+                                        chatViewModel.updateSelectedChat(null)
+                                    }
+                                    chatViewModel.updateCurrentlySelectedFolder(
+                                        folder
+                                    )
+                                }
+                            ),
                     )
+                    if (unreadCount > 0) {
+                        Text(
+                            text = "${unreadCount}",
+                            color = LocalWorkspaceColorsPalette.current.noticeOnBadge,
+                            fontSize = 14.sp,
+                            fontFamily = InterFontFamily,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier
+                                .padding(4.dp, 0.dp, 8.dp, 0.dp)
+                                .background(
+                                    color = LocalWorkspaceColorsPalette.current.noticeCounterBadge,
+                                    shape = RoundedCornerShape(100.dp)
+                                )
+                                .padding(horizontal = 8.dp)
+                        )
+                    }
                 }
             }
         }

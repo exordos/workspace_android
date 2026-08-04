@@ -16,9 +16,17 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -31,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -42,6 +51,7 @@ import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.Chat
 import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.LoginFlow
+import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 import ru.genesiscorporation.workspace.beta.modules.users.UserCell
@@ -50,6 +60,7 @@ import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CreateDirectStreamView(
     viewModel: CreateDirectStreamViewModel,
@@ -94,75 +105,99 @@ fun CreateDirectStreamView(
             }
         }
     }
-
-    Box(Modifier.fillMaxSize()) {
-        TextButton(
-            onClick = { navController.navigateUp() },
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(8.dp)
-        ) {
-            Text("Close")
-        }
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(top = 56.dp)
-        ) {
-            Box(
-                contentAlignment = Alignment.CenterStart,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(40.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .padding(vertical = 4.dp, horizontal = 16.dp)
-                    .background(
-                        LocalWorkspaceColorsPalette.current.searchBackground,
-                        RoundedCornerShape(8.dp)
-                    )
-            ) {
-                BasicTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    textStyle = TextStyle(
-                        color = LocalWorkspaceColorsPalette.current.textAdditional30,
+    Scaffold(
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = {
+                    Text(
+                        "Начать чат",
+                        color = LocalWorkspaceColorsPalette.current.textHeaders,
                         fontSize = 14.sp,
                         fontFamily = InterFontFamily,
-                    ),
-                    cursorBrush = SolidColor(LocalWorkspaceColorsPalette.current.textAdditional30),
-                    singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp),
-                    decorationBox = { innerTextField ->
-                        if (searchQuery.isEmpty()) {
-                            Text(
-                                text = "Поиск...",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        innerTextField()
+                        fontWeight = FontWeight.Medium
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = { navController.navigateUp() }) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.arrow_back),
+                            contentDescription = "Back"
+                        )
                     }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = LocalWorkspaceColorsPalette.current.surface,
+                    titleContentColor = LocalWorkspaceColorsPalette.current.textHeaders,
+                    navigationIconContentColor = LocalWorkspaceColorsPalette.current.textHeaders
                 )
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+            )
+        },
+        containerColor = LocalWorkspaceColorsPalette.current.surface
+    ) { innerPadding ->
+        Box(Modifier
+            .fillMaxSize()
+            .padding(innerPadding)
+            .background(LocalWorkspaceColorsPalette.current.surface)
+        ) {
+            Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(16.dp)
             ) {
-                items(items = filteredUsers) { item ->
-                    UserCell(
-                        item,
-                        {
-                            scope.launch {
-                                viewModel.createPrivateStream(item)
+                Box(
+                    contentAlignment = Alignment.CenterStart,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(40.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .padding(vertical = 4.dp, horizontal = 16.dp)
+                        .background(
+                            LocalWorkspaceColorsPalette.current.searchBackground,
+                            RoundedCornerShape(8.dp)
+                        )
+                ) {
+                    BasicTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        textStyle = TextStyle(
+                            color = LocalWorkspaceColorsPalette.current.textAdditional30,
+                            fontSize = 14.sp,
+                            fontFamily = InterFontFamily,
+                        ),
+                        cursorBrush = SolidColor(LocalWorkspaceColorsPalette.current.textAdditional30),
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp),
+                        decorationBox = { innerTextField ->
+                            if (searchQuery.isEmpty()) {
+                                Text(
+                                    text = "Поиск...",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
-                        },
-                        viewModel.client.userViewModel.baseUrl.collectAsState().value,
-                        viewModel
+                            innerTextField()
+                        }
                     )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(0.dp),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 12.dp)
+                ) {
+                    items(items = filteredUsers) { item ->
+                        UserCell(
+                            item,
+                            {
+                                scope.launch {
+                                    viewModel.createPrivateStream(item)
+                                }
+                            },
+                            viewModel.client.userViewModel.baseUrl.collectAsState().value,
+                            viewModel
+                        )
+                    }
                 }
             }
         }
@@ -176,61 +211,72 @@ fun UserCell(
     baseUrl: String?,
     viewModel: CreateDirectStreamViewModel,
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(65.dp)
-            .clip(
-                RoundedCornerShape(8.dp)
-            )
-            .background(LocalWorkspaceColorsPalette.current.cardBackgroundBase)
-            .clickable(
-                onClick = {
-                    onUserSelected(item)
-                }
-            )
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically
+    Box {
+        Column(
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(65.dp)
+                .clip(
+                    RoundedCornerShape(8.dp)
+                )
+                .clickable(
+                    onClick = {
+                        onUserSelected(item)
+                    }
+                )
         ) {
-            Avatar(
-                item.avatar,
-                baseUrl ?: "",
-                viewModel.client.authHeaders(),
-                null,
-                item.displayableName(),
-                Modifier.size(40.dp)
-            )
-            Column(
-                modifier = Modifier
-                    .padding(10.dp)
+            Row(
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row {
-                    Text(
-                        text = item.displayableName(),
-                        color = LocalWorkspaceColorsPalette.current.textHeaders,
-                        fontSize = 14.sp,
-                        fontFamily = InterFontFamily,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                val email = item.email
-                if (email != null) {
+                Avatar(
+                    item.avatar,
+                    baseUrl ?: "",
+                    viewModel.client.authHeaders(),
+                    null,
+                    item.displayableName(),
+                    Modifier.size(40.dp)
+                )
+                Column(
+                    modifier = Modifier
+                        .padding(horizontal = 10.dp)
+                ) {
                     Row {
                         Text(
-                            text = email,
-                            color = LocalWorkspaceColorsPalette.current.textAdditional50,
-                            fontSize = 12.sp,
+                            text = item.displayableName(),
+                            color = LocalWorkspaceColorsPalette.current.textHeaders,
+                            fontSize = 14.sp,
                             fontFamily = InterFontFamily,
+                            fontWeight = FontWeight.Medium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
-                        Spacer(Modifier.fillMaxWidth())
+                    }
+                    val email = item.email
+                    if (email != null) {
+                        Row {
+                            Text(
+                                text = email,
+                                color = LocalWorkspaceColorsPalette.current.textAdditional50,
+                                fontSize = 12.sp,
+                                fontFamily = InterFontFamily,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Spacer(Modifier.fillMaxWidth())
+                        }
                     }
                 }
             }
         }
+    }
+    Column {
+        Spacer(
+            Modifier.weight(1f)
+        )
+        HorizontalDivider(
+            thickness = 1.dp,
+            color = LocalWorkspaceColorsPalette.current.divider
+        )
     }
 }

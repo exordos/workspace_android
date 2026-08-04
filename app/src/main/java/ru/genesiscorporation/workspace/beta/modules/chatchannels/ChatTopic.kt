@@ -18,6 +18,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -29,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
 import dev.jeziellago.compose.markdowntext.MarkdownText
+import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
@@ -50,6 +52,7 @@ fun ChatTopic(
     val zone = ZoneId.systemDefault()
     val HHMMFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
     val lastMessage = item.lastMessage
+    val scope = rememberCoroutineScope()
     Column {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -61,6 +64,9 @@ fun ChatTopic(
                 )
                 .clickable(
                     onClick = {
+                        scope.launch {
+                            viewModel.updateSelectedChat(null)
+                        }
                         viewModel.currentTopicName = item.name
                         navController.navigate(
                             ChatFlow.ChatDialog(
@@ -102,7 +108,8 @@ fun ChatTopic(
                 )
                 if (lastMessage != null) {
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         val lastMessageUser = lastMessage.user
                         if (lastMessageUser != null) {
