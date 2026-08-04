@@ -1,38 +1,30 @@
 package ru.genesiscorporation.workspace.beta.ui
 
 import androidx.annotation.DrawableRes
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 
@@ -173,72 +165,40 @@ private fun NotificationGlyph(
     glyph: NotificationModeGlyph,
     tint: Color,
 ) {
-    when (glyph) {
-        NotificationModeGlyph.MENTIONS -> Text(
-            text = "@",
-            color = tint,
-            fontSize = 19.sp,
-            lineHeight = 22.sp,
-            fontWeight = FontWeight.Normal,
-        )
-
-        NotificationModeGlyph.MUTED -> NotificationVectorWithDecoration(
-            icon = R.drawable.ic_notifications,
-            tint = tint,
-            drawDecoration = { color ->
-                drawLine(
-                    color = color,
-                    start = Offset(size.width * 0.18f, size.height * 0.18f),
-                    end = Offset(size.width * 0.82f, size.height * 0.82f),
-                    strokeWidth = 1.7.dp.toPx(),
-                    cap = StrokeCap.Round,
-                )
-            },
-        )
-
-        NotificationModeGlyph.DEFAULT -> Icon(
-            painter = painterResource(R.drawable.ic_notifications),
-            contentDescription = null,
-            tint = tint,
-            modifier = Modifier.size(24.dp),
-        )
-
-        NotificationModeGlyph.FOLLOW -> NotificationVectorWithDecoration(
-            icon = R.drawable.ic_notifications,
-            tint = tint,
-            drawDecoration = { color ->
-                drawArc(
-                    color = color,
-                    startAngle = -62f,
-                    sweepAngle = 124f,
-                    useCenter = false,
-                    topLeft = Offset(size.width * 0.68f, size.height * 0.23f),
-                    size = Size(size.width * 0.23f, size.height * 0.54f),
-                    style = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round),
-                )
-            },
-        )
-    }
+    val visual = notificationModeGlyphVisual(glyph)
+    Icon(
+        painter = painterResource(visual.drawableRes),
+        contentDescription = null,
+        tint = tint,
+        modifier = Modifier.size(visual.size),
+    )
 }
 
-@Composable
-private fun NotificationVectorWithDecoration(
-    @DrawableRes icon: Int,
-    tint: Color,
-    drawDecoration: androidx.compose.ui.graphics.drawscope.DrawScope.(Color) -> Unit,
-) {
-    Box(
-        modifier = Modifier.size(24.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            painter = painterResource(icon),
-            contentDescription = null,
-            tint = tint,
-            modifier = Modifier.fillMaxSize(),
-        )
-        Canvas(Modifier.fillMaxSize()) {
-            drawDecoration(tint)
-        }
-    }
+internal data class NotificationModeGlyphVisual(
+    @param:DrawableRes val drawableRes: Int,
+    val size: DpSize,
+)
+
+internal fun notificationModeGlyphVisual(
+    glyph: NotificationModeGlyph,
+): NotificationModeGlyphVisual = when (glyph) {
+    NotificationModeGlyph.MENTIONS -> NotificationModeGlyphVisual(
+        drawableRes = R.drawable.ic_topic_notification_mentions,
+        size = DpSize(width = 18.dp, height = 18.dp),
+    )
+
+    NotificationModeGlyph.MUTED -> NotificationModeGlyphVisual(
+        drawableRes = R.drawable.ic_topic_notification_muted,
+        size = DpSize(width = 18.dp, height = 19.dp),
+    )
+
+    NotificationModeGlyph.DEFAULT -> NotificationModeGlyphVisual(
+        drawableRes = R.drawable.ic_topic_notification_inherit,
+        size = DpSize(width = 14.dp, height = 19.dp),
+    )
+
+    NotificationModeGlyph.FOLLOW -> NotificationModeGlyphVisual(
+        drawableRes = R.drawable.ic_topic_notification_follow,
+        size = DpSize(width = 16.dp, height = 16.dp),
+    )
 }
