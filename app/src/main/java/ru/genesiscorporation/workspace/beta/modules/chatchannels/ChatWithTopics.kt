@@ -50,6 +50,9 @@ import ru.genesiscorporation.workspace.beta.data.WorkspaceUiPreferences
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderItem
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
+import ru.genesiscorporation.workspace.beta.data.remote.dto.isEffectivelyMuted
+import ru.genesiscorporation.workspace.beta.data.remote.dto.isFullyMuted
+import ru.genesiscorporation.workspace.beta.data.remote.dto.resolvedActiveUnreadCount
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.forwardTopicLabel
 import ru.genesiscorporation.workspace.beta.ui.AnimatedGif
@@ -124,6 +127,7 @@ fun ChatWithTopics(
         uiPreferences.prioritizePersonalUnread,
         uiPreferences.prioritizeUnmutedUnreadChannels,
         unreadMentionStreamUuids,
+        streamTopics,
     ) {
         val folderItems = currentlySelectedFolder?.items
         val folderStreams = if (
@@ -146,6 +150,7 @@ fun ChatWithTopics(
                     folderItemsByStream = folderItemsByStream,
                     preferences = uiPreferences,
                     unreadMentionStreamUuids = unreadMentionStreamUuids,
+                    topicsByStream = streamTopics,
                 )
             }
     }
@@ -207,6 +212,7 @@ fun ChatWithTopics(
                 ChatChannel(
                     item = stream,
                     hasUnreadMention = stream.uuid in unreadMentionStreamUuids,
+                    fullyMuted = stream.isFullyMuted(streamTopics[stream.uuid].orEmpty()),
                     viewModel = chatViewModel,
                     baseUrl = baseUrl.orEmpty(),
                     showDetail = showDetail && selectedStream?.uuid == stream.uuid,
@@ -307,7 +313,10 @@ fun ChatWithTopics(
                     },
             ) {
                 val topics = streamTopics[stream.uuid].orEmpty()
-                val orderedTopics = orderTopicsForDisplay(topics)
+                val orderedTopics = orderTopicsForDisplay(
+                    topics = topics,
+                    streamNotificationMode = stream.notificationMode,
+                )
                 val selectedTopicIndex = orderedTopics
                     .indexOfFirst { it.uuid == stream.lastMessage?.topicUuid }
                     .takeIf { it >= 0 }
@@ -558,11 +567,16 @@ internal fun orderChatStreams(
     folderItemsByStream: Map<String, FolderItem>,
     preferences: WorkspaceUiPreferences,
     unreadMentionStreamUuids: Set<String> = emptySet(),
+    topicsByStream: Map<String, List<TopicsResponseData>> = emptyMap(),
 ): List<Stream> = streams.sortedWith { first, second ->
     val firstFolderItem = folderItemsByStream[first.uuid]
     val secondFolderItem = folderItemsByStream[second.uuid]
 
-    comparePriority(
+    compareValues(
+        streamGroupRank(first, topicsByStream[first.uuid].orEmpty()),
+        streamGroupRank(second, topicsByStream[second.uuid].orEmpty()),
+    ).takeIf { it != 0 }
+        ?: comparePriority(
         firstFolderItem?.pinnedAt != null,
         secondFolderItem?.pinnedAt != null,
     ).takeIf { it != 0 }
@@ -587,6 +601,15 @@ internal fun orderChatStreams(
         ?: first.uuid.compareTo(second.uuid)
 }
 
+private fun streamGroupRank(
+    stream: Stream,
+    topics: List<TopicsResponseData>,
+): Int = when {
+    stream.isArchived -> 2
+    stream.isFullyMuted(topics) -> 1
+    else -> 0
+}
+
 internal fun shouldShowTopicDividerAfter(
     itemIndex: Int,
     selectedTopicIndex: Int?,
@@ -599,7 +622,13 @@ private fun comparePersonalUnreadPriority(
     second: Stream,
     enabled: Boolean,
 ): Int {
-    if (!enabled || first.unreadCount <= 0 || second.unreadCount <= 0) return 0
+    if (
+        !enabled ||
+        first.resolvedActiveUnreadCount() <= 0 ||
+        second.resolvedActiveUnreadCount() <= 0
+    ) {
+        return 0
+    }
     return comparePriority(
         first.isPersonalDirectChat(),
         second.isPersonalDirectChat(),
@@ -614,8 +643,8 @@ private fun compareUnmutedUnreadPriority(
 ): Int {
     if (
         !enabled ||
-        first.unreadCount <= 0 ||
-        second.unreadCount <= 0 ||
+        first.resolvedActiveUnreadCount() <= 0 ||
+        second.resolvedActiveUnreadCount() <= 0 ||
         first.isDirectProviderChat() ||
         second.isDirectProviderChat()
     ) {
@@ -658,22 +687,23 @@ internal fun parseTime(value: String?): Instant =
 
 internal fun orderTopicsForDisplay(
     topics: List<TopicsResponseData>,
+    streamNotificationMode: String = "all_messages",
 ): List<TopicsResponseData> = topics.sortedWith { first, second ->
-    comparePriority(!first.isDone, !second.isDone).takeIf { it != 0 }
-        ?: compareUnmutedTopicUnreadPriority(first, second).takeIf { it != 0 }
+    compareValues(
+        topicGroupRank(first, streamNotificationMode),
+        topicGroupRank(second, streamNotificationMode),
+    ).takeIf { it != 0 }
         ?: parseTime(second.lastMessage?.createdAt ?: second.updatedAt)
             .compareTo(parseTime(first.lastMessage?.createdAt ?: first.updatedAt))
             .takeIf { it != 0 }
         ?: first.uuid.compareTo(second.uuid)
 }
 
-private fun compareUnmutedTopicUnreadPriority(
-    first: TopicsResponseData,
-    second: TopicsResponseData,
-): Int {
-    if (first.unreadCount <= 0 || second.unreadCount <= 0) return 0
-    return comparePriority(
-        !first.notificationMode.equals("mute", ignoreCase = true),
-        !second.notificationMode.equals("mute", ignoreCase = true),
-    )
+private fun topicGroupRank(
+    topic: TopicsResponseData,
+    streamNotificationMode: String,
+): Int = when {
+    topic.isDone -> 2
+    topic.isEffectivelyMuted(streamNotificationMode) -> 1
+    else -> 0
 }

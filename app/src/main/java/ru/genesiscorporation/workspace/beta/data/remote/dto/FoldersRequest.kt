@@ -36,6 +36,10 @@ data class FolderItem(
     @SerialName("stream_uuid") val streamUuid: String,
     @SerialName("chat_type") val chatType: String,
     @SerialName("unread_count") var unreadCount: Int,
+    @SerialName("active_unread_count")
+    var activeUnreadCount: Int? = null,
+    @SerialName("passive_unread_count")
+    var passiveUnreadCount: Int? = null,
     @SerialName("order_index") val orderIndex: Int? = null,
     @SerialName("pinned_at") val pinnedAt: String? = null,
 )

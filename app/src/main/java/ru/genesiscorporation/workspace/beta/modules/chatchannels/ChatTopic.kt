@@ -20,6 +20,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
@@ -38,6 +39,8 @@ import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
+import ru.genesiscorporation.workspace.beta.data.remote.dto.displayedUnreadCount
+import ru.genesiscorporation.workspace.beta.data.remote.dto.isEffectivelyMuted
 import ru.genesiscorporation.workspace.beta.ui.UnreadBadge
 import ru.genesiscorporation.workspace.beta.ui.TopicActionsDialog
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
@@ -116,12 +119,15 @@ fun ChatTopic(
 ) {
     val colors = LocalWorkspaceColorsPalette.current
     val lastMessage = item.lastMessage
+    val effectivelyMuted = item.isEffectivelyMuted(stream.notificationMode)
+    val displayedUnread = item.displayedUnreadCount()
 
     Box {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(64.dp)
+                .alpha(if (effectivelyMuted) 0.7f else 1f)
                 .clip(RoundedCornerShape(8.dp))
                 .background(
                     if (selected) colors.cardBackgroundActive else Color.Transparent,
@@ -224,14 +230,19 @@ fun ChatTopic(
                     contentAlignment = Alignment.TopCenter,
                 ) {
                     UnreadBadge(
-                        count = item.unreadCount,
-                        muted = item.notificationMode.equals("mute", ignoreCase = true),
+                        count = displayedUnread?.count ?: 0,
+                        muted = displayedUnread?.passive == true ||
+                            (
+                                item.activeUnreadCount == null &&
+                                    item.passiveUnreadCount == null &&
+                                    effectivelyMuted
+                                ),
                     )
                 }
                 Icon(
                     painter = painterResource(R.drawable.ic_notifications),
                     contentDescription = topicNotificationDescription(item.notificationMode),
-                    tint = if (item.notificationMode == "mute") {
+                    tint = if (effectivelyMuted) {
                         colors.iconDisable
                     } else {
                         colors.iconBase
@@ -243,6 +254,7 @@ fun ChatTopic(
         TopicActionsDialog(
             expanded = actionsExpanded,
             topic = item,
+            streamNotificationMode = stream.notificationMode,
             busy = actionsBusy,
             onDismiss = onDismissActions,
             onRename = onRename,
@@ -255,7 +267,8 @@ fun ChatTopic(
 
 internal fun topicNotificationDescription(mode: String): String = when (mode) {
     "mute" -> "Уведомления темы отключены"
-    "follow", "unmute" -> "Все уведомления темы включены"
+    "unmute" -> "Уведомления темы включены только для упоминаний"
+    "follow" -> "Все уведомления темы включены"
     else -> "Настройки уведомлений темы"
 }
 

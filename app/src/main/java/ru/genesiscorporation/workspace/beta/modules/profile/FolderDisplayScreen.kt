@@ -52,6 +52,7 @@ import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.data.WorkspaceAccount
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
+import ru.genesiscorporation.workspace.beta.data.remote.dto.displayedUnreadCount
 import ru.genesiscorporation.workspace.beta.modules.chatchannels.ChatViewModel
 import ru.genesiscorporation.workspace.beta.modules.chatchannels.FOLDER_TITLE_MAX_LENGTH
 import ru.genesiscorporation.workspace.beta.modules.chatchannels.folderDraftError
@@ -591,6 +592,7 @@ private fun FolderSelectableChatRow(
     avatar: @Composable () -> Unit,
 ) {
     val colors = LocalWorkspaceColorsPalette.current
+    val displayedUnread = stream.displayedUnreadCount()
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -640,9 +642,10 @@ private fun FolderSelectableChatRow(
             )
         }
         Column(horizontalAlignment = Alignment.End) {
-            if (stream.unreadCount > 0) {
-                UnreadBadge(count = stream.unreadCount)
-            }
+            UnreadBadge(
+                count = displayedUnread?.count ?: 0,
+                muted = displayedUnread?.passive == true,
+            )
             Text(
                 text = folderStreamTime(stream),
                 color = colors.textAdditional50,

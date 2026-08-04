@@ -106,6 +106,52 @@ class InboxModelTest {
     }
 
     @Test
+    fun `inbox excludes passive stream and topic unread`() {
+        val passiveOnly = stream(
+            uuid = "passive",
+            name = "Muted",
+            unreadCount = 8,
+        ).copy(
+            activeUnreadCount = 0,
+            passiveUnreadCount = 8,
+        )
+        val mixed = stream(
+            uuid = "mixed",
+            name = "Mixed",
+            unreadCount = 7,
+        ).copy(
+            activeUnreadCount = 2,
+            passiveUnreadCount = 5,
+        )
+        val activeTopic = topic("active", "mixed", "Active", 2).copy(
+            activeUnreadCount = 2,
+            passiveUnreadCount = 0,
+        )
+        val passiveTopic = topic("passive-topic", "mixed", "Muted", 5).copy(
+            activeUnreadCount = 0,
+            passiveUnreadCount = 5,
+        )
+
+        val groups = buildInboxGroups(
+            streams = listOf(passiveOnly, mixed),
+            topicsByStream = mapOf(
+                passiveOnly.uuid to listOf(
+                    topic("only-passive", "passive", "Muted", 8).copy(
+                        activeUnreadCount = 0,
+                        passiveUnreadCount = 8,
+                    ),
+                ),
+                mixed.uuid to listOf(passiveTopic, activeTopic),
+            ),
+            users = emptyList(),
+        )
+
+        assertEquals(listOf("mixed"), groups.map(InboxGroup::streamUuid))
+        assertEquals(listOf("active"), groups.single().rows.map(InboxRow::id))
+        assertEquals(2, inboxUnreadCount(groups))
+    }
+
+    @Test
     fun `blank names get functional nonblank labels and negative counts are ignored`() {
         val groups = buildInboxGroups(
             streams = listOf(stream("stream", " ", unreadCount = 0)),

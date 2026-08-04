@@ -19,6 +19,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamBindingResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
+import ru.genesiscorporation.workspace.beta.data.remote.dto.resolvedActiveUnreadCount
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.time.OffsetDateTime
@@ -1194,7 +1195,7 @@ private fun validatedFolderOrNull(
         .take(MAX_FOLDER_ITEMS_PER_FOLDER)
         .toList()
     return folder.copy(
-        unreadCount = items.sumOf(FolderItem::unreadCount),
+        unreadCount = items.sumOf { it.resolvedActiveUnreadCount() },
         items = items,
     )
 }
@@ -1218,6 +1219,8 @@ private fun isValidFolderItem(
         } != false &&
         item.chatType in VALID_FOLDER_CHAT_TYPES &&
         item.unreadCount >= 0 &&
+        item.activeUnreadCount?.let { it >= 0 } != false &&
+        item.passiveUnreadCount?.let { it >= 0 } != false &&
         (
             item.pinnedAt == null ||
                 parseTimestampMillis(item.pinnedAt) != null

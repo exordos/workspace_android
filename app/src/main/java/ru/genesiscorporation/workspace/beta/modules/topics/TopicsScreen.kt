@@ -41,6 +41,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -67,6 +68,7 @@ import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import ru.genesiscorporation.workspace.beta.ui.TopicActionsDialog
 import ru.genesiscorporation.workspace.beta.ui.TopicNameDialog
+import ru.genesiscorporation.workspace.beta.ui.UnreadBadge
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -79,6 +81,7 @@ fun TopicsScreen(
     val actionError by topicsViewModel.actionError.collectAsState()
     val actionInProgress by topicsViewModel.actionInProgress.collectAsState()
     val lastActionResult by topicsViewModel.lastActionResult.collectAsState()
+    val streamNotificationMode by topicsViewModel.streamNotificationMode.collectAsState()
     var createDialogOpen by rememberSaveable { mutableStateOf(false) }
     var managedTopicUuid by rememberSaveable { mutableStateOf<String?>(null) }
     var renamedTopicUuid by rememberSaveable { mutableStateOf<String?>(null) }
@@ -246,6 +249,7 @@ fun TopicsScreen(
             TopicActionsDialog(
                 expanded = true,
                 topic = topic,
+                streamNotificationMode = streamNotificationMode,
                 busy = actionInProgress,
                 onDismiss = { managedTopicUuid = null },
                 onRename = {
@@ -302,6 +306,7 @@ fun ChatOldTopic(
         modifier = Modifier
             .fillMaxWidth()
             .height(70.dp)
+            .alpha(if (item.effectivelyMuted) 0.7f else 1f)
             .clip(
                 RoundedCornerShape(8.dp)
             )
@@ -364,20 +369,10 @@ fun ChatOldTopic(
             ) {
                 val lastMessage = item.lastMessage
                 Spacer(modifier = Modifier.weight(1f))
-                if (item.unreadCount > 0) {
-                    Text(
-                        text = "${item.unreadCount}",
-                        color = LocalWorkspaceColorsPalette.current.noticeOnBadge,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier
-                            .background(
-                                color = LocalWorkspaceColorsPalette.current.noticeCounterBadge,
-                                shape = RoundedCornerShape(100.dp)
-                            )
-                            .padding(horizontal = 8.dp)
-                    )
-                }
+                UnreadBadge(
+                    count = item.unreadCount,
+                    muted = item.unreadPassive,
+                )
             }
         }
     }

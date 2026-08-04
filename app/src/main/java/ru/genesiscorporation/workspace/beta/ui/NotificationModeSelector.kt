@@ -80,10 +80,30 @@ val TOPIC_NOTIFICATION_MODE_OPTIONS = listOf(
     ),
     NotificationModeOption(
         value = "follow",
-        contentDescription = "Отслеживать тему",
+        contentDescription = "Все сообщения",
         glyph = NotificationModeGlyph.FOLLOW,
     ),
 )
+
+private val TOPIC_UNMUTE_NOTIFICATION_MODE_OPTION = NotificationModeOption(
+    value = "unmute",
+    contentDescription = "Только упоминания",
+    glyph = NotificationModeGlyph.MENTIONS,
+)
+
+fun topicNotificationModeOptions(
+    streamNotificationMode: String,
+    selectedMode: String? = null,
+): List<NotificationModeOption> = if (
+    streamNotificationMode.equals("muted", ignoreCase = true) ||
+    selectedMode.equals("unmute", ignoreCase = true)
+) {
+    TOPIC_NOTIFICATION_MODE_OPTIONS.toMutableList().apply {
+        add(index = 2, element = TOPIC_UNMUTE_NOTIFICATION_MODE_OPTION)
+    }
+} else {
+    TOPIC_NOTIFICATION_MODE_OPTIONS
+}
 
 @Composable
 fun NotificationModeSelector(
@@ -145,7 +165,7 @@ internal fun notificationModeMatches(
 ): Boolean {
     val selected = selectedMode.trim().lowercase()
     val option = optionMode.trim().lowercase()
-    return selected == option || (selected == "unmute" && option == "follow")
+    return selected == option
 }
 
 @Composable

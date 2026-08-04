@@ -21,11 +21,16 @@ class NotificationModeSelectorTest {
             listOf("mute", "default", "follow"),
             TOPIC_NOTIFICATION_MODE_OPTIONS.map(NotificationModeOption::value),
         )
+        assertEquals(
+            listOf("mute", "default", "unmute", "follow"),
+            topicNotificationModeOptions("muted").map(NotificationModeOption::value),
+        )
     }
 
     @Test
-    fun `legacy topic unmute is presented as follow`() {
-        assertTrue(notificationModeMatches("unmute", "follow"))
+    fun `topic unmute and follow stay distinct`() {
+        assertFalse(notificationModeMatches("unmute", "follow"))
+        assertTrue(notificationModeMatches("unmute", "unmute"))
         assertTrue(notificationModeMatches("muted", "muted"))
         assertFalse(notificationModeMatches("mute", "default"))
     }

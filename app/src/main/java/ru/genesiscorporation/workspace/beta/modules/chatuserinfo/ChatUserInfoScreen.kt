@@ -59,6 +59,7 @@ import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
+import ru.genesiscorporation.workspace.beta.data.remote.dto.displayedUnreadCount
 import ru.genesiscorporation.workspace.beta.modules.chatchannels.messagePreview
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.FullscreenZoomableImage
 import ru.genesiscorporation.workspace.beta.ui.Avatar
@@ -762,6 +763,7 @@ private fun ProfileChannelCard(
 ) {
     val colors = LocalWorkspaceColorsPalette.current
     val lastMessage = stream.lastMessage
+    val displayedUnread = stream.displayedUnreadCount()
     val messagePreview = lastMessage?.payload?.content
         ?.let(::messagePreview)
         ?.takeIf(String::isNotBlank)
@@ -828,12 +830,11 @@ private fun ProfileChannelCard(
                 if (messagePreview == null) {
                     Spacer(Modifier.weight(1f))
                 }
-                if (stream.unreadCount > 0) {
-                    UnreadBadge(
-                        count = stream.unreadCount,
-                        modifier = Modifier.padding(start = 8.dp),
-                    )
-                }
+                UnreadBadge(
+                    count = displayedUnread?.count ?: 0,
+                    muted = displayedUnread?.passive == true,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
             }
         }
     }

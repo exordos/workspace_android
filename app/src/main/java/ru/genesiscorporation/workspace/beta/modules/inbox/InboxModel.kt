@@ -3,6 +3,7 @@ package ru.genesiscorporation.workspace.beta.modules.inbox
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
+import ru.genesiscorporation.workspace.beta.data.remote.dto.resolvedActiveUnreadCount
 import ru.genesiscorporation.workspace.beta.modules.chatchannels.isDirectProviderChat
 
 enum class InboxGroupKind {
@@ -76,8 +77,9 @@ internal fun buildInboxGroups(
         if (stream.isArchived) return@mapNotNull null
 
         val topics = topicsByStream[stream.uuid].orEmpty()
-        val unreadTopics = topics.filter { it.unreadCount > 0 }
-        if (stream.unreadCount <= 0 && unreadTopics.isEmpty()) {
+        val unreadTopics = topics.filter { it.resolvedActiveUnreadCount() > 0 }
+        val streamActiveUnread = stream.resolvedActiveUnreadCount()
+        if (streamActiveUnread <= 0 && unreadTopics.isEmpty()) {
             return@mapNotNull null
         }
 
@@ -100,7 +102,7 @@ internal fun buildInboxGroups(
                 InboxRow(
                     id = topic.uuid,
                     title = "$decoratedStreamTitle · $topicTitle",
-                    unreadCount = topic.unreadCount.coerceAtLeast(0),
+                    unreadCount = topic.resolvedActiveUnreadCount(),
                     updatedAt = topic.updatedAt,
                     destination = InboxDestination.Topic(
                         streamUuid = stream.uuid,
@@ -113,7 +115,7 @@ internal fun buildInboxGroups(
                 InboxRow(
                     id = stream.uuid,
                     title = decoratedStreamTitle,
-                    unreadCount = stream.unreadCount.coerceAtLeast(0),
+                    unreadCount = streamActiveUnread,
                     updatedAt = stream.updatedAt,
                     destination = InboxDestination.Stream(stream.uuid),
                 ),
@@ -124,7 +126,10 @@ internal fun buildInboxGroups(
             streamUuid = stream.uuid,
             streamTitle = decoratedStreamTitle,
             kind = if (direct) InboxGroupKind.DIRECT else InboxGroupKind.CHANNEL,
-            unreadCount = stream.unreadCount.coerceAtLeast(0),
+            unreadCount = maxOf(
+                streamActiveUnread,
+                rows.sumOf(InboxRow::unreadCount),
+            ),
             rows = rows,
         )
     }

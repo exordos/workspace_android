@@ -27,6 +27,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
@@ -41,8 +42,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.data.ChatListDensity
+import ru.genesiscorporation.workspace.beta.data.remote.dto.DisplayedUnreadCount
+import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderItem
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
+import ru.genesiscorporation.workspace.beta.data.remote.dto.displayedUnreadCount
 import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.NotificationModeSelector
 import ru.genesiscorporation.workspace.beta.ui.STREAM_NOTIFICATION_MODE_OPTIONS
@@ -55,6 +59,7 @@ import java.time.format.DateTimeFormatter
 fun ChatChannel(
     item: Stream,
     hasUnreadMention: Boolean,
+    fullyMuted: Boolean,
     viewModel: ChatViewModel,
     baseUrl: String,
     showDetail: Boolean,
@@ -74,9 +79,17 @@ fun ChatChannel(
     val folderItem = currentlySelectedFolder?.items
         ?.firstOrNull { it.streamUuid == item.uuid }
     val pinned = folderItem?.pinnedAt != null
+    val displayedUnread = displayedUnreadForStream(item, folderItem)
+    val hasSplitCounters = if (folderItem != null) {
+        folderItem.activeUnreadCount != null || folderItem.passiveUnreadCount != null
+    } else {
+        item.activeUnreadCount != null || item.passiveUnreadCount != null
+    }
     val badgeState = streamUnreadBadgeState(
         notificationMode = item.notificationMode,
         hasUnreadMention = hasUnreadMention,
+        displayedUnreadIsPassive = displayedUnread?.passive == true,
+        hasSplitCounters = hasSplitCounters,
     )
     val avatarUrn = if (isDirect) {
         lastMessage?.user?.avatar ?: item.avatar
@@ -89,6 +102,9 @@ fun ChatChannel(
             StreamRailCard(
                 item = item,
                 hasUnreadMention = hasUnreadMention,
+                fullyMuted = fullyMuted,
+                displayedUnread = displayedUnread,
+                hasSplitCounters = hasSplitCounters,
                 baseUrl = baseUrl,
                 avatarUrn = avatarUrn,
                 selected = showDetail,
@@ -100,6 +116,7 @@ fun ChatChannel(
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = if (compact) 52.dp else 64.dp)
+                    .alpha(if (fullyMuted) 0.7f else 1f)
                     .clip(RoundedCornerShape(8.dp))
                     .background(
                         if (showDetail) colors.cardBackgroundActive else colors.background,
@@ -152,6 +169,15 @@ fun ChatChannel(
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f),
                         )
+                        if (item.notificationMode.equals("muted", ignoreCase = true)) {
+                            Spacer(Modifier.width(4.dp))
+                            Icon(
+                                painter = painterResource(R.drawable.ic_figma_channel_mute),
+                                contentDescription = "Уведомления канала отключены",
+                                tint = colors.iconBase,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (!isDirect && lastMessage?.user != null) {
@@ -203,11 +229,11 @@ fun ChatChannel(
                                 modifier = Modifier.size(16.dp),
                             )
                         }
-                        if (pinned && item.unreadCount > 0) {
+                        if (pinned && displayedUnread != null) {
                             Spacer(Modifier.width(8.dp))
                         }
                         UnreadBadge(
-                            count = item.unreadCount,
+                            count = displayedUnread?.count ?: 0,
                             muted = badgeState.muted,
                             mentioned = badgeState.mentioned,
                         )
@@ -297,6 +323,9 @@ fun ChatChannel(
 internal fun StreamRailCard(
     item: Stream,
     hasUnreadMention: Boolean,
+    fullyMuted: Boolean,
+    displayedUnread: DisplayedUnreadCount?,
+    hasSplitCounters: Boolean,
     baseUrl: String,
     avatarUrn: String?,
     selected: Boolean,
@@ -308,11 +337,14 @@ internal fun StreamRailCard(
     val badgeState = streamUnreadBadgeState(
         notificationMode = item.notificationMode,
         hasUnreadMention = hasUnreadMention,
+        displayedUnreadIsPassive = displayedUnread?.passive == true,
+        hasSplitCounters = hasSplitCounters,
     )
     Box(
         modifier = Modifier
             .width(STREAM_RAIL_CARD_WIDTH)
             .height(STREAM_RAIL_CARD_HEIGHT)
+            .alpha(if (fullyMuted) 0.7f else 1f)
             .testTag("stream-rail-${item.uuid}")
             .clip(RoundedCornerShape(STREAM_RAIL_CARD_RADIUS))
             .background(
@@ -322,8 +354,8 @@ internal fun StreamRailCard(
                 role = Role.Button
                 contentDescription = buildString {
                     append("Открыть канал ${item.name}")
-                    if (item.unreadCount > 0) {
-                        append(", непрочитанных: ${item.unreadCount}")
+                    if (displayedUnread != null) {
+                        append(", непрочитанных: ${displayedUnread.count}")
                     }
                 }
             }
@@ -350,7 +382,7 @@ internal fun StreamRailCard(
                 )
             }
             UnreadBadge(
-                count = item.unreadCount,
+                count = displayedUnread?.count ?: 0,
                 muted = badgeState.muted,
                 mentioned = badgeState.mentioned,
                 modifier = Modifier
@@ -358,8 +390,27 @@ internal fun StreamRailCard(
                     .offset(x = 6.dp, y = 6.dp)
                     .testTag("stream-rail-unread-${item.uuid}"),
             )
+            if (item.notificationMode.equals("muted", ignoreCase = true)) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_figma_channel_mute),
+                    contentDescription = "Уведомления канала отключены",
+                    tint = colors.iconBase,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .size(16.dp),
+                )
+            }
         }
     }
+}
+
+internal fun displayedUnreadForStream(
+    stream: Stream,
+    folderItem: FolderItem?,
+): DisplayedUnreadCount? = if (folderItem != null) {
+    folderItem.displayedUnreadCount()
+} else {
+    stream.displayedUnreadCount()
 }
 
 internal data class StreamUnreadBadgeState(
@@ -370,12 +421,22 @@ internal data class StreamUnreadBadgeState(
 internal fun streamUnreadBadgeState(
     notificationMode: String,
     hasUnreadMention: Boolean,
+    displayedUnreadIsPassive: Boolean = false,
+    hasSplitCounters: Boolean = false,
 ): StreamUnreadBadgeState {
+    if (displayedUnreadIsPassive) {
+        return StreamUnreadBadgeState(muted = true, mentioned = false)
+    }
     val mentionsOnly = notificationMode.equals("mentions_only", ignoreCase = true)
-    val showMention = mentionsOnly && hasUnreadMention
+    // The split contract already puts unread mentions into the active counter.
+    // Keep the legacy @ fallback only for snapshots produced before that
+    // contract; otherwise it would hide the active numeric badge.
+    val showMention = !hasSplitCounters && mentionsOnly && hasUnreadMention
     return StreamUnreadBadgeState(
-        muted = notificationMode.equals("muted", ignoreCase = true) ||
-            (mentionsOnly && !showMention),
+        muted = !hasSplitCounters && (
+            notificationMode.equals("muted", ignoreCase = true) ||
+                (mentionsOnly && !showMention)
+            ),
         mentioned = showMention,
     )
 }

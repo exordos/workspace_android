@@ -6,6 +6,7 @@ import ru.genesiscorporation.workspace.beta.data.WorkspaceUiPreferences
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderItem
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ProviderReference
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
+import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 
 class ChatListPreferencesTest {
     @Test
@@ -163,7 +164,7 @@ class ChatListPreferencesTest {
     }
 
     @Test
-    fun `folder pin remains stronger than preferences`() {
+    fun `active group remains stronger than muted folder pin`() {
         val personal = stream(
             uuid = "personal",
             updatedAt = "2026-07-30T12:00:00Z",
@@ -189,7 +190,7 @@ class ChatListPreferencesTest {
         )
 
         assertEquals(
-            listOf("pinned", "personal"),
+            listOf("personal", "pinned"),
             orderChatStreams(
                 streams = listOf(personal, pinned),
                 folderItemsByStream = folderItems,
@@ -237,6 +238,68 @@ class ChatListPreferencesTest {
         )
     }
 
+    @Test
+    fun `stream groups depend on settings even without unread`() {
+        val active = stream(
+            uuid = "active",
+            updatedAt = "2026-08-01T10:00:00Z",
+        )
+        val muted = stream(
+            uuid = "muted",
+            updatedAt = "2026-08-04T10:00:00Z",
+            notificationMode = "muted",
+        )
+        val archived = stream(
+            uuid = "archived",
+            updatedAt = "2026-08-05T10:00:00Z",
+            isArchived = true,
+        )
+
+        assertEquals(
+            listOf("active", "muted", "archived"),
+            orderChatStreams(
+                streams = listOf(archived, muted, active),
+                folderItemsByStream = emptyMap(),
+                preferences = WorkspaceUiPreferences(),
+            ).map(Stream::uuid),
+        )
+    }
+
+    @Test
+    fun `explicit active topic returns muted stream to active group`() {
+        val ordinary = stream(
+            uuid = "ordinary",
+            updatedAt = "2026-08-03T10:00:00Z",
+        )
+        val mutedWithActiveTopic = stream(
+            uuid = "muted-active-topic",
+            updatedAt = "2026-08-04T10:00:00Z",
+            notificationMode = "muted",
+        )
+        val fullyMuted = stream(
+            uuid = "fully-muted",
+            updatedAt = "2026-08-05T10:00:00Z",
+            notificationMode = "muted",
+        )
+
+        assertEquals(
+            listOf("muted-active-topic", "ordinary", "fully-muted"),
+            orderChatStreams(
+                streams = listOf(fullyMuted, ordinary, mutedWithActiveTopic),
+                folderItemsByStream = emptyMap(),
+                preferences = WorkspaceUiPreferences(),
+                topicsByStream = mapOf(
+                    mutedWithActiveTopic.uuid to listOf(
+                        topic(streamUuid = mutedWithActiveTopic.uuid, notificationMode = "follow"),
+                    ),
+                    fullyMuted.uuid to listOf(
+                        topic(streamUuid = fullyMuted.uuid, notificationMode = "default"),
+                    ),
+                ),
+            ).map(Stream::uuid),
+        )
+    }
+
     private fun stream(
         uuid: String,
         updatedAt: String,
@@ -244,6 +307,7 @@ class ChatListPreferencesTest {
         directUserUuid: String? = null,
         providerExternalId: String? = null,
         notificationMode: String = "all_messages",
+        isArchived: Boolean = false,
     ) = Stream(
         uuid = uuid,
         unreadCount = unreadCount,
@@ -251,6 +315,7 @@ class ChatListPreferencesTest {
         name = uuid,
         isPrivate = directUserUuid != null || providerExternalId != null,
         notificationMode = notificationMode,
+        isArchived = isArchived,
         directUserUuid = directUserUuid,
         provider = providerExternalId?.let {
             ProviderReference(
@@ -258,6 +323,20 @@ class ChatListPreferencesTest {
                 externalId = it,
             )
         },
+    )
+
+    private fun topic(
+        streamUuid: String,
+        notificationMode: String,
+    ) = TopicsResponseData(
+        uuid = "topic-$streamUuid-$notificationMode",
+        name = "Topic",
+        streamUuid = streamUuid,
+        updatedAt = "2026-08-04T10:00:00Z",
+        unreadCount = 0,
+        isDone = false,
+        isDefault = false,
+        notificationMode = notificationMode,
     )
 
     private fun folderItem(

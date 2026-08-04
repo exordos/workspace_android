@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -50,17 +51,34 @@ class TopicsViewModel(
     private val repo: EventsRepository
 ): ViewModel() {
 
-    val subscriptions: StateFlow<List<TopicHeader>> = repo.streamTopics
-        .map { topicsByStream ->
+    val streamNotificationMode: StateFlow<String> = repo.streams
+        .map { streams ->
+            streams.firstOrNull { it.uuid == channelStreamId }
+                ?.notificationMode
+                ?: "all_messages"
+        }
+        .stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5_000),
+            "all_messages",
+        )
+
+    val subscriptions: StateFlow<List<TopicHeader>> = combine(
+        repo.streamTopics,
+        streamNotificationMode,
+    ) { topicsByStream, streamMode ->
             topicsByStream[channelStreamId]
                 .orEmpty()
-                .let(::orderTopicsForDisplay)
+                .let { topics ->
+                    orderTopicsForDisplay(topics, streamMode)
+                }
                 .map { topic ->
                     TopicHeader.from(
                         topic = topic,
                         channelName = channelName,
                         channelId = channelStreamId,
                         lastMessage = topic.lastMessage,
+                        streamNotificationMode = streamMode,
                         displayTitle = forwardTopicLabel(
                             topic,
                             topicsByStream[channelStreamId].orEmpty(),

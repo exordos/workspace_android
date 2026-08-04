@@ -46,6 +46,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamBindingResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
+import ru.genesiscorporation.workspace.beta.data.remote.dto.resolvedActiveUnreadCount
 import ru.genesiscorporation.workspace.beta.data.remote.dto.canonicalExternalIntegrationUuid
 import ru.genesiscorporation.workspace.beta.data.remote.dto.parseCanonicalMessageUuid
 import ru.genesiscorporation.workspace.beta.data.remote.dto.validateExternalAccountResponse
@@ -82,6 +83,11 @@ data class InboxCatalogReference(
     val streams: List<Stream>,
     val topics: Map<String, List<TopicsResponseData>>,
 )
+
+private enum class UnreadBucket {
+    ACTIVE,
+    PASSIVE,
+}
 
 class EventsRepository(
     private val cursorStore: RealtimeCursorStore =
@@ -834,15 +840,13 @@ class EventsRepository(
     fun markMessagesRead(messageUuids: Collection<String>) {
         val targetUuids = messageUuids.toSet()
         if (targetUuids.isEmpty()) return
-        var newlyReadMessages =
-            emptyMap<String, Pair<String, String>>()
+        var newlyReadMessages = emptyMap<String, MessageResponse>()
         _streamTopicMessages.update { current ->
-            val changed = mutableMapOf<String, Pair<String, String>>()
+            val changed = mutableMapOf<String, MessageResponse>()
             val updated = current.mapValues { (_, messages) ->
                 messages.map { message ->
                     if (message.uuid in targetUuids && !message.read) {
-                        changed[message.uuid] =
-                            message.streamUuid to message.topicUuid
+                        changed[message.uuid] = message
                         message.copy(read = true)
                     } else {
                         message
@@ -865,15 +869,19 @@ class EventsRepository(
             }
         }
         newlyReadMessages.values
-            .groupingBy { it }
-            .eachCount()
-            .forEach { (conversation, count) ->
-            decrementTopicUnreadProjection(
-                streamUuid = conversation.first,
-                topicUuid = conversation.second,
-                count = count,
-            )
-        }
+            .groupBy { it.streamUuid to it.topicUuid }
+            .forEach { (conversation, messages) ->
+                val activeCount = messages.count { message ->
+                    unreadBucket(message) == UnreadBucket.ACTIVE
+                }
+                decrementTopicUnreadProjection(
+                    streamUuid = conversation.first,
+                    topicUuid = conversation.second,
+                    count = messages.size,
+                    activeCount = activeCount,
+                    passiveCount = messages.size - activeCount,
+                )
+            }
     }
 
     fun addMessageToStreamTopic(message: MessageResponse) {
@@ -1274,6 +1282,8 @@ class EventsRepository(
         val updatedLastMessage = messagesPool.value
             .firstOrNull { it.uuid == updatedTopic.lastMessageUuid }
         var unreadDelta = 0
+        var activeUnreadDelta: Int? = null
+        var passiveUnreadDelta: Int? = null
         mutateStreamTopics { current ->
             val topics =
                 current[updatedTopic.streamUuid]
@@ -1281,8 +1291,28 @@ class EventsRepository(
             val updatedTopics = topics.map { topic ->
                 if (topic.uuid == updatedTopic.uuid) {
                     unreadDelta = updatedTopic.unreadCount - topic.unreadCount
+                    val oldActiveUnread = topic.activeUnreadCount
+                    val newActiveUnread = updatedTopic.activeUnreadCount
+                    activeUnreadDelta = if (
+                        oldActiveUnread != null && newActiveUnread != null
+                    ) {
+                        newActiveUnread - oldActiveUnread
+                    } else {
+                        null
+                    }
+                    val oldPassiveUnread = topic.passiveUnreadCount
+                    val newPassiveUnread = updatedTopic.passiveUnreadCount
+                    passiveUnreadDelta = if (
+                        oldPassiveUnread != null && newPassiveUnread != null
+                    ) {
+                        newPassiveUnread - oldPassiveUnread
+                    } else {
+                        null
+                    }
                     topic.copy(
                         unreadCount = updatedTopic.unreadCount,
+                        activeUnreadCount = updatedTopic.activeUnreadCount,
+                        passiveUnreadCount = updatedTopic.passiveUnreadCount,
                         name = updatedTopic.name,
                         updatedAt = updatedTopic.updatedAt,
                         lastMessageUuid = updatedTopic.lastMessageUuid,
@@ -1303,28 +1333,45 @@ class EventsRepository(
             if (updatedTopics == topics) return@mutateStreamTopics current
             current + (updatedTopic.streamUuid to updatedTopics)
         }
-        if (unreadDelta != 0) {
-            updateStreamUnreadProjection(updatedTopic.streamUuid, unreadDelta)
+        if (
+            unreadDelta != 0 ||
+            (activeUnreadDelta ?: 0) != 0 ||
+            (passiveUnreadDelta ?: 0) != 0
+        ) {
+            updateStreamUnreadProjection(
+                streamUuid = updatedTopic.streamUuid,
+                unreadDelta = unreadDelta,
+                activeUnreadDelta = activeUnreadDelta,
+                passiveUnreadDelta = passiveUnreadDelta,
+            )
         }
     }
 
     private fun updateStreamUnreadProjection(
         streamUuid: String,
-        delta: Int,
+        unreadDelta: Int,
+        activeUnreadDelta: Int? = null,
+        passiveUnreadDelta: Int? = null,
     ) {
-        var projectedUnreadCount: Int? = null
+        var projectedStream: Stream? = null
         mutateStreams { current ->
             current.map { stream ->
                 if (stream.uuid == streamUuid) {
-                    val updatedCount = (stream.unreadCount + delta).coerceAtLeast(0)
-                    projectedUnreadCount = updatedCount
-                    stream.copy(unreadCount = updatedCount)
+                    stream.copy(
+                        unreadCount = (stream.unreadCount + unreadDelta).coerceAtLeast(0),
+                        activeUnreadCount = stream.activeUnreadCount?.let { count ->
+                            (count + (activeUnreadDelta ?: 0)).coerceAtLeast(0)
+                        },
+                        passiveUnreadCount = stream.passiveUnreadCount?.let { count ->
+                            (count + (passiveUnreadDelta ?: 0)).coerceAtLeast(0)
+                        },
+                    ).also { projectedStream = it }
                 } else {
                     stream
                 }
             }
         }
-        val streamUnreadCount = projectedUnreadCount ?: return
+        val stream = projectedStream ?: return
         mutateFolders { current ->
             current.map { folder ->
                 if (folder.items.none { it.streamUuid == streamUuid }) {
@@ -1332,14 +1379,18 @@ class EventsRepository(
                 } else {
                     val updatedItems = folder.items.map { item ->
                         if (item.streamUuid == streamUuid) {
-                            item.copy(unreadCount = streamUnreadCount)
+                            item.copy(
+                                unreadCount = stream.unreadCount,
+                                activeUnreadCount = stream.activeUnreadCount,
+                                passiveUnreadCount = stream.passiveUnreadCount,
+                            )
                         } else {
                             item
                         }
                     }
                     folder.copy(
                         items = updatedItems,
-                        unreadCount = updatedItems.sumOf { it.unreadCount },
+                        unreadCount = updatedItems.sumOf { it.resolvedActiveUnreadCount() },
                     )
                 }
             }
@@ -1350,9 +1401,13 @@ class EventsRepository(
         streamUuid: String,
         topicUuid: String,
         count: Int,
+        activeCount: Int,
+        passiveCount: Int,
     ) {
         if (count <= 0) return
         var appliedDelta = 0
+        var appliedActiveDelta: Int? = null
+        var appliedPassiveDelta: Int? = null
         mutateStreamTopics { current ->
             val topics =
                 current[streamUuid] ?: return@mutateStreamTopics current
@@ -1361,7 +1416,23 @@ class EventsRepository(
                     val updatedCount =
                         (topic.unreadCount - count).coerceAtLeast(0)
                     appliedDelta = updatedCount - topic.unreadCount
-                    topic.copy(unreadCount = updatedCount)
+                    val updatedActiveCount = topic.activeUnreadCount?.let {
+                        (it - activeCount).coerceAtLeast(0)
+                    }
+                    val updatedPassiveCount = topic.passiveUnreadCount?.let {
+                        (it - passiveCount).coerceAtLeast(0)
+                    }
+                    appliedActiveDelta = topic.activeUnreadCount?.let { previous ->
+                        updatedActiveCount?.minus(previous)
+                    }
+                    appliedPassiveDelta = topic.passiveUnreadCount?.let { previous ->
+                        updatedPassiveCount?.minus(previous)
+                    }
+                    topic.copy(
+                        unreadCount = updatedCount,
+                        activeUnreadCount = updatedActiveCount,
+                        passiveUnreadCount = updatedPassiveCount,
+                    )
                 } else {
                     topic
                 }
@@ -1369,7 +1440,30 @@ class EventsRepository(
             current + (streamUuid to updatedTopics)
         }
         if (appliedDelta != 0) {
-            updateStreamUnreadProjection(streamUuid, appliedDelta)
+            updateStreamUnreadProjection(
+                streamUuid = streamUuid,
+                unreadDelta = appliedDelta,
+                activeUnreadDelta = appliedActiveDelta,
+                passiveUnreadDelta = appliedPassiveDelta,
+            )
+        }
+    }
+
+    private fun unreadBucket(message: MessageResponse): UnreadBucket {
+        val topic = _streamTopics.value[message.streamUuid]
+            .orEmpty()
+            .firstOrNull { it.uuid == message.topicUuid }
+        val stream = _streams.value.firstOrNull { it.uuid == message.streamUuid }
+        return when (topic?.notificationMode?.lowercase()) {
+            "mute" -> UnreadBucket.PASSIVE
+            "unmute" -> if (message.mentioned) UnreadBucket.ACTIVE else UnreadBucket.PASSIVE
+            "follow" -> UnreadBucket.ACTIVE
+            else -> when (stream?.notificationMode?.lowercase()) {
+                "muted" -> UnreadBucket.PASSIVE
+                "mentions_only" ->
+                    if (message.mentioned) UnreadBucket.ACTIVE else UnreadBucket.PASSIVE
+                else -> UnreadBucket.ACTIVE
+            }
         }
     }
 
@@ -1612,6 +1706,8 @@ class EventsRepository(
                         sourceName = updatedStream.sourceName,
                         lastMessageUuid = updatedStream.lastMessageUuid,
                         unreadCount = updatedStream.unreadCount,
+                        activeUnreadCount = updatedStream.activeUnreadCount,
+                        passiveUnreadCount = updatedStream.passiveUnreadCount,
                         lastMessage = message
                     )
                 } else {
@@ -1626,14 +1722,18 @@ class EventsRepository(
                 } else {
                     val updatedItems = folder.items.map { item ->
                         if (item.streamUuid == updatedStream.uuid) {
-                            item.copy(unreadCount = updatedStream.unreadCount)
+                            item.copy(
+                                unreadCount = updatedStream.unreadCount,
+                                activeUnreadCount = updatedStream.activeUnreadCount,
+                                passiveUnreadCount = updatedStream.passiveUnreadCount,
+                            )
                         } else {
                             item
                         }
                     }
                     folder.copy(
                         items = updatedItems,
-                        unreadCount = updatedItems.sumOf { it.unreadCount },
+                        unreadCount = updatedItems.sumOf { it.resolvedActiveUnreadCount() },
                     )
                 }
             }
@@ -1672,7 +1772,7 @@ class EventsRepository(
                 val remainingItems = folder.items.filterNot { it.streamUuid == streamUuid }
                 folder.copy(
                     items = remainingItems,
-                    unreadCount = remainingItems.sumOf { it.unreadCount },
+                    unreadCount = remainingItems.sumOf { it.resolvedActiveUnreadCount() },
                 )
             }
         }
@@ -1734,7 +1834,7 @@ class EventsRepository(
                 val remainingItems = folder.items.filterNot { it.uuid == folderItemUuid }
                 folder.copy(
                     items = remainingItems,
-                    unreadCount = remainingItems.sumOf { it.unreadCount },
+                    unreadCount = remainingItems.sumOf { it.resolvedActiveUnreadCount() },
                 )
             }
         }

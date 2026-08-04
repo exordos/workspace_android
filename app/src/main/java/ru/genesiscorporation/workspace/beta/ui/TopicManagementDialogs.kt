@@ -79,6 +79,7 @@ fun TopicNameDialog(
 fun TopicActionsDialog(
     expanded: Boolean,
     topic: TopicsResponseData,
+    streamNotificationMode: String,
     busy: Boolean,
     onDismiss: () -> Unit,
     onRename: () -> Unit,
@@ -94,7 +95,10 @@ fun TopicActionsDialog(
         modifier = Modifier.width(278.dp),
     ) {
         NotificationModeSelector(
-            options = TOPIC_NOTIFICATION_MODE_OPTIONS,
+            options = topicNotificationModeOptions(
+                streamNotificationMode = streamNotificationMode,
+                selectedMode = topic.notificationMode,
+            ),
             selectedMode = topic.notificationMode,
             onModeSelected = onSetNotificationMode,
             enabled = !busy,

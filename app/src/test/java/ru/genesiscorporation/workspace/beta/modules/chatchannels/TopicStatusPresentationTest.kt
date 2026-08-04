@@ -62,6 +62,30 @@ class TopicStatusPresentationTest {
     }
 
     @Test
+    fun `inherited muted topics follow explicit active topics even when read`() {
+        val inherited = topic(
+            uuid = "inherited",
+            isDone = false,
+            updatedAt = "2026-08-04T12:00:00Z",
+            notificationMode = "default",
+        )
+        val explicit = topic(
+            uuid = "explicit",
+            isDone = false,
+            updatedAt = "2026-08-01T12:00:00Z",
+            notificationMode = "unmute",
+        )
+
+        assertEquals(
+            listOf("explicit", "inherited"),
+            orderTopicsForDisplay(
+                topics = listOf(inherited, explicit),
+                streamNotificationMode = "muted",
+            ).map(TopicsResponseData::uuid),
+        )
+    }
+
+    @Test
     fun `topic header retains completed state for legacy list`() {
         val completed = TopicHeader.from(
             topic = topic("done", isDone = true, updatedAt = "2026-08-02T10:00:00Z"),
@@ -78,6 +102,27 @@ class TopicStatusPresentationTest {
 
         assertTrue(completed.isDone)
         assertFalse(active.isDone)
+    }
+
+    @Test
+    fun `legacy topic header inherits muted counter presentation`() {
+        val header = TopicHeader.from(
+            topic = topic(
+                uuid = "legacy-muted",
+                isDone = false,
+                updatedAt = "2026-08-04T10:00:00Z",
+                unreadCount = 3,
+                notificationMode = "default",
+            ),
+            channelName = "Channel",
+            channelId = "stream-id",
+            lastMessage = null,
+            streamNotificationMode = "muted",
+        )
+
+        assertEquals(3, header.unreadCount)
+        assertTrue(header.unreadPassive)
+        assertTrue(header.effectivelyMuted)
     }
 
     private fun topic(

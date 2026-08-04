@@ -59,6 +59,8 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamBindingsReques
 import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamNotificationsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
+import ru.genesiscorporation.workspace.beta.data.remote.dto.displayedUnreadCount
+import ru.genesiscorporation.workspace.beta.data.remote.dto.isEffectivelyMuted
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ToggleTopicDoneRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicNotificationsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UnpinFolderItemRequest
@@ -776,18 +778,15 @@ class ChatViewModel(
                                 updatedStream.lastMessage = poolMessage(stream.lastMessageUuid)
                                 updatedStream
                             }
-                            repo.setInitialStreams(streamsWithMessages)
-                            _queryState.value = QueryState.Success
+                            completeSubscribedChannelsLoad(streamsWithMessages)
                         }
 
                         is ApiResult.Error -> {
-                            repo.setInitialStreams(response.value)
-                            _queryState.value = QueryState.Success
+                            completeSubscribedChannelsLoad(response.value)
                         }
                     }
                 } else {
-                    repo.setInitialStreams(response.value)
-                    _queryState.value = QueryState.Success
+                    completeSubscribedChannelsLoad(response.value)
                 }
             }
 
@@ -797,6 +796,38 @@ class ChatViewModel(
                 )
             }
         }
+    }
+
+    private suspend fun completeSubscribedChannelsLoad(streams: List<Stream>) {
+        repo.setInitialStreams(streams)
+        when (val topicsResponse = client.performRequest(TopicsRequest())) {
+            is ApiResult.Success -> {
+                val messagesByUuid = repo.messagesPool.value.associateBy(MessageResponse::uuid)
+                val cachedTopicsByUuid = repo.streamTopics.value.values
+                    .flatten()
+                    .associateBy(TopicsResponseData::uuid)
+                val topicsWithMessages = topicsResponse.value.map { topic ->
+                    topic.copy(
+                        lastMessage = topic.lastMessageUuid?.let { messageUuid ->
+                            messagesByUuid[messageUuid]
+                                ?: cachedTopicsByUuid[topic.uuid]
+                                    ?.lastMessage
+                                    ?.takeIf { it.uuid == messageUuid }
+                        },
+                    )
+                }
+                repo.replaceAllStreamTopics(
+                    streamUuids = streams.mapTo(mutableSetOf(), Stream::uuid),
+                    topics = topicsWithMessages,
+                )
+            }
+
+            is ApiResult.Error -> {
+                _actionError.value =
+                    "Настройки тем временно недоступны; показаны сохранённые данные"
+            }
+        }
+        _queryState.value = QueryState.Success
     }
 
     private fun refreshStreamBindings() {
@@ -2263,6 +2294,8 @@ data class TopicHeader(
     val channelId: String,
     val lastMessage: MessageResponse?,
     val unreadCount: Int,
+    val unreadPassive: Boolean = false,
+    val effectivelyMuted: Boolean = false,
     val isDone: Boolean = false,
 ) {
     companion object {
@@ -2272,16 +2305,27 @@ data class TopicHeader(
             channelId: String,
             lastMessage: MessageResponse?,
             displayTitle: String = topic.name,
-        ) = TopicHeader(
-            title = topic.name,
-            displayTitle = displayTitle,
-            uuid = topic.uuid,
-            gravatar = null,
-            channelName = channelName,
-            channelId = channelId,
-            lastMessage = lastMessage,
-            unreadCount = topic.unreadCount,
-            isDone = topic.isDone,
-        )
+            streamNotificationMode: String = "all_messages",
+        ): TopicHeader {
+            val displayedUnread = topic.displayedUnreadCount()
+            return TopicHeader(
+                title = topic.name,
+                displayTitle = displayTitle,
+                uuid = topic.uuid,
+                gravatar = null,
+                channelName = channelName,
+                channelId = channelId,
+                lastMessage = lastMessage,
+                unreadCount = displayedUnread?.count ?: 0,
+                unreadPassive = displayedUnread?.passive == true ||
+                    (
+                        topic.activeUnreadCount == null &&
+                            topic.passiveUnreadCount == null &&
+                            topic.isEffectivelyMuted(streamNotificationMode)
+                        ),
+                effectivelyMuted = topic.isEffectivelyMuted(streamNotificationMode),
+                isDone = topic.isDone,
+            )
+        }
     }
 }
