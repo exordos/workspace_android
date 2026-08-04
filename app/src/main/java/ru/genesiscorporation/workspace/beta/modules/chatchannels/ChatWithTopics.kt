@@ -70,6 +70,7 @@ fun ChatWithTopics(
     onShowDetailChange: (Boolean) -> Unit,
 ) {
     val streams by chatViewModel.streams.collectAsStateWithLifecycle()
+    val folders by chatViewModel.folders.collectAsStateWithLifecycle()
     val currentlySelectedFolder by chatViewModel.currentlySelectedFolder.collectAsState()
     val currentlySelectedStream by chatViewModel.currentlySelectedStream.collectAsState()
     val streamTopics by chatViewModel.streamTopics.collectAsStateWithLifecycle()
@@ -82,6 +83,8 @@ fun ChatWithTopics(
         chatViewModel.userViewModel.uiPreferences.collectAsStateWithLifecycle()
     val topicActionBusy by
         chatViewModel.topicActionInProgress.collectAsStateWithLifecycle()
+    val folderMutationInProgress by
+        chatViewModel.folderActionInProgress.collectAsStateWithLifecycle()
     val lastCatalogActionResult by
         chatViewModel.lastCatalogActionResult.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -218,6 +221,8 @@ fun ChatWithTopics(
                     showDetail = showDetail && selectedStream?.uuid == stream.uuid,
                     topicRailOpen = showDetail,
                     currentlySelectedFolder = currentlySelectedFolder,
+                    folders = folders,
+                    folderMutationInProgress = folderMutationInProgress,
                     latestTopicName = stream.lastMessage?.topicUuid?.let { topicUuid ->
                         streamTopics[stream.uuid]
                             .orEmpty()
@@ -225,7 +230,12 @@ fun ChatWithTopics(
                             ?.name
                     },
                     density = uiPreferences.chatListDensity,
-                    onChatNumberToAddChange = chatViewModel::onChatToAddChange,
+                    onOpenMembers = { selected ->
+                        navController.navigate(ChatFlow.ChannelInfo(selected.uuid))
+                    },
+                    onNewTopic = { selected ->
+                        createTopicForStreamUuid = selected.uuid
+                    },
                     onClick = {
                         val defaultTopic = stream.defaultTopicUuid
                         if (stream.isDirectProviderChat() && defaultTopic != null) {

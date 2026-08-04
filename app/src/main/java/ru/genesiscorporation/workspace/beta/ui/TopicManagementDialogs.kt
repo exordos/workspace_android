@@ -1,14 +1,8 @@
 package ru.genesiscorporation.workspace.beta.ui
 
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -18,7 +12,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
@@ -79,7 +72,6 @@ fun TopicNameDialog(
 fun TopicActionsDialog(
     expanded: Boolean,
     topic: TopicsResponseData,
-    streamNotificationMode: String,
     busy: Boolean,
     onDismiss: () -> Unit,
     onRename: () -> Unit,
@@ -87,68 +79,43 @@ fun TopicActionsDialog(
     onToggleDone: () -> Unit,
     onSetNotificationMode: (String) -> Unit,
 ) {
-    DropdownMenu(
+    WorkspaceContextMenu(
         expanded = expanded,
         onDismissRequest = {
             if (!busy) onDismiss()
         },
-        modifier = Modifier.width(278.dp),
+        width = 278.dp,
     ) {
         NotificationModeSelector(
-            options = topicNotificationModeOptions(
-                streamNotificationMode = streamNotificationMode,
-                selectedMode = topic.notificationMode,
-            ),
+            options = topicNotificationModeOptions(topic.notificationMode),
             selectedMode = topic.notificationMode,
             onModeSelected = onSetNotificationMode,
             enabled = !busy,
-            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+            modifier = Modifier.padding(4.dp),
         )
         if (topic.unreadCount > 0) {
-            DropdownMenuItem(
-                text = { Text("Отметить прочитанным") },
+            WorkspaceMenuActionRow(
+                text = "Отметить всё как прочитанное",
+                iconRes = R.drawable.ic_menu_check,
                 onClick = onMarkRead,
                 enabled = !busy,
-                leadingIcon = {
-                    MenuIcon(R.drawable.ic_done_all)
-                },
             )
         }
-        DropdownMenuItem(
-            text = {
-                Text(
-                    if (topic.isDone) {
-                        "Убрать отметку выполненной темы"
-                    } else {
-                        "Отметить тему как выполненную"
-                    },
-                )
+        WorkspaceMenuActionRow(
+            text = if (topic.isDone) {
+                "Убрать отметку выполненной темы"
+            } else {
+                "Отметить тему как выполненную"
             },
+            iconRes = R.drawable.ic_menu_flag,
             onClick = onToggleDone,
             enabled = !busy,
-            leadingIcon = {
-                MenuIcon(R.drawable.ic_check)
-            },
         )
-        DropdownMenuItem(
-            text = { Text("Переименовать тему") },
+        WorkspaceMenuActionRow(
+            text = "Переименовать тему",
+            iconRes = R.drawable.ic_menu_pen,
             onClick = onRename,
             enabled = !busy,
-            leadingIcon = {
-                MenuIcon(R.drawable.ic_message_edit)
-            },
         )
     }
-}
-
-@Composable
-private fun MenuIcon(
-    drawable: Int,
-) {
-    Icon(
-        painter = painterResource(drawable),
-        contentDescription = null,
-        tint = LocalWorkspaceColorsPalette.current.iconBase,
-        modifier = Modifier.size(22.dp),
-    )
 }

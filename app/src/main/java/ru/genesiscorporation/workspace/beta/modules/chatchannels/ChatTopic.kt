@@ -254,7 +254,6 @@ fun ChatTopic(
         TopicActionsDialog(
             expanded = actionsExpanded,
             topic = item,
-            streamNotificationMode = stream.notificationMode,
             busy = actionsBusy,
             onDismiss = onDismissActions,
             onRename = onRename,

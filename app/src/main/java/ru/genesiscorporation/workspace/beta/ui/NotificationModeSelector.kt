@@ -84,12 +84,8 @@ private val TOPIC_UNMUTE_NOTIFICATION_MODE_OPTION = NotificationModeOption(
 )
 
 fun topicNotificationModeOptions(
-    streamNotificationMode: String,
     selectedMode: String? = null,
-): List<NotificationModeOption> = if (
-    streamNotificationMode.equals("muted", ignoreCase = true) ||
-    selectedMode.equals("unmute", ignoreCase = true)
-) {
+): List<NotificationModeOption> = if (selectedMode.equals("unmute", ignoreCase = true)) {
     TOPIC_NOTIFICATION_MODE_OPTIONS.toMutableList().apply {
         add(index = 2, element = TOPIC_UNMUTE_NOTIFICATION_MODE_OPTION)
     }
@@ -109,7 +105,7 @@ fun NotificationModeSelector(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(44.dp)
+            .height(40.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(colors.background)
             .padding(4.dp),

@@ -60,7 +60,6 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamBindingRespons
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 import ru.genesiscorporation.workspace.beta.modules.users.UsersViewModel
-import ru.genesiscorporation.workspace.beta.ui.AddChatToFolder
 import ru.genesiscorporation.workspace.beta.ui.CreateFolder
 import ru.genesiscorporation.workspace.beta.ui.UnreadBadge
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
@@ -99,7 +98,6 @@ fun ChatScreen(
         chatViewModel.folderActionInProgress.collectAsStateWithLifecycle()
     val lastCatalogActionResult by
         chatViewModel.lastCatalogActionResult.collectAsStateWithLifecycle()
-    val chatToAdd by chatViewModel.chatToAdd.collectAsState()
     val actionError by chatViewModel.actionError.collectAsStateWithLifecycle()
     val currentlySelectedStream by
         chatViewModel.currentlySelectedStream.collectAsStateWithLifecycle()
@@ -403,21 +401,6 @@ fun ChatScreen(
                 ) {
                     Text("Отмена")
                 }
-            },
-        )
-    }
-    chatToAdd?.let { stream ->
-        ModalScrim { chatViewModel.onChatToAddChange(null) }
-        AddChatToFolder(
-            folders,
-            stream,
-            onAddButtonTap = { folder, selectedChat ->
-                chatViewModel.addChatFolder(
-                    streamUuid = selectedChat.uuid,
-                    chatType = selectedChat.folderItemChatType(),
-                    folderUuid = folder.uuid,
-                )
-                chatViewModel.onChatToAddChange(null)
             },
         )
     }

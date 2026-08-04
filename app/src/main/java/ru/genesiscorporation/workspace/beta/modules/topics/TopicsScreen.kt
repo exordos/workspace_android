@@ -81,7 +81,6 @@ fun TopicsScreen(
     val actionError by topicsViewModel.actionError.collectAsState()
     val actionInProgress by topicsViewModel.actionInProgress.collectAsState()
     val lastActionResult by topicsViewModel.lastActionResult.collectAsState()
-    val streamNotificationMode by topicsViewModel.streamNotificationMode.collectAsState()
     var createDialogOpen by rememberSaveable { mutableStateOf(false) }
     var managedTopicUuid by rememberSaveable { mutableStateOf<String?>(null) }
     var renamedTopicUuid by rememberSaveable { mutableStateOf<String?>(null) }
@@ -249,7 +248,6 @@ fun TopicsScreen(
             TopicActionsDialog(
                 expanded = true,
                 topic = topic,
-                streamNotificationMode = streamNotificationMode,
                 busy = actionInProgress,
                 onDismiss = { managedTopicUuid = null },
                 onRename = {

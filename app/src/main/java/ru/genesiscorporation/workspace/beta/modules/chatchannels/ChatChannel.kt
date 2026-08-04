@@ -16,8 +16,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -51,6 +49,8 @@ import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.NotificationModeSelector
 import ru.genesiscorporation.workspace.beta.ui.STREAM_NOTIFICATION_MODE_OPTIONS
 import ru.genesiscorporation.workspace.beta.ui.UnreadBadge
+import ru.genesiscorporation.workspace.beta.ui.WorkspaceContextMenu
+import ru.genesiscorporation.workspace.beta.ui.WorkspaceMenuActionRow
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -65,19 +65,25 @@ fun ChatChannel(
     showDetail: Boolean,
     topicRailOpen: Boolean,
     currentlySelectedFolder: FolderResponseData?,
+    folders: List<FolderResponseData>,
+    folderMutationInProgress: Boolean,
     latestTopicName: String?,
     density: ChatListDensity,
-    onChatNumberToAddChange: (Stream?) -> Unit,
+    onOpenMembers: (Stream) -> Unit,
+    onNewTopic: (Stream) -> Unit,
     onClick: () -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
+    var folderMenuExpanded by remember { mutableStateOf(false) }
     val colors = LocalWorkspaceColorsPalette.current
     val compact = density == ChatListDensity.COMPACT
     val lastMessage = item.lastMessage
     val isDirect = item.isDirectProviderChat()
-    val folderMenuAction = folderChatMenuAction(currentlySelectedFolder)
     val folderItem = currentlySelectedFolder?.items
         ?.firstOrNull { it.streamUuid == item.uuid }
+    val availableFolders = remember(folders, item.uuid) {
+        availableFoldersForStream(folders, item.uuid)
+    }
     val pinned = folderItem?.pinnedAt != null
     val displayedUnread = displayedUnreadForStream(item, folderItem)
     val hasSplitCounters = if (folderItem != null) {
@@ -248,72 +254,102 @@ fun ChatChannel(
                 }
             }
         }
-        DropdownMenu(
+        WorkspaceContextMenu(
             expanded = menuExpanded,
-            onDismissRequest = { menuExpanded = false },
-            modifier = Modifier.width(238.dp),
+            onDismissRequest = {
+                menuExpanded = false
+                folderMenuExpanded = false
+            },
+            width = 264.dp,
         ) {
-            NotificationModeSelector(
-                options = STREAM_NOTIFICATION_MODE_OPTIONS,
-                selectedMode = item.notificationMode,
-                onModeSelected = { mode ->
-                    menuExpanded = false
-                    viewModel.setStreamNotificationMode(item, mode)
-                },
-                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
-            )
-            if (item.unreadCount > 0) {
-                DropdownMenuItem(
-                    text = { Text("Отметить чат прочитанным") },
-                    onClick = {
-                        menuExpanded = false
-                        viewModel.markStreamRead(item)
-                    },
+            if (folderMenuExpanded) {
+                WorkspaceMenuActionRow(
+                    text = "Назад",
+                    iconRes = R.drawable.arrow_back,
+                    iconSize = androidx.compose.ui.unit.DpSize(10.dp, 20.dp),
+                    onClick = { folderMenuExpanded = false },
                 )
-            }
-            if (folderMenuAction == FolderChatMenuAction.ADD) {
-                DropdownMenuItem(
-                    text = { Text("Добавить в папку…") },
-                    onClick = {
-                        onChatNumberToAddChange(item)
+                availableFolders.forEach { folder ->
+                    WorkspaceMenuActionRow(
+                        text = folder.localizedTitle(),
+                        iconRes = null,
+                        enabled = !folderMutationInProgress,
+                        onClick = {
+                            viewModel.addChatFolder(
+                                streamUuid = item.uuid,
+                                chatType = item.folderItemChatType(),
+                                folderUuid = folder.uuid,
+                            )
+                            folderMenuExpanded = false
+                            menuExpanded = false
+                        },
+                    )
+                }
+            } else {
+                NotificationModeSelector(
+                    options = STREAM_NOTIFICATION_MODE_OPTIONS,
+                    selectedMode = item.notificationMode,
+                    onModeSelected = { mode ->
                         menuExpanded = false
+                        viewModel.setStreamNotificationMode(item, mode)
                     },
+                    modifier = Modifier.padding(4.dp),
                 )
-            } else if (
-                folderMenuAction == FolderChatMenuAction.REMOVE &&
-                currentlySelectedFolder != null
-            ) {
-                DropdownMenuItem(
-                    text = { Text("Удалить из папки") },
-                    onClick = {
-                        menuExpanded = false
-                        viewModel.deleteChatFromFolder(
-                            chatId = item.uuid,
-                            folder = currentlySelectedFolder,
-                        )
-                    },
+                if (item.unreadCount > 0) {
+                    WorkspaceMenuActionRow(
+                        text = "Отметить всё как прочитанное",
+                        iconRes = R.drawable.ic_menu_check,
+                        onClick = {
+                            menuExpanded = false
+                            viewModel.markStreamRead(item)
+                        },
+                    )
+                }
+                if (currentlySelectedFolder != null && folderItem != null) {
+                    WorkspaceMenuActionRow(
+                        text = if (folderItem.pinnedAt == null) {
+                            "Закрепить"
+                        } else {
+                            "Открепить"
+                        },
+                        iconRes = R.drawable.ic_menu_pin,
+                        enabled = !folderMutationInProgress,
+                        onClick = {
+                            menuExpanded = false
+                            viewModel.setFolderItemPinned(
+                                folder = currentlySelectedFolder,
+                                streamUuid = item.uuid,
+                                pinned = folderItem.pinnedAt == null,
+                            )
+                        },
+                    )
+                }
+                if (!isDirect) {
+                    WorkspaceMenuActionRow(
+                        text = "Участники",
+                        iconRes = R.drawable.ic_menu_group,
+                        onClick = {
+                            menuExpanded = false
+                            onOpenMembers(item)
+                        },
+                    )
+                }
+                WorkspaceMenuActionRow(
+                    text = "Добавить в папку",
+                    iconRes = R.drawable.ic_menu_folder,
+                    trailingIconRes = R.drawable.ic_menu_chevron_right,
+                    onClick = { folderMenuExpanded = true },
                 )
-            }
-            if (currentlySelectedFolder != null && folderItem != null) {
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            if (folderItem.pinnedAt == null) {
-                                "Закрепить в папке"
-                            } else {
-                                "Открепить от начала"
-                            },
-                        )
-                    },
-                    onClick = {
-                        menuExpanded = false
-                        viewModel.setFolderItemPinned(
-                            folder = currentlySelectedFolder,
-                            streamUuid = item.uuid,
-                            pinned = folderItem.pinnedAt == null,
-                        )
-                    },
-                )
+                if (!isDirect) {
+                    WorkspaceMenuActionRow(
+                        text = "Новая тема",
+                        iconRes = R.drawable.ic_menu_plus,
+                        onClick = {
+                            menuExpanded = false
+                            onNewTopic(item)
+                        },
+                    )
+                }
             }
         }
     }
@@ -446,18 +482,11 @@ internal val STREAM_RAIL_CARD_HEIGHT = 64.dp
 internal val STREAM_RAIL_CARD_RADIUS = 8.dp
 internal val STREAM_RAIL_AVATAR_SIZE = 40.dp
 
-internal enum class FolderChatMenuAction {
-    ADD,
-    REMOVE,
-}
-
-internal fun folderChatMenuAction(
-    folder: FolderResponseData?,
-): FolderChatMenuAction? = when {
-    folder == null -> null
-    folder.isAllChatsFolder() -> FolderChatMenuAction.ADD
-    folder.isUserManaged() -> FolderChatMenuAction.REMOVE
-    else -> null
+internal fun availableFoldersForStream(
+    folders: List<FolderResponseData>,
+    streamUuid: String,
+): List<FolderResponseData> = folders.filter { folder ->
+    folder.isUserManaged() && folder.items.none { it.streamUuid == streamUuid }
 }
 
 internal fun messagePreview(content: String): String =

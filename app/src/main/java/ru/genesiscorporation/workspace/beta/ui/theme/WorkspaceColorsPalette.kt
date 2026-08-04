@@ -8,6 +8,7 @@ import androidx.compose.ui.graphics.Color
 data class WorkspaceColorsPalette(
     val background: Color = Color.Unspecified,
     val surface: Color = Color.Unspecified,
+    val contextMenuBackground: Color = Color.Unspecified,
     val primary: Color = Color.Unspecified,
     val onPrimary: Color = Color.Unspecified,
     val textHeaders: Color = Color.Unspecified,
@@ -56,6 +57,7 @@ data class WorkspaceColorsPalette(
 val LightWorkspaceColorsPalette = WorkspaceColorsPalette(
     background = Color(color = 0xFFF6F6F8),
     surface = Color(color = 0xFFFFFFFF),
+    contextMenuBackground = Color(color = 0xFFFFFFFF),
     primary = Color(color = 0xFFB83D00),
     onPrimary = Color(color = 0xFFFFFFFF),
     textHeaders = Color(color = 0xFF1B1B1D),
@@ -104,6 +106,7 @@ val LightWorkspaceColorsPalette = WorkspaceColorsPalette(
 val DarkWorkspaceColorsPalette = WorkspaceColorsPalette(
     background = Color(color = 0xFF1B1B1D),
     surface = Color(color = 0xFF202022),
+    contextMenuBackground = Color(color = 0xFF333333),
     primary = Color(color = 0xFFFF8138),
     onPrimary = Color(color = 0xFF1B1B1D),
     textHeaders = Color(color = 0xFFF8F8F9),

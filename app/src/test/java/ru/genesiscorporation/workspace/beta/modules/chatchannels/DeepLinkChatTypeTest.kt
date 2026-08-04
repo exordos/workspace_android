@@ -5,6 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ProviderReference
+import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderItem
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
@@ -120,37 +121,39 @@ class DeepLinkChatTypeTest {
     }
 
     @Test
-    fun folderMenuOnlyExposesBackendSupportedMutations() {
-        assertEquals(
-            FolderChatMenuAction.ADD,
-            folderChatMenuAction(
-                folder(
-                    systemType = "all",
-                    uuid = ALL_CHATS_FOLDER_UUID,
-                ),
-            ),
-        )
-        assertEquals(
-            FolderChatMenuAction.REMOVE,
-            folderChatMenuAction(folder(systemType = "created")),
-        )
-        assertEquals(
-            FolderChatMenuAction.REMOVE,
-            folderChatMenuAction(folder(systemType = null)),
-        )
+    fun userManagedFolderClassificationMatchesBackendContract() {
         assertTrue(folder(systemType = null).isUserManaged())
+        assertTrue(folder(systemType = "created").isUserManaged())
         assertFalse(folder(systemType = "all").isUserManaged())
-        assertEquals(
-            null,
-            folderChatMenuAction(
-                folder(
-                    systemType = "all",
-                    uuid = "00000000-0000-0000-0000-000000000001",
+        assertFalse(folder(systemType = "personal").isUserManaged())
+    }
+
+    @Test
+    fun folderSubmenuOnlyListsUserFoldersWithoutTheStream() {
+        val targetStreamUuid = "11111111-1111-4111-8111-111111111111"
+        val available = folder(systemType = null, uuid = "available")
+        val alreadyContainsStream = folder(
+            systemType = "created",
+            uuid = "contains-stream",
+            items = listOf(
+                FolderItem(
+                    uuid = "item",
+                    folderUuid = "contains-stream",
+                    streamUuid = targetStreamUuid,
+                    chatType = "stream",
+                    unreadCount = 0,
                 ),
             ),
         )
-        assertEquals(null, folderChatMenuAction(folder(systemType = "personal")))
-        assertEquals(null, folderChatMenuAction(null))
+        val system = folder(systemType = "personal", uuid = "system")
+
+        assertEquals(
+            listOf(available),
+            availableFoldersForStream(
+                folders = listOf(system, alreadyContainsStream, available),
+                streamUuid = targetStreamUuid,
+            ),
+        )
     }
 
     private fun stream(
@@ -176,12 +179,14 @@ class DeepLinkChatTypeTest {
     private fun folder(
         systemType: String?,
         uuid: String = "44444444-4444-4444-8444-444444444444",
+        items: List<FolderItem> = emptyList(),
     ) = FolderResponseData(
         uuid = uuid,
         title = "Folder",
         unreadCount = 0,
         systemType = systemType,
         creationDate = "2026-01-01T00:00:00Z",
+        items = items,
     )
 
     private fun topic(streamUuid: String) = TopicsResponseData(

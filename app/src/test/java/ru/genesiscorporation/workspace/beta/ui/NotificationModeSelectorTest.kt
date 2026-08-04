@@ -25,8 +25,12 @@ class NotificationModeSelectorTest {
             TOPIC_NOTIFICATION_MODE_OPTIONS.map(NotificationModeOption::value),
         )
         assertEquals(
+            listOf("mute", "default", "follow"),
+            topicNotificationModeOptions().map(NotificationModeOption::value),
+        )
+        assertEquals(
             listOf("mute", "default", "unmute", "follow"),
-            topicNotificationModeOptions("muted").map(NotificationModeOption::value),
+            topicNotificationModeOptions("unmute").map(NotificationModeOption::value),
         )
     }
 

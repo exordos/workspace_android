@@ -217,8 +217,6 @@ class ChatViewModel(
     private val _navEvents = MutableSharedFlow<ChatNavEvent>(extraBufferCapacity = 1)
     val navEvents: SharedFlow<ChatNavEvent> = _navEvents
 
-    private val _chatToAdd = MutableStateFlow<Stream?>(null)
-    var chatToAdd: StateFlow<Stream?> = _chatToAdd
     private val _actionError = MutableStateFlow<String?>(null)
     val actionError: StateFlow<String?> = _actionError
     private val _inboxSyncState = MutableStateFlow(InboxSyncState())
@@ -364,10 +362,6 @@ class ChatViewModel(
 
     fun onSearchQueryChange(query: String) {
         _searchQuery.value = query
-    }
-
-    fun onChatToAddChange(chatToAdd: Stream?) {
-        _chatToAdd.value = chatToAdd
     }
 
     fun clearActionError() {
