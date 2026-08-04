@@ -52,6 +52,10 @@ fun ChatWithTopics(
     onShowDetailChange: (Boolean) -> Unit
 ) {
     val streams by chatViewModel.streams.collectAsStateWithLifecycle()
+    val unreadMentionStreamUuids by
+        chatViewModel.unreadMentionStreamUuids.collectAsStateWithLifecycle()
+    val unreadMentionTopicUuids by
+        chatViewModel.unreadMentionTopicUuids.collectAsStateWithLifecycle()
     val currentlySelectedFolder by chatViewModel.currentlySelectedFolder.collectAsState()
     val searchQuery by chatViewModel.searchQuery.collectAsState()
     val currentlySelectedStream by chatViewModel.currentlySelectedStream.collectAsState()
@@ -122,6 +126,7 @@ fun ChatWithTopics(
                     ) {
                         ChatChannel(
                             item,
+                            item.uuid in unreadMentionStreamUuids,
                             chatViewModel,
                             showDetail,
                             currentlySelectedFolder,
@@ -219,6 +224,7 @@ fun ChatWithTopics(
                                         chatViewModel,
                                         item,
                                         selectedStream,
+                                        item.uuid in unreadMentionTopicUuids,
                                         navController
                                     )
                                 }

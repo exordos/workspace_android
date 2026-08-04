@@ -8,14 +8,41 @@ import ru.genesiscorporation.workspace.beta.data.remote.HTTPMethod
 
 @Serializable
 data class MessagesRequest(
-    val streamId: String,
-    val topicId: String?
+    val streamId: String? = null,
+    val topicId: String? = null,
+    val pageLimit: Int? = null,
+    val sortDirection: MessageSortDirection? = null,
+    val read: Boolean? = null,
+    val mentioned: Boolean? = null,
 ): ApiRequest<MessagesRequestData, List<MessageResponse>, ApiError> {
+    init {
+        require(topicId == null || streamId != null) {
+            "A topic filter requires a stream filter"
+        }
+        pageLimit?.let { limit ->
+            require(limit in 1..MAX_MESSAGE_PAGE_SIZE) {
+                "Message page size must be between 1 and $MAX_MESSAGE_PAGE_SIZE"
+            }
+        }
+        require(
+            (pageLimit == null && sortDirection == null) ||
+                (pageLimit != null && sortDirection != null)
+        ) {
+            "Message pagination requires a page size and sort direction"
+        }
+    }
+
     override val method: HTTPMethod = HTTPMethod.GET
     override val requiresApiKey: Boolean = true
     override val url: String = "/api/workspace/v1/messenger/messages/"
     override val data = MessagesRequestData(
-        streamId, topicId
+        streamUuid = streamId,
+        topicUuid = topicId,
+        pageLimit = pageLimit,
+        sortKey = sortDirection?.let { "created_at" },
+        sortDirection = sortDirection?.wireValue,
+        read = read,
+        mentioned = mentioned,
     )
 }
 
@@ -34,8 +61,13 @@ data class MessagesByIdsRequest(
 
 @Serializable
 data class MessagesRequestData(
-    @SerialName("stream_uuid") val streamUuid: String,
-    @SerialName("topic_uuid") val topicUuid: String?
+    @SerialName("stream_uuid") val streamUuid: String?,
+    @SerialName("topic_uuid") val topicUuid: String?,
+    @SerialName("page_limit") val pageLimit: Int?,
+    @SerialName("sort_key") val sortKey: String?,
+    @SerialName("sort_dir") val sortDirection: String?,
+    val read: Boolean?,
+    val mentioned: Boolean?,
 )
 
 @Serializable
@@ -55,6 +87,8 @@ data class MessageResponse(
     var payload: MessageResponsePayload,
     @SerialName("is_own") val isOwn: Boolean,
     var reactions: Map<String, Int>,
+    val read: Boolean = true,
+    val mentioned: Boolean = false,
     var user: UserResponseData? = null
 )
 
@@ -63,3 +97,13 @@ data class MessageResponsePayload(
     val kind: String,
     var content: String
 )
+
+enum class MessageSortDirection(
+    val wireValue: String,
+) {
+    ASCENDING("asc"),
+    DESCENDING("desc"),
+}
+
+const val DEFAULT_MESSAGE_PAGE_SIZE = 50
+const val MAX_MESSAGE_PAGE_SIZE = 1_000

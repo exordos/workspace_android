@@ -14,9 +14,33 @@ object Chat: Destinations {
     override val title = "Chat"
 }
 
+object MyActivity: Destinations {
+    override val route = "Activity"
+    override val icon = R.drawable.ic_nav_feed
+    override val title = "My activity"
+}
+
+object Calendar: Destinations {
+    override val route = "Calendar"
+    override val icon = R.drawable.ic_nav_calendar
+    override val title = "Calendar"
+}
+
+object Mail: Destinations {
+    override val route = "Mail"
+    override val icon = R.drawable.ic_mail
+    override val title = "Mail"
+}
+
 object ChatFlow {
     @Serializable
+    object Activity
+
+    @Serializable
     object ChatList
+
+    @Serializable
+    object Mentions
 
     @Serializable
     data class ChatDialog(val title: String, val chatId: String, val topicName: String?, val topicUuid: String, val isDirectMessages: Boolean, val userId: Int?)

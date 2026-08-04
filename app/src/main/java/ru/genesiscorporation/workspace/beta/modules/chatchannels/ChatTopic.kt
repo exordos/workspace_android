@@ -35,6 +35,7 @@ import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.formatHHmm
+import ru.genesiscorporation.workspace.beta.ui.UnreadBadge
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.time.Instant
@@ -47,6 +48,7 @@ fun ChatTopic(
     viewModel: ChatViewModel,
     item: TopicsResponseData,
     stream: Stream,
+    hasUnreadMention: Boolean,
     navController: NavHostController
 ) {
     val zone = ZoneId.systemDefault()
@@ -141,21 +143,11 @@ fun ChatTopic(
                 horizontalAlignment = Alignment.End,
                 verticalArrangement = Arrangement.Center
             ) {
-                if (item.unreadCount > 0) {
-                    Text(
-                        text = "${item.unreadCount}",
-                        color = LocalWorkspaceColorsPalette.current.noticeOnBadge,
-                        fontSize = 14.sp,
-                        fontFamily = InterFontFamily,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier
-                            .background(
-                                color = LocalWorkspaceColorsPalette.current.noticeCounterBadge,
-                                shape = RoundedCornerShape(100.dp)
-                            )
-                            .padding(horizontal = 8.dp)
-                    )
-                }
+                UnreadBadge(
+                    count = item.unreadCount,
+                    muted = item.notificationMode.equals("mute", ignoreCase = true),
+                    mentioned = hasUnreadMention,
+                )
                 if (lastMessage != null) {
                     Spacer(modifier = Modifier.weight(1f))
                     val instant = Instant.parse(lastMessage.createdAt)

@@ -22,6 +22,7 @@ data class Stream(
     var name: String,
     @SerialName("private") val isPrivate: Boolean,
     val color: Int,
+    @SerialName("notification_mode") val notificationMode: String = "all_messages",
     @SerialName("last_message_uuid") var lastMessageUuid: String? = null,
     @SerialName("default_topic_uuid") var defaultTopicUuid: String? = null,
     @SerialName("direct_user_uuid") val directUserUuid: String? = null,
