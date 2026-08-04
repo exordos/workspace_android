@@ -1,0 +1,4 @@
+<resources>
+    <string name="message_composer_mentions_title">Варианты упоминаний</string>
+    <string name="message_composer_mention_item_description">%1$s, @%2$s</string>
+</resources>
