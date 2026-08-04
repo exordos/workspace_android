@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.R
+import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -107,6 +108,7 @@ fun SendMessageView(
                         "Сообщение",
                         color = LocalWorkspaceColorsPalette.current.primary,
                         fontSize = 12.sp,
+                        fontFamily = InterFontFamily,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -114,6 +116,7 @@ fun SendMessageView(
                         message,
                         color = LocalWorkspaceColorsPalette.current.textAdditional50,
                         fontSize = 12.sp,
+                        fontFamily = InterFontFamily,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -136,6 +139,7 @@ fun SendMessageView(
                         "Цитируемое сообщение",
                         color = LocalWorkspaceColorsPalette.current.primary,
                         fontSize = 12.sp,
+                        fontFamily = InterFontFamily,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -143,6 +147,7 @@ fun SendMessageView(
                         currentlyQuotedMessage.payload.content,
                         color = LocalWorkspaceColorsPalette.current.textAdditional50,
                         fontSize = 12.sp,
+                        fontFamily = InterFontFamily,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -203,7 +208,8 @@ fun SendMessageView(
                         onValueChange = viewModel::onMessageChange,
                         textStyle = TextStyle(
                             color = LocalWorkspaceColorsPalette.current.textHeaders,
-                            fontSize = 16.sp
+                            fontSize = 16.sp,
+                            fontFamily = InterFontFamily,
                         ),
                         cursorBrush = SolidColor(LocalWorkspaceColorsPalette.current.textHeaders),
                         maxLines = 4,

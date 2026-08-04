@@ -25,6 +25,13 @@ object ChatFlow {
 
     @Serializable
     data class ChatUserInfo(val userName: String, val userId: String, val avatarUrl: String, val email: String)
+    @Serializable
+    object CreateBase
+
+    @Serializable
+    object CreateStream
+    @Serializable
+    object CreateDirectStream
 }
 
 
@@ -38,12 +45,36 @@ object LoginFlow {
     data class Otp(val login: String, val password: String)
 }
 
+object StreamCreationFlow {
+    @Serializable
+    object CreateBase
+
+    @Serializable
+    object CreateStream
+    @Serializable
+    object CreateDirectStream
+}
+
+object SettingsFlow {
+    @Serializable
+    object Settings
+
+    @Serializable
+    object FolderList
+    @Serializable
+    object AddFolder
+}
+
 object ProfileFlow {
     @Serializable
     object Main
+    @Serializable
+    object OwnUserSettings
 
     @Serializable
-    object Login
+    object FolderSettings
+    @Serializable
+    object AddFolder
 }
 
 object Calls: Destinations {

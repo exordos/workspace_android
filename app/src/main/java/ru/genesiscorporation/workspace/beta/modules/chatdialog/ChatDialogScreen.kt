@@ -110,6 +110,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.ui.AnimatedGif
+import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.time.LocalDateTime
 
@@ -197,13 +198,15 @@ fun ChatDialogScreen(
                             viewModel.chatTitle,
                             color = LocalWorkspaceColorsPalette.current.textHeaders,
                             fontSize = 16.sp,
+                            fontFamily = InterFontFamily,
                             fontWeight = FontWeight.Medium
                         )
                         if (viewModel.topicName != null) {
                             Text(
                                 viewModel.topicName,
                                 color = LocalWorkspaceColorsPalette.current.textAdditional30,
-                                fontSize = 14.sp
+                                fontSize = 14.sp,
+                                fontFamily = InterFontFamily,
                             )
                         }
                     }
@@ -334,7 +337,7 @@ data class UserUploadMarkdownParts(
     val relativePath: String,
 )
 private val captionThenLink = Regex(
-    """^(?:(.*?)\r?\n)?\[([^\]]+)\]\((urn:image:[^)]+)\)""",
+    """^(?:(.*?)\r?\n)?!?\[([^\]]+)\]\((urn:image:[^?)]+(?:\?[^)]*)?)\)""",
 )
 
 fun String.parseUserUploadMarkdownOrNull(): UserUploadMarkdownParts? {
@@ -369,6 +372,7 @@ fun ChatMessage(
                     text = currentMessageDate.format(formatter),
                     color = LocalWorkspaceColorsPalette.current.textHeaders,
                     fontSize = 14.sp,
+                    fontFamily = InterFontFamily,
                     modifier = Modifier
                         .padding(vertical = 16.dp)
                         .background(
@@ -440,6 +444,7 @@ fun ChatMessage(
                             Text(text ="${reaction.value}",
                                 color = LocalWorkspaceColorsPalette.current.textHeaders,
                                 fontSize = 12.sp,
+                                fontFamily = InterFontFamily,
                             )
                         }
                     }

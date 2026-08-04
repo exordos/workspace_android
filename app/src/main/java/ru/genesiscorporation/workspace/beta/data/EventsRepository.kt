@@ -1,6 +1,7 @@
 package ru.genesiscorporation.workspace.beta.data
 
 import android.util.Log
+import androidx.compose.runtime.rememberCoroutineScope
 import io.ktor.client.plugins.websocket.webSocket
 import io.ktor.client.request.headers
 import io.ktor.http.HttpHeaders
@@ -9,10 +10,17 @@ import io.ktor.http.path
 import io.ktor.websocket.Frame
 import io.ktor.websocket.readReason
 import io.ktor.websocket.readText
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -34,6 +42,8 @@ import kotlin.plus
 
 class EventsRepository() {
 
+    val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+
     var client: WorkspaceAPIClient? = null
     var latestEpoch: Int = 0
     var epochGeneration: String = ""
@@ -43,8 +53,13 @@ class EventsRepository() {
         isLenient = true
     }
 
-    var currentUser: UserResponseData? = null
+    private val _currentUser = MutableStateFlow<UserResponseData?>(null)
+    val currentUser: StateFlow<UserResponseData?> = _currentUser.asStateFlow()
 
+    fun updateCurrentUser(newValue: UserResponseData) {
+        _currentUser.update { newValue }
+    }
+    private var isWebSocketOpen = false
 
     private val _streamTopicMessages = MutableStateFlow<Map<String, List<MessageResponse>>>(emptyMap())
     val streamTopicMessages: StateFlow<Map<String, List<MessageResponse>>> = _streamTopicMessages.asStateFlow()
@@ -178,7 +193,7 @@ class EventsRepository() {
     }
 
     fun addReaction(reaction: MessageReaction) {
-        val user = currentUser
+        val user = _currentUser.value
         if (user != null) {
             if (reaction.userUuid == user.uuid)
                 _userReactions.update { current ->
@@ -252,14 +267,29 @@ class EventsRepository() {
     }
 
     fun addStream(newStream: Stream) {
+        var streamWithUser = newStream
+        val directUserUuid = newStream.directUserUuid
+        if (directUserUuid != null) {
+            val directUser = _users.value.firstOrNull { it.uuid == directUserUuid }
+            streamWithUser.directUser = directUser
+        }
         _streams.update { current ->
-            current + newStream
+            current + streamWithUser
         }
     }
 
     fun setInitialStreams(newList: List<Stream>) {
+        val streamsWithUsers  = newList.map { newStream ->
+            var streamWithUser = newStream
+            val directUserUuid = newStream.directUserUuid
+            if (directUserUuid != null) {
+                val directUser = _users.value.firstOrNull { it.uuid == directUserUuid }
+                streamWithUser.directUser = directUser
+            }
+            streamWithUser
+        }
         _streams.update {
-            newList
+            streamsWithUsers
         }
     }
 
@@ -293,6 +323,13 @@ class EventsRepository() {
         }
     }
 
+    fun CoroutineScope.every30Seconds(block: suspend () -> Unit): Job = launch {
+        while (isActive) {
+            block()
+            delay(30_000)
+        }
+    }
+
     suspend fun start() {
         val webSocketClient = client
         if (webSocketClient != null) {
@@ -315,6 +352,15 @@ class EventsRepository() {
         val accessToken = webSocketClient.userViewModel.accessToken.value
         val baseUrl = webSocketClient.userViewModel.baseUrl.value?.removePrefix("https://")
         if (accessToken != null && baseUrl != null) {
+            isWebSocketOpen = true
+            val job = scope.every30Seconds {
+                if (!isWebSocketOpen) {
+                    val webSocketClient = client
+                    if (webSocketClient != null) {
+                        startWebsocketConnection(webSocketClient)
+                    }
+                }
+            }
             try {
                 webSocketClient.client.webSocket(
                     request = {
@@ -330,46 +376,73 @@ class EventsRepository() {
                         }
                     }
                 ) {
-                    for (frame in incoming) {
-                        when (frame) {
-                            is Frame.Text -> {
-                                val receivedText = frame.readText()
-                                val jsonObject = json.decodeFromString<JsonObject>(receivedText)
-                                val action = jsonObject["action"]?.jsonPrimitive?.contentOrNull
-                                val payload = jsonObject["payload"]?.toString()
-                                if (action != null && payload != null) {
-                                    when (jsonObject["object_type"]?.toString()?.trim('"')) {
-                                        "message" -> {
-                                            didReceiveMessageEvent(payload, action)
+                    isWebSocketOpen = !closeReason.isCompleted
+                    try {
+                        for (frame in incoming) {
+                            when (frame) {
+                                is Frame.Text -> {
+                                    val receivedText = frame.readText()
+                                    val jsonObject = json.decodeFromString<JsonObject>(receivedText)
+                                    val action = jsonObject["action"]?.jsonPrimitive?.contentOrNull
+                                    val newEpochVersion =
+                                        jsonObject["epoch_version"]?.jsonPrimitive?.contentOrNull?.toInt()
+                                    if (newEpochVersion != null) {
+                                        latestEpoch = newEpochVersion
+                                    }
+                                    val payload = jsonObject["payload"]?.toString()
+                                    if (action != null && payload != null) {
+                                        when (jsonObject["object_type"]?.toString()?.trim('"')) {
+                                            "message" -> {
+                                                didReceiveMessageEvent(payload, action)
+                                            }
+
+                                            "user" -> {
+                                                didReceiveUserEvent(payload, action)
+                                            }
+
+                                            "folder" -> {
+                                                didReceiveFolderEvent(payload, action)
+                                            }
+
+                                            "stream" -> {
+                                                didReceiveStreamEvent(payload, action)
+                                            }
+
+                                            "topic" -> {
+                                                didReceiveTopicEvent(payload, action)
+                                            }
+
+                                            "message_reaction" -> {
+                                                didReceiveReactionEvent(payload, action)
+                                            }
+
+                                            else -> Log.d("WebSocket", "Received: $receivedText")
                                         }
-                                        "user" -> {
-                                            didReceiveUserEvent(payload, action)
-                                        }
-                                        "folder" -> {
-                                            didReceiveFolderEvent(payload, action)
-                                        }
-                                        "stream" -> {
-                                            didReceiveStreamEvent(payload, action)
-                                        }
-                                        "topic" -> {
-                                            didReceiveTopicEvent(payload, action)
-                                        }
-                                        "message_reaction" -> {
-                                            didReceiveReactionEvent(payload, action)
-                                        }
-                                        else -> Log.d("WebSocket", "Received: $receivedText")
                                     }
                                 }
+
+                                is Frame.Binary -> Log.d("WebSocket", "Received binary data bundle")
+                                is Frame.Close -> Log.d(
+                                    "WebSocket",
+                                    "Connection closing reason: ${frame.readReason()}"
+                                )
+
+                                else -> Log.d("WebSocket", "Received control or ping/pong frame")
                             }
-                            is Frame.Binary -> Log.d("WebSocket", "Received binary data bundle")
-                            is Frame.Close -> Log.d("WebSocket", "Connection closing reason: ${frame.readReason()}")
-                            else -> Log.d("WebSocket", "Received control or ping/pong frame")
+                        }
+                    } finally {
+                        val reason = closeReason.await()
+                        if (reason?.code?.toInt() == 4401) {
+                            client?.refreshToken()
                         }
                     }
                 }
             } catch (e: Exception) {
                 Log.d("WebSocket", "Failed: ${e::class.simpleName}: ${e.message}")
                 e.printStackTrace()
+            } finally {
+                isWebSocketOpen = false
+                Log.d("WebSocket", "Is inactive")
             }
         }
     }
@@ -382,7 +455,12 @@ class EventsRepository() {
             }
             "updated" -> {
                 val user = json.decodeFromString<UserResponseData>(payload)
-                updateUser(user)
+                val currentUser = _currentUser.value
+                if (currentUser?.uuid == user.uuid) {
+                    updateCurrentUser(user)
+                } else {
+                    updateUser(user)
+                }
             }
             "deleted" -> {
 

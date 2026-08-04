@@ -39,6 +39,7 @@ import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -55,6 +56,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
@@ -87,6 +90,7 @@ import ru.genesiscorporation.workspace.beta.ui.AddChatToFolder
 import ru.genesiscorporation.workspace.beta.ui.AnimatedGif
 import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.CreateFolder
+import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -104,7 +108,6 @@ fun ChatScreen(
     val scope = rememberCoroutineScope()
     val folders by chatViewModel.folders.collectAsStateWithLifecycle()
     val queryState by chatViewModel.queryState.collectAsState()
-    val currentlySelectedFolder by chatViewModel.currentlySelectedFolder.collectAsState()
     var showUserList by remember { mutableStateOf(false) }
     var showAddFolderView by remember { mutableStateOf(false) }
     val chatToAdd by chatViewModel.chatToAdd.collectAsState()
@@ -189,16 +192,20 @@ fun ChatScreen(
                     titleContentColor = LocalWorkspaceColorsPalette.current.textHeaders,
                 ),
                 title = {
-                    Text("Мессенджер")
+                    Text(
+                        "Мессенджер",
+                        fontFamily = InterFontFamily,
+                    )
                 },
                 expandedHeight = 48.dp,
                 windowInsets = WindowInsets(0, 0, 0, 0),
                 actions = {
                     IconButton(onClick = {
-                        showUserList = true
+//                        showUserList = true
+                        navController.navigate(ChatFlow.CreateBase)
                     }) {
                         Image(
-                            painter = painterResource(id = ru.genesiscorporation.workspace.beta.R.drawable.new_chat),
+                            painter = painterResource(id = ru.genesiscorporation.workspace.beta.R.drawable.ic_new_stream),
                             contentDescription = null,
                             modifier = Modifier.size(32.dp)
                         )
@@ -248,7 +255,8 @@ fun ChatScreen(
                                 },
                                 textStyle = TextStyle(
                                     color = LocalWorkspaceColorsPalette.current.textAdditional30,
-                                    fontSize = 14.sp
+                                    fontSize = 14.sp,
+                                    fontFamily = InterFontFamily,
                                 ),
                                 cursorBrush = SolidColor(LocalWorkspaceColorsPalette.current.textAdditional30),
                                 singleLine = true,
@@ -268,65 +276,23 @@ fun ChatScreen(
                         }
                         Spacer(modifier = Modifier.height(8.dp))
                         if (!folders.isEmpty()) {
-                            LazyRow(modifier = Modifier.padding(vertical = 16.dp)) {
-                                items(
-                                    items = folders
-                                ) { folder ->
-                                    Row {
-                                        val unreadCount = folder.unreadCount
-                                        val endPadding = if (unreadCount > 0) 0.dp else 8.dp
-                                        Text(
-                                            folder.title,
-                                            fontSize = 14.sp,
-                                            fontWeight = FontWeight.Medium,
-                                            color = if (folder.uuid == currentlySelectedFolder?.uuid) LocalWorkspaceColorsPalette.current.textHeaders else LocalWorkspaceColorsPalette.current.textAdditional30,
-                                            modifier = Modifier
-                                                .padding(start = 16.dp, 0.dp, endPadding, 0.dp)
-                                                .clickable(
-                                                    onClick = {
-                                                        scope.launch {
-                                                            showDetail = false
-                                                            chatViewModel.updateSelectedChat(null)
-                                                        }
-                                                        chatViewModel.updateCurrentlySelectedFolder(
-                                                            folder
-                                                        )
-                                                    }
-                                                ),
-                                        )
-                                        if (unreadCount > 0) {
-                                            Text(
-                                                text = "${unreadCount}",
-                                                color = LocalWorkspaceColorsPalette.current.noticeOnBadge,
-                                                fontSize = 14.sp,
-                                                fontWeight = FontWeight.Medium,
-                                                modifier = Modifier
-                                                    .padding(4.dp, 0.dp, 8.dp, 0.dp)
-                                                    .background(
-                                                        color = LocalWorkspaceColorsPalette.current.noticeCounterBadge,
-                                                        shape = RoundedCornerShape(100.dp)
-                                                    )
-                                                    .padding(horizontal = 8.dp)
-                                            )
-                                        }
+                            FolderList(chatViewModel, {
+                                showDetail = it
+                                if (!showDetail) {
+                                    scope.launch {
+                                        chatViewModel.updateSelectedChat(null)
                                     }
                                 }
-                                item {
-                                    Text(
-                                        text = "+",
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = LocalWorkspaceColorsPalette.current.textAdditional30,
-                                        modifier = Modifier
-                                            .padding(horizontal = 16.dp)
-                                            .clickable {
-                                                showAddFolderView = true
-                                            }
-                                    )
+                            })
+                        }
+                        ChatWithTopics(chatViewModel, navController, showDetail, {
+                            showDetail = it
+                            if (!showDetail) {
+                                scope.launch {
+                                    chatViewModel.updateSelectedChat(null)
                                 }
                             }
-                        }
-                        ChatWithTopics(chatViewModel, navController, showDetail, { showDetail = it })
+                        })
                     }
             }
             if (showUserList) {
@@ -392,6 +358,90 @@ fun ChatScreen(
                         chatViewModel.onChatToAddChange(null)
                     }
                 )
+            }
+        }
+    }
+}
+
+@Composable
+fun FolderList(
+    chatViewModel: ChatViewModel,
+    setShowDetail: (Boolean) -> Unit
+) {
+    val folders by chatViewModel.folders.collectAsStateWithLifecycle()
+    val currentlySelectedFolder by chatViewModel.currentlySelectedFolder.collectAsState()
+    val scope = rememberCoroutineScope()
+    Box(
+        contentAlignment = Alignment.BottomStart
+    ) {
+
+        HorizontalDivider(
+            thickness = 1.dp,
+            color = LocalWorkspaceColorsPalette.current.divider
+        )
+        LazyRow {
+            items(
+                items = folders
+            ) { folder ->
+                val dividerColor =
+                    if (folder.uuid == currentlySelectedFolder?.uuid) {
+                        LocalWorkspaceColorsPalette.current.textHeaders
+                    } else {
+                        Color.Transparent
+                    }
+                val unreadCount = folder.unreadCount
+                val endPadding = if (unreadCount > 0) 0f else 4f
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .drawBehind {
+                            val strokeWidth = 1.dp.toPx()
+                            drawLine(
+                                color = dividerColor,
+                                start = Offset(16f, size.height - strokeWidth / 2f),
+                                end = Offset(size.width - endPadding, size.height - strokeWidth / 2f),
+                                strokeWidth = strokeWidth
+                            )
+                        }
+                        .padding(bottom = 8.dp)
+                ) {
+                    Text(
+                        folder.title,
+                        fontSize = 14.sp,
+                        fontFamily = InterFontFamily,
+                        fontWeight = FontWeight.Medium,
+                        color = if (folder.uuid == currentlySelectedFolder?.uuid) LocalWorkspaceColorsPalette.current.textHeaders else LocalWorkspaceColorsPalette.current.textAdditional30,
+                        modifier = Modifier
+                            .padding(start = 16.dp, 0.dp, endPadding.dp, 0.dp)
+                            .clickable(
+                                onClick = {
+                                    scope.launch {
+                                        setShowDetail(false)
+                                        chatViewModel.updateSelectedChat(null)
+                                    }
+                                    chatViewModel.updateCurrentlySelectedFolder(
+                                        folder
+                                    )
+                                }
+                            ),
+                    )
+                    if (unreadCount > 0) {
+                        Text(
+                            text = "${unreadCount}",
+                            color = LocalWorkspaceColorsPalette.current.noticeOnBadge,
+                            fontSize = 14.sp,
+                            fontFamily = InterFontFamily,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier
+                                .padding(4.dp, 0.dp, 8.dp, 0.dp)
+                                .background(
+                                    color = LocalWorkspaceColorsPalette.current.noticeCounterBadge,
+                                    shape = RoundedCornerShape(100.dp)
+                                )
+                                .padding(horizontal = 8.dp)
+                        )
+                    }
+                }
             }
         }
     }

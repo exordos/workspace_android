@@ -169,7 +169,7 @@ class ChatDialogViewModel(
             messageText += "[${currentlyQuotedMessage.user?.displayableName() ?: ""}](urn:user:${currentlyQuotedMessage.authorUuid}) [said](urn:message:${currentlyQuotedMessage.uuid})\n```quote\n${currentlyQuotedMessage.payload.content}\n```\n"
         }
         if (imageUri != null) {
-            val response = client.uploadImage(context, imageUri, chatId)
+            val response = client.uploadStreamImage(context, imageUri, chatId)
             when(response) {
                 is ApiResult.Success -> {
                     val text = _messageText.value
@@ -192,7 +192,7 @@ class ChatDialogViewModel(
     }
 
     suspend fun sendTextMessage(messageText: String) {
-        val userId = repo.currentUser?.uuid
+        val userId = repo.currentUser.value?.uuid
         var newMessage = MessageResponse(
             "",
             OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
@@ -205,7 +205,7 @@ class ChatDialogViewModel(
             true,
             emptyMap()
         )
-        newMessage.user = repo.currentUser
+        newMessage.user = repo.currentUser.value
         repo.updateMessagesPool(listOf(newMessage))
         repo.addMessageToStreamTopic(newMessage)
         possibleMessage = newMessage

@@ -55,6 +55,7 @@ import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.modules.chatchannels.TopicHeader
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.formatHHmm
+import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -172,6 +173,7 @@ fun ChatOldTopic(
                     text = item.title,
                     color = LocalWorkspaceColorsPalette.current.textHeaders,
                     fontSize = 14.sp,
+                    fontFamily = InterFontFamily,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -189,6 +191,7 @@ fun ChatOldTopic(
                         text = "${item.unreadCount}",
                         color = LocalWorkspaceColorsPalette.current.noticeOnBadge,
                         fontSize = 14.sp,
+                        fontFamily = InterFontFamily,
                         fontWeight = FontWeight.Medium,
                         modifier = Modifier
                             .background(

@@ -31,3 +31,8 @@ data class UploadFileResponseData(
     val uuid: String,
     val name: String
 )
+
+@Serializable
+data class UploadAvatarResponseData(
+    val uuid: String
+)

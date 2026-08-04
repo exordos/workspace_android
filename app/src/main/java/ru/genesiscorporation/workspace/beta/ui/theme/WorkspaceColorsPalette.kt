@@ -37,7 +37,8 @@ data class WorkspaceColorsPalette(
     val indicatorRed: Color = Color.Unspecified,
     val indicatorBlue: Color = Color.Unspecified,
     val indicatorGrey: Color = Color.Unspecified,
-    val chatHeaderBackground: Color = Color.Unspecified
+    val chatHeaderBackground: Color = Color.Unspecified,
+    val divider: Color = Color.Unspecified
 )
 
 val LightWorkspaceColorsPalette = WorkspaceColorsPalette(
@@ -72,7 +73,8 @@ val LightWorkspaceColorsPalette = WorkspaceColorsPalette(
     indicatorRed = Color(color = 0xFFE43535),
     indicatorBlue = Color(color = 0xFF4B98E6),
     indicatorGrey = Color(color = 0xFF484848),
-    chatHeaderBackground = Color(color = 0xFFEAF5FF)
+    chatHeaderBackground = Color(color = 0xFFEAF5FF),
+    divider = Color(color = 0xFFE8E8E8)
 )
 
 val DarkWorkspaceColorsPalette = WorkspaceColorsPalette(
@@ -107,7 +109,8 @@ val DarkWorkspaceColorsPalette = WorkspaceColorsPalette(
     indicatorRed = Color(color = 0xFFFA3B7E),
     indicatorBlue = Color(color = 0xFF51ABFF),
     indicatorGrey = Color(color = 0xFF484848),
-    chatHeaderBackground = Color(color = 0xFF282A32)
+    chatHeaderBackground = Color(color = 0xFF282A32),
+    divider = Color(color = 0xFF323234)
 )
 
 val LocalWorkspaceColorsPalette = staticCompositionLocalOf { WorkspaceColorsPalette() }

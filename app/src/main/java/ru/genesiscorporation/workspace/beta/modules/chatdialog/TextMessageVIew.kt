@@ -40,6 +40,7 @@ import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.EnhancedMarkdown
+import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.time.Instant
 import java.time.LocalDateTime
@@ -99,10 +100,10 @@ fun TextMessageView(
                         Avatar(
                             item.user?.avatar,
                             viewModel.userViewModel.baseUrl.value ?: "",
+                            viewModel.client.authHeaders(),
                             null,
                             item.user?.displayableName() ?: "",
-                            30,
-                            true
+                            Modifier.size(30.dp)
                         )
                     }
                 } else {
@@ -132,10 +133,10 @@ fun TextMessageView(
                     Avatar(
                         item.user?.avatar,
                         viewModel.userViewModel.baseUrl.value ?: "",
+                        viewModel.client.authHeaders(),
                         null,
                         item.user?.displayableName() ?: "",
-                        30,
-                        true
+                        Modifier.size(30.dp)
                     )
                 }
             }
@@ -168,13 +169,15 @@ fun TextMessageView(
                         text = item.user?.displayableName() ?: defaultName,
                         color = if (item.isOwn) LocalWorkspaceColorsPalette.current.indicatorBlue else LocalWorkspaceColorsPalette.current.indicatorPurple,
                         fontSize = 14.sp,
+                        fontFamily = InterFontFamily,
                         fontWeight = FontWeight.Medium
                     )
                     EnhancedMarkdown(
                         markdown = item.payload.content,
                         style = TextStyle(
                             color = LocalWorkspaceColorsPalette.current.textHeaders,
-                            fontSize = 14.sp
+                            fontSize = 14.sp,
+                            fontFamily = InterFontFamily,
                         ),
                         navController = navController,
                         viewModel = viewModel
@@ -186,6 +189,7 @@ fun TextMessageView(
                     text = instant.atZone(zone).format(hhmmFormatter),
                     color = LocalWorkspaceColorsPalette.current.messageTimeColor,
                     fontSize = 14.sp,
+                    fontFamily = InterFontFamily,
                 )
             }
             DropdownMenu(

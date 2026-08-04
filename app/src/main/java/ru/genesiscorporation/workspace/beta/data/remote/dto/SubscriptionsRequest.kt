@@ -24,6 +24,7 @@ data class Stream(
     val color: Int,
     @SerialName("last_message_uuid") var lastMessageUuid: String? = null,
     @SerialName("default_topic_uuid") var defaultTopicUuid: String? = null,
-    var avatar: String? = null,
+    @SerialName("direct_user_uuid") val directUserUuid: String? = null,
+    var directUser: UserResponseData? = null,
     var lastMessage: MessageResponse? = null
 )

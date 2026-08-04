@@ -29,6 +29,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.net.URL
 
@@ -54,6 +55,7 @@ fun CreateFolder(
                 "Создать папку",
                 color = LocalWorkspaceColorsPalette.current.textHeaders,
                 fontSize = 12.sp,
+                fontFamily = InterFontFamily,
                 modifier = Modifier.padding(horizontal = 5.dp, vertical = 12.dp)
             )
         }
@@ -63,7 +65,8 @@ fun CreateFolder(
                 onValueChange =  { folderName = it },
                 textStyle = TextStyle(
                     color = LocalWorkspaceColorsPalette.current.textHeaders,
-                    fontSize = 14.sp
+                    fontSize = 14.sp,
+                    fontFamily = InterFontFamily,
                 ),
                 cursorBrush = SolidColor(LocalWorkspaceColorsPalette.current.textHeaders),
                 singleLine = true,

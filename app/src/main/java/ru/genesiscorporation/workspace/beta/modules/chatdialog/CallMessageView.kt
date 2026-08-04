@@ -30,6 +30,7 @@ import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.ui.Avatar
+import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.net.URL
 import java.time.Instant
@@ -92,10 +93,10 @@ fun CallMessageView(
                         Avatar(
                             item.user?.avatar,
                             viewModel.userViewModel.baseUrl.value ?: "",
+                            viewModel.client.authHeaders(),
                             null,
                             item.user?.displayableName() ?: "",
-                            30,
-                            true
+                            Modifier.size(30.dp)
                         )
                     }
                 } else {
@@ -125,10 +126,10 @@ fun CallMessageView(
                     Avatar(
                         item.user?.avatar,
                         viewModel.userViewModel.baseUrl.value ?: "",
+                        viewModel.client.authHeaders(),
                         null,
                         item.user?.displayableName() ?: "",
-                        30,
-                        true
+                        Modifier.size(30.dp)
                     )
                 }
             }
@@ -161,12 +162,14 @@ fun CallMessageView(
                     Text(
                         text = "Звонок",
                         color = LocalWorkspaceColorsPalette.current.indicatorGreen,
-                        fontSize = 14.sp
+                        fontSize = 14.sp,
+                        fontFamily = InterFontFamily,
                     )
                     Text(
                         text = itemUrl.path.drop(1),
                         color = LocalWorkspaceColorsPalette.current.textHeaders,
                         fontSize = 14.sp,
+                        fontFamily = InterFontFamily,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier
@@ -186,6 +189,7 @@ fun CallMessageView(
                         text = instant.atZone(zone).format(hhmmFormatter),
                         color = LocalWorkspaceColorsPalette.current.messageTimeColor,
                         fontSize = 14.sp,
+                        fontFamily = InterFontFamily,
                     )
                 }
             }

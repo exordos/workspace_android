@@ -7,6 +7,7 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Text
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -92,7 +94,7 @@ fun ChatWithTopics(
             val density = LocalDensity.current
             val screenWidthPx = with(density) { maxWidth.toPx() }
             val openOffsetPx =
-                with(density) { 55.dp.toPx() }      // left edge when open
+                with(density) { 60.dp.toPx() }      // left edge when open
             val closedOffsetPx =
                 screenWidthPx + 20                    // fully off-screen right
             val offsetX = remember { Animatable(closedOffsetPx) }
@@ -118,19 +120,12 @@ fun ChatWithTopics(
                     Row(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        if (item.uuid == chatViewModel.currentlySelectedStream.collectAsState().value?.uuid) {
-                            Box(
-                                modifier = Modifier
-                                    .width(3.dp)
-                                    .height(56.dp)
-                                    .background(LocalWorkspaceColorsPalette.current.primary)
-                            )
-                        }
                         ChatChannel(
                             item,
                             chatViewModel,
                             showDetail,
                             currentlySelectedFolder,
+                            currentlySelectedStream,
                             onChatNumberToAddChange = { chatViewModel.onChatToAddChange(it) },
                             onClick = {
 //                                val defaultTopicUuid = item.defaultTopicUuid
@@ -161,7 +156,7 @@ fun ChatWithTopics(
             Box(
                 modifier = Modifier
                     .fillMaxHeight()
-                    .width(maxWidth - 55.dp)
+                    .width(maxWidth - 60.dp)
                     .offset { IntOffset(offsetX.value.roundToInt(), 0) }
                     .background(LocalWorkspaceColorsPalette.current.surface)
                     .pointerInput(Unit) {
@@ -187,39 +182,46 @@ fun ChatWithTopics(
                         )
                     }
             ) {
-                val selectedStream = currentlySelectedStream
-                if (selectedStream != null) {
-                    val topics = streamTopics[selectedStream.uuid]
-                    if (topics?.isEmpty() ?: true) {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (state is QueryState.Loading) {
-                                AnimatedGif(Modifier.size(80.dp))
-                            } else {
-                                Text("Список топиков пуст")
+                Row {
+                    VerticalDivider(
+                        thickness = 1.dp,
+                        color = LocalWorkspaceColorsPalette.current.divider
+                    )
+                    val selectedStream = currentlySelectedStream
+                    if (selectedStream != null) {
+                        val topics = streamTopics[selectedStream.uuid]
+                        if (topics?.isEmpty() ?: true) {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (state is QueryState.Loading) {
+                                    AnimatedGif(Modifier.size(80.dp))
+                                } else {
+                                    Text("Список топиков пуст")
+                                }
                             }
-                        }
-                    } else {
-                        LazyColumn(
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier
-                                .fillMaxSize()
-                        ) {
-                            items(
-                                items = topics.sortedByDescending {
-                                    LocalDateTime.parse(
-                                        it.lastMessage?.createdAt ?: it.updatedAt, messageFormatter
+                        } else {
+                            LazyColumn(
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier
+                                    .fillMaxSize()
+                            ) {
+                                items(
+                                    items = topics.sortedByDescending {
+                                        LocalDateTime.parse(
+                                            it.lastMessage?.createdAt ?: it.updatedAt,
+                                            messageFormatter
+                                        )
+                                    }
+                                ) { item ->
+                                    ChatTopic(
+                                        chatViewModel,
+                                        item,
+                                        selectedStream,
+                                        navController
                                     )
                                 }
-                            ) { item ->
-                                ChatTopic(
-                                    chatViewModel,
-                                    item,
-                                    selectedStream,
-                                    navController
-                                )
                             }
                         }
                     }
