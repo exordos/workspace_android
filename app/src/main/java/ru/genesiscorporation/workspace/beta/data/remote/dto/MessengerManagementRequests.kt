@@ -129,6 +129,39 @@ class MarkStreamReadRequest(
     override val data = EmptyRequestData()
 }
 
+class UpdateStreamRequest(
+    streamUuid: String,
+    name: String? = null,
+    description: String? = null,
+    inviteOnly: Boolean? = null,
+    isPrivate: Boolean? = null,
+) : ApiRequest<UpdateStreamRequestData, Stream, ApiError> {
+    override val method = HTTPMethod.PUT
+    override val url = "/api/workspace/v1/messenger/streams/$streamUuid"
+    override val data = UpdateStreamRequestData(
+        name = name,
+        description = description,
+        inviteOnly = inviteOnly,
+        isPrivate = isPrivate,
+    )
+}
+
+@Serializable
+data class UpdateStreamRequestData(
+    val name: String? = null,
+    val description: String? = null,
+    @SerialName("invite_only") val inviteOnly: Boolean? = null,
+    @SerialName("private") val isPrivate: Boolean? = null,
+)
+
+class DeleteStreamRequest(
+    streamUuid: String,
+) : ApiRequest<EmptyRequestData, String, ApiError> {
+    override val method = HTTPMethod.DELETE
+    override val url = "/api/workspace/v1/messenger/streams/$streamUuid"
+    override val data = EmptyRequestData()
+}
+
 class AddStreamMembersRequest(
     streamUuid: String,
     memberUserUuids: List<String>,
@@ -152,3 +185,18 @@ class DeleteStreamBindingRequest(
         "/api/workspace/v1/messenger/stream_bindings/$bindingUuid"
     override val data = EmptyRequestData()
 }
+
+class UpdateStreamBindingRoleRequest(
+    bindingUuid: String,
+    role: String,
+) : ApiRequest<UpdateStreamBindingRoleRequestData, StreamBindingResponseData, ApiError> {
+    override val method = HTTPMethod.PUT
+    override val url =
+        "/api/workspace/v1/messenger/stream_bindings/$bindingUuid"
+    override val data = UpdateStreamBindingRoleRequestData(role)
+}
+
+@Serializable
+data class UpdateStreamBindingRoleRequestData(
+    val role: String,
+)

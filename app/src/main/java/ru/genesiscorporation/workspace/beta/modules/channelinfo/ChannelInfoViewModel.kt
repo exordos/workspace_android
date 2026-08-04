@@ -19,7 +19,10 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamBindingsReques
 import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamNotificationsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.AddStreamMembersRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.DeleteStreamBindingRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.DeleteStreamRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamsRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.UpdateStreamBindingRoleRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.UpdateStreamRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UsersRequest
 import java.util.concurrent.atomic.AtomicLong
@@ -27,6 +30,7 @@ import java.util.concurrent.atomic.AtomicLong
 internal object MemberActionKind {
     const val ADD = "add"
     const val REMOVE = "remove"
+    const val ROLE = "role"
 }
 
 data class MemberActionResult(
@@ -51,6 +55,10 @@ class ChannelInfoViewModel(
     val muteInProgress: StateFlow<Boolean> = _muteInProgress
     private val _actionError = MutableStateFlow<String?>(null)
     val actionError: StateFlow<String?> = _actionError
+    private val _channelActionInProgress = MutableStateFlow(false)
+    val channelActionInProgress: StateFlow<Boolean> = _channelActionInProgress
+    private val _deletedStream = MutableStateFlow(false)
+    val deletedStream: StateFlow<Boolean> = _deletedStream
     private val _memberActionInProgress = MutableStateFlow(false)
     val memberActionInProgress: StateFlow<Boolean> = _memberActionInProgress
     private val _memberLoadError = MutableStateFlow<String?>(null)
@@ -115,20 +123,17 @@ class ChannelInfoViewModel(
         }
     }
 
-    fun toggleMuted() {
+    fun setNotificationMode(notificationMode: String) {
         if (_muteInProgress.value) return
+        if (notificationMode !in STREAM_NOTIFICATION_MODES) return
         val currentStream = stream.value ?: return
-        val targetMode = if (currentStream.notificationMode == "muted") {
-            "all_messages"
-        } else {
-            "muted"
-        }
+        if (currentStream.notificationMode == notificationMode) return
         viewModelScope.launch {
             _muteInProgress.value = true
             _actionError.value = null
             when (
                 val response = client.performRequest(
-                    StreamNotificationsRequest(streamUuid, targetMode),
+                    StreamNotificationsRequest(streamUuid, notificationMode),
                 )
             ) {
                 is ApiResult.Success -> repo.updateStream(response.value)
@@ -141,6 +146,101 @@ class ChannelInfoViewModel(
         }
     }
 
+    fun updateChannelDetails(name: String, description: String) {
+        if (_channelActionInProgress.value || !canManageCurrentChannel()) return
+        val normalizedName = name.trim()
+        if (normalizedName.isEmpty()) {
+            _actionError.value = "Название канала не может быть пустым"
+            return
+        }
+        val normalizedDescription = description.trim()
+        val currentStream = stream.value ?: return
+        if (
+            currentStream.name == normalizedName &&
+            currentStream.description == normalizedDescription
+        ) {
+            return
+        }
+        viewModelScope.launch {
+            runChannelUpdate(
+                UpdateStreamRequest(
+                    streamUuid = streamUuid,
+                    name = normalizedName,
+                    description = normalizedDescription,
+                ),
+                fallbackError = "Не удалось сохранить канал",
+            )
+        }
+    }
+
+    internal fun updateChannelVisibility(visibility: ChannelVisibility) {
+        if (_channelActionInProgress.value || !canManageCurrentChannel()) return
+        val currentStream = stream.value ?: return
+        val flags = visibility.flags()
+        if (
+            currentStream.inviteOnly == flags.inviteOnly &&
+            currentStream.isPrivate == flags.isPrivate
+        ) {
+            return
+        }
+        viewModelScope.launch {
+            runChannelUpdate(
+                UpdateStreamRequest(
+                    streamUuid = streamUuid,
+                    inviteOnly = flags.inviteOnly,
+                    isPrivate = flags.isPrivate,
+                ),
+                fallbackError = "Не удалось изменить тип канала",
+            )
+        }
+    }
+
+    fun deleteChannel() {
+        val currentStream = stream.value ?: return
+        if (
+            _channelActionInProgress.value ||
+            !canDeleteChannel(
+                currentUserUuid = client.userViewModel.userId.value,
+                ownerUuid = currentStream.owner,
+            )
+        ) {
+            return
+        }
+        viewModelScope.launch {
+            _channelActionInProgress.value = true
+            _actionError.value = null
+            when (
+                val response = client.performRequest(DeleteStreamRequest(streamUuid))
+            ) {
+                is ApiResult.Success -> {
+                    repo.removeStream(streamUuid)
+                    _deletedStream.value = true
+                }
+
+                is ApiResult.Error -> {
+                    _actionError.value = response.error.message
+                        ?: "Не удалось удалить канал"
+                }
+            }
+            _channelActionInProgress.value = false
+        }
+    }
+
+    private suspend fun runChannelUpdate(
+        request: UpdateStreamRequest,
+        fallbackError: String,
+    ) {
+        _channelActionInProgress.value = true
+        _actionError.value = null
+        when (val response = client.performRequest(request)) {
+            is ApiResult.Success -> repo.updateStream(response.value)
+            is ApiResult.Error -> {
+                _actionError.value = response.error.message ?: fallbackError
+            }
+        }
+        _channelActionInProgress.value = false
+    }
+
     fun clearActionError() {
         _actionError.value = null
     }
@@ -150,11 +250,24 @@ class ChannelInfoViewModel(
         viewModelScope.launch { loadBindings() }
     }
 
+    fun canManageCurrentChannel(): Boolean =
+        canManageChannel(stream.value?.role)
+
+    fun canManageMember(member: ChannelMember): Boolean =
+        canManageChannelMember(
+            currentUserRole = stream.value?.role,
+            currentUserUuid = client.userViewModel.userId.value,
+            memberUserUuid = member.user.uuid,
+            memberRole = member.role,
+            bindingsAuthoritative = bindingsAuthoritative.value,
+        )
+
     fun canRemoveMember(member: ChannelMember): Boolean =
         canRemoveChannelMember(
-            memberUserUuid = member.user.uuid,
+            currentUserRole = stream.value?.role,
             currentUserUuid = client.userViewModel.userId.value,
-            ownerUuid = stream.value?.owner,
+            memberUserUuid = member.user.uuid,
+            memberRole = member.role,
             bindingsAuthoritative = bindingsAuthoritative.value,
         )
 
@@ -168,6 +281,10 @@ class ChannelInfoViewModel(
     private suspend fun addMembersInternal(
         userUuids: Collection<String>,
     ): Boolean {
+        if (!canManageCurrentChannel()) {
+            _actionError.value = "Недостаточно прав для добавления участников"
+            return false
+        }
         if (!memberActionMutex.tryLock()) return false
         val loadedBindings = bindings.value
         if (loadedBindings == null || !bindingsAuthoritative.value) {
@@ -271,6 +388,59 @@ class ChannelInfoViewModel(
         }
     }
 
+    fun updateMemberRole(member: ChannelMember, role: String): Long =
+        launchMemberAction(
+            kind = MemberActionKind.ROLE,
+            userUuid = member.user.uuid,
+        ) {
+            updateMemberRoleInternal(member, role)
+        }
+
+    private suspend fun updateMemberRoleInternal(
+        member: ChannelMember,
+        role: String,
+    ): Boolean {
+        if (!canManageMember(member) || !isEditableChannelMemberRole(role)) {
+            _actionError.value = "Недостаточно прав для изменения роли"
+            return false
+        }
+        if (member.role == role) return true
+        if (!memberActionMutex.tryLock()) return false
+        _memberActionInProgress.value = true
+        _actionError.value = null
+        return try {
+            when (
+                val response = client.performRequest(
+                    UpdateStreamBindingRoleRequest(member.bindingUuid, role),
+                )
+            ) {
+                is ApiResult.Success -> {
+                    val updatedBindings = bindings.value
+                        .orEmpty()
+                        .map { existing ->
+                            if (existing.uuid == member.bindingUuid) {
+                                response.value
+                            } else {
+                                existing
+                            }
+                        }
+                    repo.replaceStreamBindings(streamUuid, updatedBindings)
+                    bindings.value = updatedBindings
+                    true
+                }
+
+                is ApiResult.Error -> {
+                    _actionError.value = response.error.message
+                        ?: "Не удалось изменить роль"
+                    false
+                }
+            }
+        } finally {
+            _memberActionInProgress.value = false
+            memberActionMutex.unlock()
+        }
+    }
+
     private fun launchMemberAction(
         kind: String,
         userUuid: String?,
@@ -347,15 +517,8 @@ internal fun resolveChannelMembers(
         )
 }
 
-internal fun canRemoveChannelMember(
-    memberUserUuid: String,
-    currentUserUuid: String?,
-    ownerUuid: String?,
-    bindingsAuthoritative: Boolean = true,
-): Boolean =
-    bindingsAuthoritative &&
-        currentUserUuid != null &&
-        (
-            memberUserUuid == currentUserUuid ||
-                ownerUuid == currentUserUuid
-        )
+private val STREAM_NOTIFICATION_MODES = setOf(
+    "mentions_only",
+    "muted",
+    "all_messages",
+)

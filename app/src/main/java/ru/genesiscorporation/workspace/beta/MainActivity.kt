@@ -1568,7 +1568,12 @@ fun ChatNavigation(
                 )
             }
             val channelInfoViewModel: ChannelInfoViewModel = viewModel(factory = factory)
-            ChannelInfoScreen(channelInfoViewModel, navController)
+            ChannelInfoScreen(
+                viewModel = channelInfoViewModel,
+                navController = navController,
+                onBottomNavigationVisibilityChange =
+                    onBottomNavigationVisibilityChange,
+            )
         }
     }
     pendingIncomingShare?.let { request ->

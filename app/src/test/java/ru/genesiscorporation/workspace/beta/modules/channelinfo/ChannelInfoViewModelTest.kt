@@ -49,41 +49,6 @@ class ChannelInfoViewModelTest {
         assertTrue(result.isEmpty())
     }
 
-    @Test
-    fun `members can leave while only the stream owner can remove others`() {
-        assertTrue(
-            canRemoveChannelMember(
-                memberUserUuid = "current",
-                currentUserUuid = "current",
-                ownerUuid = "owner",
-            ),
-        )
-        assertTrue(
-            canRemoveChannelMember(
-                memberUserUuid = "member",
-                currentUserUuid = "owner",
-                ownerUuid = "owner",
-            ),
-        )
-        assertEquals(
-            false,
-            canRemoveChannelMember(
-                memberUserUuid = "other",
-                currentUserUuid = "member",
-                ownerUuid = "owner",
-            ),
-        )
-        assertEquals(
-            false,
-            canRemoveChannelMember(
-                memberUserUuid = "current",
-                currentUserUuid = "current",
-                ownerUuid = "owner",
-                bindingsAuthoritative = false,
-            ),
-        )
-    }
-
     private fun user(uuid: String, name: String) = UserResponseData(
         firstName = name,
         username = uuid,

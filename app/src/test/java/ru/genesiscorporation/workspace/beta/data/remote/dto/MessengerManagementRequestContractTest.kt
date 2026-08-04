@@ -1,6 +1,9 @@
 package ru.genesiscorporation.workspace.beta.data.remote.dto
 
 import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.properties.Properties
 import kotlinx.serialization.properties.encodeToStringMap
 import org.junit.Assert.assertEquals
@@ -81,6 +84,62 @@ class MessengerManagementRequestContractTest {
         assertEquals(
             "/api/workspace/v1/messenger/streams/stream-id/actions/read/invoke",
             markRead.url,
+        )
+    }
+
+    @Test
+    fun `stream settings use partial put and canonical delete contracts`() {
+        val metadata = UpdateStreamRequest(
+            streamUuid = "stream-id",
+            name = "Platform",
+            description = "Platform discussions",
+        )
+        val visibility = UpdateStreamRequest(
+            streamUuid = "stream-id",
+            inviteOnly = true,
+            isPrivate = false,
+        )
+        val role = UpdateStreamBindingRoleRequest(
+            bindingUuid = "binding-id",
+            role = "moderator",
+        )
+        val delete = DeleteStreamRequest("stream-id")
+
+        assertEquals(HTTPMethod.PUT, metadata.method)
+        assertEquals(
+            "/api/workspace/v1/messenger/streams/stream-id",
+            metadata.url,
+        )
+        assertEquals("Platform", metadata.data.name)
+        assertEquals("Platform discussions", metadata.data.description)
+        assertEquals(true, visibility.data.inviteOnly)
+        assertEquals(false, visibility.data.isPrivate)
+        assertEquals(HTTPMethod.PUT, role.method)
+        assertEquals(
+            "/api/workspace/v1/messenger/stream_bindings/binding-id",
+            role.url,
+        )
+        assertEquals("moderator", role.data.role)
+        assertEquals(HTTPMethod.DELETE, delete.method)
+        assertEquals(
+            "/api/workspace/v1/messenger/streams/stream-id",
+            delete.url,
+        )
+
+        val json = Json { explicitNulls = false }
+        assertEquals(
+            setOf("name", "description"),
+            json.encodeToJsonElement(
+                UpdateStreamRequestData.serializer(),
+                metadata.data,
+            ).jsonObject.keys,
+        )
+        assertEquals(
+            setOf("invite_only", "private"),
+            json.encodeToJsonElement(
+                UpdateStreamRequestData.serializer(),
+                visibility.data,
+            ).jsonObject.keys,
         )
     }
 
