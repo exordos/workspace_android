@@ -34,8 +34,8 @@
     <string name="reaction_picker_item_description">Reaction %1$s, :%2$s:</string>
     <string name="workspace_reply_action">Reply</string>
     <string name="workspace_reply_add_action">Add reply</string>
-    <string name="workspace_reply_fragment_action">Reply to fragment…</string>
-    <string name="workspace_reply_add_fragment_action">Add fragment to replies…</string>
+    <string name="workspace_reply_fragment_action">Select text and reply…</string>
+    <string name="workspace_reply_add_fragment_action">Add selected text…</string>
     <string name="workspace_reply_fragment_title">Select a fragment</string>
     <string name="workspace_reply_fragment_hint">Long-press the text, adjust the selection handles, then confirm.</string>
     <string name="workspace_reply_fragment_selection_area">Message text for fragment selection</string>

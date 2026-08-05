@@ -33,8 +33,8 @@
     <string name="reaction_picker_item_description">Реакция %1$s, :%2$s:</string>
     <string name="workspace_reply_action">Ответить</string>
     <string name="workspace_reply_add_action">Добавить ответ</string>
-    <string name="workspace_reply_fragment_action">Ответить на фрагмент…</string>
-    <string name="workspace_reply_add_fragment_action">Добавить фрагмент к ответам…</string>
+    <string name="workspace_reply_fragment_action">Выделить и ответить…</string>
+    <string name="workspace_reply_add_fragment_action">Добавить выделение…</string>
     <string name="workspace_reply_fragment_title">Выберите фрагмент</string>
     <string name="workspace_reply_fragment_hint">Зажмите текст, настройте границы выделения и подтвердите.</string>
     <string name="workspace_reply_fragment_selection_area">Текст сообщения для выбора фрагмента</string>
@@ -46,7 +46,7 @@
     <string name="workspace_reply_remove_tab">Убрать ответ для %1$s</string>
     <string name="workspace_reply_move_left">Переместить ответ влево</string>
     <string name="workspace_reply_move_right">Переместить ответ вправо</string>
-    <string name="workspace_reply_active_title">Ответ для %1$s</string>
+    <string name="workspace_reply_active_title">Ответ: %1$s</string>
     <string name="workspace_reply_selected_fragment">Выбранный фрагмент</string>
     <string name="message_select">Выбрать сообщение</string>
     <string name="message_unselect">Снять выбор</string>

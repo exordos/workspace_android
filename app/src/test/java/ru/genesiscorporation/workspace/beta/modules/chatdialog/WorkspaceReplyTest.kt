@@ -14,6 +14,29 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 
 class WorkspaceReplyTest {
     @Test
+    fun `tab strip is reserved for multi-reply sessions`() {
+        assertTrue(
+            !shouldShowWorkspaceReplyTabs(
+                WorkspaceReplySession(
+                    tabs = listOf(tab(id = "first", messageUuid = MESSAGE_A)),
+                    activeTabId = "first",
+                ),
+            ),
+        )
+        assertTrue(
+            shouldShowWorkspaceReplyTabs(
+                WorkspaceReplySession(
+                    tabs = listOf(
+                        tab(id = "first", messageUuid = MESSAGE_A),
+                        tab(id = "second", messageUuid = MESSAGE_B),
+                    ),
+                    activeTabId = "first",
+                ),
+            ),
+        )
+    }
+
+    @Test
     fun `reply replaces active quote while preserving its answer and identity`() {
         val first = tab(
             id = "first",

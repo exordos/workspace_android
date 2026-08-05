@@ -50,79 +50,83 @@ internal fun WorkspaceReplyComposer(
     val moveRightDescription =
         stringResource(R.string.workspace_reply_move_right)
     Column(modifier = Modifier.fillMaxWidth()) {
-        LazyRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                .semantics {
-                    contentDescription = tabListDescription
-                }
-                .padding(horizontal = 12.dp, vertical = 4.dp),
-            contentPadding = PaddingValues(end = 4.dp),
-        ) {
-            items(session.tabs, key = WorkspaceReplyTab::id) { tab ->
-                val isSelected = tab.id == session.activeTabId
-                val excerpt = remember(tab) { replyTabExcerpt(tab) }
-                val description = stringResource(
-                    R.string.workspace_reply_tab_description,
-                    tab.senderName,
-                    excerpt,
-                )
-                Row(
-                    modifier = Modifier
-                        .padding(end = 6.dp)
-                        .background(
-                            color = if (isSelected) {
-                                colors.primary.copy(alpha = 0.16f)
-                            } else {
-                                colors.background
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                        )
-                        .semantics {
-                            selected = isSelected
-                            role = Role.Tab
-                        },
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = tab.senderName,
-                        color = if (isSelected) {
-                            colors.textHeaders
-                        } else {
-                            colors.textAdditional50
-                        },
-                        fontSize = 12.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier
-                            .clickable(
-                                enabled = enabled,
-                                role = Role.Tab,
-                                onClickLabel = description,
-                            ) {
-                                onSelect(tab.id)
-                            }
-                            .padding(
-                                start = 12.dp,
-                                end = 6.dp,
-                                top = 12.dp,
-                                bottom = 12.dp,
-                            ),
+        if (shouldShowWorkspaceReplyTabs(session)) {
+            LazyRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics {
+                        contentDescription = tabListDescription
+                    }
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                contentPadding = PaddingValues(end = 4.dp),
+            ) {
+                items(session.tabs, key = WorkspaceReplyTab::id) { tab ->
+                    val isSelected = tab.id == session.activeTabId
+                    val excerpt = remember(tab) { replyTabExcerpt(tab) }
+                    val description = stringResource(
+                        R.string.workspace_reply_tab_description,
+                        tab.senderName,
+                        excerpt,
                     )
-                    IconButton(
-                        onClick = { onRemove(tab.id) },
-                        enabled = enabled,
-                        modifier = Modifier.size(48.dp),
+                    Row(
+                        modifier = Modifier
+                            .padding(end = 6.dp)
+                            .background(
+                                color = if (isSelected) {
+                                    colors.primary.copy(alpha = 0.16f)
+                                } else {
+                                    colors.background
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                            )
+                            .semantics {
+                                selected = isSelected
+                                role = Role.Tab
+                            },
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_close_small),
-                            contentDescription = stringResource(
-                                R.string.workspace_reply_remove_tab,
-                                tab.senderName,
-                            ),
-                            tint = colors.iconBase,
-                            modifier = Modifier.size(20.dp),
+                        Text(
+                            text = tab.senderName,
+                            color = if (isSelected) {
+                                colors.textHeaders
+                            } else {
+                                colors.textAdditional50
+                            },
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .clickable(
+                                    enabled = enabled,
+                                    role = Role.Tab,
+                                    onClickLabel = description,
+                                ) {
+                                    onSelect(tab.id)
+                                }
+                                .padding(
+                                    start = 12.dp,
+                                    end = 6.dp,
+                                    top = 12.dp,
+                                    bottom = 12.dp,
+                                ),
                         )
+                        IconButton(
+                            onClick = { onRemove(tab.id) },
+                            enabled = enabled,
+                            modifier = Modifier.size(48.dp),
+                        ) {
+                            Icon(
+                                painter = painterResource(
+                                    R.drawable.ic_close_small,
+                                ),
+                                contentDescription = stringResource(
+                                    R.string.workspace_reply_remove_tab,
+                                    tab.senderName,
+                                ),
+                                tint = colors.iconBase,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
                     }
                 }
             }
@@ -227,5 +231,9 @@ internal fun replyTabExcerpt(tab: WorkspaceReplyTab): String {
         normalized.take(REPLY_TAB_EXCERPT_CHARS).trimEnd() + "…"
     }
 }
+
+internal fun shouldShowWorkspaceReplyTabs(
+    session: WorkspaceReplySession,
+): Boolean = session.tabs.size > 1
 
 private const val REPLY_TAB_EXCERPT_CHARS = 36
