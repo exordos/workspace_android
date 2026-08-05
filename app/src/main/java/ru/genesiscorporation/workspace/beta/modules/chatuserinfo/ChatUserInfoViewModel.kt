@@ -2,16 +2,9 @@ package ru.genesiscorporation.workspace.beta.modules.chatuserinfo
 
 import androidx.lifecycle.ViewModel
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.update
 import ru.genesiscorporation.workspace.beta.R
-import ru.genesiscorporation.workspace.beta.UserViewModel
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
-import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
-import ru.genesiscorporation.workspace.beta.data.remote.dto.SendMessageRequest
-import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
-import ru.genesiscorporation.workspace.beta.modules.chatdialog.JitsiStyleRoomNameGenerator
-import ru.genesiscorporation.workspace.beta.modules.chatdialog.Message
 
 class ChatUserInfoViewModel(
     val userName: String,

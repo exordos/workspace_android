@@ -30,8 +30,10 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.OwnUserRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ServerSettingsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ToggleTopicDoneRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
+import ru.genesiscorporation.workspace.beta.data.remote.dto.UpdateTopicNotificationModeRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UsersRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
@@ -311,6 +313,38 @@ class ChatViewModel(
                 }
             }
 
+            is ApiResult.Error -> {
+
+            }
+        }
+    }
+
+    suspend fun setNextNotificationMode(topic: TopicsResponseData) {
+        when (topic.notificationMode) {
+            "mute" -> setTopicNotificationMode(topic.uuid, "default")
+            "default" -> setTopicNotificationMode(topic.uuid, "follow")
+            else -> setTopicNotificationMode(topic.uuid, "mute")
+        }
+    }
+
+    suspend fun setTopicNotificationMode(topicUuid: String, notificationMode: String) {
+        val response = client.performRequest(UpdateTopicNotificationModeRequest(topicUuid, notificationMode))
+        when(response) {
+            is ApiResult.Success -> {
+
+            }
+            is ApiResult.Error -> {
+
+            }
+        }
+    }
+
+    suspend fun toggleTopicDone(topicUuid: String) {
+        val response = client.performRequest(ToggleTopicDoneRequest(topicUuid))
+        when(response) {
+            is ApiResult.Success -> {
+
+            }
             is ApiResult.Error -> {
 
             }

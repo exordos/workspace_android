@@ -2,12 +2,16 @@ package ru.genesiscorporation.workspace.beta.data
 
 import android.util.Log
 import androidx.compose.runtime.rememberCoroutineScope
+import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.client.plugins.websocket.webSocket
+import io.ktor.client.plugins.websocket.webSocketSession
 import io.ktor.client.request.headers
 import io.ktor.http.HttpHeaders
 import io.ktor.http.URLProtocol
 import io.ktor.http.path
+import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
+import io.ktor.websocket.close
 import io.ktor.websocket.readReason
 import io.ktor.websocket.readText
 import kotlinx.coroutines.CoroutineScope
@@ -45,6 +49,7 @@ class EventsRepository() {
     val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     var client: WorkspaceAPIClient? = null
+    var session: DefaultClientWebSocketSession? = null
     var latestEpoch: Int = 0
     var epochGeneration: String = ""
 
@@ -146,7 +151,8 @@ class EventsRepository() {
                         name = updatedTopic.name,
                         lastMessageUuid = updatedTopic.lastMessageUuid,
                         isDone = updatedTopic.isDone,
-                        lastMessage = message
+                        lastMessage = message,
+                        notificationMode = updatedTopic.notificationMode
                     )
                 } else {
                     topic
@@ -257,6 +263,8 @@ class EventsRepository() {
                     stream.copy(
                         lastMessageUuid = updatedStream.lastMessageUuid,
                         unreadCount = updatedStream.unreadCount,
+                        activeUnreadCount = updatedStream.activeUnreadCount,
+                        passiveUnreadCount = updatedStream.passiveUnreadCount,
                         lastMessage = message
                     )
                 } else {
@@ -359,88 +367,101 @@ class EventsRepository() {
                     if (webSocketClient != null) {
                         startWebsocketConnection(webSocketClient)
                     }
+                } else {
+                    val webSocketClient = client
+                    if (webSocketClient != null) {
+                        val response = webSocketClient.performRequest(EpochRequest())
+                        when (response) {
+                            is ApiResult.Success -> {
+                                if (latestEpoch < response.value.epochVersion || epochGeneration != response.value.epochGeneration) {
+                                    session?.close(CloseReason(CloseReason.Codes.NORMAL, "Lost connection to server"))
+                                    startWebsocketConnection(webSocketClient)
+                                }
+                            }
+
+                            is ApiResult.Error -> {
+
+                            }
+                        }
+                    }
                 }
             }
             try {
-                webSocketClient.client.webSocket(
-                    request = {
-                        url {
-                            protocol = URLProtocol.WS
-                            this.host = baseUrl
-                            path("/api/workspace/v1/events/ws")
-                            parameters.append("last_epoch_version", latestEpoch.toString())
-                            parameters.append("epoch_generation", epochGeneration)
-                        }
-                        headers {
-                            append(HttpHeaders.SecWebSocketProtocol, "workspace.events.v1, bearer.$accessToken")
-                        }
+                val session = webSocketClient.client.webSocketSession {
+                    url {
+                        protocol = URLProtocol.WS
+                        this.host = baseUrl
+                        path("/api/workspace/v1/events/ws")
+                        parameters.append("last_epoch_version", latestEpoch.toString())
+                        parameters.append("epoch_generation", epochGeneration)
                     }
-                ) {
-                    isWebSocketOpen = !closeReason.isCompleted
-                    try {
-                        for (frame in incoming) {
-                            when (frame) {
-                                is Frame.Text -> {
-                                    val receivedText = frame.readText()
-                                    val jsonObject = json.decodeFromString<JsonObject>(receivedText)
-                                    val action = jsonObject["action"]?.jsonPrimitive?.contentOrNull
-                                    val newEpochVersion =
-                                        jsonObject["epoch_version"]?.jsonPrimitive?.contentOrNull?.toInt()
-                                    if (newEpochVersion != null) {
-                                        latestEpoch = newEpochVersion
-                                    }
-                                    val payload = jsonObject["payload"]?.toString()
-                                    if (action != null && payload != null) {
-                                        when (jsonObject["object_type"]?.toString()?.trim('"')) {
-                                            "message" -> {
-                                                didReceiveMessageEvent(payload, action)
-                                            }
-
-                                            "user" -> {
-                                                didReceiveUserEvent(payload, action)
-                                            }
-
-                                            "folder" -> {
-                                                didReceiveFolderEvent(payload, action)
-                                            }
-
-                                            "stream" -> {
-                                                didReceiveStreamEvent(payload, action)
-                                            }
-
-                                            "topic" -> {
-                                                didReceiveTopicEvent(payload, action)
-                                            }
-
-                                            "message_reaction" -> {
-                                                didReceiveReactionEvent(payload, action)
-                                            }
-
-                                            else -> Log.d("WebSocket", "Received: $receivedText")
+                    headers {
+                        append(HttpHeaders.SecWebSocketProtocol, "workspace.events.v1, bearer.$accessToken")
+                    }
+                }
+                this.session = session
+                isWebSocketOpen = !session.closeReason.isCompleted
+                try {
+                    for (frame in session.incoming) {
+                        when (frame) {
+                            is Frame.Text -> {val receivedText = frame.readText()
+                                val jsonObject = json.decodeFromString<JsonObject>(receivedText)
+                                val action = jsonObject["action"]?.jsonPrimitive?.contentOrNull
+                                val newEpochVersion =
+                                    jsonObject["epoch_version"]?.jsonPrimitive?.contentOrNull?.toInt()
+                                if (newEpochVersion != null) {
+                                    latestEpoch = newEpochVersion
+                                }
+                                val payload = jsonObject["payload"]?.toString()
+                                if (action != null && payload != null) {
+                                    when (jsonObject["object_type"]?.toString()?.trim('"')) {
+                                        "message" -> {
+                                            didReceiveMessageEvent(payload, action)
                                         }
+
+                                        "user" -> {
+                                            didReceiveUserEvent(payload, action)
+                                        }
+
+                                        "folder" -> {
+                                            didReceiveFolderEvent(payload, action)
+                                        }
+
+                                        "stream" -> {
+                                            didReceiveStreamEvent(payload, action)
+                                        }
+
+                                        "topic" -> {
+                                            didReceiveTopicEvent(payload, action)
+                                        }
+
+                                        "message_reaction" -> {
+                                            didReceiveReactionEvent(payload, action)
+                                        }
+
+                                        else -> Log.d("WebSocket", "Received: $receivedText")
                                     }
                                 }
-
-                                is Frame.Binary -> Log.d("WebSocket", "Received binary data bundle")
-                                is Frame.Close -> Log.d(
-                                    "WebSocket",
-                                    "Connection closing reason: ${frame.readReason()}"
-                                )
-
-                                else -> Log.d("WebSocket", "Received control or ping/pong frame")
                             }
+                            is Frame.Binary -> Log.d("WebSocket", "Received binary data bundle")
+                            is Frame.Close -> Log.d(
+                                "WebSocket",
+                                "Connection closing reason: ${frame.readReason()}"
+                            )
+                            else -> Log.d("WebSocket", "Received control or ping/pong frame")
                         }
-                    } finally {
-                        val reason = closeReason.await()
-                        if (reason?.code?.toInt() == 4401) {
-                            client?.refreshToken()
-                        }
+                    }
+                } finally {
+                    val reason = session.closeReason.await()
+                    if (reason?.code?.toInt() == 4401) {
+                        client?.refreshToken()
                     }
                 }
             } catch (e: Exception) {
                 Log.d("WebSocket", "Failed: ${e::class.simpleName}: ${e.message}")
                 e.printStackTrace()
             } finally {
+                this.session = null
                 isWebSocketOpen = false
                 Log.d("WebSocket", "Is inactive")
             }
