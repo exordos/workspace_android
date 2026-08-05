@@ -201,7 +201,6 @@ fun ChatScreen(
                 windowInsets = WindowInsets(0, 0, 0, 0),
                 actions = {
                     IconButton(onClick = {
-//                        showUserList = true
                         navController.navigate(ChatFlow.CreateBase)
                     }) {
                         Image(

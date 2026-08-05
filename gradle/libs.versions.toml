@@ -23,6 +23,7 @@ composeMarkdown = "0.7.1"
 appCompat = "1.1.0"
 foundationLayout = "1.11.2"
 uiText = "1.11.2"
+emoji = "1.7.6"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -64,6 +65,7 @@ compose-markdown = { group = "com.github.jeziellago", name = "compose-markdown",
 androidx-app-compat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appCompat" }
 androidx-compose-foundation-layout = { group = "androidx.compose.foundation", name = "foundation-layout", version.ref = "foundationLayout" }
 androidx-compose-ui-text = { group = "androidx.compose.ui", name = "ui-text", version.ref = "uiText" }
+fellbaum-jemoji = { group = "net.fellbaum", name = "jemoji", version.ref = "emoji" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

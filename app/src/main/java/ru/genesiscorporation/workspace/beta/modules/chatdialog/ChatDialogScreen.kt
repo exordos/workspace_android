@@ -107,6 +107,7 @@ import java.time.Duration
 import java.util.Locale
 import androidx.compose.ui.platform.LocalLocale
 import kotlinx.coroutines.flow.distinctUntilChanged
+import net.fellbaum.jemoji.EmojiManager
 import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.ui.AnimatedGif
@@ -418,6 +419,7 @@ fun ChatMessage(
                 ) {
                     for (reaction in item.reactions) {
                         val hasMyReaction = viewModel.hasMyReaction(reaction.key, item.uuid)
+                        val unicodeEmoji = remember(reaction.key) { toUnicodeEmoji(reaction.key) }
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
@@ -440,7 +442,7 @@ fun ChatMessage(
                                     }
                                 ),
                         ) {
-                            Text(reaction.key)
+                            Text(unicodeEmoji)
                             Text(text ="${reaction.value}",
                                 color = LocalWorkspaceColorsPalette.current.textHeaders,
                                 fontSize = 12.sp,
@@ -454,7 +456,36 @@ fun ChatMessage(
     }
 }
 
-
+enum class EmojiKind { Unicode, Shortcode, Unknown }
+fun classifyEmoji(raw: String): EmojiKind {
+    val value = raw.trim()
+    if (value.isEmpty()) return EmojiKind.Unknown
+    if (value.any { isEmojiCodePoint(it.code) } || EmojiManager.isEmoji(value)) {
+        return EmojiKind.Unicode
+    }
+    val shortcodePattern = Regex("""^:?[a-z0-9_+-]+:?$""", RegexOption.IGNORE_CASE)
+    if (shortcodePattern.matches(value)) {
+        return EmojiKind.Shortcode
+    }
+    return EmojiKind.Unknown
+}
+private fun isEmojiCodePoint(cp: Int): Boolean =
+    Character.getType(cp) == Character.OTHER_SYMBOL.toInt() ||
+            (cp in 0x1F000..0x1FAFF) || // Misc Pictographs / Supplemental Symbols
+            (cp in 0x2600..0x27BF) ||   // Misc symbols / dingbats
+            (cp in 0xFE00..0xFE0F) ||   // Variation selectors
+            cp == 0x200D               // ZWJ
+fun toUnicodeEmoji(raw: String): String {
+    val value = raw.trim()
+    if (value.isEmpty()) return value
+    if (EmojiManager.isEmoji(value)) return value
+    val alias = value.trim(':')
+    val emojis = EmojiManager.getByAlias(alias).orElse(emptyList())
+    val match = emojis.firstOrNull { emoji ->
+        emoji.githubAliases.any { it.trim(':') == alias }
+    } ?: emojis.firstOrNull()
+    return match?.getEmoji() ?: value
+}
 
 private val HHMM: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 

@@ -18,6 +18,8 @@ class StreamsRequest(): ApiRequest<EmptyRequestData, List<Stream>, ApiError> {
 data class Stream(
     val uuid: String,
     @SerialName("unread_count") var unreadCount: Int,
+    @SerialName("active_unread_count") var activeUnreadCount: Int,
+    @SerialName("passive_unread_count") var passiveUnreadCount: Int,
     @SerialName("updated_at") var updatedAt: String,
     var name: String,
     @SerialName("private") val isPrivate: Boolean,

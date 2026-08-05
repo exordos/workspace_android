@@ -335,18 +335,3 @@ class ChatDialogViewModel(
         }
     }
 }
-
-@Serializable
-data class Message(
-    var id: Int?,
-    val senderFullName: String,
-    val senderId: Int,
-    var content: String,
-    val timestamp: Long,
-    val avatarUrl: String,
-    val subject: String,
-    val isFromCurrentUser: Boolean,
-    val flags: List<String>
-) {
-
-}
