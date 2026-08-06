@@ -24,6 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
@@ -48,6 +49,7 @@ import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.JitsiStyleRoomNameGenerator
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.pastEpochSecondsToRelativeRu
+import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 import ru.genesiscorporation.workspace.beta.modules.profile.ProfileViewModel
 import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
@@ -62,11 +64,48 @@ fun ChatUserInfoScreen(
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val currentUserId by viewModel.client.userViewModel.repo.userIdFlow.collectAsStateWithLifecycle(
-        initialValue = 0
-    )
-//    val profile = viewModel.repo.users.collectAsState().value.firstOrNull { it.userId.toString() == viewModel.userId }
+    val state by viewModel.createQueryState.collectAsStateWithLifecycle()
+    val user by viewModel.user.collectAsStateWithLifecycle()
 
+    LaunchedEffect(state) {
+        if (state is QueryState.Success) {
+            val createdStream = viewModel.createdStream
+            if (createdStream != null) {
+                val shouldSendMessage = viewModel.shouldSendMessage
+                if (shouldSendMessage) {
+//                    viewModel.shouldSendMessage = false
+                    val roomName = JitsiStyleRoomNameGenerator.generate()
+                    val messageText = "${viewModel.repo.jitsiServerUrl}/${roomName}"
+                    scope.launch {
+                        viewModel.sendTextMessage(messageText, createdStream)
+                    }
+                    val options = JitsiMeetConferenceOptions.Builder()
+                        .setServerURL(URL(viewModel.repo.jitsiServerUrl))
+                        .setRoom(roomName)
+                        .build()
+                    JitsiMeetActivity.launch(context, options)
+                    viewModel.shouldSendMessage = false
+                } else {
+                    viewModel.createdStream = null
+                    navController.navigate(
+                        ChatFlow.ChatDialog(
+                            createdStream.name,
+                            createdStream.uuid,
+                            null,
+                            createdStream.defaultTopicUuid ?: "",
+                            true,
+                            null
+                        )
+                    ) {
+                        popUpTo<ChatFlow.ChatList> {
+                            inclusive = false
+                        }
+                        launchSingleTop = true
+                    }
+                }
+            }
+        }
+    }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -100,11 +139,11 @@ fun ChatUserInfoScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Avatar(
-                    viewModel.avatarUrl,
+                    user.avatar,
                     viewModel.client.userViewModel.baseUrl.value ?: "",
                     viewModel.client.authHeaders(),
                     null,
-                    "",
+                    user.displayableName(),
                     Modifier.size(64.dp)
                 )
                 Text(
@@ -124,15 +163,10 @@ fun ChatUserInfoScreen(
             ) {
                 Button(
                     onClick = {
-                        val roomName = JitsiStyleRoomNameGenerator.generate()
+                        viewModel.shouldSendMessage = true
                         scope.launch {
-                            viewModel.callButtonTapped(roomName)
+                            viewModel.createPrivateStream(user)
                         }
-                        val options = JitsiMeetConferenceOptions.Builder()
-                            .setServerURL(URL(viewModel.repo.jitsiServerUrl))
-                            .setRoom(roomName)
-                            .build()
-                        JitsiMeetActivity.launch(context, options)
                     },
                     modifier = Modifier
                         .weight(1f)
@@ -150,23 +184,9 @@ fun ChatUserInfoScreen(
                 }
                 Button(
                     onClick = {
-//                        if (currentUserId != null) {
-//                            navController.navigate(
-//                                ChatFlow.ChatDialog(
-//                                    viewModel.userName,
-//                                    "[${viewModel.userId}, ${currentUserId}]",
-//                                    null,
-//                                    null,
-//                                    true,
-//                                    viewModel.userId.toInt()
-//                                )
-//                            ) {
-//                                popUpTo<ChatFlow.ChatList> {
-//                                    inclusive = false
-//                                }
-//                                launchSingleTop = true
-//                            }
-//                        }
+                        scope.launch {
+                            viewModel.createPrivateStream(user)
+                        }
                     },
                     modifier = Modifier
                         .weight(1f)
@@ -190,19 +210,9 @@ fun ChatUserInfoScreen(
             )
             ProfileRow(
                 "ID пользователя",
-                "${viewModel.userId}",
+                user.uuid,
                 R.drawable.ic_userid
             )
-//            for (customProfileField in viewModel.repo.customProfileFields) {
-//                if (profile != null && (profile.profileData?.get(customProfileField.id.toString()) != null)) {
-//                    ProfileRow(
-//                        customProfileField.name,
-//                        profile.profileData[customProfileField.id.toString()]?.value
-//                            ?: "",
-//                        viewModel.imageId(customProfileField.id)
-//                    )
-//                }
-//            }
         }
     }
 }

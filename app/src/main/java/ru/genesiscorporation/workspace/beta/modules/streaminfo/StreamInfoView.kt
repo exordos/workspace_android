@@ -3,6 +3,7 @@ package ru.genesiscorporation.workspace.beta.modules.streaminfo
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,6 +13,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -23,6 +26,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -31,6 +35,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -38,13 +43,18 @@ import androidx.navigation.NavHostController
 import kotlinx.coroutines.launch
 import org.jitsi.meet.sdk.JitsiMeetActivity
 import org.jitsi.meet.sdk.JitsiMeetConferenceOptions
+import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.R
+import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.JitsiStyleRoomNameGenerator
 import ru.genesiscorporation.workspace.beta.modules.chatuserinfo.ChatUserInfoViewModel
+import ru.genesiscorporation.workspace.beta.modules.createdirectstream.UserCell
 import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.net.URL
+import kotlin.collections.count
+import kotlin.collections.mapNotNull
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -132,6 +142,7 @@ fun StreamInfoView(
             }
             ActionButtonsRow(viewModel, navController)
             NotificationButtonsRow(viewModel)
+            BoundUsers(viewModel, navController)
         }
     }
 }
@@ -305,36 +316,83 @@ fun NotificationButtonsRow(
 }
 
 @Composable
-fun ProfileRow(
-    title: String,
-    text: String,
-    imageId: Int
+fun BoundUsers(
+    viewModel: StreamInfoViewModel,
+    navController: NavHostController
 ) {
+    val streamBindings by viewModel.streamBindings.collectAsStateWithLifecycle()
+    val users by viewModel.users.collectAsStateWithLifecycle()
+    Column {
+        Text("Участники")
+        val currentStreamBindings = streamBindings[viewModel.streamUuid]
+        if (currentStreamBindings != null && currentStreamBindings.count() > 0) {
+            val currentBindedOnlineUsers =
+                currentStreamBindings.mapNotNull { binding -> users.firstOrNull { binding.userUuid == it.uuid } }
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier
+                    .fillMaxSize()
+            ) {
+                items(items = currentBindedOnlineUsers) { user ->
+                    UserRow(
+                        viewModel,
+                        user,
+                        navController
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun UserRow(
+    viewModel: StreamInfoViewModel,
+    user: UserResponseData,
+    navController: NavHostController
+) {
+    val baseUrl = viewModel.client.userViewModel.baseUrl.collectAsState().value
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .padding(vertical = 8.dp)
+        modifier = Modifier.clickable (onClick = {
+            navController.navigate(
+                ChatFlow.ChatUserInfo(
+                    user.displayableName(),
+                    user.uuid,
+                    user.avatar,
+                    user.email ?: ""
+                )
+            )
+        })
     ) {
-        Image(
-            painter = painterResource(id = imageId),
-            contentDescription = null,
-            modifier = Modifier
-                .padding(end = 16.dp)
+        Avatar(
+            user.avatar,
+            baseUrl ?: "",
+            viewModel.client.authHeaders(),
+            null,
+            user.displayableName(),
+            Modifier.size(40.dp)
+                .padding(end = 4.dp)
         )
         Column(
             horizontalAlignment = Alignment.Start
         ) {
             Text(
-                text = title,
-                color = LocalWorkspaceColorsPalette.current.textAdditional30,
-                fontSize = 12.sp,
-                fontFamily = InterFontFamily,
-            )
-            Text(
-                text = text,
+                text = user.displayableName(),
                 color = LocalWorkspaceColorsPalette.current.textHeaders,
                 fontSize = 14.sp,
                 fontFamily = InterFontFamily,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = user.status,
+                color = LocalWorkspaceColorsPalette.current.textAdditional50,
+                fontSize = 12.sp,
+                fontFamily = InterFontFamily,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }
