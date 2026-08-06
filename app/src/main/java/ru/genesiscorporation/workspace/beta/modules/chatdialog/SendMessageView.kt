@@ -205,11 +205,7 @@ fun SendMessageView(
                 ) {
                     Button(
                         onClick = {
-                            viewModel.onUserSelected(
-                                name = "daria g",
-                                urn = "urn:user:ebf7bf63-a5f8-42c7-997f-da29e135b012",
-                            )
-//                            launcher.launch("image/*")
+                            launcher.launch("image/*")
                         },
                         modifier = Modifier.size(32.dp),
                         contentPadding = PaddingValues(0.dp),
@@ -315,28 +311,21 @@ class MentionTextFieldState(initialText: String = "") {
         value = TextFieldValue(newText, TextRange(s + text.length))
     }
 
-    /** Appends arbitrary text at the end and moves the caret after it. */
     fun appendText(text: String) {
         if (text.isEmpty()) return
         val newText = value.text + text
         value = TextFieldValue(newText, TextRange(newText.length))
     }
 
-    /** Replaces the entire field contents. */
     fun setText(text: String) {
         value = TextFieldValue(text, TextRange(text.length))
     }
 
-    /** Inserts at the current selection / caret. */
     fun insertMention(displayName: String, urn: String, trailingSpace: Boolean = true) {
         val token = formatMention(displayName, urn)
         insertText(if (trailingSpace) "$token " else token)
     }
 
-    /**
-     * Replaces an in-progress `@query` before the caret, then inserts the mention.
-     * Returns false if no `@query` was found.
-     */
     fun insertMentionFromAtQuery(
         displayName: String,
         urn: String,
@@ -352,7 +341,6 @@ class MentionTextFieldState(initialText: String = "") {
         return true
     }
 
-    /** Active `@query` before the caret, if any (no spaces in the query). */
     fun activeAtQuery(): Pair<Int, String>? {
         val caret = value.selection.max
         val at = findActiveAtQueryStart(value.text, caret) ?: return null
@@ -364,8 +352,6 @@ class MentionTextFieldState(initialText: String = "") {
 fun rememberMentionTextFieldState(initialText: String = ""): MentionTextFieldState =
     remember { MentionTextFieldState(initialText) }
 
-// region Visual transformation + offset mapping
-
 private class MentionVisualTransformation(
     private val mentionStyle: SpanStyle,
 ) : VisualTransformation {
@@ -373,17 +359,6 @@ private class MentionVisualTransformation(
         buildMentionTransformedText(text.text, mentionStyle)
 }
 
-/**
- * Builds display text and parallel o→t / t→o maps.
- *
- * Mapping rules for a mention chip:
- * - original start  → transformed start
- * - original interior / end → transformed end
- * - transformed start → original start
- * - transformed interior / end → original end
- *
- * Selecting the whole chip therefore selects the whole `[...](...)` token.
- */
 internal fun buildMentionTransformedText(
     original: String,
     mentionStyle: SpanStyle,
@@ -393,7 +368,7 @@ internal fun buildMentionTransformedText(
         return TransformedText(AnnotatedString(original), OffsetMapping.Identity)
     }
 
-    val o2t = IntArray(original.length + 1)
+    val originalToTransformed = IntArray(original.length + 1)
     val transformed = buildAnnotatedString {
         var o = 0
         var t = 0
@@ -406,10 +381,9 @@ internal fun buildMentionTransformedText(
                 val chip = "@${mention.displayName}"
                 val chipLen = chip.length
 
-                o2t[o] = t
+                originalToTransformed[o] = t
                 for (i in 1..rawLen) {
-                    // interior + endExclusive map to chip end
-                    o2t[o + i] = t + chipLen
+                    originalToTransformed[o + i] = t + chipLen
                 }
 
                 withStyle(mentionStyle) { append(chip) }
@@ -418,16 +392,16 @@ internal fun buildMentionTransformedText(
                 t += chipLen
                 mentionIndex++
             } else {
-                o2t[o] = t
+                originalToTransformed[o] = t
                 append(original[o])
                 o++
                 t++
             }
         }
-        o2t[original.length] = t
+        originalToTransformed[original.length] = t
     }
 
-    val t2o = IntArray(transformed.length + 1)
+    val transformedToOriginal = IntArray(transformed.length + 1)
     run {
         var o = 0
         var t = 0
@@ -438,26 +412,26 @@ internal fun buildMentionTransformedText(
                 val rawLen = mention.endExclusive - mention.start
                 val chipLen = 1 + mention.displayName.length
 
-                t2o[t] = o
+                transformedToOriginal[t] = o
                 for (j in 1..chipLen) {
-                    t2o[t + j] = o + rawLen
+                    transformedToOriginal[t + j] = o + rawLen
                 }
 
                 o += rawLen
                 t += chipLen
                 mentionIndex++
             } else {
-                t2o[t] = o
+                transformedToOriginal[t] = o
                 o++
                 t++
             }
         }
-        t2o[transformed.length] = original.length
+        transformedToOriginal[transformed.length] = original.length
     }
 
     return TransformedText(
         text = transformed,
-        offsetMapping = ArrayOffsetMapping(o2t, t2o),
+        offsetMapping = ArrayOffsetMapping(originalToTransformed, transformedToOriginal),
     )
 }
 
@@ -471,10 +445,6 @@ private class ArrayOffsetMapping(
     override fun transformedToOriginal(offset: Int): Int =
         transformedToOriginal[offset.coerceIn(0, transformedToOriginal.lastIndex)]
 }
-
-// endregion
-
-// region Edit handling
 
 internal fun applyMentionAwareChange(
     old: TextFieldValue,
@@ -498,7 +468,6 @@ internal fun applyMentionAwareChange(
         newEnd--
     }
 
-    // Region removed from old: [start, oldEnd)
     if (oldEnd > start) {
         val mentions = findMentions(oldText)
         var delStart = start
@@ -529,7 +498,6 @@ internal fun applyMentionAwareChange(
     return snapSelectionAwayFromMentionInterior(incoming)
 }
 
-/** If the caret/selection lands inside a raw mention, snap to the nearest edge. */
 private fun snapSelectionAwayFromMentionInterior(value: TextFieldValue): TextFieldValue {
     val mentions = findMentions(value.text)
     if (mentions.isEmpty()) return value
@@ -555,7 +523,5 @@ private fun findActiveAtQueryStart(text: String, caret: Int): Int? {
     if (at < 0) return null
     val query = before.substring(at + 1)
     if (query.any { it.isWhitespace() }) return null
-    // Don't treat the '@' inside already-committed display text; only free '@'
-    // in the raw buffer. Mentions don't contain a bare '@'.
     return at
 }
