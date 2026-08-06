@@ -51,14 +51,30 @@ import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.withStyle
+import kotlin.math.max
+import kotlin.math.min
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SendMessageView(
     viewModel: ChatDialogViewModel
 ) {
-
-    val messageText by viewModel.messageText.collectAsState()
+    val state = rememberMentionTextFieldState()
     val scope = rememberCoroutineScope()
     val imageUri by viewModel.imageUri.collectAsState()
     val editingMessageBackupText by viewModel.editingMessageBackupText.collectAsState()
@@ -189,7 +205,11 @@ fun SendMessageView(
                 ) {
                     Button(
                         onClick = {
-                            launcher.launch("image/*")
+                            viewModel.onUserSelected(
+                                name = "daria g",
+                                urn = "urn:user:ebf7bf63-a5f8-42c7-997f-da29e135b012",
+                            )
+//                            launcher.launch("image/*")
                         },
                         modifier = Modifier.size(32.dp),
                         contentPadding = PaddingValues(0.dp),
@@ -204,8 +224,8 @@ fun SendMessageView(
                         )
                     }
                     BasicTextField(
-                        value = messageText,
-                        onValueChange = viewModel::onMessageChange,
+                        value = viewModel.mentions.value,
+                        onValueChange = viewModel.mentions::onValueChange,
                         textStyle = TextStyle(
                             color = LocalWorkspaceColorsPalette.current.textHeaders,
                             fontSize = 16.sp,
@@ -216,6 +236,9 @@ fun SendMessageView(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 12.dp),
+                        visualTransformation = MentionVisualTransformation(SpanStyle(color = Color(0xFF1565C0))),
+                        decorationBox =
+                    { innerTextField -> innerTextField() }
                     )
                 }
             }
@@ -247,4 +270,292 @@ fun SendMessageView(
             }
         }
     }
+}
+
+private val MentionPattern =
+    Regex("""\[([^\[\]]+)]\((urn:user:[^)]+)\)""")
+
+data class MentionSpan(
+    val range: IntRange,
+    val displayName: String,
+    val urn: String,
+) {
+    val start: Int get() = range.first
+    val endExclusive: Int get() = range.last + 1
+}
+
+fun findMentions(text: String): List<MentionSpan> =
+    MentionPattern.findAll(text).map { match ->
+        MentionSpan(
+            range = match.range,
+            displayName = match.groupValues[1],
+            urn = match.groupValues[2],
+        )
+    }.toList()
+
+fun formatMention(displayName: String, urn: String): String =
+    "[$displayName]($urn)"
+
+@Stable
+class MentionTextFieldState(initialText: String = "") {
+    var value by mutableStateOf(TextFieldValue(initialText))
+        private set
+
+    val text: String get() = value.text
+
+    fun onValueChange(incoming: TextFieldValue) {
+        value = applyMentionAwareChange(value, incoming)
+    }
+
+    fun insertText(text: String) {
+        if (text.isEmpty()) return
+        val s = value.selection.min
+        val e = value.selection.max
+        val newText = value.text.replaceRange(s, e, text)
+        value = TextFieldValue(newText, TextRange(s + text.length))
+    }
+
+    /** Appends arbitrary text at the end and moves the caret after it. */
+    fun appendText(text: String) {
+        if (text.isEmpty()) return
+        val newText = value.text + text
+        value = TextFieldValue(newText, TextRange(newText.length))
+    }
+
+    /** Replaces the entire field contents. */
+    fun setText(text: String) {
+        value = TextFieldValue(text, TextRange(text.length))
+    }
+
+    /** Inserts at the current selection / caret. */
+    fun insertMention(displayName: String, urn: String, trailingSpace: Boolean = true) {
+        val token = formatMention(displayName, urn)
+        insertText(if (trailingSpace) "$token " else token)
+    }
+
+    /**
+     * Replaces an in-progress `@query` before the caret, then inserts the mention.
+     * Returns false if no `@query` was found.
+     */
+    fun insertMentionFromAtQuery(
+        displayName: String,
+        urn: String,
+        trailingSpace: Boolean = true,
+    ): Boolean {
+        val caret = value.selection.max
+        val at = findActiveAtQueryStart(value.text, caret) ?: return false
+        value = TextFieldValue(
+            text = value.text.removeRange(at, caret),
+            selection = TextRange(at),
+        )
+        insertMention(displayName, urn, trailingSpace)
+        return true
+    }
+
+    /** Active `@query` before the caret, if any (no spaces in the query). */
+    fun activeAtQuery(): Pair<Int, String>? {
+        val caret = value.selection.max
+        val at = findActiveAtQueryStart(value.text, caret) ?: return null
+        return at to value.text.substring(at + 1, caret)
+    }
+}
+
+@Composable
+fun rememberMentionTextFieldState(initialText: String = ""): MentionTextFieldState =
+    remember { MentionTextFieldState(initialText) }
+
+// region Visual transformation + offset mapping
+
+private class MentionVisualTransformation(
+    private val mentionStyle: SpanStyle,
+) : VisualTransformation {
+    override fun filter(text: AnnotatedString): TransformedText =
+        buildMentionTransformedText(text.text, mentionStyle)
+}
+
+/**
+ * Builds display text and parallel o→t / t→o maps.
+ *
+ * Mapping rules for a mention chip:
+ * - original start  → transformed start
+ * - original interior / end → transformed end
+ * - transformed start → original start
+ * - transformed interior / end → original end
+ *
+ * Selecting the whole chip therefore selects the whole `[...](...)` token.
+ */
+internal fun buildMentionTransformedText(
+    original: String,
+    mentionStyle: SpanStyle,
+): TransformedText {
+    val mentions = findMentions(original)
+    if (mentions.isEmpty()) {
+        return TransformedText(AnnotatedString(original), OffsetMapping.Identity)
+    }
+
+    val o2t = IntArray(original.length + 1)
+    val transformed = buildAnnotatedString {
+        var o = 0
+        var t = 0
+        var mentionIndex = 0
+
+        while (o < original.length) {
+            val mention = mentions.getOrNull(mentionIndex)
+            if (mention != null && o == mention.start) {
+                val rawLen = mention.endExclusive - mention.start
+                val chip = "@${mention.displayName}"
+                val chipLen = chip.length
+
+                o2t[o] = t
+                for (i in 1..rawLen) {
+                    // interior + endExclusive map to chip end
+                    o2t[o + i] = t + chipLen
+                }
+
+                withStyle(mentionStyle) { append(chip) }
+
+                o += rawLen
+                t += chipLen
+                mentionIndex++
+            } else {
+                o2t[o] = t
+                append(original[o])
+                o++
+                t++
+            }
+        }
+        o2t[original.length] = t
+    }
+
+    val t2o = IntArray(transformed.length + 1)
+    run {
+        var o = 0
+        var t = 0
+        var mentionIndex = 0
+        while (o < original.length) {
+            val mention = mentions.getOrNull(mentionIndex)
+            if (mention != null && o == mention.start) {
+                val rawLen = mention.endExclusive - mention.start
+                val chipLen = 1 + mention.displayName.length
+
+                t2o[t] = o
+                for (j in 1..chipLen) {
+                    t2o[t + j] = o + rawLen
+                }
+
+                o += rawLen
+                t += chipLen
+                mentionIndex++
+            } else {
+                t2o[t] = o
+                o++
+                t++
+            }
+        }
+        t2o[transformed.length] = original.length
+    }
+
+    return TransformedText(
+        text = transformed,
+        offsetMapping = ArrayOffsetMapping(o2t, t2o),
+    )
+}
+
+private class ArrayOffsetMapping(
+    private val originalToTransformed: IntArray,
+    private val transformedToOriginal: IntArray,
+) : OffsetMapping {
+    override fun originalToTransformed(offset: Int): Int =
+        originalToTransformed[offset.coerceIn(0, originalToTransformed.lastIndex)]
+
+    override fun transformedToOriginal(offset: Int): Int =
+        transformedToOriginal[offset.coerceIn(0, transformedToOriginal.lastIndex)]
+}
+
+// endregion
+
+// region Edit handling
+
+internal fun applyMentionAwareChange(
+    old: TextFieldValue,
+    incoming: TextFieldValue,
+): TextFieldValue {
+    if (old.text == incoming.text) {
+        return snapSelectionAwayFromMentionInterior(incoming)
+    }
+
+    val oldText = old.text
+    val newText = incoming.text
+
+    var start = 0
+    val minLen = min(oldText.length, newText.length)
+    while (start < minLen && oldText[start] == newText[start]) start++
+
+    var oldEnd = oldText.length
+    var newEnd = newText.length
+    while (oldEnd > start && newEnd > start && oldText[oldEnd - 1] == newText[newEnd - 1]) {
+        oldEnd--
+        newEnd--
+    }
+
+    // Region removed from old: [start, oldEnd)
+    if (oldEnd > start) {
+        val mentions = findMentions(oldText)
+        var delStart = start
+        var delEnd = oldEnd
+
+        for (mention in mentions) {
+            val ms = mention.start
+            val me = mention.endExclusive
+            val overlaps = delStart < me && delEnd > ms
+            val fullyContained = delStart <= ms && delEnd >= me
+            if (overlaps && !fullyContained) {
+                delStart = min(delStart, ms)
+                delEnd = max(delEnd, me)
+            }
+        }
+
+        if (delStart != start || delEnd != oldEnd) {
+            val replacement = newText.substring(start, newEnd)
+            val result = buildString(oldText.length - (delEnd - delStart) + replacement.length) {
+                append(oldText, 0, delStart)
+                append(replacement)
+                append(oldText, delEnd, oldText.length)
+            }
+            return TextFieldValue(result, TextRange(delStart + replacement.length))
+        }
+    }
+
+    return snapSelectionAwayFromMentionInterior(incoming)
+}
+
+/** If the caret/selection lands inside a raw mention, snap to the nearest edge. */
+private fun snapSelectionAwayFromMentionInterior(value: TextFieldValue): TextFieldValue {
+    val mentions = findMentions(value.text)
+    if (mentions.isEmpty()) return value
+
+    fun snap(index: Int): Int {
+        val hit = mentions.firstOrNull { index > it.start && index < it.endExclusive }
+            ?: return index
+        val mid = (hit.start + hit.endExclusive) / 2
+        return if (index < mid) hit.start else hit.endExclusive
+    }
+
+    val sel = value.selection
+    val start = snap(sel.start)
+    val end = snap(sel.end)
+    return if (start == sel.start && end == sel.end) value
+    else value.copy(selection = TextRange(start, end))
+}
+
+private fun findActiveAtQueryStart(text: String, caret: Int): Int? {
+    if (caret <= 0 || caret > text.length) return null
+    val before = text.substring(0, caret)
+    val at = before.lastIndexOf('@')
+    if (at < 0) return null
+    val query = before.substring(at + 1)
+    if (query.any { it.isWhitespace() }) return null
+    // Don't treat the '@' inside already-committed display text; only free '@'
+    // in the raw buffer. Mentions don't contain a bare '@'.
+    return at
 }

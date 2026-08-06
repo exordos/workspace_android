@@ -57,6 +57,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.OutlinedTextFieldDefaults.contentPadding
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -122,6 +123,8 @@ fun ChatDialogScreen(
     navController: NavHostController
 ) {
     val streamTopicMessages by viewModel.streamTopicMessages.collectAsStateWithLifecycle()
+    val streamBindings by viewModel.streamBindings.collectAsStateWithLifecycle()
+    val users by viewModel.users.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsState()
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -195,16 +198,25 @@ fun ChatDialogScreen(
                                 }
                             }
                         )) {
+                        val title = if (viewModel.isDirectMessages) viewModel.chatTitle else viewModel.topicName ?: viewModel.chatTitle
                         Text(
-                            viewModel.chatTitle,
+                            title,
                             color = LocalWorkspaceColorsPalette.current.textHeaders,
                             fontSize = 16.sp,
                             fontFamily = InterFontFamily,
                             fontWeight = FontWeight.Medium
                         )
-                        if (viewModel.topicName != null) {
+                        val currentStreamBindings = streamBindings[viewModel.chatId]
+                        if (currentStreamBindings != null && currentStreamBindings.count() > 0) {
+                            val currentBindedOnlineUsers = currentStreamBindings.mapNotNull { binding -> users.firstOrNull { binding.userUuid == it.uuid && it.status == "active" } }
+                            var baseText = context.resources.getQuantityString(
+                                R.plurals.participants_count, currentStreamBindings.count(), currentStreamBindings.count()
+                            )
+                            if (currentBindedOnlineUsers.count() > 0) {
+                                baseText += ", ${currentBindedOnlineUsers.count()} онлайн"
+                            }
                             Text(
-                                viewModel.topicName,
+                                baseText,
                                 color = LocalWorkspaceColorsPalette.current.textAdditional30,
                                 fontSize = 14.sp,
                                 fontFamily = InterFontFamily,
@@ -221,7 +233,7 @@ fun ChatDialogScreen(
                     }
                 },
                 actions = {
-                    Button(
+                    IconButton(
                         onClick = {
                             val roomName = JitsiStyleRoomNameGenerator.generate()
                             val messageText = "${viewModel.repo.jitsiServerUrl}/${roomName}"
@@ -235,7 +247,7 @@ fun ChatDialogScreen(
 
                             JitsiMeetActivity.launch(context, options)
                         },
-                        colors = ButtonDefaults.buttonColors(
+                        colors = IconButtonDefaults.iconButtonColors(
                             containerColor = Color.Transparent,
                             contentColor = LocalWorkspaceColorsPalette.current.iconBase
                         )
@@ -243,6 +255,20 @@ fun ChatDialogScreen(
                         Icon(
                             painter = painterResource(id = R.drawable.call),
                             contentDescription = "Call"
+                        )
+                    }
+                    IconButton(
+                        onClick = {
+                            navController.navigate(ChatFlow.StreamInfo(viewModel.chatId, viewModel.topicUuid))
+                        },
+                        colors = IconButtonDefaults.iconButtonColors(
+                            containerColor = Color.Transparent,
+                            contentColor = LocalWorkspaceColorsPalette.current.iconBase
+                        )
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_more_vertical),
+                            contentDescription = "More"
                         )
                     }
                 }
@@ -371,16 +397,21 @@ fun ChatMessage(
                 val formatter = DateTimeFormatter.ofPattern("d MMM", locale)
                 Text(
                     text = currentMessageDate.format(formatter),
-                    color = LocalWorkspaceColorsPalette.current.textHeaders,
+                    color = LocalWorkspaceColorsPalette.current.textAdditional50,
                     fontSize = 14.sp,
                     fontFamily = InterFontFamily,
                     modifier = Modifier
                         .padding(vertical = 16.dp)
-                        .background(
-                            LocalWorkspaceColorsPalette.current.surface,
+                        .border(
+                            width = 1.dp,
+                            color = LocalWorkspaceColorsPalette.current.divider,
                             shape = RoundedCornerShape(100.dp)
                         )
-                        .padding(vertical = 4.dp, horizontal = 12.dp)
+                        .background(
+                            LocalWorkspaceColorsPalette.current.cardBackgroundBase,
+                            shape = RoundedCornerShape(100.dp)
+                        )
+                        .padding(vertical = 8.dp, horizontal = 12.dp)
                 )
             }
 //            if (previousMessage.flags.contains("read") && !item.flags.contains("read")) {
@@ -413,68 +444,10 @@ fun ChatMessage(
             } else {
                 TextMessageView(item, viewModel, navController)
             }
-            if (!item.reactions.isEmpty()) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    for (reaction in item.reactions) {
-                        val hasMyReaction = viewModel.hasMyReaction(reaction.key, item.uuid)
-                        val unicodeEmoji = remember(reaction.key) { toUnicodeEmoji(reaction.key) }
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .padding(4.dp)
-                                .border(
-                                    width = 1.dp,
-                                    color = LocalWorkspaceColorsPalette.current.onPrimary,
-                                    shape = RoundedCornerShape(16.dp)
-                                )
-                                .background(
-                                    if (hasMyReaction) LocalWorkspaceColorsPalette.current.primary else Color.Transparent,
-                                    shape = RoundedCornerShape(16.dp)
-                                )
-                                .padding(4.dp)
-                                .clickable(
-                                    onClick = {
-                                        scope.launch {
-                                            viewModel.onMessageReactionTap(item.uuid, reaction.key)
-                                        }
-                                    }
-                                ),
-                        ) {
-                            Text(unicodeEmoji)
-                            Text(text ="${reaction.value}",
-                                color = LocalWorkspaceColorsPalette.current.textHeaders,
-                                fontSize = 12.sp,
-                                fontFamily = InterFontFamily,
-                            )
-                        }
-                    }
-                }
-            }
         }
     }
 }
 
-enum class EmojiKind { Unicode, Shortcode, Unknown }
-fun classifyEmoji(raw: String): EmojiKind {
-    val value = raw.trim()
-    if (value.isEmpty()) return EmojiKind.Unknown
-    if (value.any { isEmojiCodePoint(it.code) } || EmojiManager.isEmoji(value)) {
-        return EmojiKind.Unicode
-    }
-    val shortcodePattern = Regex("""^:?[a-z0-9_+-]+:?$""", RegexOption.IGNORE_CASE)
-    if (shortcodePattern.matches(value)) {
-        return EmojiKind.Shortcode
-    }
-    return EmojiKind.Unknown
-}
-private fun isEmojiCodePoint(cp: Int): Boolean =
-    Character.getType(cp) == Character.OTHER_SYMBOL.toInt() ||
-            (cp in 0x1F000..0x1FAFF) || // Misc Pictographs / Supplemental Symbols
-            (cp in 0x2600..0x27BF) ||   // Misc symbols / dingbats
-            (cp in 0xFE00..0xFE0F) ||   // Variation selectors
-            cp == 0x200D               // ZWJ
 fun toUnicodeEmoji(raw: String): String {
     val value = raw.trim()
     if (value.isEmpty()) return value

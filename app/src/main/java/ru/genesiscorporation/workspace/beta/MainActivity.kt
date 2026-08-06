@@ -105,6 +105,8 @@ import ru.genesiscorporation.workspace.beta.modules.otp.OtpScreen
 import ru.genesiscorporation.workspace.beta.modules.otp.OtpViewModel
 import ru.genesiscorporation.workspace.beta.modules.ownusersettings.OwnUserSettingsView
 import ru.genesiscorporation.workspace.beta.modules.ownusersettings.OwnUserSettingsViewModel
+import ru.genesiscorporation.workspace.beta.modules.streaminfo.StreamInfoView
+import ru.genesiscorporation.workspace.beta.modules.streaminfo.StreamInfoViewModel
 
 
 class MainActivity : ComponentActivity() {
@@ -321,6 +323,13 @@ fun ChatNavigation(
             val chatUserInfoViewModelFactory = remember { ChatUserInfoViewModelFactory(workspaceApiClient, args.userName, args.userId, args.avatarUrl, args.email, eventsRepository) }
             val chatUserInfoViewModel: ChatUserInfoViewModel = viewModel(factory = chatUserInfoViewModelFactory)
             ChatUserInfoScreen(chatUserInfoViewModel, navController)
+        }
+
+        composable<ChatFlow.StreamInfo> {
+            val args = it.toRoute<ChatFlow.StreamInfo>()
+            val streamInfoViewModelFactory = remember { StreamInfoViewModelFactory(workspaceApiClient, args.streamUuid, args.topicUuid, eventsRepository) }
+            val streamInfoViewModel: StreamInfoViewModel = viewModel(factory = streamInfoViewModelFactory)
+            StreamInfoView(streamInfoViewModel, navController)
         }
 
         composable<ChatFlow.CreateBase> {

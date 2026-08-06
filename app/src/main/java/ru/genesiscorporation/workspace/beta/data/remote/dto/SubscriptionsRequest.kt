@@ -27,6 +27,7 @@ data class Stream(
     @SerialName("last_message_uuid") var lastMessageUuid: String? = null,
     @SerialName("default_topic_uuid") var defaultTopicUuid: String? = null,
     @SerialName("direct_user_uuid") val directUserUuid: String? = null,
+    @SerialName("notification_mode") var notificationMode: String,
     var directUser: UserResponseData? = null,
     var lastMessage: MessageResponse? = null
 )
