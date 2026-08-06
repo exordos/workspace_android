@@ -25,6 +25,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -46,6 +47,7 @@ import coil3.compose.AsyncImagePainter
 import coil3.network.NetworkHeaders
 import coil3.network.httpHeaders
 import coil3.request.ImageRequest
+import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.data.UrnParser
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
@@ -68,6 +70,7 @@ fun ImageMessageView(
     onImageLoad: () -> Unit
 ) {
     val zone = ZoneId.systemDefault()
+    val scope = rememberCoroutineScope()
     val hhmmFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
     var showFullscreen by remember { mutableStateOf(false) }
     val bubbleShape = if (item.isOwn) {
@@ -92,6 +95,7 @@ fun ImageMessageView(
     ) {
         val nextMessage = viewModel.nextMessageByUuid(item.uuid)
         if (!viewModel.isDirectMessages && !item.isOwn) {
+            val bottomPadding = if (item.reactions.isEmpty()) 0.dp else 8.dp
             if (nextMessage != null) {
                 if (nextMessage.authorUuid != item.authorUuid) {
                     Box(
@@ -116,13 +120,13 @@ fun ImageMessageView(
                             null,
                             item.user?.displayableName() ?: "",
                             Modifier.size(30.dp)
+                                .padding(end = 4.dp, bottom = bottomPadding)
                         )
                     }
                 } else {
                     Box(
                         modifier = Modifier
-                            .padding(end = 12.dp)
-                            .size(30.dp)
+                            .size(34.dp)
                             .background(color = Color.Transparent, shape = CircleShape)
                     )
                 }
@@ -149,88 +153,128 @@ fun ImageMessageView(
                         null,
                         item.user?.displayableName() ?: "",
                         Modifier.size(30.dp)
+                            .padding(end = 4.dp, bottom = bottomPadding)
                     )
                 }
             }
         }
-        Row(
-            verticalAlignment = Alignment.Bottom,
-            modifier = Modifier
-                .background(
-                    if (item.isOwn)
-                        LocalWorkspaceColorsPalette.current.messageOwnBackground
-                    else LocalWorkspaceColorsPalette.current.messageBackground,
-                    shape = bubbleShape
-                )
-                .padding(10.dp)
-        ) {
-            Column(
-                horizontalAlignment = Alignment.Start,
+        Column {
+            Row(
+                verticalAlignment = Alignment.Bottom,
                 modifier = Modifier
-                    .weight(2f, fill = false)
-            ) {
-                val defaultName = if (item.isOwn) "Я" else "Собеседник"
-                Text(
-                    text = item.user?.displayableName() ?: defaultName,
-                    color = if (item.isOwn) LocalWorkspaceColorsPalette.current.indicatorBlue else LocalWorkspaceColorsPalette.current.indicatorPurple,
-                    fontSize = 14.sp,
-                    fontFamily = InterFontFamily,
-                    fontWeight = FontWeight.Medium
-                )
-                val baseUrl by viewModel.userViewModel.repo.baseUrlFlow.collectAsStateWithLifecycle(initialValue = "")
-                val authHeaders = viewModel.client.authHeaders()
-                val headers = NetworkHeaders.Builder()
-                    .set(authHeaders.first().title, authHeaders.first().value)
-                    .build()
-                val imageUrl = UrnParser.parseUrl(imageUrn, baseUrl ?: "")
-                if (imageUrl != null) {
-                    val imageRequest = ImageRequest.Builder(LocalContext.current)
-                        .data(imageUrl)
-                        .httpHeaders(headers)
-                        .build()
-                    AsyncImage(
-                        model = imageRequest,
-                        contentDescription = null,
-                        modifier = Modifier.clickable { showFullscreen = true },
-                        onState = { state ->
-                            when (state) {
-                                is AsyncImagePainter.State.Success -> {
-                                    onImageLoad()
-                                }
-
-                                else -> Unit
-                            }
-                        }
+                    .background(
+                        if (item.isOwn)
+                            LocalWorkspaceColorsPalette.current.messageOwnBackground
+                        else LocalWorkspaceColorsPalette.current.messageBackground,
+                        shape = bubbleShape
                     )
-                    if (showFullscreen) {
-                        FullscreenZoomableImage(
+                    .padding(10.dp)
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.Start,
+                    modifier = Modifier
+                        .weight(2f, fill = false)
+                ) {
+                    val defaultName = if (item.isOwn) "Я" else "Собеседник"
+                    Text(
+                        text = item.user?.displayableName() ?: defaultName,
+                        color = if (item.isOwn) LocalWorkspaceColorsPalette.current.indicatorBlue else LocalWorkspaceColorsPalette.current.indicatorPurple,
+                        fontSize = 14.sp,
+                        fontFamily = InterFontFamily,
+                        fontWeight = FontWeight.Medium
+                    )
+                    val baseUrl by viewModel.userViewModel.repo.baseUrlFlow.collectAsStateWithLifecycle(
+                        initialValue = ""
+                    )
+                    val authHeaders = viewModel.client.authHeaders()
+                    val headers = NetworkHeaders.Builder()
+                        .set(authHeaders.first().title, authHeaders.first().value)
+                        .build()
+                    val imageUrl = UrnParser.parseUrl(imageUrn, baseUrl ?: "")
+                    if (imageUrl != null) {
+                        val imageRequest = ImageRequest.Builder(LocalContext.current)
+                            .data(imageUrl)
+                            .httpHeaders(headers)
+                            .build()
+                        AsyncImage(
                             model = imageRequest,
                             contentDescription = null,
-                            onDismiss = { showFullscreen = false },
+                            modifier = Modifier.clickable { showFullscreen = true },
+                            onState = { state ->
+                                when (state) {
+                                    is AsyncImagePainter.State.Success -> {
+                                        onImageLoad()
+                                    }
+
+                                    else -> Unit
+                                }
+                            }
                         )
-                    }
-                    if (text.isNotEmpty()) {
-                        Text(
-                            text = text,
-                            color = LocalWorkspaceColorsPalette.current.textHeaders,
-                            fontSize = 14.sp,
-                            fontFamily = InterFontFamily,
-                        )
+                        if (showFullscreen) {
+                            FullscreenZoomableImage(
+                                model = imageRequest,
+                                contentDescription = null,
+                                onDismiss = { showFullscreen = false },
+                            )
+                        }
+                        if (text.isNotEmpty()) {
+                            Text(
+                                text = text,
+                                color = LocalWorkspaceColorsPalette.current.textHeaders,
+                                fontSize = 14.sp,
+                                fontFamily = InterFontFamily,
+                            )
+                        }
                     }
                 }
-            }
 //                TappableAsyncImage(
 //                    model = imageRequest,
 //                    contentDescription = null,
 //                )
-            Spacer(modifier = Modifier.widthIn(min = 20.dp))
-            val instant = Instant.parse(item.createdAt)
-            Text(
-                text = instant.atZone(zone).format(hhmmFormatter),
-                color = LocalWorkspaceColorsPalette.current.messageTimeColor,
-                fontSize = 14.sp,
-                fontFamily = InterFontFamily,
-            )
+                Spacer(modifier = Modifier.widthIn(min = 20.dp))
+                val instant = Instant.parse(item.createdAt)
+                Text(
+                    text = instant.atZone(zone).format(hhmmFormatter),
+                    color = LocalWorkspaceColorsPalette.current.messageTimeColor,
+                    fontSize = 14.sp,
+                    fontFamily = InterFontFamily,
+                )
+            }
+            if (!item.reactions.isEmpty()) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    for (reaction in item.reactions) {
+                        val hasMyReaction = viewModel.hasMyReaction(reaction.key, item.uuid)
+                        val unicodeEmoji = remember(reaction.key) { toUnicodeEmoji(reaction.key) }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier
+                                .padding(top = 4.dp, bottom = 8.dp)
+                                .background(
+                                    if (hasMyReaction) LocalWorkspaceColorsPalette.current.primary else LocalWorkspaceColorsPalette.current.cardBackgroundActive,
+                                    shape = RoundedCornerShape(16.dp)
+                                )
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                .clickable(
+                                    onClick = {
+                                        scope.launch {
+                                            viewModel.onMessageReactionTap(item.uuid, reaction.key)
+                                        }
+                                    }
+                                ),
+                        ) {
+                            Text(unicodeEmoji)
+                            Text(text ="${reaction.value}",
+                                color = LocalWorkspaceColorsPalette.current.textHeaders,
+                                fontSize = 12.sp,
+                                fontFamily = InterFontFamily,
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }

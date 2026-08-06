@@ -61,6 +61,11 @@ fun EnhancedMarkdown(
                             )
                         }
                     }
+                    url.startsWith("urn:url:") -> {
+                        val url = url.removePrefix("urn:url:")
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                        runCatching { context.startActivity(intent) }
+                    }
                     else -> {
                         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
                         runCatching { context.startActivity(intent) }

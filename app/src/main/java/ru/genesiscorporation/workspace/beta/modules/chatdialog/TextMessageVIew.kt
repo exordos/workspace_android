@@ -80,6 +80,7 @@ fun TextMessageView(
     ) {
         val nextMessage = viewModel.nextMessageByUuid(item.uuid)
         if (!viewModel.isDirectMessages && !item.isOwn) {
+            val bottomPadding = if (item.reactions.isEmpty()) 0.dp else 8.dp
             if (nextMessage != null) {
                 if (nextMessage.authorUuid != item.authorUuid) {
                     Box(
@@ -103,14 +104,14 @@ fun TextMessageView(
                             viewModel.client.authHeaders(),
                             null,
                             item.user?.displayableName() ?: "",
-                            Modifier.size(30.dp)
+                            Modifier.padding(end = 4.dp, bottom = bottomPadding)
+                                .size(30.dp)
                         )
                     }
                 } else {
                     Box(
                         modifier = Modifier
-                            .padding(end = 12.dp)
-                            .size(30.dp)
+                            .size(34.dp)
                             .background(color = Color.Transparent, shape = CircleShape)
                     )
                 }
@@ -136,104 +137,142 @@ fun TextMessageView(
                         viewModel.client.authHeaders(),
                         null,
                         item.user?.displayableName() ?: "",
-                        Modifier.size(30.dp)
+                        Modifier.padding(end = 4.dp, bottom = bottomPadding)
+                            .size(30.dp)
                     )
                 }
             }
         }
-        Box {
-            Row(
-                verticalAlignment = Alignment.Bottom,
-                modifier = Modifier
-                    .background(
-                        if (item.isOwn)
-                            LocalWorkspaceColorsPalette.current.messageOwnBackground
-                        else LocalWorkspaceColorsPalette.current.messageBackground,
-                        shape = bubbleShape
-                    )
-                    .combinedClickable(
-                        onClick = {},
-                        onLongClick = {
-                            menuExpanded = true
-                        }
-                    )
-                    .padding(10.dp)
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.Start,
+        Column {
+            Box {
+                Row(
+                    verticalAlignment = Alignment.Bottom,
                     modifier = Modifier
-                        .weight(2f, fill = false)
+                        .background(
+                            if (item.isOwn)
+                                LocalWorkspaceColorsPalette.current.messageOwnBackground
+                            else LocalWorkspaceColorsPalette.current.messageBackground,
+                            shape = bubbleShape
+                        )
+//                        .combinedClickable(
+//                            onClick = {},
+//                            onLongClick = {
+//                                menuExpanded = true
+//                            }
+//                        )
+                        .padding(10.dp)
                 ) {
-                    val defaultName = if (item.isOwn) "Я" else "Собеседник"
-                    Text(
-                        text = item.user?.displayableName() ?: defaultName,
-                        color = if (item.isOwn) LocalWorkspaceColorsPalette.current.indicatorBlue else LocalWorkspaceColorsPalette.current.indicatorPurple,
-                        fontSize = 14.sp,
-                        fontFamily = InterFontFamily,
-                        fontWeight = FontWeight.Medium
-                    )
-                    EnhancedMarkdown(
-                        markdown = item.payload.content,
-                        style = TextStyle(
-                            color = LocalWorkspaceColorsPalette.current.textHeaders,
+                    Column(
+                        horizontalAlignment = Alignment.Start,
+                        modifier = Modifier
+                            .weight(2f, fill = false)
+                    ) {
+                        val defaultName = if (item.isOwn) "Я" else "Собеседник"
+                        Text(
+                            text = item.user?.displayableName() ?: defaultName,
+                            color = if (item.isOwn) LocalWorkspaceColorsPalette.current.indicatorBlue else LocalWorkspaceColorsPalette.current.indicatorPurple,
                             fontSize = 14.sp,
                             fontFamily = InterFontFamily,
-                        ),
-                        navController = navController,
-                        viewModel = viewModel
+                            fontWeight = FontWeight.Medium
+                        )
+                        EnhancedMarkdown(
+                            markdown = item.payload.content,
+                            style = TextStyle(
+                                color = LocalWorkspaceColorsPalette.current.textHeaders,
+                                fontSize = 14.sp,
+                                fontFamily = InterFontFamily,
+                            ),
+                            navController = navController,
+                            viewModel = viewModel
+                        )
+                    }
+                    Spacer(modifier = Modifier.widthIn(min = 20.dp))
+                    val instant = Instant.parse(item.createdAt)
+                    Text(
+                        text = instant.atZone(zone).format(hhmmFormatter),
+                        color = LocalWorkspaceColorsPalette.current.messageTimeColor,
+                        fontSize = 14.sp,
+                        fontFamily = InterFontFamily,
                     )
                 }
-                Spacer(modifier = Modifier.widthIn(min = 20.dp))
-                val instant = Instant.parse(item.createdAt)
-                Text(
-                    text = instant.atZone(zone).format(hhmmFormatter),
-                    color = LocalWorkspaceColorsPalette.current.messageTimeColor,
-                    fontSize = 14.sp,
-                    fontFamily = InterFontFamily,
-                )
-            }
-            DropdownMenu(
-                expanded = menuExpanded,
-                onDismissRequest = { menuExpanded = false }
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly
+                DropdownMenu(
+                    expanded = menuExpanded,
+                    onDismissRequest = { menuExpanded = false }
                 ) {
-                    listOf("👍", "❤️", "😂", "😮", "😢").forEach { emoji ->
-                        TextButton(
-                            onClick = {
-                                scope.launch {
-                                    viewModel.onReactionTap(item.uuid, emoji)
-                                }
-                                menuExpanded = false
-                            },
-                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
-                            modifier = Modifier.size(40.dp)
-                        ) {
-                            Text(text = emoji, fontSize = 20.sp)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        listOf("👍", "❤️", "😂", "😮", "😢").forEach { emoji ->
+                            TextButton(
+                                onClick = {
+                                    scope.launch {
+                                        viewModel.onReactionTap(item.uuid, emoji)
+                                    }
+                                    menuExpanded = false
+                                },
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Text(text = emoji, fontSize = 20.sp)
+                            }
                         }
                     }
-                }
-                HorizontalDivider()
-                if (item.isOwn) {
+                    HorizontalDivider()
+                    if (item.isOwn) {
+                        DropdownMenuItem(
+                            text = { Text("Редактировать") },
+                            onClick = {
+                                viewModel.onEditMessageClicked(item)
+                                menuExpanded = false
+                            }
+                        )
+                    }
                     DropdownMenuItem(
-                        text = { Text("Редактировать") },
+                        text = { Text("Цитировать") },
                         onClick = {
-                            viewModel.onEditMessageClicked(item)
+                            viewModel.onQuoteMessageClicked(item)
                             menuExpanded = false
                         }
                     )
                 }
-                DropdownMenuItem(
-                    text = { Text("Цитировать") },
-                    onClick = {
-                        viewModel.onQuoteMessageClicked(item)
-                        menuExpanded = false
+            }
+            if (!item.reactions.isEmpty()) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    for (reaction in item.reactions) {
+                        val hasMyReaction = viewModel.hasMyReaction(reaction.key, item.uuid)
+                        val unicodeEmoji = remember(reaction.key) { toUnicodeEmoji(reaction.key) }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier
+                                .padding(top = 4.dp, bottom = 8.dp)
+                                .background(
+                                    if (hasMyReaction) LocalWorkspaceColorsPalette.current.primary else LocalWorkspaceColorsPalette.current.cardBackgroundActive,
+                                    shape = RoundedCornerShape(16.dp)
+                                )
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                .clickable(
+                                    onClick = {
+                                        scope.launch {
+                                            viewModel.onMessageReactionTap(item.uuid, reaction.key)
+                                        }
+                                    }
+                                ),
+                        ) {
+                            Text(unicodeEmoji)
+                            Text(text ="${reaction.value}",
+                                color = LocalWorkspaceColorsPalette.current.textHeaders,
+                                fontSize = 12.sp,
+                                fontFamily = InterFontFamily,
+                            )
+                        }
                     }
-                )
+                }
             }
         }
     }

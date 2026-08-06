@@ -30,6 +30,8 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.OwnUserRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ServerSettingsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
+import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamBindingResponseData
+import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamBindingsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ToggleTopicDoneRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
@@ -81,6 +83,13 @@ class ChatViewModel(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = emptyList()
+        )
+
+    val streamBindings: StateFlow<Map<String, List<StreamBindingResponseData>>> = repo.streamBindings
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyMap()
         )
     private val _currentlySelectedFolder = MutableStateFlow<FolderResponseData?>(null)
     var currentlySelectedFolder: StateFlow<FolderResponseData?> = _currentlySelectedFolder
@@ -142,7 +151,9 @@ class ChatViewModel(
     suspend fun updateSelectedChat(newChat: Stream?) {
         _currentlySelectedStream.update { newChat }
         if (newChat != null) {
-            if (streamTopics.value[newChat.uuid]?.isEmpty() ?: true) {
+            if (streamBindings.value[newChat.uuid]?.isEmpty() ?: true) {
+                loadStreamBindings(newChat)
+            } else if (streamTopics.value[newChat.uuid]?.isEmpty() ?: true) {
                 loadTopics(newChat)
             }
         }
@@ -257,6 +268,20 @@ class ChatViewModel(
 
             is ApiResult.Error -> {
                 _queryState.value = QueryState.Error("")
+            }
+        }
+    }
+
+    suspend fun loadStreamBindings(stream: Stream) {
+        _queryState.value = QueryState.Loading
+        val streamBindingsResponse = client.performRequest(StreamBindingsRequest(stream.uuid))
+        when(streamBindingsResponse) {
+            is ApiResult.Success -> {
+                repo.addStreamBindings(stream.uuid, streamBindingsResponse.value)
+                loadTopics(stream)
+            }
+            is ApiResult.Error -> {
+                loadTopics(stream)
             }
         }
     }

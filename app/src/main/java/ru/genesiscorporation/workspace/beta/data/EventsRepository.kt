@@ -39,8 +39,12 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageReaction
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
+import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamBindingResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
+import kotlin.collections.map
+import kotlin.collections.orEmpty
+import kotlin.collections.plus
 import kotlin.plus
 
 
@@ -164,6 +168,43 @@ class EventsRepository() {
         }
     }
 
+    private val _streamBindings = MutableStateFlow<Map<String, List<StreamBindingResponseData>>>(emptyMap())
+    val streamBindings: StateFlow<Map<String, List<StreamBindingResponseData>>> = _streamBindings.asStateFlow()
+
+    fun addStreamBindings(streamUuid: String, streamBindings: List<StreamBindingResponseData>) {
+        _streamBindings.update { current ->
+            current + (streamUuid to streamBindings)
+        }
+    }
+    fun addBindingToStream(streamBinding: StreamBindingResponseData) {
+        _streamBindings.update { current ->
+            if (current[streamBinding.streamUuid] != null) {
+                val existingTopics = current[streamBinding.streamUuid].orEmpty()
+                current + (streamBinding.streamUuid to (existingTopics + streamBinding))
+            } else {
+                current
+            }
+        }
+    }
+
+    fun updateStreamBindings(updatedStreamBinding: StreamBindingResponseData) {
+        _streamBindings.update { current ->
+            val streamBindings = current[updatedStreamBinding.streamUuid] ?: return@update current
+            val updatedStreamBindings = streamBindings.map { streamBinding ->
+                if (streamBinding.uuid == updatedStreamBinding.uuid) {
+                    streamBinding.copy(
+                        role = updatedStreamBinding.role
+                    )
+                } else {
+                    streamBinding
+                }
+            }
+
+            if (updatedStreamBindings == streamBindings) return@update current
+            current + (updatedStreamBinding.streamUuid to updatedStreamBindings)
+        }
+    }
+
     private val _messagesPool = MutableStateFlow<List<MessageResponse>>(emptyList())
     val messagesPool: StateFlow<List<MessageResponse>> = _messagesPool.asStateFlow()
     fun setInitialMessagesPool(newList: List<MessageResponse>) {
@@ -265,6 +306,7 @@ class EventsRepository() {
                         unreadCount = updatedStream.unreadCount,
                         activeUnreadCount = updatedStream.activeUnreadCount,
                         passiveUnreadCount = updatedStream.passiveUnreadCount,
+                        notificationMode = updatedStream.notificationMode,
                         lastMessage = message
                     )
                 } else {
@@ -479,9 +521,8 @@ class EventsRepository() {
                 val currentUser = _currentUser.value
                 if (currentUser?.uuid == user.uuid) {
                     updateCurrentUser(user)
-                } else {
-                    updateUser(user)
                 }
+                updateUser(user)
             }
             "deleted" -> {
 

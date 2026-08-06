@@ -32,6 +32,8 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.RemoveMessageReactionRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.SendDirectMessageRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.SendMessageRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamBindingResponseData
+import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamBindingsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UsersRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
@@ -62,6 +64,20 @@ class ChatDialogViewModel(
             initialValue = emptyMap()
         )
 
+    val streamBindings: StateFlow<Map<String, List<StreamBindingResponseData>>> = repo.streamBindings
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyMap()
+        )
+
+    val users: StateFlow<List<UserResponseData>> = repo.users
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList()
+        )
+
     private var possibleMessage: MessageResponse? = null
 
     var user: UserResponseData? = null
@@ -75,9 +91,16 @@ class ChatDialogViewModel(
     private val _quotedMessage = MutableStateFlow<MessageResponse?>(null)
     val quotedMessage: StateFlow<MessageResponse?> = _quotedMessage
 
+    val mentions = MentionTextFieldState()
 
-    private val _messageText = MutableStateFlow("")
-    val messageText: StateFlow<String> = _messageText
+    fun onUserSelected(name: String, urn: String) {
+        if (!mentions.insertMentionFromAtQuery(name, urn)) {
+            mentions.insertMention(name, urn)
+        }
+    }
+
+//    private val _messageText = MutableStateFlow("")
+//    val messageText: StateFlow<String> = _messageText
 
     private val _imageUri = MutableStateFlow<Uri?>(null)
     val imageUri: StateFlow<Uri?> = _imageUri
@@ -85,10 +108,6 @@ class ChatDialogViewModel(
     var shouldScrollToBottom: Boolean = true
 
     val messageFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
-
-    fun onMessageChange(newText: String) {
-        _messageText.value = newText
-    }
 
     fun onImageUriChange(newUri: Uri?) {
         _imageUri.value = newUri
@@ -127,7 +146,7 @@ class ChatDialogViewModel(
         if (message.uuid != "") {
             editingMessage = message
             _editingMessageBackupText.value = message.payload.content
-            _messageText.value = message.payload.content
+            mentions.insertText(message.payload.content)
         }
     }
 
@@ -144,7 +163,7 @@ class ChatDialogViewModel(
     fun clearEditingMessage() {
         _editingMessageBackupText.value = null
         editingMessage = null
-        _messageText.value = ""
+        mentions.insertText("")
     }
 
     fun hasMyReaction(reaction: String, messageUuid: String): Boolean {
@@ -152,10 +171,10 @@ class ChatDialogViewModel(
     }
 
     suspend fun onSendClicked(context: Context) {
-        val text = _messageText.value
+        val text = mentions.text
         val messageId = editingMessage?.uuid
         if (messageId != null && !text.isBlank()) {
-            sendEditMessage(messageId, _messageText.value)
+            sendEditMessage(messageId, mentions.text)
         } else {
             sendMessage(context)
         }
@@ -172,7 +191,7 @@ class ChatDialogViewModel(
             val response = client.uploadStreamImage(context, imageUri, chatId)
             when(response) {
                 is ApiResult.Success -> {
-                    val text = _messageText.value
+                    val text = mentions.text
                     if (!text.isBlank()) {
                         messageText += "$text\r\n"
                     }
@@ -184,7 +203,7 @@ class ChatDialogViewModel(
                 }
             }
         } else {
-            val text = _messageText.value
+            val text = mentions.text
             messageText += text
             if (text.isBlank()) return
             sendTextMessage(messageText)
@@ -209,7 +228,7 @@ class ChatDialogViewModel(
         repo.updateMessagesPool(listOf(newMessage))
         repo.addMessageToStreamTopic(newMessage)
         possibleMessage = newMessage
-        _messageText.value = ""
+        mentions.insertText("")
         _imageUri.value = null
         editingMessage = null
         _editingMessageBackupText.value = null
@@ -232,7 +251,6 @@ class ChatDialogViewModel(
 
             }
         }
-        _messageText.value = ""
     }
 
     suspend fun sendEditMessage(messageUuid: String, messageText: String) {
@@ -249,7 +267,7 @@ class ChatDialogViewModel(
                 _editingMessageBackupText.value = null
             }
         }
-        _messageText.value = ""
+        mentions.insertText("")
     }
 
     init {
@@ -258,6 +276,9 @@ class ChatDialogViewModel(
             val key = "${chatId}.${topicUuid}"
             if (streamTopicMessages.value[key]?.isEmpty() ?: true) {
                 loadLatestMessages()
+            }
+            if (streamBindings.value[chatId]?.isEmpty() ?: true) {
+                loadStreamBindings()
             }
         }
     }
@@ -276,6 +297,18 @@ class ChatDialogViewModel(
             }
             is ApiResult.Error -> {
                 _isLoading.value = false
+            }
+        }
+    }
+
+    suspend fun loadStreamBindings() {
+        val streamBindingsResponse = client.performRequest(StreamBindingsRequest(chatId))
+        when(streamBindingsResponse) {
+            is ApiResult.Success -> {
+                repo.addStreamBindings(chatId, streamBindingsResponse.value)
+            }
+            is ApiResult.Error -> {
+
             }
         }
     }

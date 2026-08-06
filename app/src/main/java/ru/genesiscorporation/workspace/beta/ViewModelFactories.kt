@@ -20,6 +20,7 @@ import ru.genesiscorporation.workspace.beta.modules.login.LoginViewModel
 import ru.genesiscorporation.workspace.beta.modules.otp.OtpViewModel
 import ru.genesiscorporation.workspace.beta.modules.ownusersettings.OwnUserSettingsViewModel
 import ru.genesiscorporation.workspace.beta.modules.profile.ProfileViewModel
+import ru.genesiscorporation.workspace.beta.modules.streaminfo.StreamInfoViewModel
 import ru.genesiscorporation.workspace.beta.modules.topics.TopicsViewModel
 import ru.genesiscorporation.workspace.beta.modules.users.UsersViewModel
 
@@ -163,6 +164,21 @@ class ChatDialogViewModelFactory(private val client: WorkspaceAPIClient, private
                 isDirectMessages,
                 repo,
                 userId
+            ) as T
+        }
+        throw IllegalArgumentException("Unknown ViewModel class")
+    }
+}
+
+class StreamInfoViewModelFactory(private val client: WorkspaceAPIClient, private val streamUuid: String, private val topicUuid: String, private  val repo: EventsRepository) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        if (modelClass.isAssignableFrom(StreamInfoViewModel::class.java)) {
+            @Suppress("UNCHECKED_CAST")
+            return StreamInfoViewModel(
+                streamUuid,
+                topicUuid,
+                client,
+                repo
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")

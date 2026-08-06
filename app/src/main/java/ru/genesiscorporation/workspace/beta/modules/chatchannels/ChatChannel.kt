@@ -157,16 +157,18 @@ fun ChatChannel(
                 horizontalAlignment = Alignment.End,
                 verticalArrangement = Arrangement.Center
             ) {
+                val unreadCount = if (item.activeUnreadCount > 0) item.activeUnreadCount else item.passiveUnreadCount
                 if (item.unreadCount > 0) {
+                    val backgroundColor = if (item.activeUnreadCount > 0) LocalWorkspaceColorsPalette.current.noticeCounterBadge else LocalWorkspaceColorsPalette.current.noticeDisable
                     Text(
-                        text = "${item.unreadCount}",
+                        text = "${unreadCount}",
                         color = LocalWorkspaceColorsPalette.current.noticeOnBadge,
                         fontSize = 14.sp,
                         fontFamily = InterFontFamily,
                         fontWeight = FontWeight.Medium,
                         modifier = Modifier
                             .background(
-                                color = LocalWorkspaceColorsPalette.current.noticeCounterBadge,
+                                color = backgroundColor,
                                 shape = RoundedCornerShape(100.dp)
                             )
                             .padding(horizontal = 8.dp)

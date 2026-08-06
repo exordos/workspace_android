@@ -162,7 +162,7 @@ fun ChatTopic(
                         fontFamily = InterFontFamily,
                         modifier = Modifier
                             .background(
-                                color = LocalWorkspaceColorsPalette.current.noticeCounterBadge,
+                                color = if (item.notificationMode == "mute") LocalWorkspaceColorsPalette.current.noticeDisable else LocalWorkspaceColorsPalette.current.noticeCounterBadge,
                                 shape = RoundedCornerShape(100.dp)
                             )
                             .padding(horizontal = 8.dp)
