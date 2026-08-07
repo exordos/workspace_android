@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -62,7 +63,7 @@ fun ChatTopic(
     var menuExpanded by remember { mutableStateOf(false) }
     val lastMessage = item.lastMessage
     val scope = rememberCoroutineScope()
-    Column {
+    Box {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
@@ -131,7 +132,6 @@ fun ChatTopic(
                                 color = LocalWorkspaceColorsPalette.current.primary,
                                 fontSize = 12.sp,
                                 fontFamily = InterFontFamily,
-                                fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -150,9 +150,9 @@ fun ChatTopic(
             }
             Column(
                 modifier = Modifier
-                    .padding(start = 8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                    .padding(8.dp, 4.dp, 0.dp, 4.dp),
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.Center
             ) {
                 if (item.unreadCount > 0) {
                     Text(
@@ -162,14 +162,13 @@ fun ChatTopic(
                         fontFamily = InterFontFamily,
                         modifier = Modifier
                             .background(
-                                color = if (item.notificationMode == "mute") LocalWorkspaceColorsPalette.current.noticeDisable else LocalWorkspaceColorsPalette.current.noticeCounterBadge,
+                                color = if (item.notificationMode == "mute") LocalWorkspaceColorsPalette.current.noticeDisable else LocalWorkspaceColorsPalette.current.noticeBase,
                                 shape = RoundedCornerShape(100.dp)
                             )
                             .padding(horizontal = 8.dp)
                     )
-                } else {
-                    Spacer(Modifier.height(15.dp))
                 }
+                Spacer(modifier = Modifier.weight(1f))
                 IconButton(onClick = {
                     scope.launch {
                         viewModel.setNextNotificationMode(item)
@@ -180,11 +179,16 @@ fun ChatTopic(
                         "follow" -> R.drawable.ic_volume_small
                         else -> R.drawable.ic_notifications_small
                     }
-                    Image(
-                        painter = painterResource(id = imageName),
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp)
-                    )
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.CenterEnd
+                    ) {
+                        Image(
+                            painter = painterResource(id = imageName),
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
         }
@@ -285,8 +289,13 @@ fun ChatTopic(
             }
         )
     }
-    HorizontalDivider(
-        thickness = 1.dp,
-        color = LocalWorkspaceColorsPalette.current.divider,
-    )
+    Column {
+        Spacer(
+            Modifier.weight(1f)
+        )
+        HorizontalDivider(
+            thickness = 1.dp,
+            color = LocalWorkspaceColorsPalette.current.divider
+        )
+    }
 }

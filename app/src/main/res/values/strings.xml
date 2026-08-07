@@ -1,3 +1,9 @@
 <resources>
     <!-- app_name is defined per product flavor in src/genesis and src/exordos -->
+    <plurals name="participants_count">
+        <item quantity="one">%d участник</item>
+        <item quantity="few">%d участника</item>
+        <item quantity="many">%d участников</item>
+        <item quantity="other">%d участников</item>
+    </plurals>
 </resources>

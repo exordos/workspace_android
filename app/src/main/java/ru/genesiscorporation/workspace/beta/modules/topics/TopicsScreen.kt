@@ -195,7 +195,7 @@ fun ChatOldTopic(
                         fontWeight = FontWeight.Medium,
                         modifier = Modifier
                             .background(
-                                color = LocalWorkspaceColorsPalette.current.noticeCounterBadge,
+                                color = LocalWorkspaceColorsPalette.current.noticeBase,
                                 shape = RoundedCornerShape(100.dp)
                             )
                             .padding(horizontal = 8.dp)
