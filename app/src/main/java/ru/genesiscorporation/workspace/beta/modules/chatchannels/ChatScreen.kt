@@ -188,13 +188,14 @@ fun ChatScreen(
         topBar = {
             CenterAlignedTopAppBar(
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = LocalWorkspaceColorsPalette.current.surface,
+                    containerColor = LocalWorkspaceColorsPalette.current.background,
                     titleContentColor = LocalWorkspaceColorsPalette.current.textHeaders,
                 ),
                 title = {
                     Text(
                         "Мессенджер",
-                        fontFamily = InterFontFamily,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Medium
                     )
                 },
                 expandedHeight = 48.dp,
@@ -227,7 +228,7 @@ fun ChatScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .imePadding()
-                    .background(LocalWorkspaceColorsPalette.current.surface)
+                    .background(LocalWorkspaceColorsPalette.current.background)
             ) {
                     Column(
                         modifier = Modifier
@@ -266,7 +267,7 @@ fun ChatScreen(
                                     if (searchQuery.isEmpty()) {
                                         Text(
                                             text = "Поиск...",
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            color = LocalWorkspaceColorsPalette.current.textAdditional30,
                                         )
                                     }
                                     innerTextField()
@@ -293,43 +294,6 @@ fun ChatScreen(
                             }
                         })
                     }
-            }
-            if (showUserList) {
-                UsersScreen(
-                    usersViewModel,
-                    onUserSelected = { userResponse ->
-                        showUserList = false
-                        scope.launch {
-                            chatViewModel.createPrivateStream(userResponse)
-                        }
-                    },
-                    onDismiss = {
-                        showUserList = false
-                    }
-                )
-            }
-            if (showAddFolderView) {
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.45f))
-                        .clickable(
-                            indication = null,
-                            interactionSource = remember { MutableInteractionSource() },
-                            onClick = { showAddFolderView = false },
-                        ),
-                )
-                CreateFolder(
-                    onCreateButtonTap = { folderName ->
-                        scope.launch {
-                            chatViewModel.addFolder(folderName)
-                        }
-                        showAddFolderView = false
-                    },
-                    onDismiss = {
-                        showAddFolderView = false
-                    }
-                )
             }
             val chat = chatToAdd
             if (chat != null) {
@@ -407,7 +371,6 @@ fun FolderList(
                     Text(
                         folder.title,
                         fontSize = 14.sp,
-                        fontFamily = InterFontFamily,
                         fontWeight = FontWeight.Medium,
                         color = if (folder.uuid == currentlySelectedFolder?.uuid) LocalWorkspaceColorsPalette.current.textHeaders else LocalWorkspaceColorsPalette.current.textAdditional30,
                         modifier = Modifier
@@ -434,7 +397,7 @@ fun FolderList(
                             modifier = Modifier
                                 .padding(4.dp, 0.dp, 8.dp, 0.dp)
                                 .background(
-                                    color = LocalWorkspaceColorsPalette.current.noticeCounterBadge,
+                                    color = LocalWorkspaceColorsPalette.current.noticeBase,
                                     shape = RoundedCornerShape(100.dp)
                                 )
                                 .padding(horizontal = 8.dp)

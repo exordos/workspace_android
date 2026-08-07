@@ -58,13 +58,13 @@ val LightWorkspaceColorsPalette = WorkspaceColorsPalette(
     messageOwnBackground = Color(color = 0xFFAED7FF),
     messageActiveCallBackground = Color(color = 0xFFE2FFE9),
     messageSelectedForeground = Color(color = 0xFFA8E6AF),
-    cardBackgroundBase = Color(color = 0xFFF5F5F5),
+    cardBackgroundBase = Color(color = 0xFFCDE6FF),
     cardBackgroundActive = Color(color = 0xFFCDE6FF),
     noticeBase = Color(color = 0xFF7087FF),
     noticeDisable = Color(color = 0xFF989898),
     noticeOnBadge = Color(color = 0xFFFFFFFF),
     noticeCounterBadge = Color(color = 0xFF7087FF),
-    searchBackground = Color(color = 0xFFE6E6E6),
+    searchBackground = Color(color = 0xFFFFFFFF),
     indicatorYellow = Color(color = 0xFFFFD633),
     indicatorPink = Color(color = 0xFFF458D2),
     indicatorPurple = Color(color = 0xFF8D6DFF),
@@ -74,7 +74,7 @@ val LightWorkspaceColorsPalette = WorkspaceColorsPalette(
     indicatorBlue = Color(color = 0xFF4B98E6),
     indicatorGrey = Color(color = 0xFF484848),
     chatHeaderBackground = Color(color = 0xFFEAF5FF),
-    divider = Color(color = 0xFFE8E8E8)
+    divider = Color(color = 0xFFC5CED8)
 )
 
 val DarkWorkspaceColorsPalette = WorkspaceColorsPalette(

@@ -70,23 +70,24 @@ fun ChatChannel(
     val zone = ZoneId.systemDefault()
     val HHMMFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
-    Column {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(64.dp)
-                .clip(
-                    RoundedCornerShape(8.dp)
-                )
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(64.dp)
+            .clip(
+                RoundedCornerShape(8.dp)
+            )
 //            .background(animatedBackground)
 //            .padding(start = 8.dp)
-                .combinedClickable(
-                    onClick = onClick,
-                    onLongClick = {
-                        menuExpanded = true
-                    }
-                )
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = {
+                    menuExpanded = true
+                }
+            )
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             val avatarUrn = item.directUser?.avatar
             val lastMessage = item.lastMessage
@@ -133,7 +134,6 @@ fun ChatChannel(
                                 color = LocalWorkspaceColorsPalette.current.primary,
                                 fontSize = 12.sp,
                                 fontFamily = InterFontFamily,
-                                fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -153,19 +153,18 @@ fun ChatChannel(
             }
             Column(
                 modifier = Modifier
-                    .padding(8.dp),
+                    .padding(8.dp, 4.dp, 0.dp, 4.dp),
                 horizontalAlignment = Alignment.End,
                 verticalArrangement = Arrangement.Center
             ) {
                 val unreadCount = if (item.activeUnreadCount > 0) item.activeUnreadCount else item.passiveUnreadCount
                 if (item.unreadCount > 0) {
-                    val backgroundColor = if (item.activeUnreadCount > 0) LocalWorkspaceColorsPalette.current.noticeCounterBadge else LocalWorkspaceColorsPalette.current.noticeDisable
+                    val backgroundColor = if (item.activeUnreadCount > 0) LocalWorkspaceColorsPalette.current.noticeBase else LocalWorkspaceColorsPalette.current.noticeDisable
                     Text(
                         text = "${unreadCount}",
                         color = LocalWorkspaceColorsPalette.current.noticeOnBadge,
-                        fontSize = 14.sp,
+                        fontSize = 12.sp,
                         fontFamily = InterFontFamily,
-                        fontWeight = FontWeight.Medium,
                         modifier = Modifier
                             .background(
                                 color = backgroundColor,
@@ -174,8 +173,8 @@ fun ChatChannel(
                             .padding(horizontal = 8.dp)
                     )
                 }
+                Spacer(modifier = Modifier.weight(1f))
                 if (lastMessage != null) {
-                    Spacer(modifier = Modifier.weight(1f))
                     val instant = Instant.parse(lastMessage.createdAt)
                     Text(
                         text = instant.atZone(zone).format(HHMMFormatter),
@@ -216,10 +215,15 @@ fun ChatChannel(
             }
         }
         if (currentlySelectedStream == null) {
-            HorizontalDivider(
-                thickness = 1.dp,
-                color = LocalWorkspaceColorsPalette.current.divider,
-            )
+            Column {
+                Spacer(
+                    Modifier.weight(1f)
+                )
+                HorizontalDivider(
+                    thickness = 1.dp,
+                    color = LocalWorkspaceColorsPalette.current.divider
+                )
+            }
         }
     }
 }

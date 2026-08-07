@@ -106,7 +106,7 @@ fun ChatWithTopics(
                 )
             }
             LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(0.dp),
                 modifier = Modifier
                     .fillMaxSize()
             ) {
@@ -158,7 +158,7 @@ fun ChatWithTopics(
                     .fillMaxHeight()
                     .width(maxWidth - 60.dp)
                     .offset { IntOffset(offsetX.value.roundToInt(), 0) }
-                    .background(LocalWorkspaceColorsPalette.current.surface)
+                    .background(LocalWorkspaceColorsPalette.current.background)
                     .pointerInput(Unit) {
                         detectHorizontalDragGestures(
                             onDragEnd = {
@@ -203,7 +203,7 @@ fun ChatWithTopics(
                             }
                         } else {
                             LazyColumn(
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(0.dp),
                                 modifier = Modifier
                                     .fillMaxSize()
                             ) {
