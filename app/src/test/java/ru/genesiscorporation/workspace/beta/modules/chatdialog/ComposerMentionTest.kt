@@ -1,6 +1,7 @@
 package ru.genesiscorporation.workspace.beta.modules.chatdialog
 
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -138,6 +139,30 @@ class ComposerMentionTest {
             ),
         )
         assertEquals("Hi there", state.text)
+    }
+
+    @Test
+    fun `deleting one of two mentions keeps the other mention intact`() {
+        val state = MentionTextFieldState()
+        state.insertMention(
+            displayName = "Alice",
+            urn = "urn:user:$aliceUuid",
+        )
+        state.insertMention(
+            displayName = "Bob",
+            urn = "urn:user:$bobUuid",
+            trailingSpace = false,
+        )
+        val textWithTwoMentions = state.text
+
+        state.onValueChange(
+            TextFieldValue(
+                text = textWithTwoMentions.dropLast(1),
+                selection = TextRange(textWithTwoMentions.length - 1),
+            ),
+        )
+
+        assertEquals("[Alice](urn:user:$aliceUuid) ", state.text)
     }
 
     private fun user(
