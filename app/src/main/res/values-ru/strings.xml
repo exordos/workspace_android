@@ -1,4 +1,10 @@
 <resources>
     <string name="message_composer_mentions_title">Варианты упоминаний</string>
     <string name="message_composer_mention_item_description">%1$s, @%2$s</string>
+    <plurals name="participants_count">
+        <item quantity="one">%d участник</item>
+        <item quantity="few">%d участника</item>
+        <item quantity="many">%d участников</item>
+        <item quantity="other">%d участников</item>
+    </plurals>
 </resources>

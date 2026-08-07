@@ -135,17 +135,14 @@ fun LoginScreen(
                         viewModel.userViewModel.organizationName ?: "Название организации",
                         color = LocalWorkspaceColorsPalette.current.textHeaders,
                         fontSize = 16.sp,
-                        fontFamily = InterFontFamily,
                         fontWeight = FontWeight.Medium,
                         modifier = Modifier.padding(20.dp, 12.dp, 4.dp, 20.dp)
                     )
                     Text(
                         viewModel.userViewModel.organizationUrl ?: "",
                         color = LocalWorkspaceColorsPalette.current.textAdditional50,
-                        fontSize = 16.sp,
-                        fontFamily = InterFontFamily,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.padding(horizontal = 20.dp)
+                        fontSize = 14.sp,
+                        fontFamily = InterFontFamily
                     )
                 }
             }
@@ -163,7 +160,6 @@ fun LoginScreen(
                     "Логин",
                     color = LocalWorkspaceColorsPalette.current.textAdditional30,
                     fontSize = 14.sp,
-                    fontFamily = InterFontFamily,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.padding(horizontal = 20.dp)
                 )
@@ -201,7 +197,6 @@ fun LoginScreen(
                     "Пароль",
                     color = LocalWorkspaceColorsPalette.current.textAdditional30,
                     fontSize = 14.sp,
-                    fontFamily = InterFontFamily,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.padding(horizontal = 20.dp)
                 )
@@ -263,7 +258,11 @@ fun LoginScreen(
                     modifier = Modifier.fillMaxWidth()
                         .padding(20.dp, 6.dp, 20.dp, 6.dp)
                 ) {
-                    Text("Войти")
+                    Text(
+                        "Войти",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium
+                    )
                 }
                 Button(
                     onClick = {
@@ -284,7 +283,11 @@ fun LoginScreen(
                     modifier = Modifier.fillMaxWidth()
                         .padding(20.dp, 6.dp, 20.dp, 6.dp)
                 ) {
-                    Text("Выйти из организации")
+                    Text(
+                        "Выйти из организации",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium
+                    )
                 }
             }
         }

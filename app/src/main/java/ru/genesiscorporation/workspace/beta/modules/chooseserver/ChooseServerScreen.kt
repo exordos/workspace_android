@@ -84,8 +84,7 @@ fun ChooseServerScreen(
             Text(
                 "Добро пожаловать",
                 color = LocalWorkspaceColorsPalette.current.textHeaders,
-                fontSize = 16.sp,
-                fontFamily = InterFontFamily,
+                fontSize = 20.sp,
                 fontWeight = FontWeight.Medium
             )
             Text(
@@ -103,7 +102,6 @@ fun ChooseServerScreen(
                     "Адрес организации",
                     color = LocalWorkspaceColorsPalette.current.textAdditional30,
                     fontSize = 14.sp,
-                    fontFamily = InterFontFamily,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.padding(horizontal = 20.dp)
                 )

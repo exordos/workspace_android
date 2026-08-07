@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -75,8 +76,14 @@ fun OtpScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Вход") },
+            CenterAlignedTopAppBar(
+                title = {
+                    Text(
+                        "Вход",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = { navController.navigateUp() }) {
                         Icon(
@@ -107,16 +114,15 @@ fun OtpScreen(
                     "Введите код",
                     color = LocalWorkspaceColorsPalette.current.textHeaders,
                     fontSize = 20.sp,
-                    fontFamily = InterFontFamily,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.padding(top = 200.dp, bottom = 8.dp)
                 )
                 Text(
-                    "из приложения Google Authenticator",
+                    "Введите 6-значный код\nиз приложения-аутентификатора",
                     color = LocalWorkspaceColorsPalette.current.textAdditional50,
                     fontSize = 14.sp,
                     fontFamily = InterFontFamily,
-                    modifier = Modifier.padding(bottom = 64.dp)
+                    modifier = Modifier.padding(bottom = 44.dp)
                 )
                 Box(
                     modifier = Modifier

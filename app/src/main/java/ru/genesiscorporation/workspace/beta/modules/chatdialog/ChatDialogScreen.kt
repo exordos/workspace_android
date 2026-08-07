@@ -176,7 +176,7 @@ fun ChatDialogScreen(
         topBar = {
             TopAppBar(
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = LocalWorkspaceColorsPalette.current.surface,
+                    containerColor = LocalWorkspaceColorsPalette.current.background,
                     titleContentColor = LocalWorkspaceColorsPalette.current.textHeaders,
                 ),
                 expandedHeight = 60.dp,
@@ -204,7 +204,9 @@ fun ChatDialogScreen(
                             color = LocalWorkspaceColorsPalette.current.textHeaders,
                             fontSize = 16.sp,
                             fontFamily = InterFontFamily,
-                            fontWeight = FontWeight.Medium
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         val currentStreamBindings = streamBindings[viewModel.chatId]
                         if (currentStreamBindings != null && currentStreamBindings.count() > 0) {
