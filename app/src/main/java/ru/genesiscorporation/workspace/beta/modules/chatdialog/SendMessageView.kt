@@ -28,21 +28,36 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBarDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -51,21 +66,6 @@ import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.runtime.Stable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.input.OffsetMapping
-import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.text.input.TransformedText
-import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.text.withStyle
 import kotlin.math.max
 import kotlin.math.min
 
@@ -74,12 +74,26 @@ import kotlin.math.min
 fun SendMessageView(
     viewModel: ChatDialogViewModel
 ) {
-    val state = rememberMentionTextFieldState()
     val scope = rememberCoroutineScope()
     val imageUri by viewModel.imageUri.collectAsState()
     val editingMessageBackupText by viewModel.editingMessageBackupText.collectAsState()
     val quotedMessage by viewModel.quotedMessage.collectAsState()
+    val mentionUsers by viewModel.users.collectAsState()
+    val baseUrl by viewModel.userViewModel.baseUrl.collectAsState()
     val context = LocalContext.current
+    val editorFocusRequester = remember { FocusRequester() }
+    val mentionQuery = viewModel.mentions.activeAtQuery()?.second
+    val mentionCandidates = remember(mentionUsers) {
+        composerMentionCandidates(mentionUsers)
+    }
+    val mentionSuggestions = remember(mentionCandidates, mentionQuery) {
+        mentionQuery?.let { query ->
+            filterComposerMentionSuggestions(
+                candidates = mentionCandidates,
+                query = query,
+            )
+        }.orEmpty()
+    }
     val launcher = rememberLauncherForActivityResult(
         contract =
             ActivityResultContracts.GetContent()
@@ -178,6 +192,18 @@ fun SendMessageView(
                 )
             }
         }
+        ComposerMentionSuggestions(
+            suggestions = mentionSuggestions,
+            baseUrl = baseUrl.orEmpty(),
+            authHeaders = viewModel.client.authHeaders(),
+            onSelect = { suggestion ->
+                viewModel.onUserSelected(
+                    name = suggestion.displayName,
+                    urn = "urn:user:${suggestion.userUuid}",
+                )
+                editorFocusRequester.requestFocus()
+            },
+        )
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -231,7 +257,8 @@ fun SendMessageView(
                         maxLines = 4,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp),
+                            .padding(horizontal = 12.dp)
+                            .focusRequester(editorFocusRequester),
                         visualTransformation = MentionVisualTransformation(SpanStyle(color = Color(0xFF1565C0))),
                         decorationBox =
                     { innerTextField -> innerTextField() }
@@ -267,7 +294,6 @@ fun SendMessageView(
         }
     }
 }
-
 private val MentionPattern =
     Regex("""\[([^\[\]]+)]\((urn:user:[^)]+)\)""")
 
@@ -521,7 +547,11 @@ private fun findActiveAtQueryStart(text: String, caret: Int): Int? {
     val before = text.substring(0, caret)
     val at = before.lastIndexOf('@')
     if (at < 0) return null
+    if (at > 0 && before[at - 1] !in mentionTriggerBoundaries) return null
     val query = before.substring(at + 1)
-    if (query.any { it.isWhitespace() }) return null
+    if (query.length > maxMentionQueryChars || query.any { it.isWhitespace() }) return null
     return at
 }
+
+private val mentionTriggerBoundaries = setOf(' ', '\n', '\t', '(', '[', '{', ',', '.', ':', ';', '!', '?')
+private const val maxMentionQueryChars = 128

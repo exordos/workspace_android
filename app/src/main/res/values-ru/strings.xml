@@ -1,7 +1,6 @@
 <resources>
-    <string name="message_composer_mentions_title">Mention suggestions</string>
+    <string name="message_composer_mentions_title">Варианты упоминаний</string>
     <string name="message_composer_mention_item_description">%1$s, @%2$s</string>
-    <!-- app_name is defined per product flavor in src/genesis and src/exordos -->
     <plurals name="participants_count">
         <item quantity="one">%d участник</item>
         <item quantity="few">%d участника</item>
