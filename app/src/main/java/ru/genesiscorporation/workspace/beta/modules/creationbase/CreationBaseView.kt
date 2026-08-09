@@ -60,13 +60,13 @@ fun CreationBaseView(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = LocalWorkspaceColorsPalette.current.surface,
+                    containerColor = LocalWorkspaceColorsPalette.current.background,
                     titleContentColor = LocalWorkspaceColorsPalette.current.textHeaders,
                     navigationIconContentColor = LocalWorkspaceColorsPalette.current.textHeaders
                 )
             )
         },
-        containerColor = LocalWorkspaceColorsPalette.current.surface
+        containerColor = LocalWorkspaceColorsPalette.current.background
     ) { innerPadding ->
         Column(
             modifier = Modifier

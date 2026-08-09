@@ -47,6 +47,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
@@ -112,15 +113,28 @@ fun ProfileScreen(
                             viewModel.client.authHeaders(),
                             null,
                             userData.displayableName(),
-                            Modifier.size(64.dp)
+                            Modifier.padding(end = 8.dp).size(64.dp)
                         )
-                        Text(
-                            text = "${userData.firstName} ${userData.lastName}",
-                            color = LocalWorkspaceColorsPalette.current.textHeaders,
-                            fontSize = 20.sp,
-                            fontFamily = InterFontFamily,
-                            fontWeight = FontWeight.Medium
-                        )
+                        Column(
+                            horizontalAlignment = Alignment.Start,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                text = "${userData.firstName} ${userData.lastName}",
+                                color = LocalWorkspaceColorsPalette.current.textHeaders,
+                                fontSize = 20.sp,
+                                fontFamily = InterFontFamily,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "В сети",
+                                color = LocalWorkspaceColorsPalette.current.indicatorGreen,
+                                fontSize = 12.sp,
+                                fontFamily = InterFontFamily,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 }
 //            Button(

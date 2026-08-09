@@ -13,6 +13,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamBindingResponseData
+import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UpdateStreamNotificationModeRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UpdateTopicNotificationModeRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
@@ -30,6 +31,15 @@ class StreamInfoViewModel(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = repo.streams.value.first { it.uuid == streamUuid }
+        )
+
+    val topic: StateFlow<TopicsResponseData?> = repo.streamTopics
+        .map { map -> map[streamUuid] }
+        .map { list -> list?.first { it.uuid == topicUuid } }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = repo.streamTopics.value[streamUuid]?.first { it.uuid == topicUuid }
         )
 
     val streamBindings: StateFlow<Map<String, List<StreamBindingResponseData>>> = repo.streamBindings

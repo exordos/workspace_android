@@ -36,6 +36,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -110,7 +111,7 @@ fun ChatUserInfoScreen(
         topBar = {
             TopAppBar(
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = LocalWorkspaceColorsPalette.current.surface,
+                    containerColor = LocalWorkspaceColorsPalette.current.background,
                     titleContentColor = LocalWorkspaceColorsPalette.current.textHeaders,
                 ),
                 expandedHeight = 48.dp,
@@ -130,7 +131,7 @@ fun ChatUserInfoScreen(
     ) { innerPadding ->
         Column(
             modifier = Modifier.fillMaxSize()
-                .background(LocalWorkspaceColorsPalette.current.surface)
+                .background(LocalWorkspaceColorsPalette.current.background)
                 .padding(16.dp, innerPadding.calculateTopPadding(), 16.dp, innerPadding.calculateBottomPadding()),
             horizontalAlignment = Alignment.Start,
             verticalArrangement = Arrangement.Top
@@ -144,15 +145,28 @@ fun ChatUserInfoScreen(
                     viewModel.client.authHeaders(),
                     null,
                     user.displayableName(),
-                    Modifier.size(64.dp)
+                    Modifier.padding(end = 8.dp).size(64.dp)
                 )
-                Text(
-                    text = viewModel.userName,
-                    color = LocalWorkspaceColorsPalette.current.textHeaders,
-                    fontSize = 20.sp,
-                    fontFamily = InterFontFamily,
-                    fontWeight = FontWeight.Medium
-                )
+                Column(
+                    horizontalAlignment = Alignment.Start,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = viewModel.userName,
+                        color = LocalWorkspaceColorsPalette.current.textHeaders,
+                        fontSize = 20.sp,
+                        fontFamily = InterFontFamily,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = user.statusDescription(),
+                        color = LocalWorkspaceColorsPalette.current.textAdditional50,
+                        fontSize = 12.sp,
+                        fontFamily = InterFontFamily,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
             Row(
                 modifier = Modifier

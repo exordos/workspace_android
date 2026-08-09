@@ -137,7 +137,7 @@ fun ChatTopic(
                             )
                         }
                         MarkdownText(
-                            markdown = lastMessage.payload.content,
+                            markdown = lastMessage.description(),
                             maxLines = 1,
                             style = TextStyle(
                                 color = LocalWorkspaceColorsPalette.current.textAdditional50,
@@ -216,15 +216,17 @@ fun ChatTopic(
                         }
                     }
                 },
+                modifier = Modifier
+                    .padding(horizontal = 24.dp)
+                    .background(
+                        if (item.notificationMode == "mute") LocalWorkspaceColorsPalette.current.cardBackgroundBase else LocalWorkspaceColorsPalette.current.background,
+                        RoundedCornerShape(8.dp)
+                    )
             ) {
                 Image(
                     painter = painterResource(id = R.drawable.ic_notifications_off),
                     contentDescription = null,
                     modifier = Modifier.size(24.dp)
-                        .background(
-                            if (item.notificationMode == "mute") LocalWorkspaceColorsPalette.current.cardBackgroundBase else LocalWorkspaceColorsPalette.current.background,
-                            RoundedCornerShape(8.dp)
-                        )
                 )
             }
             IconButton(
@@ -235,15 +237,17 @@ fun ChatTopic(
                         }
                     }
                 },
+                modifier = Modifier
+                    .background(
+                        if (item.notificationMode == "default") LocalWorkspaceColorsPalette.current.cardBackgroundBase else LocalWorkspaceColorsPalette.current.background,
+                        RoundedCornerShape(8.dp)
+                    )
+                    .padding(horizontal = 24.dp)
             ) {
                 Image(
                     painter = painterResource(id = R.drawable.ic_notifications),
                     contentDescription = null,
                     modifier = Modifier.size(24.dp)
-                        .background(
-                            if (item.notificationMode == "default") LocalWorkspaceColorsPalette.current.cardBackgroundBase else LocalWorkspaceColorsPalette.current.background,
-                            RoundedCornerShape(8.dp)
-                        )
                 )
             }
             IconButton(
@@ -254,16 +258,17 @@ fun ChatTopic(
                         }
                     }
                 },
-                modifier = Modifier.size(24.dp)
+                modifier = Modifier
+                    .padding(horizontal = 24.dp)
+                    .background(
+                        if (item.notificationMode == "follow") LocalWorkspaceColorsPalette.current.cardBackgroundBase else LocalWorkspaceColorsPalette.current.background,
+                        RoundedCornerShape(8.dp)
+                    )
             ) {
                 Image(
                     painter = painterResource(id = R.drawable.ic_volume),
                     contentDescription = null,
                     modifier = Modifier.size(24.dp)
-                        .background(
-                            if (item.notificationMode == "follow") LocalWorkspaceColorsPalette.current.cardBackgroundBase else LocalWorkspaceColorsPalette.current.background,
-                            RoundedCornerShape(8.dp)
-                        )
                 )
             }
         }

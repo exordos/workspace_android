@@ -18,6 +18,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -28,10 +30,12 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,10 +48,13 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
+import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
+import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 import ru.genesiscorporation.workspace.beta.modules.createdirectstream.CreateDirectStreamViewModel
 import ru.genesiscorporation.workspace.beta.modules.createdirectstream.UserCell
 import ru.genesiscorporation.workspace.beta.ui.Avatar
@@ -63,8 +70,9 @@ fun CreateStreamView(
     val streamName by viewModel.streamName.collectAsState()
     val users by viewModel.users.collectAsState()
     val selectedUserUuids by viewModel.selectedUserUuids.collectAsState()
-
+    val scope = rememberCoroutineScope()
     var searchQuery by remember { mutableStateOf("") }
+    val state by viewModel.createQueryState.collectAsStateWithLifecycle()
 
     val filteredUsers = remember(searchQuery, users) {
         if (searchQuery.isBlank()) {
@@ -75,6 +83,31 @@ fun CreateStreamView(
             }
         }
     }
+
+    LaunchedEffect(state) {
+        if (state is QueryState.Success) {
+            val createdStream = viewModel.createdStream
+            if (createdStream != null) {
+                viewModel.createdStream = null
+                navController.navigate(
+                    ChatFlow.ChatDialog(
+                        createdStream.name,
+                        createdStream.uuid,
+                        null,
+                        createdStream.defaultTopicUuid ?: "",
+                        false,
+                        null
+                    )
+                ) {
+                    popUpTo<ChatFlow.ChatList> {
+                        inclusive = false
+                    }
+                    launchSingleTop = true
+                }
+            }
+        }
+    }
+
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -96,13 +129,13 @@ fun CreateStreamView(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = LocalWorkspaceColorsPalette.current.surface,
+                    containerColor = LocalWorkspaceColorsPalette.current.background,
                     titleContentColor = LocalWorkspaceColorsPalette.current.textHeaders,
                     navigationIconContentColor = LocalWorkspaceColorsPalette.current.textHeaders
                 )
             )
         },
-        containerColor = LocalWorkspaceColorsPalette.current.surface
+        containerColor = LocalWorkspaceColorsPalette.current.background
     ) { innerPadding ->
         Column(
             horizontalAlignment = Alignment.Start,
@@ -212,6 +245,26 @@ fun CreateStreamView(
                         )
                     }
                 }
+            }
+            Button(
+                onClick = {
+                    scope.launch {
+                        viewModel.createStream()
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = LocalWorkspaceColorsPalette.current.primary,
+                    contentColor = LocalWorkspaceColorsPalette.current.onPrimary
+                ),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth()
+                    .padding(20.dp, 6.dp, 20.dp, 6.dp)
+            ) {
+                Text(
+                    "Войти",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium
+                )
             }
         }
     }

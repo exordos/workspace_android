@@ -139,7 +139,7 @@ fun ChatChannel(
                             )
                         }
                         MarkdownText(
-                            markdown = lastMessage.payload.content,
+                            markdown = lastMessage.description(),
                             modifier = Modifier.weight(1f),
                             maxLines = 1,
                             style = TextStyle(

@@ -5,6 +5,7 @@ import kotlinx.serialization.Serializable
 import ru.genesiscorporation.workspace.beta.data.remote.ApiError
 import ru.genesiscorporation.workspace.beta.data.remote.ApiRequest
 import ru.genesiscorporation.workspace.beta.data.remote.HTTPMethod
+import ru.genesiscorporation.workspace.beta.modules.chatdialog.QuotedMessage
 
 @Serializable
 data class MessagesRequest(
@@ -56,10 +57,48 @@ data class MessageResponse(
     @SerialName("is_own") val isOwn: Boolean,
     var reactions: Map<String, Int>,
     var user: UserResponseData? = null
-)
+
+
+) {
+    private fun parseQuotedMessages(): List<QuotedMessagePart> {
+        return quoteBlockRegex.findAll(payload.content.trim())
+            .map { match ->
+                QuotedMessagePart(
+                    uuid = match.groupValues[2],
+                    text = match.groupValues[3].trim(),
+                )
+            }
+            .toList()
+    }
+    private fun containsQuotedMessages(): Boolean {
+        return quoteBlockRegex.containsMatchIn(payload.content)
+    }
+
+    fun asQuotedMessages(): List<QuotedMessagePart> {
+        if (containsQuotedMessages()) {
+            return parseQuotedMessages()
+        } else {
+            return listOf(QuotedMessagePart(null, payload.content))
+        }
+    }
+
+    fun description(): String {
+        return asQuotedMessages().last().text
+    }
+}
 
 @Serializable
 data class MessageResponsePayload(
     val kind: String,
     var content: String
 )
+
+data class QuotedMessagePart(
+    val uuid: String?,
+    val text: String,
+)
+
+private val quoteBlockRegex = Regex(
+    """\[([^\]]*)\]\(urn:quote:([0-9a-fA-F-]{36})\)\s*\n+([\s\S]*?)(?=\n*\[(?:[^\]]*)\]\(urn:quote:|\z)"""
+)
+

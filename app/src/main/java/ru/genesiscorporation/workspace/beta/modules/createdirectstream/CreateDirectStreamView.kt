@@ -48,11 +48,14 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
 import ru.genesiscorporation.workspace.beta.Chat
 import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.LoginFlow
 import ru.genesiscorporation.workspace.beta.R
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
+import ru.genesiscorporation.workspace.beta.modules.chatdialog.MentionTextFieldState
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 import ru.genesiscorporation.workspace.beta.modules.users.UserCell
 import ru.genesiscorporation.workspace.beta.modules.users.UsersViewModel
@@ -126,18 +129,18 @@ fun CreateDirectStreamView(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = LocalWorkspaceColorsPalette.current.surface,
+                    containerColor = LocalWorkspaceColorsPalette.current.background,
                     titleContentColor = LocalWorkspaceColorsPalette.current.textHeaders,
                     navigationIconContentColor = LocalWorkspaceColorsPalette.current.textHeaders
                 )
             )
         },
-        containerColor = LocalWorkspaceColorsPalette.current.surface
+        containerColor = LocalWorkspaceColorsPalette.current.background
     ) { innerPadding ->
         Box(Modifier
             .fillMaxSize()
             .padding(innerPadding)
-            .background(LocalWorkspaceColorsPalette.current.surface)
+            .background(LocalWorkspaceColorsPalette.current.background)
         ) {
             Column(
                 modifier = Modifier

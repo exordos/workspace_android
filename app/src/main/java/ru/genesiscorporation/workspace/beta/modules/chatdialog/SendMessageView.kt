@@ -4,12 +4,15 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.defaultMinSize
@@ -63,7 +66,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
 import ru.genesiscorporation.workspace.beta.R
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
+import ru.genesiscorporation.workspace.beta.ui.ReferenceMessage
+import ru.genesiscorporation.workspace.beta.ui.ReferenceMessageBase
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import kotlin.math.max
@@ -77,7 +84,8 @@ fun SendMessageView(
     val scope = rememberCoroutineScope()
     val imageUri by viewModel.imageUri.collectAsState()
     val editingMessageBackupText by viewModel.editingMessageBackupText.collectAsState()
-    val quotedMessage by viewModel.quotedMessage.collectAsState()
+    val quotedMessage by viewModel.currentQuotedMessage.collectAsState()
+    val quotedMessages by viewModel.quotedMessages.collectAsState()
     val mentionUsers by viewModel.users.collectAsState()
     val baseUrl by viewModel.userViewModel.baseUrl.collectAsState()
     val context = LocalContext.current
@@ -130,66 +138,62 @@ fun SendMessageView(
         val message = editingMessageBackupText
         val currentlyQuotedMessage = quotedMessage
         if (message != null) {
-            Row(
-                modifier = Modifier.padding(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 0.dp)
+            ReferenceMessageBase(
+                Modifier.weight(1f)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+                shouldClose = true,
+                onCloseTap = { viewModel.clearEditingMessage() }
             ) {
-                Column {
-                    Text(
-                        "Сообщение",
-                        color = LocalWorkspaceColorsPalette.current.primary,
-                        fontSize = 12.sp,
-                        fontFamily = InterFontFamily,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        message,
-                        color = LocalWorkspaceColorsPalette.current.textAdditional50,
-                        fontSize = 12.sp,
-                        fontFamily = InterFontFamily,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                Spacer(modifier = Modifier.weight(1f))
-                Icon(
-                    painter = painterResource(R.drawable.ic_close_small),
-                    contentDescription = "Close",
-                    modifier = Modifier
-                        .size(24.dp)
-                        .clickable { viewModel.clearEditingMessage() },
-                )
+                ReferenceMessage("Редактирование", message)
             }
         } else if (currentlyQuotedMessage != null){
-            Row(
-                modifier = Modifier.padding(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 0.dp)
-            ) {
-                Column {
-                    Text(
-                        "Цитируемое сообщение",
-                        color = LocalWorkspaceColorsPalette.current.primary,
-                        fontSize = 12.sp,
-                        fontFamily = InterFontFamily,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        currentlyQuotedMessage.payload.content,
-                        color = LocalWorkspaceColorsPalette.current.textAdditional50,
-                        fontSize = 12.sp,
-                        fontFamily = InterFontFamily,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+            if (quotedMessages.count() > 1) {
+                FlowRow(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    quotedMessages.forEach { quotedMessage ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier
+                                .border(
+                                    width = 1.dp,
+                                    color = LocalWorkspaceColorsPalette.current.divider,
+                                    shape = RoundedCornerShape(8.dp)
+                                )
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(
+                                    if (quotedMessage == currentlyQuotedMessage) LocalWorkspaceColorsPalette.current.cardBackgroundActive else LocalWorkspaceColorsPalette.current.surface
+                                )
+                                .padding(8.dp)
+                                .clickable( onClick = { viewModel.onClickOnQuotedMessage(quotedMessage) })
+                        ) {
+                            Text(
+                                quotedMessage.message.user?.displayableName() ?: "Пользователь",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = if (quotedMessage == currentlyQuotedMessage) LocalWorkspaceColorsPalette.current.textHeaders else LocalWorkspaceColorsPalette.current.textHeaders
+                            )
+                            Icon(
+                                painter = painterResource(R.drawable.ic_close_small),
+                                contentDescription = "Close",
+                                modifier = Modifier
+                                    .size(20.dp)
+                                    .clickable { viewModel.clearQuotingMessage(quotedMessage) },
+                            )
+                        }
+                    }
                 }
-                Spacer(modifier = Modifier.weight(1f))
-                Icon(
-                    painter = painterResource(R.drawable.ic_close_small),
-                    contentDescription = "Close",
-                    modifier = Modifier
-                        .size(24.dp)
-                        .clickable { viewModel.clearEditingMessage() },
-                )
+            }
+            ReferenceMessageBase(
+                Modifier.weight(1f)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                shouldClose = true,
+                onCloseTap = { viewModel.clearQuotingMessage(currentlyQuotedMessage) }
+            ) {
+                ReferenceMessage("Ответить", currentlyQuotedMessage.message.payload.content)
             }
         }
         ComposerMentionSuggestions(
@@ -247,7 +251,7 @@ fun SendMessageView(
                     }
                     BasicTextField(
                         value = viewModel.mentions.value,
-                        onValueChange = viewModel.mentions::onValueChange,
+                        onValueChange = viewModel::onMentionsChange,
                         textStyle = TextStyle(
                             color = LocalWorkspaceColorsPalette.current.textHeaders,
                             fontSize = 16.sp,

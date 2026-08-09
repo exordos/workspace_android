@@ -1,5 +1,6 @@
 package ru.genesiscorporation.workspace.beta.modules.chatdialog
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -21,6 +22,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -28,18 +30,25 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import dev.jeziellago.compose.markdowntext.MarkdownText
 import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.ChatFlow
+import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
+import ru.genesiscorporation.workspace.beta.data.remote.dto.QuotedMessagePart
 import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.EnhancedMarkdown
+import ru.genesiscorporation.workspace.beta.ui.ReferenceMessageBase
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.time.Instant
@@ -53,6 +62,7 @@ fun TextMessageView(
     viewModel: ChatDialogViewModel,
     navController: NavHostController
 ) {
+    val quotedMessages by viewModel.quotedMessages.collectAsState()
     val zone = ZoneId.systemDefault()
     val hhmmFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
     val scope = rememberCoroutineScope()
@@ -154,12 +164,12 @@ fun TextMessageView(
                             else LocalWorkspaceColorsPalette.current.messageBackground,
                             shape = bubbleShape
                         )
-//                        .combinedClickable(
-//                            onClick = {},
-//                            onLongClick = {
-//                                menuExpanded = true
-//                            }
-//                        )
+                        .combinedClickable(
+                            onClick = {},
+                            onLongClick = {
+                                menuExpanded = true
+                            }
+                        )
                         .padding(10.dp)
                 ) {
                     Column(
@@ -175,16 +185,14 @@ fun TextMessageView(
                             fontFamily = InterFontFamily,
                             fontWeight = FontWeight.Medium
                         )
-                        EnhancedMarkdown(
-                            markdown = item.payload.content,
-                            style = TextStyle(
-                                color = LocalWorkspaceColorsPalette.current.textHeaders,
-                                fontSize = 14.sp,
-                                fontFamily = InterFontFamily,
-                            ),
-                            navController = navController,
-                            viewModel = viewModel
-                        )
+                        item.asQuotedMessages().forEach {
+                            QuotedMessagePartView(
+                                it,
+                                item.isOwn,
+                                viewModel,
+                                navController
+                            )
+                        }
                     }
                     Spacer(modifier = Modifier.widthIn(min = 20.dp))
                     val instant = Instant.parse(item.createdAt)
@@ -221,22 +229,77 @@ fun TextMessageView(
                         }
                     }
                     HorizontalDivider()
+                    DropdownMenuItem(
+                        text = {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Image(
+                                    painter = painterResource(id = R.drawable.ic_quote),
+                                    contentDescription = ""
+                                )
+                                Text(
+                                    "Ответить",
+                                    color = LocalWorkspaceColorsPalette.current.textHeaders,
+                                    fontSize = 14.sp,
+                                    fontFamily = InterFontFamily
+                                )
+                            }
+                        },
+                        onClick = {
+                            viewModel.onQuoteMessageClicked(item)
+                            menuExpanded = false
+                        }
+                    )
+                    if (quotedMessages.count() > 0) {
+                        DropdownMenuItem(
+                            text = {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Image(
+                                        painter = painterResource(id = R.drawable.ic_add_quote),
+                                        contentDescription = ""
+                                    )
+                                    Text(
+                                        "Добавить цитату",
+                                        color = LocalWorkspaceColorsPalette.current.textHeaders,
+                                        fontSize = 14.sp,
+                                        fontFamily = InterFontFamily
+                                    )
+                                }
+                            },
+                            onClick = {
+                                viewModel.onAddQuoteMessageClicked(item)
+                                menuExpanded = false
+                            }
+                        )
+                    }
                     if (item.isOwn) {
                         DropdownMenuItem(
-                            text = { Text("Редактировать") },
+                            text = {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Image(
+                                        painter = painterResource(id = R.drawable.ic_edit),
+                                        contentDescription = ""
+                                    )
+                                    Text(
+                                        "Изменить",
+                                        color = LocalWorkspaceColorsPalette.current.textHeaders,
+                                        fontSize = 14.sp,
+                                        fontFamily = InterFontFamily
+                                    )
+                                }
+                            },
                             onClick = {
                                 viewModel.onEditMessageClicked(item)
                                 menuExpanded = false
                             }
                         )
                     }
-                    DropdownMenuItem(
-                        text = { Text("Цитировать") },
-                        onClick = {
-                            viewModel.onQuoteMessageClicked(item)
-                            menuExpanded = false
-                        }
-                    )
                 }
             }
             if (!item.reactions.isEmpty()) {
@@ -275,5 +338,71 @@ fun TextMessageView(
                 }
             }
         }
+    }
+}
+
+@Composable fun QuotedMessagePartView(
+    quotedMessagePart: QuotedMessagePart,
+    isOwn: Boolean,
+    viewModel: ChatDialogViewModel,
+    navController: NavHostController
+) {
+    val streamTopicMessages by viewModel.streamTopicMessages.collectAsStateWithLifecycle()
+    Column() {
+        val quotedMessageUuid = quotedMessagePart.uuid
+        if (quotedMessageUuid != null) {
+            val messages = streamTopicMessages["${viewModel.chatId}.${viewModel.topicUuid ?: ""}"]
+            val message = messages?.firstOrNull { it.uuid == quotedMessageUuid }
+            ReferenceMessageBase(
+                Modifier
+                    .padding(vertical = 4.dp),
+                shouldClose = false, onCloseTap = {}
+            ) {
+                Column(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background( if (isOwn) LocalWorkspaceColorsPalette.current.messageOwnSelectedBg else LocalWorkspaceColorsPalette.current.messageOwnBackground )
+                        .padding(8.dp)
+                ) {
+                    Text(
+                        message?.user?.displayableName() ?: "Цитируемое сообщение",
+                        color = LocalWorkspaceColorsPalette.current.indicatorOrange,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    val messageQuotedParts = message?.asQuotedMessages()
+                    if (messageQuotedParts != null) {
+                        messageQuotedParts.forEach {
+                            QuotedMessagePartView(
+                                it,
+                                isOwn,
+                                viewModel,
+                                navController
+                            )
+                        }
+                    } else {
+                        Text(
+                            "Не удалось загрузить сообщение",
+                            color = LocalWorkspaceColorsPalette.current.textAdditional30,
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+        }
+        EnhancedMarkdown(
+            markdown = quotedMessagePart.text,
+            style = TextStyle(
+                color = LocalWorkspaceColorsPalette.current.textHeaders,
+                fontSize = 14.sp,
+                fontFamily = InterFontFamily,
+            ),
+            navController = navController,
+            viewModel = viewModel
+        )
     }
 }

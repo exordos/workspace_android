@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.util.Log
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import coil3.request.ImageRequest
@@ -14,6 +15,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -30,8 +32,8 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponsePayload
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.RemoveMessageReactionRequest
-import ru.genesiscorporation.workspace.beta.data.remote.dto.SendDirectMessageRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.SendMessageRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamBindingResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamBindingsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
@@ -41,6 +43,7 @@ import java.time.LocalDateTime
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 import kotlin.collections.filter
+import kotlin.collections.first
 import kotlin.collections.firstOrNull
 import kotlin.io.encoding.Base64
 import kotlin.text.toInt
@@ -70,6 +73,21 @@ class ChatDialogViewModel(
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = emptyMap()
         )
+    val stream: StateFlow<Stream> = repo.streams
+        .map { list -> list.first { it.uuid == chatId } }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = repo.streams.value.first { it.uuid == chatId }
+        )
+
+    val directUser: StateFlow<UserResponseData?> = repo.users
+        .map { list -> list.firstOrNull() { it.uuid == stream.value.directUserUuid } }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = null
+        )
 
     val users: StateFlow<List<UserResponseData>> = repo.users
         .stateIn(
@@ -88,8 +106,10 @@ class ChatDialogViewModel(
     private val _editingMessageBackupText = MutableStateFlow<String?>(null)
     val editingMessageBackupText: StateFlow<String?> = _editingMessageBackupText
 
-    private val _quotedMessage = MutableStateFlow<MessageResponse?>(null)
-    val quotedMessage: StateFlow<MessageResponse?> = _quotedMessage
+    private val _quotedMessages = MutableStateFlow<List<QuotedMessage>>(emptyList())
+    val quotedMessages: StateFlow<List<QuotedMessage>> = _quotedMessages
+    private val _currentQuotedMessage = MutableStateFlow<QuotedMessage?>(null)
+    val currentQuotedMessage: StateFlow<QuotedMessage?> = _currentQuotedMessage
 
     val mentions = MentionTextFieldState()
 
@@ -142,18 +162,32 @@ class ChatDialogViewModel(
     }
 
     fun onEditMessageClicked(message: MessageResponse) {
-        _quotedMessage.value = null
+        _currentQuotedMessage.update { null }
+        _quotedMessages.update { emptyList() }
         if (message.uuid != "") {
             editingMessage = message
             _editingMessageBackupText.value = message.payload.content
-            mentions.insertText(message.payload.content)
+            mentions.setText(message.payload.content)
         }
     }
 
     fun onQuoteMessageClicked(message: MessageResponse) {
         editingMessage = null
         _editingMessageBackupText.value = null
-        _quotedMessage.value = message
+        val newQuotedMessage = QuotedMessage(message, mentions.text)
+        _quotedMessages.update { listOf(newQuotedMessage) }
+        _currentQuotedMessage.update { newQuotedMessage }
+    }
+
+    fun onAddQuoteMessageClicked(message: MessageResponse) {
+        editingMessage = null
+        _editingMessageBackupText.value = null
+        val newQuotedMessage = QuotedMessage(message, "")
+        _quotedMessages.update { current ->
+            current + newQuotedMessage
+        }
+        _currentQuotedMessage.update { newQuotedMessage }
+        mentions.setText("")
     }
 
     fun onScroll() {
@@ -163,8 +197,41 @@ class ChatDialogViewModel(
     fun clearEditingMessage() {
         _editingMessageBackupText.value = null
         editingMessage = null
-        mentions.insertText("")
+        mentions.setText("")
     }
+
+    fun clearQuotingMessage(quotedMessage: QuotedMessage) {
+        _quotedMessages.update { current ->
+            current - quotedMessage
+        }
+        val lastQuotedMessage = _quotedMessages.value.lastOrNull()
+        if (lastQuotedMessage != null) {
+            if (quotedMessage == currentQuotedMessage.value) {
+                _currentQuotedMessage.update {
+                    lastQuotedMessage
+                }
+                mentions.setText(lastQuotedMessage.text)
+            }
+        } else {
+            _currentQuotedMessage.update {
+                null
+            }
+            mentions.setText("")
+        }
+    }
+
+    fun onMentionsChange(incoming: TextFieldValue) {
+        mentions.onValueChange(incoming)
+        _currentQuotedMessage.value?.text = mentions.text
+    }
+
+    fun onClickOnQuotedMessage(quotedMessage: QuotedMessage) {
+        _currentQuotedMessage.update {
+            quotedMessage
+        }
+        mentions.setText(quotedMessage.text)
+    }
+
 
     fun hasMyReaction(reaction: String, messageUuid: String): Boolean {
         return  !repo.userReactions.value.none { it.emojiName == reaction && it.messageUuid == messageUuid }
@@ -183,17 +250,21 @@ class ChatDialogViewModel(
     suspend fun sendMessage(context: Context) {
         val imageUri = _imageUri.value
         var messageText = ""
-        val currentlyQuotedMessage = _quotedMessage.value
-        if (currentlyQuotedMessage != null) {
-            messageText += "[${currentlyQuotedMessage.user?.displayableName() ?: ""}](urn:user:${currentlyQuotedMessage.authorUuid}) [said](urn:message:${currentlyQuotedMessage.uuid})\n```quote\n${currentlyQuotedMessage.payload.content}\n```\n"
+        val baseText = if (quotedMessages.value.isEmpty()) {
+            mentions.text
+        } else {
+            val quotedMessagesStrings = quotedMessages.value.map {
+                "[${it.message.user?.displayableName() ?: "user"}](urn:quote:${it.message.uuid})\n\n${it.text}"
+            }
+            val resultString = quotedMessagesStrings.joinToString("\n\n")
+            resultString
         }
         if (imageUri != null) {
             val response = client.uploadStreamImage(context, imageUri, chatId)
             when(response) {
                 is ApiResult.Success -> {
-                    val text = mentions.text
-                    if (!text.isBlank()) {
-                        messageText += "$text\r\n"
+                    if (!baseText.isBlank()) {
+                        messageText += "$baseText\r\n"
                     }
                     messageText += "[${response.value.name}](urn:image:${response.value.uuid})"
                     sendTextMessage(messageText)
@@ -203,9 +274,8 @@ class ChatDialogViewModel(
                 }
             }
         } else {
-            val text = mentions.text
-            messageText += text
-            if (text.isBlank()) return
+            messageText += baseText
+            if (baseText.isBlank()) return
             sendTextMessage(messageText)
         }
     }
@@ -228,11 +298,12 @@ class ChatDialogViewModel(
         repo.updateMessagesPool(listOf(newMessage))
         repo.addMessageToStreamTopic(newMessage)
         possibleMessage = newMessage
-        mentions.insertText("")
+        mentions.setText("")
         _imageUri.value = null
         editingMessage = null
         _editingMessageBackupText.value = null
-        _quotedMessage.value = null
+        _currentQuotedMessage.update { null }
+        _quotedMessages.update { emptyList() }
         val sendMessageRequest = SendMessageRequest(
             chatId,
             topicUuid,
@@ -267,7 +338,7 @@ class ChatDialogViewModel(
                 _editingMessageBackupText.value = null
             }
         }
-        mentions.insertText("")
+        mentions.setText("")
     }
 
     init {
@@ -368,3 +439,9 @@ class ChatDialogViewModel(
         }
     }
 }
+
+@Serializable
+data class QuotedMessage(
+    val message: MessageResponse,
+    var text: String
+)

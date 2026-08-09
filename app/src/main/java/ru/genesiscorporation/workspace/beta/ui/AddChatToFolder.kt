@@ -46,7 +46,7 @@ fun AddChatToFolder(
         modifier = Modifier
             .padding(16.dp)
             .background(
-                LocalWorkspaceColorsPalette.current.surface,
+                LocalWorkspaceColorsPalette.current.background,
                 shape = RoundedCornerShape(16.dp)
             )
             .padding(horizontal = 16.dp)

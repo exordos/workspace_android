@@ -122,9 +122,11 @@ fun ChatDialogScreen(
     viewModel: ChatDialogViewModel,
     navController: NavHostController
 ) {
+    val directUser by viewModel.directUser.collectAsStateWithLifecycle()
     val streamTopicMessages by viewModel.streamTopicMessages.collectAsStateWithLifecycle()
     val streamBindings by viewModel.streamBindings.collectAsStateWithLifecycle()
     val users by viewModel.users.collectAsStateWithLifecycle()
+    val quotedMessages by viewModel.quotedMessages.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -182,7 +184,9 @@ fun ChatDialogScreen(
                 expandedHeight = 60.dp,
                 windowInsets = WindowInsets(0, 0, 0, 0),
                 title = {
-                    Column(modifier = Modifier
+                    Column(
+                        verticalArrangement = Arrangement.Center,
+                        modifier = Modifier
                         .clickable(
                             onClick = {
                                 val user = viewModel.user
@@ -197,7 +201,8 @@ fun ChatDialogScreen(
 //                                    )
                                 }
                             }
-                        )) {
+                        )
+                    ) {
                         val title = if (viewModel.isDirectMessages) viewModel.chatTitle else viewModel.topicName ?: viewModel.chatTitle
                         Text(
                             title,
@@ -209,12 +214,17 @@ fun ChatDialogScreen(
                             overflow = TextOverflow.Ellipsis
                         )
                         val currentStreamBindings = streamBindings[viewModel.chatId]
+                        val user = directUser
                         if (currentStreamBindings != null && currentStreamBindings.count() > 0) {
                             val currentBindedOnlineUsers = currentStreamBindings.mapNotNull { binding -> users.firstOrNull { binding.userUuid == it.uuid && it.status == "active" } }
-                            var baseText = context.resources.getQuantityString(
-                                R.plurals.participants_count, currentStreamBindings.count(), currentStreamBindings.count()
-                            )
-                            if (currentBindedOnlineUsers.count() > 0) {
+                            var baseText = if (viewModel.isDirectMessages && user != null) {
+                                user.statusDescription()
+                            } else {
+                                context.resources.getQuantityString(
+                                    R.plurals.participants_count, currentStreamBindings.count(), currentStreamBindings.count()
+                                )
+                            }
+                            if (!viewModel.isDirectMessages && currentBindedOnlineUsers.count() > 0) {
                                 baseText += ", ${currentBindedOnlineUsers.count()} онлайн"
                             }
                             Text(

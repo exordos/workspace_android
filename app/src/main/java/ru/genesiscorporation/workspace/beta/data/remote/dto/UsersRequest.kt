@@ -46,4 +46,12 @@ data class UserResponseData(
 
         return  displayName
     }
+
+    fun statusDescription(): String {
+        if (status == "active") {
+            return "В сети"
+        } else {
+            return "Не в сети"
+        }
+    }
 }
