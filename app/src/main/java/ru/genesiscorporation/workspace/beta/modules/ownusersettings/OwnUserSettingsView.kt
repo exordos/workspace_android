@@ -123,7 +123,7 @@ fun OwnUserSettingsView(
                                     viewModel.client.authHeaders(),
                                     null,
                                     userData.displayableName(),
-                                    Modifier.size(64.dp)
+                                    Modifier.padding(end = 8.dp).size(64.dp)
                                 )
                                 IconButton(
                                     onClick = {

@@ -5,9 +5,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -19,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
@@ -64,6 +68,7 @@ fun StreamInfoView(
 ) {
 
     val stream by viewModel.stream.collectAsStateWithLifecycle()
+    val topic by viewModel.topic.collectAsStateWithLifecycle()
     val streamBindings by viewModel.streamBindings.collectAsStateWithLifecycle()
     val users by viewModel.users.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -77,7 +82,7 @@ fun StreamInfoView(
         topBar = {
             TopAppBar(
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = LocalWorkspaceColorsPalette.current.surface,
+                    containerColor = LocalWorkspaceColorsPalette.current.background,
                     titleContentColor = LocalWorkspaceColorsPalette.current.textHeaders,
                 ),
                 expandedHeight = 48.dp,
@@ -97,7 +102,7 @@ fun StreamInfoView(
     ) { innerPadding ->
         Column(
             modifier = Modifier.fillMaxSize()
-                .background(LocalWorkspaceColorsPalette.current.surface)
+                .background(LocalWorkspaceColorsPalette.current.background)
                 .padding(16.dp, innerPadding.calculateTopPadding(), 16.dp, innerPadding.calculateBottomPadding()),
             horizontalAlignment = Alignment.Start,
             verticalArrangement = Arrangement.Top
@@ -140,8 +145,12 @@ fun StreamInfoView(
                     }
                 }
             }
-            ActionButtonsRow(viewModel, navController)
+//            ActionButtonsRow(viewModel, navController)
             NotificationButtonsRow(viewModel)
+            val summary = topic?.summary
+            if (summary != null) {
+                TopicSummary(summary)
+            }
             BoundUsers(viewModel, navController)
         }
     }
@@ -224,7 +233,8 @@ fun NotificationButtonsRow(
     val scope = rememberCoroutineScope()
     Column {
         Row(
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
                 "Уведомления",
@@ -233,7 +243,7 @@ fun NotificationButtonsRow(
                 fontWeight = FontWeight.Medium
             )
             Text(
-                "Для всего чата",
+                "(Для всего чата)",
                 color = LocalWorkspaceColorsPalette.current.textAdditional30,
                 fontSize = 12.sp,
                 fontFamily = InterFontFamily,
@@ -242,12 +252,13 @@ fun NotificationButtonsRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 8.dp)
+                .padding(vertical = 4.dp)
                 .border(
                     width = 1.dp,
                     color = LocalWorkspaceColorsPalette.current.divider,
                     shape = RoundedCornerShape(8.dp)
-                ),
+                )
+                .padding(vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -259,7 +270,7 @@ fun NotificationButtonsRow(
                 },
                 modifier = Modifier
                     .weight(1f)
-                    .height(52.dp),
+                    .height(36.dp),
                 shape = RoundedCornerShape(8.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = if (stream.notificationMode == "mentions_only")  LocalWorkspaceColorsPalette.current.cardBackgroundBase else Color.Transparent,
@@ -279,7 +290,7 @@ fun NotificationButtonsRow(
                 },
                 modifier = Modifier
                     .weight(1f)
-                    .height(52.dp),
+                    .height(36.dp),
                 shape = RoundedCornerShape(8.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = if (stream.notificationMode == "muted")  LocalWorkspaceColorsPalette.current.cardBackgroundBase else Color.Transparent,
@@ -299,7 +310,7 @@ fun NotificationButtonsRow(
                 },
                 modifier = Modifier
                     .weight(1f)
-                    .height(52.dp),
+                    .height(36.dp),
                 shape = RoundedCornerShape(8.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = if (stream.notificationMode == "all_messages")  LocalWorkspaceColorsPalette.current.cardBackgroundBase else Color.Transparent,
@@ -346,54 +357,104 @@ fun BoundUsers(
 }
 
 @Composable
+fun TopicSummary(
+    summary: String
+) {
+    Column(
+        horizontalAlignment = Alignment.Start
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                "Контекст топика",
+                color = LocalWorkspaceColorsPalette.current.textHeaders,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium
+            )
+            Text(
+                "(AI✨)",
+                color = LocalWorkspaceColorsPalette.current.textAdditional30,
+                fontSize = 12.sp,
+                fontFamily = InterFontFamily,
+            )
+        }
+        Text(
+            summary,
+            color = LocalWorkspaceColorsPalette.current.textHeaders,
+            fontSize = 12.sp,
+            fontFamily = InterFontFamily,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 12.dp)
+                .border(
+                    width = 1.dp,
+                    color = LocalWorkspaceColorsPalette.current.divider,
+                    shape = RoundedCornerShape(8.dp)
+                )
+                .padding(8.dp),
+        )
+    }
+}
+
+@Composable
 fun UserRow(
     viewModel: StreamInfoViewModel,
     user: UserResponseData,
     navController: NavHostController
 ) {
-    val baseUrl = viewModel.client.userViewModel.baseUrl.collectAsState().value
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.clickable (onClick = {
-            navController.navigate(
-                ChatFlow.ChatUserInfo(
-                    user.displayableName(),
-                    user.uuid,
-                    user.avatar,
-                    user.email ?: ""
+    Column {
+        val baseUrl = viewModel.client.userViewModel.baseUrl.collectAsState().value
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = {
+                navController.navigate(
+                    ChatFlow.ChatUserInfo(
+                        user.displayableName(),
+                        user.uuid,
+                        user.avatar,
+                        user.email ?: ""
+                    )
                 )
-            )
-        })
-    ) {
-        Avatar(
-            user.avatar,
-            baseUrl ?: "",
-            viewModel.client.authHeaders(),
-            null,
-            user.displayableName(),
-            Modifier.size(40.dp)
-                .padding(end = 4.dp)
-        )
-        Column(
-            horizontalAlignment = Alignment.Start
+            })
         ) {
-            Text(
-                text = user.displayableName(),
-                color = LocalWorkspaceColorsPalette.current.textHeaders,
-                fontSize = 14.sp,
-                fontFamily = InterFontFamily,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+            Avatar(
+                user.avatar,
+                baseUrl ?: "",
+                viewModel.client.authHeaders(),
+                null,
+                user.displayableName(),
+                Modifier
+                    .padding(end = 12.dp)
+                    .size(30.dp)
             )
-            Text(
-                text = user.status,
-                color = LocalWorkspaceColorsPalette.current.textAdditional50,
-                fontSize = 12.sp,
-                fontFamily = InterFontFamily,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            Column(
+                horizontalAlignment = Alignment.Start,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = user.displayableName(),
+                    color = LocalWorkspaceColorsPalette.current.textHeaders,
+                    fontSize = 14.sp,
+                    fontFamily = InterFontFamily,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = user.statusDescription(),
+                    color = LocalWorkspaceColorsPalette.current.textAdditional50,
+                    fontSize = 12.sp,
+                    fontFamily = InterFontFamily,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
+        HorizontalDivider(
+            thickness = 1.dp,
+            color = LocalWorkspaceColorsPalette.current.divider
+        )
     }
 }

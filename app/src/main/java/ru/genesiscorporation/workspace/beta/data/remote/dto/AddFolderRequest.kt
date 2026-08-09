@@ -14,7 +14,7 @@ class AddFolderRequest(
     override val requiresApiKey: Boolean = true
     override val shouldApplySuffix: Boolean = false
     override val isJson: Boolean = true
-    override val url: String = "/workspace/v1/folders/"
+    override val url: String = "/api/workspace/v1/messenger/folders/"
     override val data = AddFolderRequestData(title)
 }
 

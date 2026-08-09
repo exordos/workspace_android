@@ -24,27 +24,6 @@ data class SendMessageRequest(
 }
 
 @Serializable
-data class SendDirectMessageRequest(
-    val streamUuid: String,
-    val content: String
-): ApiRequest<SendDirectMessageRequestData, SendMessageResponse, ApiError> {
-    override val method: HTTPMethod = HTTPMethod.POST
-    override val requiresApiKey: Boolean = true
-    override val url: String = "/api/workspace/v1/messenger/messages/"
-    override val data = SendDirectMessageRequestData(
-        streamUuid,
-        MessageResponsePayload("markdown", content)
-    )
-}
-
-@Serializable
-data class SendDirectMessageRequestData(
-    @SerialName("stream_uuid") val streamUuid: String,
-    val payload: MessageResponsePayload
-)
-
-
-@Serializable
 data class SendMessageRequestData(
     @SerialName("stream_uuid") val streamUuid: String,
     @SerialName("topic_uuid") val topicUuid: String?,

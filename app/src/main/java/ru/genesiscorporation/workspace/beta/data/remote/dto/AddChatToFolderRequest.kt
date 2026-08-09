@@ -15,7 +15,7 @@ class AddChatToFolderRequest(
     override val requiresApiKey: Boolean = true
     override val shouldApplySuffix: Boolean = false
     override val isJson: Boolean = true
-    override val url: String = "/workspace/v1/folders/${folderUuid}/items/"
+    override val url: String = "/api/workspace/v1/messenger/folders/${folderUuid}/items/"
     override val data = AddChatToFolderRequestData(chatId, chatType)
 }
 

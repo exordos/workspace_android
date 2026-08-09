@@ -156,7 +156,8 @@ class EventsRepository() {
                         lastMessageUuid = updatedTopic.lastMessageUuid,
                         isDone = updatedTopic.isDone,
                         lastMessage = message,
-                        notificationMode = updatedTopic.notificationMode
+                        notificationMode = updatedTopic.notificationMode,
+                        summary = updatedTopic.summary
                     )
                 } else {
                     topic
