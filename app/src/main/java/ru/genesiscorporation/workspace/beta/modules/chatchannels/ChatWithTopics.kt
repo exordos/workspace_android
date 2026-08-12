@@ -56,6 +56,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.resolvedActiveUnread
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.forwardTopicLabel
 import ru.genesiscorporation.workspace.beta.ui.AnimatedGif
+import ru.genesiscorporation.workspace.beta.ui.CreateTopicDialog
 import ru.genesiscorporation.workspace.beta.ui.TopicNameDialog
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.time.Instant
@@ -465,11 +466,8 @@ fun ChatWithTopics(
     }
 
     createTopicForStream?.let { stream ->
-        TopicNameDialog(
-            title = "Новая тема в «${stream.name}»",
-            initialName = "",
+        CreateTopicDialog(
             busy = topicActionBusy,
-            submitLabel = "Создать",
             onSubmit = { name ->
                 if (!topicActionBusy && pendingTopicActionRequestId == null) {
                     pendingTopicActionRequestId =

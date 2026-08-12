@@ -67,6 +67,7 @@ import ru.genesiscorporation.workspace.beta.modules.chatdialog.formatHHmm
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import ru.genesiscorporation.workspace.beta.ui.TopicActionsDialog
+import ru.genesiscorporation.workspace.beta.ui.CreateTopicDialog
 import ru.genesiscorporation.workspace.beta.ui.TopicNameDialog
 import ru.genesiscorporation.workspace.beta.ui.UnreadBadge
 
@@ -227,11 +228,8 @@ fun TopicsScreen(
         }
     }
     if (createDialogOpen) {
-        TopicNameDialog(
-            title = "Новый топик в «${topicsViewModel.channelName}»",
-            initialName = "",
+        CreateTopicDialog(
             busy = actionInProgress,
-            submitLabel = "Создать",
             onSubmit = { name ->
                 if (!actionInProgress && pendingActionRequestId == null) {
                     pendingActionRequestId = topicsViewModel.createTopic(name)
