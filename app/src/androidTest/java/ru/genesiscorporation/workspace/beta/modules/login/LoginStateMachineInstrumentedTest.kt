@@ -66,7 +66,7 @@ class LoginStateMachineInstrumentedTest {
                                 assertEquals(SYNTHETIC_PASSWORD, body.string("password"))
                                 assertEquals("openid email profile", body.string("scope"))
                                 assertEquals("3600", body.string("ttl"))
-                                assertEquals("172800", body.string("refresh_ttl"))
+                                assertEquals("2592000", body.string("refresh_ttl"))
                                 assertNull(request.headers[HttpHeaders.Authorization])
                                 when (request.headers["X-OTP"]) {
                                     null -> otpError("OTP required")

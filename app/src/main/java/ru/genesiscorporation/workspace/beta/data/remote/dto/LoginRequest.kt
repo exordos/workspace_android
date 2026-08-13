@@ -22,7 +22,7 @@ data class LoginRequest(
         "login+password",
         "openid email profile",
         "3600",
-        "172800",
+        "2592000",
     )
 
     override val additionalHeaders: Map<String, String> =
