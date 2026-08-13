@@ -21,6 +21,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import ru.genesiscorporation.workspace.beta.data.remote.dto.DisplayedUnreadCount
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.ui.theme.WokspaceTheme
 
@@ -46,6 +47,9 @@ class StreamRailCardInstrumentedTest {
                 StreamRailCard(
                     item = stream,
                     hasUnreadMention = false,
+                    fullyMuted = false,
+                    displayedUnread = DisplayedUnreadCount(stream.unreadCount, false),
+                    hasSplitCounters = false,
                     baseUrl = "",
                     avatarUrn = null,
                     selected = true,
@@ -106,6 +110,9 @@ class StreamRailCardInstrumentedTest {
                 StreamRailCard(
                     item = stream,
                     hasUnreadMention = true,
+                    fullyMuted = false,
+                    displayedUnread = DisplayedUnreadCount(stream.unreadCount, false),
+                    hasSplitCounters = false,
                     baseUrl = "",
                     avatarUrn = null,
                     selected = false,
@@ -136,6 +143,9 @@ class StreamRailCardInstrumentedTest {
                 StreamRailCard(
                     item = stream,
                     hasUnreadMention = false,
+                    fullyMuted = false,
+                    displayedUnread = DisplayedUnreadCount(stream.unreadCount, false),
+                    hasSplitCounters = false,
                     baseUrl = "",
                     avatarUrn = null,
                     selected = false,
