@@ -115,7 +115,14 @@ fun ChatWithTopics(
         pendingTopicActionRequestId = null
         if (!result.success) return@LaunchedEffect
         when (result.kind) {
-            CatalogActionKind.CREATE_TOPIC -> createTopicForStreamUuid = null
+            CatalogActionKind.CREATE_TOPIC -> {
+                createTopicForStreamUuid = null
+                val route = result.createdTopic?.toChatDialog()
+                if (route != null) {
+                    chatViewModel.currentTopicName = route.topicName.orEmpty()
+                    navController.navigate(route)
+                }
+            }
             CatalogActionKind.RENAME_TOPIC -> topicToRenameUuid = null
             CatalogActionKind.MARK_TOPIC_READ,
             CatalogActionKind.TOGGLE_TOPIC_DONE,

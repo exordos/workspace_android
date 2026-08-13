@@ -14,18 +14,19 @@ import ru.genesiscorporation.workspace.beta.UserViewModel
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
-import ru.genesiscorporation.workspace.beta.modules.chatchannels.TopicHeader
-import ru.genesiscorporation.workspace.beta.modules.chatchannels.orderTopicsForDisplay
-import ru.genesiscorporation.workspace.beta.modules.chatdialog.forwardTopicLabel
-import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
-import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesByIdsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.CreateTopicRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MarkTopicReadRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesByIdsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.RenameTopicRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ToggleTopicDoneRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicNotificationsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
+import ru.genesiscorporation.workspace.beta.modules.chatchannels.CreatedTopicResult
+import ru.genesiscorporation.workspace.beta.modules.chatchannels.TopicHeader
+import ru.genesiscorporation.workspace.beta.modules.chatchannels.orderTopicsForDisplay
+import ru.genesiscorporation.workspace.beta.modules.chatdialog.forwardTopicLabel
+import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 import java.util.concurrent.atomic.AtomicLong
 
 internal object TopicActionKind {
@@ -41,6 +42,7 @@ data class TopicActionResult(
     val kind: String,
     val topicUuid: String?,
     val success: Boolean,
+    val createdTopic: CreatedTopicResult? = null,
 )
 
 class TopicsViewModel(
@@ -159,20 +161,38 @@ class TopicsViewModel(
             .orEmpty()
             .firstOrNull { it.uuid == topicUuid }
 
-    fun createTopic(name: String): Long = launchTopicAction(
-        kind = TopicActionKind.CREATE,
-        topicUuid = null,
-    ) {
-        createTopicInternal(name)
+    fun createTopic(name: String): Long {
+        val requestId = nextActionRequestId.incrementAndGet()
+        viewModelScope.launch {
+            val createdTopic = createTopicInternal(name)
+            _lastActionResult.value = TopicActionResult(
+                requestId = requestId,
+                kind = TopicActionKind.CREATE,
+                topicUuid = createdTopic?.uuid,
+                success = createdTopic != null,
+                createdTopic = createdTopic?.let {
+                    CreatedTopicResult(
+                        uuid = it.uuid,
+                        name = it.name,
+                        streamUuid = it.streamUuid,
+                        streamName = channelName,
+                    )
+                },
+            )
+        }
+        return requestId
     }
 
-    private suspend fun createTopicInternal(name: String): Boolean {
+    private suspend fun createTopicInternal(name: String): TopicsResponseData? {
         val normalizedName = name.trim()
         if (normalizedName.isEmpty()) {
             _actionError.value = "Введите название топика"
-            return false
+            return null
         }
-        return runTopicAction("Не удалось создать топик") {
+        if (!actionMutex.tryLock()) return null
+        _actionInProgress.value = true
+        _actionError.value = null
+        return try {
             when (
                 val response = client.performRequest(
                     CreateTopicRequest(normalizedName, channelStreamId),
@@ -184,14 +204,18 @@ class TopicsViewModel(
                     } else {
                         repo.addTopicToStream(response.value)
                     }
-                    true
+                    response.value
                 }
 
                 is ApiResult.Error -> {
                     _actionError.value = response.error.message
-                    false
+                        ?: "Не удалось создать топик"
+                    null
                 }
             }
+        } finally {
+            _actionInProgress.value = false
+            actionMutex.unlock()
         }
     }
 

@@ -63,13 +63,14 @@ import coil3.request.ImageRequest
 import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.modules.chatchannels.TopicHeader
+import ru.genesiscorporation.workspace.beta.modules.chatchannels.toChatDialog
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.formatHHmm
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
-import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
-import ru.genesiscorporation.workspace.beta.ui.TopicActionsDialog
 import ru.genesiscorporation.workspace.beta.ui.CreateTopicDialog
+import ru.genesiscorporation.workspace.beta.ui.TopicActionsDialog
 import ru.genesiscorporation.workspace.beta.ui.TopicNameDialog
 import ru.genesiscorporation.workspace.beta.ui.UnreadBadge
+import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -103,7 +104,14 @@ fun TopicsScreen(
         pendingActionRequestId = null
         if (!result.success) return@LaunchedEffect
         when (result.kind) {
-            TopicActionKind.CREATE -> createDialogOpen = false
+            TopicActionKind.CREATE -> {
+                createDialogOpen = false
+                val route = result.createdTopic?.toChatDialog()
+                if (route != null) {
+                    topicsViewModel.currentTopicName = route.topicName.orEmpty()
+                    navController.navigate(route)
+                }
+            }
             TopicActionKind.RENAME -> renamedTopicUuid = null
             TopicActionKind.MARK_READ,
             TopicActionKind.TOGGLE_DONE,

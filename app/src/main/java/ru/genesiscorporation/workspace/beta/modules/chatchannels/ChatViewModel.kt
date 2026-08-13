@@ -117,6 +117,14 @@ data class CatalogActionResult(
     val kind: String,
     val targetUuid: String?,
     val success: Boolean,
+    val createdTopic: CreatedTopicResult? = null,
+)
+
+data class CreatedTopicResult(
+    val uuid: String,
+    val name: String,
+    val streamUuid: String,
+    val streamName: String,
 )
 
 data class FolderCreationResult(
@@ -1432,11 +1440,26 @@ class ChatViewModel(
     fun createTopic(
         stream: Stream,
         name: String,
-    ): Long = launchCatalogAction(
-        kind = CatalogActionKind.CREATE_TOPIC,
-        targetUuid = stream.uuid,
-    ) {
-        createTopicInternal(stream, name) != null
+    ): Long {
+        val requestId = nextCatalogActionRequestId.incrementAndGet()
+        viewModelScope.launch {
+            val createdTopic = createTopicInternal(stream, name)
+            _lastCatalogActionResult.value = CatalogActionResult(
+                requestId = requestId,
+                kind = CatalogActionKind.CREATE_TOPIC,
+                targetUuid = stream.uuid,
+                success = createdTopic != null,
+                createdTopic = createdTopic?.let {
+                    CreatedTopicResult(
+                        uuid = it.uuid,
+                        name = it.name,
+                        streamUuid = it.streamUuid,
+                        streamName = stream.name,
+                    )
+                },
+            )
+        }
+        return requestId
     }
 
     private suspend fun createTopicInternal(
