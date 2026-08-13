@@ -12,8 +12,13 @@ import ru.genesiscorporation.workspace.beta.data.PersistedAttachment
 import ru.genesiscorporation.workspace.beta.data.PersistedComposerDraft
 import ru.genesiscorporation.workspace.beta.data.PersistedConversationRoute
 import ru.genesiscorporation.workspace.beta.data.PersistedConversationState
+import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderItem
+import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponsePayload
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
+import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 
 class IncomingShareTest {
     @Test
@@ -60,6 +65,73 @@ class IncomingShareTest {
             listOf(direct, channel),
             incomingShareStreams(
                 listOf(channel, direct, archived, channel.copy(name = "Duplicate")),
+            ),
+        )
+    }
+
+    @Test
+    fun `folder projection keeps exact members in canonical catalog order`() {
+        val direct = stream(
+            uuid = DIRECT_STREAM_UUID,
+            name = "Zulu direct",
+            isPrivate = true,
+            directUserUuid = USER_UUID,
+        )
+        val channel = stream(
+            uuid = STREAM_UUID,
+            name = "Alpha channel",
+        )
+        val catalog = incomingShareStreams(listOf(channel, direct))
+        val selectedFolder = folder(
+            uuid = "aaaaaaaa-aaaa-4aaa-8aaa-bbbbbbbbbbbb",
+            title = "Project",
+            streamUuids = listOf(STREAM_UUID, "missing", STREAM_UUID),
+        )
+
+        assertEquals(
+            listOf(channel),
+            incomingShareStreamsInFolder(catalog, selectedFolder),
+        )
+        assertEquals(
+            catalog,
+            incomingShareStreamsInFolder(
+                catalog,
+                folder(
+                    uuid = ALL_CHATS_FOLDER_UUID,
+                    title = "All",
+                    streamUuids = emptyList(),
+                ),
+            ),
+        )
+        assertEquals(catalog, incomingShareStreamsInFolder(catalog, null))
+    }
+
+    @Test
+    fun `direct destination avatar belongs to the peer not the last sender`() {
+        val peer = user(USER_UUID, "urn:image:peer")
+        val lastSender = user(OTHER_USER_UUID, "urn:image:last-sender")
+        val direct = stream(
+            uuid = DIRECT_STREAM_UUID,
+            name = "Peer",
+            isPrivate = true,
+            directUserUuid = USER_UUID,
+        ).copy(
+            avatar = "urn:image:stream-fallback",
+            lastMessage = message(lastSender),
+        )
+
+        assertEquals(
+            "urn:image:peer",
+            incomingShareAvatarUrn(direct, mapOf(peer.uuid to peer)),
+        )
+        assertEquals(
+            "urn:image:stream-fallback",
+            incomingShareAvatarUrn(direct, emptyMap()),
+        )
+        assertNull(
+            incomingShareAvatarUrn(
+                direct.copy(avatar = null),
+                emptyMap(),
             ),
         )
     }
@@ -290,6 +362,7 @@ class IncomingShareTest {
         assertTrue(manifest.contains("android.intent.action.SEND_MULTIPLE\""))
         assertFalse(sourceText.contains("SendMessageRequest"))
         assertTrue(sourceText.contains("Добавить в черновик"))
+        assertTrue(sourceText.contains("IncomingShareFolderTabs"))
     }
 
     private fun locateProjectRoot(): Path {
@@ -325,6 +398,27 @@ class IncomingShareTest {
         sizeBytes = 5,
     )
 
+    private fun user(uuid: String, avatar: String) = UserResponseData(
+        username = "user-$uuid",
+        uuid = uuid,
+        status = "active",
+        avatar = avatar,
+    )
+
+    private fun message(author: UserResponseData) = MessageResponse(
+        uuid = MESSAGE_UUID,
+        updatedAt = UPDATED_AT,
+        createdAt = UPDATED_AT,
+        streamUuid = DIRECT_STREAM_UUID,
+        topicUuid = DEFAULT_TOPIC_UUID,
+        userUuid = author.uuid,
+        authorUuid = author.uuid,
+        payload = MessageResponsePayload(kind = "markdown", content = "Latest"),
+        isOwn = false,
+        reactions = emptyMap(),
+        user = author,
+    )
+
     private fun stream(
         uuid: String,
         name: String,
@@ -357,6 +451,26 @@ class IncomingShareTest {
         isDefault = isDefault,
     )
 
+    private fun folder(
+        uuid: String,
+        title: String,
+        streamUuids: List<String>,
+    ) = FolderResponseData(
+        uuid = uuid,
+        title = title,
+        unreadCount = 0,
+        creationDate = UPDATED_AT,
+        items = streamUuids.mapIndexed { index, streamUuid ->
+            FolderItem(
+                uuid = "bbbbbbbb-bbbb-4bbb-8bbb-${index.toString().padStart(12, '0')}",
+                folderUuid = uuid,
+                streamUuid = streamUuid,
+                chatType = "stream",
+                unreadCount = 0,
+            )
+        },
+    )
+
     private companion object {
         const val STREAM_UUID = "11111111-1111-4111-8111-111111111111"
         const val DIRECT_STREAM_UUID =
@@ -369,11 +483,15 @@ class IncomingShareTest {
         const val FOREIGN_TOPIC_UUID =
             "66666666-6666-4666-8666-666666666666"
         const val USER_UUID = "77777777-7777-4777-8777-777777777777"
+        const val OTHER_USER_UUID =
+            "77777777-7777-4777-8777-888888888888"
         const val MESSAGE_UUID = "88888888-8888-4888-8888-888888888888"
         const val QUOTED_MESSAGE_UUID =
             "99999999-9999-4999-8999-999999999999"
         const val UPDATED_AT = "2026-07-30T12:00:00Z"
         const val INCOMING_REQUEST_ID =
             "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        const val ALL_CHATS_FOLDER_UUID =
+            "00000000-0000-0000-0000-000000000000"
     }
 }
