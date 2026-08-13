@@ -24,6 +24,19 @@ class RefreshRetryPolicyInstrumentedTest {
         assertFalse(shouldBackoffRefresh(rejected))
         assertFalse(shouldRemoveAccountAfterRefresh(unavailable))
         assertTrue(shouldBackoffRefresh(unavailable))
+        assertTrue(shouldRetryRefreshAutomatically(unavailable))
+    }
+
+    @Test
+    fun genericAuthenticationStatusDoesNotDiscardTheSession() {
+        listOf(
+            httpApiError(401, """{"message":"authentication failed"}"""),
+            httpApiError(403, """{"message":"request forbidden"}"""),
+        ).forEach { error ->
+            assertFalse(error.code, shouldRemoveAccountAfterRefresh(error))
+            assertTrue(error.code, shouldBackoffRefresh(error))
+            assertFalse(error.code, shouldRetryRefreshAutomatically(error))
+        }
     }
 
     @Test

@@ -192,18 +192,6 @@ class WorkspaceAPIClient(
                             httpResponseAfterRefresh.apiResponseMetadata(),
                         )
                     }
-                } else if (httpResponseAfterRefresh.status.value == 401) {
-                    session.ownerKey?.let {
-                        userViewModel.removeActiveAccountIfOwnerAndWait(it)
-                    }
-                    val error = ApiError(
-                        "Authentication expired",
-                        "401",
-                        ApiErrorKind.UNAUTHORIZED,
-                        httpStatus = 401,
-                    )
-
-                    ApiResult.Error(error)
                 } else {
                     val responseString = httpResponseAfterRefresh.readTextWithLimit()
                     ApiResult.Error(
@@ -367,14 +355,6 @@ class WorkspaceAPIClient(
                     mime = normalizedMime,
                     fileName = fileName,
                 )
-                if (
-                    retry is ApiResult.Error &&
-                    retry.error.kind == ApiErrorKind.UNAUTHORIZED
-                ) {
-                    session.ownerKey?.let {
-                        userViewModel.removeActiveAccountIfOwnerAndWait(it)
-                    }
-                }
                 if (
                     retry is ApiResult.Success &&
                     session.ownerKey != null &&
@@ -547,14 +527,6 @@ class WorkspaceAPIClient(
                     mime = detectedMime,
                     fileName = fileName,
                 )
-                if (
-                    retry is ApiResult.Error &&
-                    retry.error.kind == ApiErrorKind.UNAUTHORIZED
-                ) {
-                    session.ownerKey?.let {
-                        userViewModel.removeActiveAccountIfOwnerAndWait(it)
-                    }
-                }
                 retry
             } else {
                 firstAttempt
@@ -737,14 +709,6 @@ class WorkspaceAPIClient(
                 }
                 val retry = downloadFileWithToken(baseUrl, refreshedToken, canonicalUuid)
                 if (
-                    retry is ApiResult.Error &&
-                    retry.error.kind == ApiErrorKind.UNAUTHORIZED
-                ) {
-                    session.ownerKey?.let {
-                        userViewModel.removeActiveAccountIfOwnerAndWait(it)
-                    }
-                }
-                if (
                     retry is ApiResult.Success &&
                     session.ownerKey != null &&
                     !userViewModel.repo.isActiveCredentialOwner(session.ownerKey)
@@ -828,6 +792,7 @@ class WorkspaceAPIClient(
     ): ApiResult<String, ApiError> {
         val expectedOwnerKey = failedSession.ownerKey
             ?: return ApiResult.Error(accountChangedError())
+        var automaticRetriesRemaining = MAX_AUTOMATIC_REFRESH_RETRIES
         while (true) {
             var retryDelayMillis = 0L
             refreshMutex.lock()
@@ -898,19 +863,30 @@ class WorkspaceAPIClient(
                             return ApiResult.Success(userResponse.accessToken)
                         }
                         is ApiResult.Error -> {
-                            if (shouldRemoveAccountAfterRefresh(refreshResponse.error)) {
+                            val error = refreshResponse.error
+                            if (shouldRemoveAccountAfterRefresh(error)) {
                                 refreshRetryGate.clear(expectedOwnerKey)
                                 userViewModel.removeActiveAccountIfOwnerAndWait(
                                     expectedOwnerKey,
                                 )
-                            } else {
-                                refreshRetryGate.recordFailure(
-                                    ownerKey = expectedOwnerKey,
-                                    error = refreshResponse.error,
-                                    nowMillis = monotonicMillis(),
-                                )
+                                return ApiResult.Error(error)
                             }
-                            return ApiResult.Error(refreshResponse.error)
+                            refreshRetryGate.recordFailure(
+                                ownerKey = expectedOwnerKey,
+                                error = error,
+                                nowMillis = monotonicMillis(),
+                            )
+                            if (
+                                !shouldRetryRefreshAutomatically(error) ||
+                                automaticRetriesRemaining == 0
+                            ) {
+                                return ApiResult.Error(error)
+                            }
+                            automaticRetriesRemaining -= 1
+                            retryDelayMillis = refreshRetryGate.remainingDelayMillis(
+                                ownerKey = expectedOwnerKey,
+                                nowMillis = monotonicMillis(),
+                            )
                         }
                     }
                 }
@@ -1230,9 +1206,14 @@ internal fun tokenIdentityMismatchError(): ApiError =
     )
 
 internal fun shouldRemoveAccountAfterRefresh(error: ApiError): Boolean =
-    error.kind == ApiErrorKind.UNAUTHORIZED ||
-        error.kind == ApiErrorKind.FORBIDDEN ||
-        normalizeRefreshErrorCode(error.code) in TERMINAL_REFRESH_ERROR_CODES
+    normalizeRefreshErrorCode(error.code) in TERMINAL_REFRESH_ERROR_CODES
+
+internal fun shouldRetryRefreshAutomatically(error: ApiError): Boolean =
+    error.kind == ApiErrorKind.SERVER ||
+        error.kind == ApiErrorKind.RATE_LIMITED ||
+        error.kind == ApiErrorKind.TIMEOUT ||
+        error.kind == ApiErrorKind.NETWORK ||
+        error.httpStatus == 408
 
 internal fun shouldBackoffRefresh(error: ApiError): Boolean =
     !shouldRemoveAccountAfterRefresh(error) && error.code != "ACCOUNT_CHANGED"
@@ -1305,6 +1286,8 @@ internal class RefreshRetryGate(
 
 private val DEFAULT_REFRESH_RETRY_DELAYS_MILLIS =
     longArrayOf(1_000L, 2_000L, 4_000L, 8_000L, 16_000L, 30_000L)
+
+private const val MAX_AUTOMATIC_REFRESH_RETRIES = 2
 
 @PublishedApi
 internal fun requestOwnerMatches(

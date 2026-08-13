@@ -37,13 +37,11 @@ class AuthenticationRetryPolicyTest {
     }
 
     @Test
-    fun revokedRefreshCredentialsRemoveOnlyTheRejectedOwner() {
+    fun explicitInvalidRefreshCredentialsRemoveOnlyTheRejectedOwner() {
         listOf(
             ApiError("Expired", "invalid_grant", ApiErrorKind.VALIDATION, 400),
             ApiError("Expired", "invalid-refresh-token", ApiErrorKind.VALIDATION, 400),
             ApiError("Expired", "InvalidRefreshTokenError", ApiErrorKind.VALIDATION, 400),
-            ApiError("Unauthorized", "401", ApiErrorKind.UNAUTHORIZED, 401),
-            ApiError("Forbidden", "403", ApiErrorKind.FORBIDDEN, 403),
         ).forEach { error ->
             assertTrue(error.code, shouldRemoveAccountAfterRefresh(error))
             assertFalse(error.code, shouldBackoffRefresh(error))
@@ -51,20 +49,45 @@ class AuthenticationRetryPolicyTest {
     }
 
     @Test
-    fun clientConfigurationAndTransientFailuresKeepTheAccount() {
-        val transientErrors = listOf(
+    fun nonTerminalRefreshFailuresKeepTheAccount() {
+        val recoverableErrors = listOf(
             ApiError("Bad client", "invalid_client", ApiErrorKind.VALIDATION, 400),
+            ApiError("Unauthorized", "401", ApiErrorKind.UNAUTHORIZED, 401),
+            ApiError("Forbidden", "403", ApiErrorKind.FORBIDDEN, 403),
             ApiError("Busy", "429", ApiErrorKind.RATE_LIMITED, 429),
             ApiError("Unavailable", "503", ApiErrorKind.SERVER, 503),
             ApiError("Timed out", "TIMEOUT", ApiErrorKind.TIMEOUT),
             ApiError("Offline", "NETWORK", ApiErrorKind.NETWORK),
         )
 
-        transientErrors.forEach { error ->
+        recoverableErrors.forEach { error ->
             assertFalse(error.code, shouldRemoveAccountAfterRefresh(error))
             assertTrue(error.code, shouldBackoffRefresh(error))
         }
         assertFalse(shouldBackoffRefresh(accountChangedError()))
+    }
+
+    @Test
+    fun onlyTransientRefreshFailuresRetryAutomatically() {
+        listOf(
+            ApiError("Busy", "429", ApiErrorKind.RATE_LIMITED, 429),
+            ApiError("Unavailable", "503", ApiErrorKind.SERVER, 503),
+            ApiError("Timed out", "TIMEOUT", ApiErrorKind.TIMEOUT),
+            ApiError("Offline", "NETWORK", ApiErrorKind.NETWORK),
+            ApiError("Timed out", "408", ApiErrorKind.UNKNOWN, 408),
+        ).forEach { error ->
+            assertTrue(error.code, shouldRetryRefreshAutomatically(error))
+        }
+
+        listOf(
+            ApiError("Expired", "invalid_grant", ApiErrorKind.VALIDATION, 400),
+            ApiError("Bad client", "invalid_client", ApiErrorKind.VALIDATION, 400),
+            ApiError("Unauthorized", "401", ApiErrorKind.UNAUTHORIZED, 401),
+            ApiError("Forbidden", "403", ApiErrorKind.FORBIDDEN, 403),
+            ApiError("Malformed", "MALFORMED_RESPONSE", ApiErrorKind.MALFORMED_RESPONSE),
+        ).forEach { error ->
+            assertFalse(error.code, shouldRetryRefreshAutomatically(error))
+        }
     }
 
     @Test

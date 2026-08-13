@@ -47,58 +47,102 @@ import ru.genesiscorporation.workspace.beta.data.WorkspaceUiPreferencesRepositor
 @RunWith(AndroidJUnit4::class)
 class RefreshTokenEndpointInstrumentedTest {
     @Test
-    fun terminalEndpointResponsesRemoveOnlyTheRejectedOwner() = runBlocking {
-        val cases = listOf(
-            TerminalCase(
+    fun invalidGrantRemovesOnlyTheRejectedOwner() = runBlocking {
+        withMockHarness("refresh-invalid-grant", handler = { request ->
+            assertRefreshRequest(request)
+            respond(
+                content = """{"error":"invalid_grant"}""",
                 status = HttpStatusCode.BadRequest,
-                body = """{"error":"invalid_grant"}""",
-                expectedCode = "invalid_grant",
-            ),
-            TerminalCase(
-                status = HttpStatusCode.Unauthorized,
-                body = """{"message":"expired"}""",
-                expectedCode = "401",
-            ),
-            TerminalCase(
-                status = HttpStatusCode.Forbidden,
-                body = """{"message":"forbidden"}""",
-                expectedCode = "403",
-            ),
-        )
+                headers = JSON_HEADERS,
+            )
+        }) { harness ->
+            val result = harness.client.refreshToken(
+                failedSession = harness.failedSession,
+                failedAccessToken = OLD_ACCESS_TOKEN,
+            )
 
-        cases.forEachIndexed { index, case ->
-            withMockHarness("refresh-terminal-$index", handler = { request ->
+            assertTrue(result is ApiResult.Error)
+            val error = (result as ApiResult.Error).error
+            assertEquals("invalid_grant", error.code)
+            assertTrue(shouldRemoveAccountAfterRefresh(error))
+            assertNull(harness.repository.activeAccountIdFlow.first())
+            assertNull(
+                harness.credentials.read(
+                    harness.ownerKey,
+                    Credential.ACCESS_TOKEN,
+                ),
+            )
+            assertNull(
+                harness.credentials.read(
+                    harness.ownerKey,
+                    Credential.REFRESH_TOKEN,
+                ),
+            )
+            assertEquals(listOf(harness.ownerKey), harness.clearedOwners)
+        }
+    }
+
+    @Test
+    fun genericUnauthorizedAndForbiddenResponsesKeepTheOwner() = runBlocking {
+        listOf(
+            NonTerminalCase(HttpStatusCode.Unauthorized, "401"),
+            NonTerminalCase(HttpStatusCode.Forbidden, "403"),
+        ).forEachIndexed { index, case ->
+            withMockHarness("refresh-non-terminal-$index", handler = { request ->
                 assertRefreshRequest(request)
                 respond(
-                    content = case.body,
+                    content = """{"message":"request rejected"}""",
                     status = case.status,
                     headers = JSON_HEADERS,
                 )
             }) { harness ->
-                val result = harness.client.refreshToken(
-                    failedSession = harness.failedSession,
-                    failedAccessToken = OLD_ACCESS_TOKEN,
+                assertRetryableFailure(
+                    harness = harness,
+                    expectedKind = apiErrorKind(case.status.value),
+                    expectedCode = case.expectedCode,
                 )
-
-                assertTrue(result is ApiResult.Error)
-                val error = (result as ApiResult.Error).error
-                assertEquals(case.expectedCode, error.code)
-                assertTrue(shouldRemoveAccountAfterRefresh(error))
-                assertNull(harness.repository.activeAccountIdFlow.first())
-                assertNull(
-                    harness.credentials.read(
-                        harness.ownerKey,
-                        Credential.ACCESS_TOKEN,
-                    ),
-                )
-                assertNull(
-                    harness.credentials.read(
-                        harness.ownerKey,
-                        Credential.REFRESH_TOKEN,
-                    ),
-                )
-                assertEquals(listOf(harness.ownerKey), harness.clearedOwners)
             }
+        }
+    }
+
+    @Test
+    fun unauthorizedAfterSuccessfulRefreshKeepsTheRotatedSession() = runBlocking {
+        var protectedRequestCount = 0
+        var refreshRequestCount = 0
+        withMockHarness("authorized-retry-rejected", handler = { request ->
+            when (request.url.encodedPath) {
+                REFRESH_PATH -> {
+                    refreshRequestCount += 1
+                    successfulRefreshResponse()
+                }
+                AUTHENTICATED_PROBE_PATH -> {
+                    protectedRequestCount += 1
+                    respond(
+                        content = """{"message":"authentication failed"}""",
+                        status = HttpStatusCode.Unauthorized,
+                        headers = JSON_HEADERS,
+                    )
+                }
+                else -> error("Unexpected request path: ${request.url.encodedPath}")
+            }
+        }) { harness ->
+            val result = harness.client.performRequest(AuthenticatedProbeRequest())
+
+            assertTrue(result is ApiResult.Error)
+            val error = (result as ApiResult.Error).error
+            assertEquals(ApiErrorKind.UNAUTHORIZED, error.kind)
+            assertEquals(2, protectedRequestCount)
+            assertEquals(1, refreshRequestCount)
+            assertEquals(harness.ownerKey, harness.repository.activeAccountIdFlow.first())
+            assertEquals(
+                ROTATED_ACCESS_TOKEN,
+                harness.credentials.read(harness.ownerKey, Credential.ACCESS_TOKEN),
+            )
+            assertEquals(
+                ROTATED_REFRESH_TOKEN,
+                harness.credentials.read(harness.ownerKey, Credential.REFRESH_TOKEN),
+            )
+            assertTrue(harness.clearedOwners.isEmpty())
         }
     }
 
@@ -174,7 +218,7 @@ class RefreshTokenEndpointInstrumentedTest {
         }
 
     @Test
-    fun transientFailureKeepsOwnerAndLaterSuccessRotatesCredentials() =
+    fun transientFailureRetriesAndRotatesCredentialsInTheSameCall() =
         runBlocking {
             var requestCount = 0
             withMockHarness("refresh-transient", handler = { request ->
@@ -190,32 +234,13 @@ class RefreshTokenEndpointInstrumentedTest {
                     successfulRefreshResponse()
                 }
             }) { harness ->
-                val first = harness.client.refreshToken(
+                val result = harness.client.refreshToken(
                     failedSession = harness.failedSession,
                     failedAccessToken = OLD_ACCESS_TOKEN,
                 )
 
-                assertTrue(first is ApiResult.Error)
-                val firstError = (first as ApiResult.Error).error
-                assertEquals(ApiErrorKind.SERVER, firstError.kind)
-                assertTrue(shouldBackoffRefresh(firstError))
-                assertEquals(harness.ownerKey, harness.repository.activeAccountIdFlow.first())
-                assertEquals(
-                    OLD_REFRESH_TOKEN,
-                    harness.credentials.read(
-                        harness.ownerKey,
-                        Credential.REFRESH_TOKEN,
-                    ),
-                )
-
-                delay(1_050L)
-                val second = harness.client.refreshToken(
-                    failedSession = harness.failedSession,
-                    failedAccessToken = OLD_ACCESS_TOKEN,
-                )
-
-                assertTrue(second is ApiResult.Success)
-                assertEquals(ROTATED_ACCESS_TOKEN, (second as ApiResult.Success).value)
+                assertTrue(result is ApiResult.Success)
+                assertEquals(ROTATED_ACCESS_TOKEN, (result as ApiResult.Success).value)
                 assertEquals(2, requestCount)
                 val rotated = harness.repository.activeCredentialSnapshot()
                 assertEquals(ROTATED_ACCESS_TOKEN, rotated.accessToken)
@@ -451,11 +476,17 @@ class RefreshTokenEndpointInstrumentedTest {
         assertNull(request.headers[HttpHeaders.Authorization])
     }
 
-    private data class TerminalCase(
+    private data class NonTerminalCase(
         val status: HttpStatusCode,
-        val body: String,
         val expectedCode: String,
     )
+
+    private class AuthenticatedProbeRequest :
+        ApiRequest<EmptyRequestData, ResponseResult, ApiError> {
+        override val url = AUTHENTICATED_PROBE_PATH
+        override val method = HTTPMethod.GET
+        override val data = EmptyRequestData()
+    }
 
     private data class RefreshHarness(
         val client: WorkspaceAPIClient,
@@ -522,6 +553,7 @@ class RefreshTokenEndpointInstrumentedTest {
         const val EXPECTED_ORIGIN = "https://workspace.example.com"
         const val REFRESH_PATH =
             "/api/core/v1/iam/clients/default/actions/get_token/invoke"
+        const val AUTHENTICATED_PROBE_PATH = "/api/workspace/v1/auth-probe"
         const val USER_ID = "11111111-1111-4111-8111-111111111111"
         const val OTHER_USER_ID = "33333333-3333-4333-8333-333333333333"
         const val PROJECT_ID = "22222222-2222-4222-8222-222222222222"
