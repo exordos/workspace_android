@@ -22,11 +22,16 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import ru.genesiscorporation.workspace.beta.UserViewModel
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
+import ru.genesiscorporation.workspace.beta.data.remote.ApiError
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.data.remote.dto.AddMessageReactionRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.DeleteDraftRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.Draft
 import ru.genesiscorporation.workspace.beta.data.remote.dto.EditMessageRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MarkMessagesReadRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MarkMessagesReadUpToRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageElement
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageReaction
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponsePayload
@@ -39,6 +44,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamBindingsReques
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UsersRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
+import java.io.File
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
@@ -47,6 +53,8 @@ import kotlin.collections.first
 import kotlin.collections.firstOrNull
 import kotlin.io.encoding.Base64
 import kotlin.text.toInt
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
 class ChatDialogViewModel(
     val client: WorkspaceAPIClient,
@@ -57,7 +65,8 @@ class ChatDialogViewModel(
     val topicUuid: String,
     val isDirectMessages: Boolean,
     val repo: EventsRepository,
-    val userId: Int?
+    val userId: Int?,
+    val storage: AttachmentStorage
 ): ViewModel() {
 
     val streamTopicMessages: StateFlow<Map<String, List<MessageResponse>>> = repo.streamTopicMessages
@@ -96,6 +105,13 @@ class ChatDialogViewModel(
             initialValue = emptyList()
         )
 
+    val drafts: StateFlow<List<Draft>> = repo.draftsPool
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = repo.draftsPool.value
+        )
+
     private var possibleMessage: MessageResponse? = null
 
     var user: UserResponseData? = null
@@ -122,15 +138,20 @@ class ChatDialogViewModel(
 //    private val _messageText = MutableStateFlow("")
 //    val messageText: StateFlow<String> = _messageText
 
-    private val _imageUri = MutableStateFlow<Uri?>(null)
-    val imageUri: StateFlow<Uri?> = _imageUri
+    private val _uriList = MutableStateFlow<List<AttachedUri>>(emptyList())
+    val uriList: StateFlow<List<AttachedUri>> = _uriList
 
     var shouldScrollToBottom: Boolean = true
 
     val messageFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
 
-    fun onImageUriChange(newUri: Uri?) {
-        _imageUri.value = newUri
+    fun addUri(newUri: Uri, fileName: String, type: String) {
+        val attachedUri = AttachedUri(newUri, fileName, type)
+        _uriList.update { current -> current + attachedUri }
+    }
+
+    fun removeAttachedUri(attachedUri: AttachedUri) {
+        _uriList.update { current -> current - attachedUri }
     }
 
     fun nextMessageByUuid(currentUuid: String): MessageResponse? {
@@ -159,6 +180,28 @@ class ChatDialogViewModel(
 
     fun getUser(userUuid: String): UserResponseData? {
         return repo.users.value.firstOrNull { it.uuid == userUuid }
+    }
+
+    private val states = mutableMapOf<String, MutableStateFlow<FileUiState>>()
+    fun stateFor(uuid: String, fileName: String): StateFlow<FileUiState> {
+        return states.getOrPut("$uuid:$fileName") {
+            MutableStateFlow(FileUiState.Idle)
+        }
+    }
+    fun load(uuid: String, fileName: String) {
+        val key = "$uuid:$fileName"
+        val flow = states.getOrPut(key) { MutableStateFlow(FileUiState.Idle) }
+        viewModelScope.launch {
+            flow.value = FileUiState.Loading
+            when (val result = storage.loadOrDownload(uuid, fileName)) {
+                is ApiResult.Success -> {
+                    flow.value = FileUiState.Ready(result.value)
+                }
+                is ApiResult.Error -> {
+                    flow.value = FileUiState.Error(result.error.message ?: "")
+                }
+            }
+        }
     }
 
     fun onEditMessageClicked(message: MessageResponse) {
@@ -190,9 +233,15 @@ class ChatDialogViewModel(
         mentions.setText("")
     }
 
-    fun onScroll() {
+    fun enableAutoScroll() {
+        shouldScrollToBottom = true
+    }
+
+
+    fun disableAutoScroll() {
         shouldScrollToBottom = false
     }
+
 
     fun clearEditingMessage() {
         _editingMessageBackupText.value = null
@@ -248,7 +297,7 @@ class ChatDialogViewModel(
     }
 
     suspend fun sendMessage(context: Context) {
-        val imageUri = _imageUri.value
+        val attachmentList = _uriList.value
         var messageText = ""
         val baseText = if (quotedMessages.value.isEmpty()) {
             mentions.text
@@ -259,31 +308,33 @@ class ChatDialogViewModel(
             val resultString = quotedMessagesStrings.joinToString("\n\n")
             resultString
         }
-        if (imageUri != null) {
-            val response = client.uploadStreamImage(context, imageUri, chatId)
+        var attachmentsSuffix = ""
+        for (attachment in attachmentList) {
+            val response = client.uploadStreamFile(attachment.fileName, context, attachment.uri, chatId)
             when(response) {
                 is ApiResult.Success -> {
-                    if (!baseText.isBlank()) {
-                        messageText += "$baseText\r\n"
-                    }
-                    messageText += "[${response.value.name}](urn:image:${response.value.uuid})"
-                    sendTextMessage(messageText)
+                    attachmentsSuffix += "[${response.value.name}](urn:${attachment.type}:${response.value.uuid})\n\n"
                 }
                 is ApiResult.Error -> {
 
                 }
             }
-        } else {
-            messageText += baseText
-            if (baseText.isBlank()) return
-            sendTextMessage(messageText)
         }
+        messageText += baseText
+        if (!attachmentsSuffix.isEmpty()) {
+            messageText += "\r\n"
+            messageText += attachmentsSuffix
+        }
+        if (messageText.isBlank()) return
+        sendTextMessage(messageText)
     }
 
+    @OptIn(ExperimentalUuidApi::class)
     suspend fun sendTextMessage(messageText: String) {
         val userId = repo.currentUser.value?.uuid
+        val uuid: Uuid = Uuid.random()
         var newMessage = MessageResponse(
-            "",
+            uuid.toString(),
             OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
             OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
             chatId,
@@ -292,14 +343,15 @@ class ChatDialogViewModel(
             userId ?: "",
             MessageResponsePayload("markdown", messageText),
             true,
-            emptyMap()
+            emptyMap(),
+            false
         )
         newMessage.user = repo.currentUser.value
         repo.updateMessagesPool(listOf(newMessage))
         repo.addMessageToStreamTopic(newMessage)
         possibleMessage = newMessage
         mentions.setText("")
-        _imageUri.value = null
+        _uriList.update { emptyList() }
         editingMessage = null
         _editingMessageBackupText.value = null
         _currentQuotedMessage.update { null }
@@ -315,11 +367,28 @@ class ChatDialogViewModel(
                 newMessage.uuid = response.value.uuid
                 newMessage.topicUuid = response.value.topicUuid
                 repo.updateMessage(newMessage)
+                deleteCurrentTopicDraftIfNeeded()
                 possibleMessage = null
             }
 
             is ApiResult.Error -> {
 
+            }
+        }
+    }
+
+    suspend fun deleteCurrentTopicDraftIfNeeded() {
+        val draft = drafts.value.firstOrNull { it.streamUuid == chatId && it.topicUuid == topicUuid }
+        if (draft != null) {
+            val response = client.performRequest(DeleteDraftRequest(draft.uuid, draft.revision))
+            when (response) {
+                is ApiResult.Success -> {
+                    repo.removeDraft(draft)
+                }
+
+                is ApiResult.Error -> {
+
+                }
             }
         }
     }
@@ -350,6 +419,10 @@ class ChatDialogViewModel(
             }
             if (streamBindings.value[chatId]?.isEmpty() ?: true) {
                 loadStreamBindings()
+            }
+            val draft = drafts.value.firstOrNull { it.streamUuid == chatId && it.topicUuid == topicUuid }
+            if (draft != null) {
+                mentions.setText(draft.payload.content)
             }
         }
     }
@@ -385,6 +458,31 @@ class ChatDialogViewModel(
     }
 
     suspend fun markMessagesReadUpTo(messageUuid: String) {
+        val markMessagesReadResponse = client.performRequest(MarkMessagesReadUpToRequest(messageUuid))
+        when(markMessagesReadResponse) {
+            is ApiResult.Success -> {
+
+            }
+
+            is ApiResult.Error -> {
+
+            }
+        }
+    }
+
+    suspend fun onMessagesVisible(newlyVisible: List<String>) {
+        val messages = streamTopicMessages.value["${chatId}.${topicUuid}"]
+        if (messages != null) {
+            for (messageUuid in newlyVisible) {
+                val message = messages.firstOrNull { it.uuid == messageUuid }
+                if (message != null && !message.read) {
+                    markMessageRead(messageUuid)
+                }
+            }
+        }
+    }
+
+    suspend fun markMessageRead(messageUuid: String) {
         val markMessagesReadResponse = client.performRequest(MarkMessagesReadRequest(messageUuid))
         when(markMessagesReadResponse) {
             is ApiResult.Success -> {
@@ -445,3 +543,132 @@ data class QuotedMessage(
     val message: MessageResponse,
     var text: String
 )
+
+data class AttachedUri(
+    val uri: Uri,
+    val fileName: String,
+    val type: String
+)
+
+object MarkdownPayloadParser {
+    private val imageRegex = Regex("""!\[([^\]]*)\]\(urn:image:([^)]+)\)""")
+    private val fileRegex = Regex("""\[([^\]]*)\]\(urn:file:([^)]+)\)""")
+    private val quoteRegex = Regex("""\[([^\]]*)\]\(urn:quote:([^)]+)\)""")
+    fun parse(content: String): List<MessageElement> {
+        val input = content.replace("\\n", "\n").trim()
+        if (input.isEmpty()) return emptyList()
+        val elements = mutableListOf<MessageElement>()
+        var index = 0
+        while (index < input.length) {
+            val next = findNextSpecial(input, index) ?: run {
+                appendPlainText(elements, input.substring(index))
+                break
+            }
+            if (next.start > index) {
+                appendPlainText(elements, input.substring(index, next.start))
+            }
+            elements += next.element
+            index = next.end
+        }
+        return elements
+    }
+    private fun appendPlainText(elements: MutableList<MessageElement>, raw: String) {
+        val text = raw.trim()
+        if (text.isNotEmpty()) {
+            elements += MessageElement.PlainText(text)
+        }
+    }
+    private data class SpecialMatch(
+        val start: Int,
+        val end: Int,
+        val element: MessageElement,
+    )
+    private fun findNextSpecial(input: String, fromIndex: Int): SpecialMatch? {
+        val image = imageRegex.find(input, fromIndex)
+        val file = fileRegex.find(input, fromIndex)
+        val quote = quoteRegex.find(input, fromIndex)
+        val candidates = listOfNotNull(
+            image?.let {
+                SpecialMatch(
+                    start = it.range.first,
+                    end = it.range.last + 1,
+                    element = MessageElement.Image(
+                        fileName = it.groupValues[1],
+                        uuid = it.groupValues[2],
+                    ),
+                )
+            },
+            file?.let {
+                SpecialMatch(
+                    start = it.range.first,
+                    end = it.range.last + 1,
+                    element = MessageElement.File(
+                        fileName = it.groupValues[1],
+                        uuid = it.groupValues[2],
+                    ),
+                )
+            },
+            quote?.let {
+                SpecialMatch(
+                    start = it.range.first,
+                    end = it.range.last + 1,
+                    element = MessageElement.Quote(
+                        displayName = it.groupValues[1],
+                        uuid = it.groupValues[2],
+                        text = "", // remove if you dropped this field
+                    ),
+                )
+            },
+        )
+        return candidates.minByOrNull { it.start }
+    }
+}
+
+data class LocalAttachment(
+    val uuid: String,
+    val fileName: String,
+    val localFile: File,
+)
+class AttachmentStorage(
+    val context: Context,
+    private val client: WorkspaceAPIClient,
+) {
+    private val dir: File
+        get() = File(context.filesDir, "attachments").apply { mkdirs() }
+    fun localFile(uuid: String, fileName: String): File {
+        val safeName = fileName.replace(Regex("""[^\w.\- ]"""), "_")
+        return File(dir, "$uuid-$safeName")
+    }
+    fun isCached(uuid: String, fileName: String): Boolean {
+        val file = localFile(uuid, fileName)
+        return file.exists() && file.length() > 0
+    }
+
+    suspend fun loadOrDownload(uuid: String, fileName: String): ApiResult<LocalAttachment, ApiError> {
+        val destination = localFile(uuid, fileName)
+        if (isCached(uuid, fileName)) {
+            return ApiResult.Success(
+                LocalAttachment(
+                    uuid = uuid,
+                    fileName = fileName,
+                    localFile = destination,
+                )
+            )
+        }
+        return when (
+            val result = client.downloadFile(
+                path = "/api/workspace/v1/messenger/files/$uuid/actions/download",
+                destination = destination,
+            )
+        ) {
+            is ApiResult.Success -> ApiResult.Success(
+                LocalAttachment(
+                    uuid = uuid,
+                    fileName = fileName,
+                    localFile = result.value,
+                )
+            )
+            is ApiResult.Error -> result
+        }
+    }
+}

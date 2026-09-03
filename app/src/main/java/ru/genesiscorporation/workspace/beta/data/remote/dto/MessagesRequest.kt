@@ -32,6 +32,14 @@ data class MessagesByIdsRequest(
     )
 }
 
+@Serializable
+class MentionedMessagesRequest: ApiRequest<MentionedMessagesRequestData, List<MessageResponse>, ApiError> {
+    override val method: HTTPMethod = HTTPMethod.GET
+    override val requiresApiKey: Boolean = true
+    override val url: String = "/api/workspace/v1/messenger/messages/"
+    override val data = MentionedMessagesRequestData()
+}
+
 
 @Serializable
 data class MessagesRequestData(
@@ -45,6 +53,11 @@ data class MessagesByIdsRequestData(
 ) {
 }
 @Serializable
+data class MentionedMessagesRequestData(
+    val mentioned: Boolean = true
+)
+
+@Serializable
 data class MessageResponse(
     var uuid: String,
     @SerialName("updated_at") val updatedAt: String,
@@ -56,8 +69,8 @@ data class MessageResponse(
     var payload: MessageResponsePayload,
     @SerialName("is_own") val isOwn: Boolean,
     var reactions: Map<String, Int>,
+    var read: Boolean,
     var user: UserResponseData? = null
-
 
 ) {
     private fun parseQuotedMessages(): List<QuotedMessagePart> {
@@ -102,3 +115,25 @@ private val quoteBlockRegex = Regex(
     """\[([^\]]*)\]\(urn:quote:([0-9a-fA-F-]{36})\)\s*\n+([\s\S]*?)(?=\n*\[(?:[^\]]*)\]\(urn:quote:|\z)"""
 )
 
+sealed interface MessageElement {
+
+    data class Image(
+        val fileName: String,
+        val uuid: String,
+    ) : MessageElement
+
+    data class File(
+        val fileName: String,
+        val uuid: String,
+    ) : MessageElement
+
+    data class Quote(
+        val displayName: String,
+        val uuid: String,
+        val text: String,
+    ) : MessageElement
+
+    data class PlainText(
+        val text: String,
+    ) : MessageElement
+}

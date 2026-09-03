@@ -8,7 +8,11 @@ import ru.genesiscorporation.workspace.beta.data.ApiKeyRepository
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.modules.addfolder.AddFolderViewModel
+import ru.genesiscorporation.workspace.beta.modules.adduserstostream.AddUsersToStreamView
+import ru.genesiscorporation.workspace.beta.modules.adduserstostream.AddUsersToStreamViewModel
+import ru.genesiscorporation.workspace.beta.modules.calendar.CalendarViewModel
 import ru.genesiscorporation.workspace.beta.modules.chatchannels.ChatViewModel
+import ru.genesiscorporation.workspace.beta.modules.chatdialog.AttachmentStorage
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.ChatDialogViewModel
 import ru.genesiscorporation.workspace.beta.modules.chatuserinfo.ChatUserInfoViewModel
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.ChooseServerViewModel
@@ -16,7 +20,12 @@ import ru.genesiscorporation.workspace.beta.modules.createdirectstream.CreateDir
 import ru.genesiscorporation.workspace.beta.modules.createstream.CreateStreamViewModel
 import ru.genesiscorporation.workspace.beta.modules.creationbase.CreationBaseViewModel
 import ru.genesiscorporation.workspace.beta.modules.foldersettings.FolderSettingsViewModel
+import ru.genesiscorporation.workspace.beta.modules.home.HomeViewModel
+import ru.genesiscorporation.workspace.beta.modules.homedrafts.HomeDraftsViewModel
+import ru.genesiscorporation.workspace.beta.modules.homeinbounds.HomeInboundsViewModel
+import ru.genesiscorporation.workspace.beta.modules.homementions.HomeMentionsViewModel
 import ru.genesiscorporation.workspace.beta.modules.login.LoginViewModel
+import ru.genesiscorporation.workspace.beta.modules.mail.MailViewModel
 import ru.genesiscorporation.workspace.beta.modules.otp.OtpViewModel
 import ru.genesiscorporation.workspace.beta.modules.ownusersettings.OwnUserSettingsViewModel
 import ru.genesiscorporation.workspace.beta.modules.profile.ProfileViewModel
@@ -134,7 +143,7 @@ class ChatViewModelFactory(private val client: WorkspaceAPIClient,
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(ChatViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return ChatViewModel(client, userViewModel, repo, pendingDeepLink, onDeepLinkHandled) as T
+            return ChatViewModel(client, repo, pendingDeepLink, onDeepLinkHandled) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
@@ -150,7 +159,7 @@ class ChatTopicsViewModelFactory(private val client: WorkspaceAPIClient, private
     }
 }
 
-class ChatDialogViewModelFactory(private val client: WorkspaceAPIClient, private val userViewModel: UserViewModel, private val chatTitle: String, private val chatId: String, private val topicName: String?, private val topicUuid: String, private val isDirectMessages: Boolean, private  val repo: EventsRepository, val userId: Int?) : ViewModelProvider.Factory {
+class ChatDialogViewModelFactory(private val client: WorkspaceAPIClient, private val userViewModel: UserViewModel, private val chatTitle: String, private val chatId: String, private val topicName: String?, private val topicUuid: String, private val isDirectMessages: Boolean, private  val repo: EventsRepository, val userId: Int?, private val storage: AttachmentStorage) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(ChatDialogViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
@@ -163,7 +172,8 @@ class ChatDialogViewModelFactory(private val client: WorkspaceAPIClient, private
                 topicUuid,
                 isDirectMessages,
                 repo,
-                userId
+                userId,
+                storage
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
@@ -219,6 +229,80 @@ class ChatUserInfoViewModelFactory(private val client: WorkspaceAPIClient, val u
         if (modelClass.isAssignableFrom(ChatUserInfoViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
             return ChatUserInfoViewModel(userName, userId, avatarUrl, email, client, repo) as T
+        }
+        throw IllegalArgumentException("Unknown ViewModel class")
+    }
+}
+
+class AddUsersToStreamViewModelFactory(private val client: WorkspaceAPIClient, private val streamUuid: String, private  val repo: EventsRepository) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        if (modelClass.isAssignableFrom(AddUsersToStreamViewModel::class.java)) {
+            @Suppress("UNCHECKED_CAST")
+            return AddUsersToStreamViewModel(
+                streamUuid,
+                client,
+                repo
+            ) as T
+        }
+        throw IllegalArgumentException("Unknown ViewModel class")
+    }
+}
+
+class MailViewModelFactory(private val repo: EventsRepository) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        if (modelClass.isAssignableFrom(MailViewModel::class.java)) {
+            @Suppress("UNCHECKED_CAST")
+            return MailViewModel(repo) as T
+        }
+        throw IllegalArgumentException("Unknown ViewModel class")
+    }
+}
+
+class CalendarViewModelFactory(private val repo: EventsRepository) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        if (modelClass.isAssignableFrom(CalendarViewModel::class.java)) {
+            @Suppress("UNCHECKED_CAST")
+            return CalendarViewModel(repo) as T
+        }
+        throw IllegalArgumentException("Unknown ViewModel class")
+    }
+}
+
+class HomeViewModelFactory(private val repo: EventsRepository, private val client: WorkspaceAPIClient) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        if (modelClass.isAssignableFrom(HomeViewModel::class.java)) {
+            @Suppress("UNCHECKED_CAST")
+            return HomeViewModel(client, repo) as T
+        }
+        throw IllegalArgumentException("Unknown ViewModel class")
+    }
+}
+
+class HomeMentionsViewModelFactory(private val repo: EventsRepository, private val client: WorkspaceAPIClient) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        if (modelClass.isAssignableFrom(HomeMentionsViewModel::class.java)) {
+            @Suppress("UNCHECKED_CAST")
+            return HomeMentionsViewModel(client, repo) as T
+        }
+        throw IllegalArgumentException("Unknown ViewModel class")
+    }
+}
+
+class HomeInboundsViewModelFactory(private val repo: EventsRepository, private val client: WorkspaceAPIClient) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        if (modelClass.isAssignableFrom(HomeInboundsViewModel::class.java)) {
+            @Suppress("UNCHECKED_CAST")
+            return HomeInboundsViewModel(client, repo) as T
+        }
+        throw IllegalArgumentException("Unknown ViewModel class")
+    }
+}
+
+class HomeDraftsViewModelFactory(private val repo: EventsRepository, private val client: WorkspaceAPIClient) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        if (modelClass.isAssignableFrom(HomeDraftsViewModel::class.java)) {
+            @Suppress("UNCHECKED_CAST")
+            return HomeDraftsViewModel(client, repo) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }

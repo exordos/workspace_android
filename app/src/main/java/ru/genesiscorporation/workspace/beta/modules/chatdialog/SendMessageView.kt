@@ -1,5 +1,6 @@
 package ru.genesiscorporation.workspace.beta.modules.chatdialog
 
+import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -27,6 +28,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBarDefaults
 import androidx.compose.material3.Text
@@ -64,7 +67,9 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
 import coil3.compose.AsyncImage
+import io.ktor.http.ContentDisposition.Companion.File
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import ru.genesiscorporation.workspace.beta.R
@@ -73,8 +78,10 @@ import ru.genesiscorporation.workspace.beta.ui.ReferenceMessage
 import ru.genesiscorporation.workspace.beta.ui.ReferenceMessageBase
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
+import java.io.File
 import kotlin.math.max
 import kotlin.math.min
+import android.provider.OpenableColumns
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -82,7 +89,7 @@ fun SendMessageView(
     viewModel: ChatDialogViewModel
 ) {
     val scope = rememberCoroutineScope()
-    val imageUri by viewModel.imageUri.collectAsState()
+    val uriList by viewModel.uriList.collectAsState()
     val editingMessageBackupText by viewModel.editingMessageBackupText.collectAsState()
     val quotedMessage by viewModel.currentQuotedMessage.collectAsState()
     val quotedMessages by viewModel.quotedMessages.collectAsState()
@@ -102,38 +109,91 @@ fun SendMessageView(
             )
         }.orEmpty()
     }
-    val launcher = rememberLauncherForActivityResult(
-        contract =
-            ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        viewModel.onImageUriChange(uri)
-    }
+//    val launcher = rememberLauncherForActivityResult(
+//        contract =
+//            ActivityResultContracts.GetContent()
+//    ) { uri: Uri? ->
+//        viewModel.onImageUriChange(uri)
+//    }
     Column(
         modifier = Modifier
             .background(LocalWorkspaceColorsPalette.current.surface)
     ) {
-        if (imageUri != null) {
-            Box(
-                modifier = Modifier
-                    .padding(start = 12.dp, top = 12.dp, end = 12.dp, bottom = 0.dp)
-                    .size(100.dp)
-                    .clip(RoundedCornerShape(8.dp))
-            ) {
-                AsyncImage(
-                    model = imageUri,
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop,
-                )
-                Icon(
-                    painter = painterResource(R.drawable.ic_close_small),
-                    contentDescription = "Close",
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .size(24.dp)
-                        .clickable { viewModel.onImageUriChange(null) },
-                )
+        if (!uriList.isEmpty()) {
+            for (attachedUri in uriList) {
+                when (attachedUri.type) {
+                    "image" -> Box(
+                        modifier = Modifier
+                            .padding(start = 12.dp, top = 12.dp, end = 12.dp, bottom = 0.dp)
+                            .size(100.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                    ) {
+                        AsyncImage(
+                            model = attachedUri.uri,
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop,
+                        )
+                        Icon(
+                            painter = painterResource(R.drawable.ic_close_small),
+                            contentDescription = "Close",
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .size(24.dp)
+                                .clickable { viewModel.removeAttachedUri(attachedUri) },
+                        )
+                    }
+                    "file" -> Box(
+                        modifier = Modifier
+                            .padding(start = 12.dp, top = 12.dp, end = 12.dp, bottom = 0.dp)
+                            .border(
+                                width = 1.dp,
+                                color = LocalWorkspaceColorsPalette.current.divider,
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .size(100.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                    ) {
+                        Column {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_file_attachment),
+                                contentDescription = "file_attachment",
+                                modifier = Modifier.fillMaxWidth()
+                                    .background(LocalWorkspaceColorsPalette.current.onPrimary)
+                                    .padding(vertical = 20.dp),
+                            )
+                            val (baseName, extension) = splitFileName(attachedUri.fileName)
+                            Text(
+                                baseName,
+                                color = LocalWorkspaceColorsPalette.current.textHeaders,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Medium,
+                                fontFamily = InterFontFamily,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(horizontal = 4.dp),
+                            )
+                            Text(
+                                extension,
+                                color = LocalWorkspaceColorsPalette.current.iconBase,
+                                fontSize = 10.sp,
+                                fontFamily = InterFontFamily,
+                                modifier = Modifier.padding(horizontal = 4.dp)
+                            )
+                        }
+                        Icon(
+                            painter = painterResource(R.drawable.ic_close_small),
+                            contentDescription = "Close",
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .size(24.dp)
+                                .clickable { viewModel.removeAttachedUri(attachedUri) },
+                        )
+                    }
+                }
+
             }
+
         }
         val message = editingMessageBackupText
         val currentlyQuotedMessage = quotedMessage
@@ -233,22 +293,17 @@ fun SendMessageView(
                 Row(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Button(
-                        onClick = {
-                            launcher.launch("image/*")
+                    AttachButton(
+                        onImagePicked = {
+                            viewModel.addUri(it, "", "image")
                         },
-                        modifier = Modifier.size(32.dp),
-                        contentPadding = PaddingValues(0.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color.Transparent,
-                            contentColor = LocalWorkspaceColorsPalette.current.iconBase
-                        )
-                    ) {
-                        Icon(
-                            painter = painterResource(id = R.drawable.attach_file),
-                            contentDescription = "Attach file"
-                        )
-                    }
+                        onPhotoTaken = {
+                            viewModel.addUri(it, "", "image")
+                        },
+                        onFilePicked = { uri, fileName ->
+                            viewModel.addUri(uri, fileName ?: "", "file")
+                        },
+                    )
                     BasicTextField(
                         value = viewModel.mentions.value,
                         onValueChange = viewModel::onMentionsChange,
@@ -297,6 +352,110 @@ fun SendMessageView(
             }
         }
     }
+}
+
+@Composable
+fun AttachButton(
+    onImagePicked: (Uri) -> Unit,
+    onPhotoTaken: (Uri) -> Unit,
+    onFilePicked: (Uri, String?) -> Unit,
+) {
+    val context = LocalContext.current
+    var menuExpanded by remember { mutableStateOf(false) }
+
+    val pickImageLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        uri?.let(onImagePicked)
+    }
+
+    var cameraImageUri by remember { mutableStateOf<Uri?>(null) }
+    val takePhotoLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        if (success) {
+            cameraImageUri?.let(onPhotoTaken)
+        }
+    }
+
+    val pickFileLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let {
+            val name = getFileName(context, it)
+            onFilePicked(it, name)
+        }
+    }
+    Box {
+        Button(
+            onClick = { menuExpanded = true },
+            modifier = Modifier.size(32.dp),
+            contentPadding = PaddingValues(0.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color.Transparent,
+                contentColor = LocalWorkspaceColorsPalette.current.iconBase
+            )
+        ) {
+            Icon(
+                painter = painterResource(id = R.drawable.attach_file),
+                contentDescription = "Attach file"
+            )
+        }
+        DropdownMenu(
+            expanded = menuExpanded,
+            onDismissRequest = { menuExpanded = false }
+        ) {
+            DropdownMenuItem(
+                text = { Text("Pick image") },
+                onClick = {
+                    menuExpanded = false
+                    pickImageLauncher.launch("image/*")
+                }
+            )
+            DropdownMenuItem(
+                text = { Text("Take photo") },
+                onClick = {
+                    menuExpanded = false
+                    val uri = createImageUri(context)
+                    cameraImageUri = uri
+                    takePhotoLauncher.launch(uri)
+                }
+            )
+            DropdownMenuItem(
+                text = { Text("Add file") },
+                onClick = {
+                    menuExpanded = false
+
+                    pickFileLauncher.launch(arrayOf("*/*"))
+                }
+            )
+        }
+    }
+}
+
+fun getFileName(context: Context, uri: Uri): String? {
+    return context.contentResolver.query(
+        uri,
+        arrayOf(OpenableColumns.DISPLAY_NAME),
+        null,
+        null,
+        null
+    )?.use { cursor ->
+        val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+        if (index >= 0 && cursor.moveToFirst()) cursor.getString(index) else null
+    }
+}
+
+private fun createImageUri(context: Context): Uri {
+    val file = File(
+        context.cacheDir,
+        "camera_${System.currentTimeMillis()}.jpg"
+    )
+    return FileProvider.getUriForFile(
+        context,
+        "${context.packageName}.fileprovider",
+        file
+    )
 }
 private val MentionPattern =
     Regex("""\[([^\[\]]+)]\((urn:user:[^)]+)\)""")
@@ -559,3 +718,18 @@ private fun findActiveAtQueryStart(text: String, caret: Int): Int? {
 
 private val mentionTriggerBoundaries = setOf(' ', '\n', '\t', '(', '[', '{', ',', '.', ':', ';', '!', '?')
 private const val maxMentionQueryChars = 128
+
+
+
+data class FileNameParts(val nameWithoutExtension: String, val extension: String)
+fun splitFileName(fileName: String): FileNameParts {
+    val lastDot = fileName.lastIndexOf('.')
+
+    if (lastDot <= 0 || lastDot == fileName.lastIndex) {
+        return FileNameParts(fileName, "")
+    }
+    return FileNameParts(
+        nameWithoutExtension = fileName.substring(0, lastDot),
+        extension = fileName.substring(lastDot + 1)
+    )
+}

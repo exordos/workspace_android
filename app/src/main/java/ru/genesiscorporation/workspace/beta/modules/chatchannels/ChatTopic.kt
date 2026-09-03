@@ -217,11 +217,11 @@ fun ChatTopic(
                     }
                 },
                 modifier = Modifier
-                    .padding(horizontal = 24.dp)
                     .background(
                         if (item.notificationMode == "mute") LocalWorkspaceColorsPalette.current.cardBackgroundBase else LocalWorkspaceColorsPalette.current.background,
                         RoundedCornerShape(8.dp)
                     )
+                    .padding(horizontal = 24.dp)
             ) {
                 Image(
                     painter = painterResource(id = R.drawable.ic_notifications_off),
@@ -259,11 +259,11 @@ fun ChatTopic(
                     }
                 },
                 modifier = Modifier
-                    .padding(horizontal = 24.dp)
                     .background(
                         if (item.notificationMode == "follow") LocalWorkspaceColorsPalette.current.cardBackgroundBase else LocalWorkspaceColorsPalette.current.background,
                         RoundedCornerShape(8.dp)
                     )
+                    .padding(horizontal = 24.dp)
             ) {
                 Image(
                     painter = painterResource(id = R.drawable.ic_volume),
@@ -271,6 +271,27 @@ fun ChatTopic(
                     modifier = Modifier.size(24.dp)
                 )
             }
+        }
+        if (item.unreadCount > 0) {
+            DropdownMenuItem(
+                text = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Image(
+                            painter = painterResource(id = R.drawable.ic_check),
+                            contentDescription = ""
+                        )
+                        Text("Отметить всё как прочитанное")
+                    }
+                },
+                onClick = {
+                    scope.launch {
+                        viewModel.markTopicMessagesRead(item.uuid)
+                    }
+                    menuExpanded = false
+                }
+            )
         }
         val actionText = if (item.isDone) "Убрать отметку выполненной темы" else "Отметить тему как выполненную"
         val imageName = if (item.isDone) R.drawable.ic_theme_uncomplete else R.drawable.ic_theme_complete

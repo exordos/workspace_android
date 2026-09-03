@@ -28,6 +28,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
@@ -101,11 +102,6 @@ fun ProfileScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
                             .padding(vertical = 8.dp)
-                            .clickable(
-                                onClick = {
-                                    navController.navigate(ProfileFlow.OwnUserSettings)
-                                }
-                            )
                     ) {
                         Avatar(
                             userData.avatar,
@@ -137,21 +133,74 @@ fun ProfileScreen(
                         }
                     }
                 }
-//            Button(
-//                onClick = {
-//
-//                }
-//            ) {
-//                Row {
-//                    Image(
-//                        painter = painterResource(id = R.drawable.ic_add),
-//                        contentDescription = null
-//                    )
-//                    Text(
-//                        text = "Добавить организацию"
-//                    )
-//                }
-//            }
+                HorizontalDivider(
+                    thickness = 1.dp,
+                    color = LocalWorkspaceColorsPalette.current.divider
+                )
+                Text(
+                    text = "ОПИСАНИЕ",
+                    color = LocalWorkspaceColorsPalette.current.textAdditional30,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(vertical = 12.dp)
+                )
+                Column(
+                    modifier = Modifier.fillMaxWidth()
+                        .clickable(
+                            onClick = {
+                                navController.navigate(ProfileFlow.OwnUserSettings)
+                            }
+                        )
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Image(
+                            painter = painterResource(id = R.drawable.ic_personal_settings),
+                            contentDescription = null,
+                            modifier = Modifier.padding(0.dp, 6.dp, 8.dp, 6.dp)
+                        )
+                        Text(
+                            text = "Личная информация"
+                        )
+                    }
+                    HorizontalDivider(
+                        thickness = 1.dp,
+                        color = LocalWorkspaceColorsPalette.current.divider
+                    )
+                }
+                Text(
+                    text = "НАСТРОЙКИ",
+                    color = LocalWorkspaceColorsPalette.current.textAdditional30,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(vertical = 12.dp)
+                )
+                Column(
+                    modifier = Modifier.fillMaxWidth()
+                        .clickable(
+                            onClick = {
+                                navController.navigate(ProfileFlow.FolderSettings)
+                            }
+                        )
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Image(
+                            painter = painterResource(id = R.drawable.ic_folder_settings),
+                            contentDescription = null,
+                            modifier = Modifier.padding(0.dp, 6.dp, 8.dp, 6.dp)
+                        )
+                        Text(
+                            text = "Отображение папок"
+                        )
+                    }
+                    HorizontalDivider(
+                        thickness = 1.dp,
+                        color = LocalWorkspaceColorsPalette.current.divider
+                    )
+                }
                 Row(
                     verticalAlignment = Alignment.CenterVertically
                 ) {

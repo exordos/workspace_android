@@ -8,20 +8,21 @@ import ru.genesiscorporation.workspace.beta.data.remote.HTTPMethod
 
 class AddChatToFolderRequest(
     folderUuid: String,
-    chatId: Int,
+    streamUuid: String,
     chatType: String
 ): ApiRequest<AddChatToFolderRequestData, AddChatToFolderResponseData, ApiError> {
     override val method: HTTPMethod = HTTPMethod.POST
     override val requiresApiKey: Boolean = true
     override val shouldApplySuffix: Boolean = false
     override val isJson: Boolean = true
-    override val url: String = "/api/workspace/v1/messenger/folders/${folderUuid}/items/"
-    override val data = AddChatToFolderRequestData(chatId, chatType)
+    override val url: String = "/api/workspace/v1/messenger/folder_items/"
+    override val data = AddChatToFolderRequestData(folderUuid, streamUuid, chatType)
 }
 
 @Serializable
 data class AddChatToFolderRequestData(
-    @SerialName("chat_id") val chatId: Int,
+    @SerialName("folder_uuid") val folderUuid: String,
+    @SerialName("stream_uuid") val streamUuid: String,
     @SerialName("chat_type") val chatType: String
 )
 @Serializable
