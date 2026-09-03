@@ -2,6 +2,7 @@ package ru.genesiscorporation.workspace.beta.modules.chatchannels
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -19,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -30,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -37,6 +40,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.toColorInt
 import dev.jeziellago.compose.markdowntext.MarkdownText
+import kotlinx.coroutines.launch
+import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
@@ -61,6 +66,7 @@ fun ChatChannel(
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val palette = LocalWorkspaceColorsPalette.current
+    val scope = rememberCoroutineScope()
     val targetBackground = if (showDetail) palette.chatHeaderBackground.copy(alpha = 0f) else palette.chatHeaderBackground
 //    val animatedBackground by animateColorAsState(
 //        targetValue = targetBackground,
@@ -189,6 +195,102 @@ fun ChatChannel(
             expanded = menuExpanded,
             onDismissRequest = { menuExpanded = false }
         ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .background(
+                        LocalWorkspaceColorsPalette.current.background,
+                        RoundedCornerShape(8.dp)
+                    ),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = {
+                        if (item.notificationMode != "mentions_only") {
+                            scope.launch {
+                                viewModel.setStreamNotificationMode(item.uuid,"mentions_only")
+                            }
+                        }
+                    },
+                    modifier = Modifier
+                        .background(
+                            if (item.notificationMode == "mentions_only") LocalWorkspaceColorsPalette.current.cardBackgroundBase else LocalWorkspaceColorsPalette.current.background,
+                            RoundedCornerShape(8.dp)
+                        )
+                        .padding(horizontal = 24.dp)
+                ) {
+                    Image(
+                        painter = painterResource(id = R.drawable.ic_mentions_small),
+                        contentDescription = null,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+                IconButton(
+                    onClick = {
+                        if (item.notificationMode != "muted") {
+                            scope.launch {
+                                viewModel.setStreamNotificationMode(item.uuid,"muted")
+                            }
+                        }
+                    },
+                    modifier = Modifier
+                        .background(
+                            if (item.notificationMode == "muted") LocalWorkspaceColorsPalette.current.cardBackgroundBase else LocalWorkspaceColorsPalette.current.background,
+                            RoundedCornerShape(8.dp)
+                        )
+                        .padding(horizontal = 24.dp)
+                ) {
+                    Image(
+                        painter = painterResource(id = R.drawable.ic_notifications_off_small),
+                        contentDescription = null,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+                IconButton(
+                    onClick = {
+                        if (item.notificationMode != "all_messages") {
+                            scope.launch {
+                                viewModel.setStreamNotificationMode(item.uuid,"all_messages")
+                            }
+                        }
+                    },
+                    modifier = Modifier
+                        .background(
+                            if (item.notificationMode == "all_messages") LocalWorkspaceColorsPalette.current.cardBackgroundBase else LocalWorkspaceColorsPalette.current.background,
+                            RoundedCornerShape(8.dp)
+                        )
+                        .padding(horizontal = 24.dp)
+                ) {
+                    Image(
+                        painter = painterResource(id = R.drawable.ic_notifications_small),
+                        contentDescription = null,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
+            if (item.unreadCount > 0) {
+                DropdownMenuItem(
+                    text = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Image(
+                                painter = painterResource(id = R.drawable.ic_check),
+                                contentDescription = ""
+                            )
+                            Text("Отметить всё как прочитанное")
+                        }
+                    },
+                    onClick = {
+                        scope.launch {
+                            viewModel.markStreamMessagesRead(item.uuid)
+                        }
+                        menuExpanded = false
+                    }
+                )
+            }
             if (currentlySelectedFolder?.systemType == "all") {
                 DropdownMenuItem(
                     text = { Text("Добавить в папку...") },

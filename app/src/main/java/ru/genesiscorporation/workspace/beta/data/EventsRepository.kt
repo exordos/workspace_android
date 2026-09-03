@@ -1,5 +1,6 @@
 package ru.genesiscorporation.workspace.beta.data
 
+import android.app.Activity
 import android.util.Log
 import androidx.compose.runtime.rememberCoroutineScope
 import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
@@ -18,6 +19,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -34,14 +36,27 @@ import kotlinx.serialization.json.jsonPrimitive
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.data.remote.dto.DeletedMessageReaction
+import ru.genesiscorporation.workspace.beta.data.remote.dto.Draft
+import ru.genesiscorporation.workspace.beta.data.remote.dto.DraftsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.EpochRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
+import ru.genesiscorporation.workspace.beta.data.remote.dto.FoldersRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageReaction
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageReactionsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesByIdsRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.OwnUserRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.PresenceRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ServerSettingsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamBindingResponseData
+import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
+import ru.genesiscorporation.workspace.beta.data.remote.dto.UsersRequest
+import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import kotlin.collections.map
 import kotlin.collections.orEmpty
 import kotlin.collections.plus
@@ -52,15 +67,29 @@ class EventsRepository() {
 
     val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
+    private val heartbeatJob: Job = scope.every30Seconds {
+        val webSocketClient = client ?: return@every30Seconds
+        heartbeatTask(webSocketClient)
+    }
+    fun close() {
+        scope.cancel()
+    }
     var client: WorkspaceAPIClient? = null
     var session: DefaultClientWebSocketSession? = null
     var latestEpoch: Int = 0
     var epochGeneration: String = ""
 
+    var pushId: String? = null
+
+    var jitsiServerUrl: String = ""
+
     private val json = Json {
         ignoreUnknownKeys = true
         isLenient = true
     }
+
+
+    private val folderCreationFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
 
     private val _currentUser = MutableStateFlow<UserResponseData?>(null)
     val currentUser: StateFlow<UserResponseData?> = _currentUser.asStateFlow()
@@ -70,9 +99,19 @@ class EventsRepository() {
     }
     private var isWebSocketOpen = false
 
+    private val _streamsQueryState = MutableStateFlow<QueryState>(QueryState.Idle)
+    val streamsQueryState: StateFlow<QueryState> = _streamsQueryState
+
+
+    private val _currentlySelectedFolder = MutableStateFlow<FolderResponseData?>(null)
+    var currentlySelectedFolder: StateFlow<FolderResponseData?> = _currentlySelectedFolder
+
     private val _streamTopicMessages = MutableStateFlow<Map<String, List<MessageResponse>>>(emptyMap())
     val streamTopicMessages: StateFlow<Map<String, List<MessageResponse>>> = _streamTopicMessages.asStateFlow()
 
+    fun updateCurrentlySelectedFolder(newFolder: FolderResponseData?) {
+        _currentlySelectedFolder.update { newFolder }
+    }
     fun addStreamTopicMessages(streamUuid: String, topicUuid: String, messages: List<MessageResponse>) {
         val messagesWithUser = messages.map { message ->
             message.user = users.value.firstOrNull { it.uuid == message.authorUuid }
@@ -132,6 +171,7 @@ class EventsRepository() {
         _streamTopics.update { current ->
             current + (streamUuid to topics)
         }
+        appendItemsToTopicsPool(topics)
     }
     fun addTopicToStream(topic: TopicsResponseData) {
         _streamTopics.update { current ->
@@ -142,6 +182,7 @@ class EventsRepository() {
                 current
             }
         }
+        appendItemsToTopicsPool(listOf(topic))
     }
 
     fun updateTopic(updatedTopic: TopicsResponseData) {
@@ -167,6 +208,7 @@ class EventsRepository() {
             if (updatedTopics == topics) return@update current
             current + (updatedTopic.streamUuid to updatedTopics)
         }
+        updateTopicInTopicsPool(updatedTopic)
     }
 
     private val _streamBindings = MutableStateFlow<Map<String, List<StreamBindingResponseData>>>(emptyMap())
@@ -227,6 +269,72 @@ class EventsRepository() {
         }
         _messagesPool.update { current ->
             current + messagesWithUser
+        }
+    }
+
+    private val _topicsPool = MutableStateFlow<List<TopicsResponseData>>(emptyList())
+    val topicsPool: StateFlow<List<TopicsResponseData>> = _topicsPool.asStateFlow()
+
+    fun appendItemsToTopicsPool(newList: List<TopicsResponseData>) {
+        val currentPoolIds = _messagesPool.value.map { it.uuid }
+        val filteredTopics = newList.filter { !currentPoolIds.contains(it.uuid) }
+
+        _topicsPool.update { current ->
+            current + filteredTopics
+        }
+    }
+
+    fun updateTopicInTopicsPool(updatedTopic: TopicsResponseData) {
+        _topicsPool.update { current ->
+            current.map { topic ->
+                if (topic.uuid == updatedTopic.uuid) {
+                    topic.copy(
+                        unreadCount = updatedTopic.unreadCount,
+                        name = updatedTopic.name,
+                        lastMessageUuid = updatedTopic.lastMessageUuid,
+                        isDone = updatedTopic.isDone,
+                        notificationMode = updatedTopic.notificationMode,
+                        summary = updatedTopic.summary
+                    )
+                } else {
+                    topic
+                }
+            }
+        }
+    }
+
+    private val _draftsPool = MutableStateFlow<List<Draft>>(emptyList())
+    val draftsPool: StateFlow<List<Draft>> = _draftsPool.asStateFlow()
+
+    fun setInitialDraftsPool(newList: List<Draft>) {
+        _draftsPool.update {
+            newList
+        }
+    }
+
+    fun addDraft(newValue: Draft) {
+        _draftsPool.update { current ->
+            current + newValue
+        }
+    }
+
+    fun updateDraft(updatedDraft: Draft) {
+        _draftsPool.update { current ->
+            current.map { draft ->
+                if (draft.uuid == updatedDraft.uuid) {
+                    draft.copy(
+                        payload = updatedDraft.payload
+                    )
+                } else {
+                    draft
+                }
+            }
+        }
+    }
+
+    fun removeDraft(valueToRemove: Draft) {
+        _draftsPool.update { current ->
+            current - valueToRemove
         }
     }
 
@@ -292,6 +400,10 @@ class EventsRepository() {
         _users.update {
             newList
         }
+    }
+
+    fun poolMessage(uuid: String?): MessageResponse? {
+        return messagesPool.value.firstOrNull { it.uuid == uuid }
     }
 
     private val _streams = MutableStateFlow<List<Stream>>(emptyList())
@@ -399,36 +511,60 @@ class EventsRepository() {
         }
     }
 
+    suspend fun heartbeatTask(webSocketClient: WorkspaceAPIClient) {
+
+        if (!isWebSocketOpen) {
+            val webSocketClient = client
+            if (webSocketClient != null) {
+                startWebsocketConnection(webSocketClient)
+            }
+        } else {
+            val webSocketClient = client
+            if (webSocketClient != null) {
+                val response = webSocketClient.performRequest(EpochRequest())
+                when (response) {
+                    is ApiResult.Success -> {
+                        if (latestEpoch < response.value.epochVersion || epochGeneration != response.value.epochGeneration) {
+                            session?.close(CloseReason(CloseReason.Codes.NORMAL, "Lost connection to server"))
+                            scope.launch {
+                                startWebsocketConnection(webSocketClient)
+                            }
+                        }
+                    }
+
+                    is ApiResult.Error -> {
+
+                    }
+                }
+            }
+        }
+        val myUser = currentUser.value
+        if (myUser != null) {
+            val myStatus = if (myUser.status == "offline" || myUser.status == "idle") "active" else myUser.status
+            val presenceResponse = webSocketClient.performRequest(
+                PresenceRequest(
+                    myUser.uuid,
+                    myStatus,
+                    myUser.statusEmoji,
+                    myUser.statusText
+                )
+            )
+            when (presenceResponse) {
+                is ApiResult.Success -> {
+
+                }
+                is ApiResult.Error -> {
+
+                }
+            }
+        }
+    }
+
     suspend fun startWebsocketConnection(webSocketClient: WorkspaceAPIClient) {
         val accessToken = webSocketClient.userViewModel.accessToken.value
         val baseUrl = webSocketClient.userViewModel.baseUrl.value?.removePrefix("https://")
         if (accessToken != null && baseUrl != null) {
             isWebSocketOpen = true
-            val job = scope.every30Seconds {
-                if (!isWebSocketOpen) {
-                    val webSocketClient = client
-                    if (webSocketClient != null) {
-                        startWebsocketConnection(webSocketClient)
-                    }
-                } else {
-                    val webSocketClient = client
-                    if (webSocketClient != null) {
-                        val response = webSocketClient.performRequest(EpochRequest())
-                        when (response) {
-                            is ApiResult.Success -> {
-                                if (latestEpoch < response.value.epochVersion || epochGeneration != response.value.epochGeneration) {
-                                    session?.close(CloseReason(CloseReason.Codes.NORMAL, "Lost connection to server"))
-                                    startWebsocketConnection(webSocketClient)
-                                }
-                            }
-
-                            is ApiResult.Error -> {
-
-                            }
-                        }
-                    }
-                }
-            }
             try {
                 val session = webSocketClient.client.webSocketSession {
                     url {
@@ -610,9 +746,137 @@ class EventsRepository() {
         }
     }
 
-    var pushId: String? = null
+    suspend fun loadServerSettings() {
+        val webSocketClient = client ?: return
+        _streamsQueryState.value = QueryState.Loading
+        val response = webSocketClient.performRequest(ServerSettingsRequest(webSocketClient.userViewModel.baseUrl.value ?: ""))
+        when(response) {
+            is ApiResult.Success -> {
+                jitsiServerUrl = response.value.meetUrl
+                loadUserInfo()
+            }
+            is ApiResult.Error -> {
+                _streamsQueryState.value = QueryState.Error("")
+            }
+        }
+    }
 
-    var jitsiServerUrl: String = ""
+    suspend fun loadUserInfo() {
+        val webSocketClient = client ?: return
+        val response = webSocketClient.performRequest(OwnUserRequest())
+        when(response) {
+            is ApiResult.Success -> {
+                updateCurrentUser(response.value)
+                loadMessageReactions(response.value.uuid)
+            }
+
+            is ApiResult.Error -> {
+                _streamsQueryState.value = QueryState.Error("")
+            }
+        }
+    }
+
+    suspend fun loadMessageReactions(userUuid: String) {
+        val webSocketClient = client ?: return
+        val response = webSocketClient.performRequest(MessageReactionsRequest(userUuid))
+        when(response) {
+            is ApiResult.Success -> {
+                setInitialMessageReactions(response.value)
+                loadAllUsersInfo()
+            }
+
+            is ApiResult.Error -> {
+                _streamsQueryState.value = QueryState.Error("")
+            }
+        }
+    }
+
+    suspend fun loadAllUsersInfo() {
+        val webSocketClient = client ?: return
+        val response = webSocketClient.performRequest(UsersRequest())
+        when(response) {
+            is ApiResult.Success -> {
+                setInitialUsers(response.value)
+                loadFolders()
+            }
+
+            is ApiResult.Error -> {
+                _streamsQueryState.value = QueryState.Error("")
+            }
+        }
+    }
+    suspend fun loadFolders() {
+        val webSocketClient = client ?: return
+        val response = webSocketClient.performRequest(FoldersRequest())
+        when(response) {
+            is ApiResult.Success -> {
+                setInitialFolders(response.value.sortedBy { LocalDateTime.parse(it.creationDate, folderCreationFormatter) })
+                if (!folders.value.isEmpty()) {
+                    _currentlySelectedFolder.value = folders.value.first()
+                }
+                loadSubscribedChannels()
+            }
+
+            is ApiResult.Error -> {
+                _streamsQueryState.value = QueryState.Error("")
+                _streamsQueryState.value = QueryState.Error("")
+            }
+        }
+    }
+
+    suspend fun loadSubscribedChannels() {
+        val webSocketClient = client ?: return
+        val response = webSocketClient.performRequest(StreamsRequest())
+        when(response) {
+            is ApiResult.Success -> {
+                val messageIds = response.value.mapNotNull { it.lastMessageUuid }
+                if (!messageIds.isEmpty()) {
+                    val messagesResponse = webSocketClient.performRequest(MessagesByIdsRequest(messageIds))
+                    when (messagesResponse) {
+                        is ApiResult.Success -> {
+                            setInitialMessagesPool(messagesResponse.value)
+                            val streamsWithMessages = response.value.map { stream ->
+                                var updatedStream = stream
+                                updatedStream.lastMessage = poolMessage(stream.lastMessageUuid)
+                                updatedStream
+                            }
+                            setInitialStreams(streamsWithMessages)
+                            loadDrafts()
+                        }
+
+                        is ApiResult.Error -> {
+                            setInitialStreams(response.value)
+                            loadDrafts()
+                        }
+                    }
+                } else {
+                    setInitialStreams(response.value)
+                    loadDrafts()
+                }
+            }
+
+            is ApiResult.Error -> {
+                _streamsQueryState.value = QueryState.Error("")
+            }
+        }
+    }
+
+    suspend fun loadDrafts() {
+        val webSocketClient = client ?: return
+        val response = webSocketClient.performRequest(DraftsRequest())
+        when(response) {
+            is ApiResult.Success -> {
+                setInitialDraftsPool(response.value)
+                _streamsQueryState.value = QueryState.Success
+                start()
+            }
+
+            is ApiResult.Error -> {
+                _streamsQueryState.value = QueryState.Success
+                start()
+            }
+        }
+    }
 }
 
 @Serializable

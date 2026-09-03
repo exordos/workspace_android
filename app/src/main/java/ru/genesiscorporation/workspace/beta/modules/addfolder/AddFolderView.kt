@@ -69,7 +69,7 @@ fun AddFolderView(
     ) {
 
         Text(
-            "Название стрима",
+            "Название папки",
             color = LocalWorkspaceColorsPalette.current.textAdditional30,
             fontSize = 14.sp,
             fontFamily = InterFontFamily,
@@ -104,7 +104,7 @@ fun AddFolderView(
             )
         }
         Text(
-            "Добавить участников",
+            "Добавить стримы",
             color = LocalWorkspaceColorsPalette.current.textAdditional30,
             fontSize = 14.sp,
             fontFamily = InterFontFamily,

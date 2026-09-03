@@ -47,7 +47,7 @@ class ApiKeyRepository(private val context: Context, scope: CoroutineScope) {
     val accessToken: StateFlow<String?> = accessTokenFlow
         .stateIn(
             scope = scope,
-            started = SharingStarted.Eagerly, // or WhileSubscribed(5_000)
+            started = SharingStarted.Eagerly,
             initialValue = null,
         )
     fun getAccessToken(): String? = accessToken.value

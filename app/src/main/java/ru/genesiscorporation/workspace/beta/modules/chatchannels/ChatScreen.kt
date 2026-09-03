@@ -90,6 +90,7 @@ import ru.genesiscorporation.workspace.beta.ui.AddChatToFolder
 import ru.genesiscorporation.workspace.beta.ui.AnimatedGif
 import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.CreateFolder
+import ru.genesiscorporation.workspace.beta.ui.CreateTopic
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.time.LocalDateTime
@@ -107,15 +108,10 @@ fun ChatScreen(
     var showDetail by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val folders by chatViewModel.folders.collectAsStateWithLifecycle()
+    val shouldShowCreateTopicView by chatViewModel.shouldShowCreateTopicView.collectAsStateWithLifecycle()
     val queryState by chatViewModel.queryState.collectAsState()
-    var showUserList by remember { mutableStateOf(false) }
-    var showAddFolderView by remember { mutableStateOf(false) }
     val chatToAdd by chatViewModel.chatToAdd.collectAsState()
-    val usersViewModelFactory = remember { UsersViewModelFactory(chatViewModel.client) }
-    var usersViewModel: UsersViewModel = viewModel(factory = usersViewModelFactory)
-    val userId by chatViewModel.userViewModel.repo.userIdFlow.collectAsStateWithLifecycle(
-        initialValue = 0
-    )
+
     val backStackEntry by navController.currentBackStackEntryAsState()
     val cameBack = backStackEntry?.savedStateHandle
         ?.getStateFlow("from_detail_back", false)
@@ -131,7 +127,7 @@ fun ChatScreen(
             backStackEntry?.savedStateHandle?.set(
                 "from_detail_back",
                 false
-            ) // consume one-shot event
+            )
         }
     }
 
@@ -312,13 +308,36 @@ fun ChatScreen(
                     chat,
                     onAddButtonTap = { folder, chat ->
                         scope.launch {
-//                            chatViewModel.addChatFolder(
-//                                chat.chatId,
-//                                if (chat.isDirectMessages) "private" else "stream",
-//                                folder.uuid
-//                            )
+                            chatViewModel.addChatFolder(
+                                chat.uuid,
+                                if (chat.isPrivate) "private" else "stream",
+                                folder.uuid
+                            )
                         }
                         chatViewModel.onChatToAddChange(null)
+                    }
+                )
+            }
+            if (shouldShowCreateTopicView) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.45f))
+                        .clickable(
+                            indication = null,
+                            interactionSource = remember { MutableInteractionSource() },
+                            onClick = { chatViewModel.onDismissTopicCreationButtonTap() },
+                        ),
+                )
+                CreateTopic(
+                    onCreateButtonTap = { topicName ->
+                        scope.launch {
+                            chatViewModel.addTopic(topicName)
+                        }
+                        chatViewModel.onDismissTopicCreationButtonTap()
+                    },
+                    onDismiss = {
+                        chatViewModel.onDismissTopicCreationButtonTap()
                     }
                 )
             }

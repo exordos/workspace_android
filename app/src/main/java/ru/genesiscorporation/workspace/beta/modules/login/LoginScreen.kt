@@ -20,11 +20,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -102,9 +105,11 @@ fun LoginScreen(
 
     Box(modifier = Modifier.fillMaxSize()
         .background(LocalWorkspaceColorsPalette.current.background),
-        contentAlignment = Alignment.TopCenter
+        contentAlignment = Alignment.Center
     ) {
         Column(modifier = Modifier.fillMaxWidth()
+            .imePadding()
+            .verticalScroll(rememberScrollState())
             .background(LocalWorkspaceColorsPalette.current.background)
         ) {
             Box(
@@ -120,8 +125,8 @@ fun LoginScreen(
                         AsyncImage(
                             model = organizationImageUrl,
                             contentDescription = null,
-                            modifier = Modifier.size(116.dp)
-                                .padding(top = 48.dp)
+                            modifier = Modifier.padding(top = 48.dp)
+                                .size(116.dp)
                         )
                     } else {
                         Image(

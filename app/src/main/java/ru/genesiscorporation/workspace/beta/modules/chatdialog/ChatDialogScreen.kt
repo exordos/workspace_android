@@ -131,6 +131,7 @@ fun ChatDialogScreen(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val notifiedKeys = remember { mutableSetOf<String>() }
 
     val messageFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
 
@@ -138,6 +139,7 @@ fun ChatDialogScreen(
     var imeHeight = remember { mutableStateOf(0) }
     val ime = WindowInsets.ime
     val localDensity = LocalDensity.current
+
     LaunchedEffect(key1 = Unit) {
         val keyboardFlow = snapshotFlow {
             ime.getBottom(localDensity)
@@ -154,8 +156,8 @@ fun ChatDialogScreen(
             }
         }
     }
-    LaunchedEffect(streamTopicMessages["${viewModel.chatId}.${viewModel.topicUuid ?: ""}"]?.size) {
-        val messages = streamTopicMessages["${viewModel.chatId}.${viewModel.topicUuid ?: ""}"]
+    LaunchedEffect(streamTopicMessages["${viewModel.chatId}.${viewModel.topicUuid}"]?.size) {
+        val messages = streamTopicMessages["${viewModel.chatId}.${viewModel.topicUuid}"]
         if (messages != null) {
             if (messages.isNotEmpty()) {
                 listState.scrollToItem(messages.lastIndex)
@@ -164,12 +166,41 @@ fun ChatDialogScreen(
         }
     }
 
+    LaunchedEffect(streamTopicMessages["${viewModel.chatId}.${viewModel.topicUuid ?: ""}"]?.lastOrNull()) {
+        val messages = streamTopicMessages["${viewModel.chatId}.${viewModel.topicUuid ?: ""}"]
+        if (messages != null) {
+            if (messages.isNotEmpty() && viewModel.shouldScrollToBottom) {
+                listState.scrollToItem(messages.lastIndex)
+            }
+        }
+    }
+
     LaunchedEffect(listState) {
-        snapshotFlow { listState.isScrollInProgress }
+        snapshotFlow {
+            listState.isScrollInProgress to !listState.canScrollForward
+        }
             .distinctUntilChanged()
-            .collect { isScrolling ->
-                if (isScrolling) {
-                    viewModel.onScroll()
+            .collect { (isScrolling, isAtBottom) ->
+                when {
+                    isAtBottom -> viewModel.enableAutoScroll()
+                    isScrolling -> viewModel.disableAutoScroll()
+                }
+            }
+    }
+
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.layoutInfo.visibleItemsInfo }
+            .collect { visibleItemsInfo ->
+                val visibleKeysNow: Set<String> =
+                    visibleItemsInfo.mapNotNull { info ->
+                        info.key as? String
+                    }.toSet()
+                val newlyVisible = visibleKeysNow.filter { it !in notifiedKeys }
+                if (newlyVisible.isNotEmpty()) {
+                    notifiedKeys.addAll(newlyVisible)
+                    scope.launch {
+                        viewModel.onMessagesVisible(newlyVisible)
+                    }
                 }
             }
     }
@@ -347,7 +378,7 @@ fun ChatDialogScreen(
                                 alignment = Alignment.Bottom
                             )
                         ) {
-                            items(items = messages.sortedBy { LocalDateTime.parse(it.createdAt, messageFormatter) }, key = { "${it.uuid}${it.payload.content}" }) { item ->
+                            items(items = messages.sortedBy { LocalDateTime.parse(it.createdAt, messageFormatter) }, key = { "${it.uuid}" }) { item ->
                                 ChatMessage(
                                     item,
                                     viewModel,
@@ -448,13 +479,8 @@ fun ChatMessage(
                     .matches() && item.payload.content.contains(viewModel.repo.jitsiServerUrl)
             ) {
                 CallMessageView(item, viewModel, navController)
-            } else if (item.payload.content.parseUserUploadMarkdownOrNull() != null) {
-                val text = item.payload.content.parseUserUploadMarkdownOrNull()!!.caption
-                val imageName = item.payload.content.parseUserUploadMarkdownOrNull()!!.fileName
-                val imageUrl = item.payload.content.parseUserUploadMarkdownOrNull()!!.relativePath
-                ImageMessageView(text, "$imageUrl", viewModel, item, navController, onImageLoad)
             } else {
-                TextMessageView(item, viewModel, navController)
+                TextMessageView(item, viewModel, navController, onImageLoad)
             }
         }
     }

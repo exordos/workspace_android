@@ -14,11 +14,14 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -101,9 +104,16 @@ fun StreamInfoView(
         },
     ) { innerPadding ->
         Column(
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier
+                .fillMaxSize()
                 .background(LocalWorkspaceColorsPalette.current.background)
-                .padding(16.dp, innerPadding.calculateTopPadding(), 16.dp, innerPadding.calculateBottomPadding()),
+                .padding(
+                    16.dp,
+                    innerPadding.calculateTopPadding(),
+                    16.dp,
+                    innerPadding.calculateBottomPadding()
+                )
+                .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.Start,
             verticalArrangement = Arrangement.Top
         ) {
@@ -116,7 +126,8 @@ fun StreamInfoView(
                     viewModel.client.authHeaders(),
                     stream.color,
                     stream.name,
-                    Modifier.padding(end = 12.dp)
+                    Modifier
+                        .padding(end = 12.dp)
                         .size(64.dp)
                 )
                 Column {
@@ -334,17 +345,36 @@ fun BoundUsers(
     val streamBindings by viewModel.streamBindings.collectAsStateWithLifecycle()
     val users by viewModel.users.collectAsStateWithLifecycle()
     Column {
-        Text("Участники")
+        Row(
+            verticalAlignment = Alignment.Bottom
+        ) {
+            Text(
+                "Участники",
+                color = LocalWorkspaceColorsPalette.current.textHeaders,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium
+            )
+            Spacer(Modifier.weight(1f))
+            IconButton(onClick = {
+                navController.navigate(ChatFlow.AddUsersToStream(viewModel.streamUuid))
+            }) {
+                Image(
+                    painter = painterResource(id = R.drawable.ic_person_add),
+                    contentDescription = null,
+                    modifier = Modifier.size(32.dp)
+                )
+            }
+        }
         val currentStreamBindings = streamBindings[viewModel.streamUuid]
         if (currentStreamBindings != null && currentStreamBindings.count() > 0) {
             val currentBindedOnlineUsers =
                 currentStreamBindings.mapNotNull { binding -> users.firstOrNull { binding.userUuid == it.uuid } }
-            LazyColumn(
+            Column(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
                 modifier = Modifier
                     .fillMaxSize()
             ) {
-                items(items = currentBindedOnlineUsers) { user ->
+                currentBindedOnlineUsers.forEach { user ->
                     UserRow(
                         viewModel,
                         user,
@@ -392,7 +422,9 @@ fun TopicSummary(
                     color = LocalWorkspaceColorsPalette.current.divider,
                     shape = RoundedCornerShape(8.dp)
                 )
-                .padding(8.dp),
+                .padding(8.dp)
+                .heightIn(max = 200.dp)
+                .verticalScroll(rememberScrollState()),
         )
     }
 }
@@ -410,15 +442,15 @@ fun UserRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable(onClick = {
-                navController.navigate(
-                    ChatFlow.ChatUserInfo(
-                        user.displayableName(),
-                        user.uuid,
-                        user.avatar,
-                        user.email ?: ""
+                    navController.navigate(
+                        ChatFlow.ChatUserInfo(
+                            user.displayableName(),
+                            user.uuid,
+                            user.avatar,
+                            user.email ?: ""
+                        )
                     )
-                )
-            })
+                })
         ) {
             Avatar(
                 user.avatar,

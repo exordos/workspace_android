@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.widget.CalendarView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -56,6 +57,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -93,6 +95,11 @@ import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.serialization.kotlinx.json.*
 import ru.genesiscorporation.workspace.beta.modules.addfolder.AddFolderView
 import ru.genesiscorporation.workspace.beta.modules.addfolder.AddFolderViewModel
+import ru.genesiscorporation.workspace.beta.modules.adduserstostream.AddUsersToStreamView
+import ru.genesiscorporation.workspace.beta.modules.adduserstostream.AddUsersToStreamViewModel
+import ru.genesiscorporation.workspace.beta.modules.calendar.CalendarScreen
+import ru.genesiscorporation.workspace.beta.modules.calendar.CalendarViewModel
+import ru.genesiscorporation.workspace.beta.modules.chatdialog.AttachmentStorage
 import ru.genesiscorporation.workspace.beta.modules.createdirectstream.CreateDirectStreamView
 import ru.genesiscorporation.workspace.beta.modules.createdirectstream.CreateDirectStreamViewModel
 import ru.genesiscorporation.workspace.beta.modules.createstream.CreateStreamView
@@ -101,6 +108,16 @@ import ru.genesiscorporation.workspace.beta.modules.creationbase.CreationBaseVie
 import ru.genesiscorporation.workspace.beta.modules.creationbase.CreationBaseViewModel
 import ru.genesiscorporation.workspace.beta.modules.foldersettings.FolderSettingsView
 import ru.genesiscorporation.workspace.beta.modules.foldersettings.FolderSettingsViewModel
+import ru.genesiscorporation.workspace.beta.modules.home.HomeScreen
+import ru.genesiscorporation.workspace.beta.modules.home.HomeViewModel
+import ru.genesiscorporation.workspace.beta.modules.homedrafts.HomeDraftsScreen
+import ru.genesiscorporation.workspace.beta.modules.homedrafts.HomeDraftsViewModel
+import ru.genesiscorporation.workspace.beta.modules.homeinbounds.HomeInboundsScreen
+import ru.genesiscorporation.workspace.beta.modules.homeinbounds.HomeInboundsViewModel
+import ru.genesiscorporation.workspace.beta.modules.homementions.HomeMentionsScreen
+import ru.genesiscorporation.workspace.beta.modules.homementions.HomeMentionsViewModel
+import ru.genesiscorporation.workspace.beta.modules.mail.MailScreen
+import ru.genesiscorporation.workspace.beta.modules.mail.MailViewModel
 import ru.genesiscorporation.workspace.beta.modules.otp.OtpScreen
 import ru.genesiscorporation.workspace.beta.modules.otp.OtpViewModel
 import ru.genesiscorporation.workspace.beta.modules.ownusersettings.OwnUserSettingsView
@@ -217,7 +234,10 @@ fun WokspaceApp(
     val lifecycleOwner = LocalLifecycleOwner.current
     var navController = rememberNavController()
     val destinationList = listOf<Destinations>(
+        Home,
         Chat,
+        Calendar,
+        Mail,
         Profile
     )
     val context = LocalContext.current
@@ -233,9 +253,9 @@ fun WokspaceApp(
             .addOnSuccessListener { token ->
                 eventsRepository.pushId = token
                 Log.d("FCM", "fetched token $token")
-                scope.launch {
-                    viewModel.sendToken("workspace:android:$token")
-                }
+//                scope.launch {
+//                    viewModel.sendToken("$token")
+//                }
             }
             .addOnFailureListener { e ->
                 Log.e("FCM", "Token fetch failed", e)
@@ -258,8 +278,11 @@ fun WokspaceApp(
                     onClick = {
                         currentDestination.value = index
                         navController.navigate(destinationList[index].route) {
-                            popUpTo(Chat.route)
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
                             launchSingleTop = true
+                            restoreState = true
                         }
                     }
                 )
@@ -271,9 +294,22 @@ fun WokspaceApp(
                     .windowInsetsPadding(WindowInsets.statusBars)
             ) {
                 RequestNotificationPermissionIfNeeded()
-                NavHost(navController = navController, startDestination = Chat.route) {
+                NavHost(navController = navController, startDestination = Home.route) {
+                    composable(Home.route) {
+                        HomeNavigation(workspaceApiClient, eventsRepository)
+                    }
                     composable(Chat.route) {
                         ChatNavigation(workspaceApiClient, eventsRepository, pendingDeepLink, onDeepLinkHandled)
+                    }
+                    composable(Calendar.route) {
+                        val calendarViewModelFactory = remember { CalendarViewModelFactory(eventsRepository) }
+                        var calendarViewModel: CalendarViewModel = viewModel(factory = calendarViewModelFactory)
+                        CalendarScreen(calendarViewModel, navController)
+                    }
+                    composable(Mail.route) {
+                        val mailViewModelFactory = remember { MailViewModelFactory(eventsRepository) }
+                        var mailViewModel: MailViewModel = viewModel(factory = mailViewModelFactory)
+                        MailScreen(mailViewModel, navController)
                     }
                     composable(Profile.route) {
                         ProfileNavigation(workspaceApiClient, eventsRepository)
@@ -285,6 +321,49 @@ fun WokspaceApp(
                 }
             }
 //        }
+    }
+}
+
+@Composable
+fun HomeNavigation(
+    workspaceApiClient: WorkspaceAPIClient,
+    eventsRepository: EventsRepository
+) {
+    val navController = rememberNavController()
+    val user = UserState.current
+    val homeViewModelFactory = remember { HomeViewModelFactory(eventsRepository, workspaceApiClient) }
+    val homeViewModel: HomeViewModel = viewModel(factory = homeViewModelFactory)
+
+    NavHost(navController = navController, startDestination = HomeFlow.HomeBase) {
+        composable<HomeFlow.HomeBase> {
+            HomeScreen(homeViewModel, navController)
+        }
+        composable<HomeFlow.HomeInbounds> {
+            val homeInboundsViewModelFactory = remember { HomeInboundsViewModelFactory(eventsRepository, workspaceApiClient) }
+            val homeInboundsViewModel: HomeInboundsViewModel = viewModel(factory = homeInboundsViewModelFactory)
+            HomeInboundsScreen(homeInboundsViewModel, navController)
+        }
+        composable<HomeFlow.HomeDrafts> {
+            val homeDraftsViewModelFactory = remember { HomeDraftsViewModelFactory(eventsRepository, workspaceApiClient) }
+            val homeDraftsViewModel: HomeDraftsViewModel = viewModel(factory = homeDraftsViewModelFactory)
+            HomeDraftsScreen(homeDraftsViewModel, navController)
+        }
+        composable<HomeFlow.HomeMentions> {
+            val homeMentionsViewModelFactory = remember { HomeMentionsViewModelFactory(eventsRepository, workspaceApiClient) }
+            val homeMentionsViewModel: HomeMentionsViewModel = viewModel(factory = homeMentionsViewModelFactory)
+            HomeMentionsScreen(homeMentionsViewModel, navController)
+        }
+        composable<HomeFlow.ChatDialog> {
+            val args = it.toRoute<HomeFlow.ChatDialog>()
+            val storage = AttachmentStorage(
+                context = LocalContext.current,
+                client = workspaceApiClient,
+            )
+            Log.d("RepoCheck", "chatnav repo instance = ${System.identityHashCode(eventsRepository)}")
+            val chatDialogViewModelFactory = remember { ChatDialogViewModelFactory(workspaceApiClient, user, args.title, args.chatId, args.topicName, args.topicUuid, args.isDirectMessages, eventsRepository, args.userId, storage) }
+            val chatDialogViewModel: ChatDialogViewModel = viewModel(factory = chatDialogViewModelFactory)
+            ChatDialogScreen(chatDialogViewModel, navController)
+        }
     }
 }
 
@@ -306,7 +385,11 @@ fun ChatNavigation(
         composable<ChatFlow.ChatDialog> {
             val args = it.toRoute<ChatFlow.ChatDialog>()
             Log.d("RepoCheck", "chatnav repo instance = ${System.identityHashCode(eventsRepository)}")
-            val chatDialogViewModelFactory = remember { ChatDialogViewModelFactory(workspaceApiClient, user, args.title, args.chatId, args.topicName, args.topicUuid, args.isDirectMessages, eventsRepository, args.userId) }
+            val storage = AttachmentStorage(
+                context = LocalContext.current,
+                client = workspaceApiClient,
+            )
+            val chatDialogViewModelFactory = remember { ChatDialogViewModelFactory(workspaceApiClient, user, args.title, args.chatId, args.topicName, args.topicUuid, args.isDirectMessages, eventsRepository, args.userId, storage) }
             val chatDialogViewModel: ChatDialogViewModel = viewModel(factory = chatDialogViewModelFactory)
             ChatDialogScreen(chatDialogViewModel, navController)
         }
@@ -346,6 +429,12 @@ fun ChatNavigation(
             val createDirectStreamViewModelFactory = remember { CreateDirectStreamViewModelFactory(workspaceApiClient, eventsRepository) }
             val createDirectStreamViewModel: CreateDirectStreamViewModel = viewModel(factory = createDirectStreamViewModelFactory)
             CreateDirectStreamView(createDirectStreamViewModel, navController)
+        }
+        composable<ChatFlow.AddUsersToStream> {
+            val args = it.toRoute<ChatFlow.AddUsersToStream>()
+            val addUsersToStreamViewModelFactory = remember { AddUsersToStreamViewModelFactory(workspaceApiClient, args.streamUuid, eventsRepository) }
+            val addUsersToStreamViewModel: AddUsersToStreamViewModel = viewModel(factory = addUsersToStreamViewModelFactory)
+            AddUsersToStreamView(addUsersToStreamViewModel, navController)
         }
     }
 }

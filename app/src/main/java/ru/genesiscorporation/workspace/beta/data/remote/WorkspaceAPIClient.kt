@@ -30,6 +30,9 @@ import io.ktor.http.content.TextContent
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.http.withCharset
+import io.ktor.utils.io.ByteReadChannel
+import io.ktor.utils.io.core.readBytes
+import io.ktor.utils.io.readRemaining
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -49,6 +52,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.LoginRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TokenRefreshRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UploadAvatarResponseData
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
+import java.io.File
 
 class WorkspaceAPIClient(
     val client: HttpClient,
@@ -219,11 +223,11 @@ class WorkspaceAPIClient(
         }
     }
 
-    suspend fun uploadStreamImage(context: Context, uri: Uri, streamUuid: String): ApiResult<UploadFileResponseData, ApiError> {
+    suspend fun uploadStreamFile(fileName: String, context: Context, uri: Uri, streamUuid: String): ApiResult<UploadFileResponseData, ApiError> {
         val path = "/api/workspace/v1/messenger/files/"
         val bytes = readUriBytes(context, uri)
         val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
-        val fileName = "image.jpg"
+        val fileName = fileName
         val parts = formData {
             append(
                 key = "file",
@@ -283,6 +287,24 @@ class WorkspaceAPIClient(
         } else {
             val error = ApiError("Request failed", "REQUEST_FAILED")
 
+            return ApiResult.Error(error)
+        }
+    }
+
+    suspend fun downloadFile(path: String, destination: File): ApiResult<File, ApiError> {
+        val baseUrl = userViewModel.repo.baseUrlFlow.first()
+        val accessToken = if (baseAccessToken != null) baseAccessToken ?: "" else userViewModel.repo.accessTokenFlow.first() ?: ""
+        val httpResponse: HttpResponse = client.get("${baseUrl}${path}") {
+            header("User-Agent", "Workspace/android/${BuildConfig.VERSION_NAME}")
+            header("Authorization", "Bearer $accessToken")
+        }
+        if (httpResponse.status.isSuccess()) {
+            val channel: ByteReadChannel = httpResponse.body()
+            destination.parentFile?.mkdirs()
+            destination.writeBytes(channel.readRemaining().readBytes())
+            return ApiResult.Success(destination)
+        } else {
+            val error = ApiError("Request failed", "REQUEST_FAILED")
             return ApiResult.Error(error)
         }
     }

@@ -14,6 +14,51 @@ object Chat: Destinations {
     override val title = "Chat"
 }
 
+object Mail: Destinations {
+    override val route = "Mail"
+    override val icon = R.drawable.ic_mail_tab
+    override val title = "Mail"
+}
+
+object Calendar: Destinations {
+    override val route = "Calendar"
+    override val icon = R.drawable.ic_calendar_tab
+    override val title = "Calendar"
+}
+
+object Home: Destinations {
+    override val route = "Home"
+    override val icon = R.drawable.ic_home_tab
+    override val title = "Home"
+}
+
+object HomeFlow {
+    @Serializable
+    object HomeBase
+
+    @Serializable
+    object HomeInbounds
+
+    @Serializable
+    object HomeFavorites
+
+    @Serializable
+    object HomeMentions
+
+    @Serializable
+    object HomeReactions
+
+    @Serializable
+    object HomeDrafts
+
+    @Serializable
+    object HomeFeed
+    @Serializable
+    data class ChatDialog(val title: String, val chatId: String, val topicName: String?, val topicUuid: String, val isDirectMessages: Boolean, val userId: Int?)
+
+
+}
+
 object ChatFlow {
     @Serializable
     object ChatList
@@ -35,6 +80,8 @@ object ChatFlow {
     object CreateStream
     @Serializable
     object CreateDirectStream
+    @Serializable
+    data class AddUsersToStream(val streamUuid: String)
 }
 
 

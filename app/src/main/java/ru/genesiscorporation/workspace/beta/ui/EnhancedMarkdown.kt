@@ -71,7 +71,9 @@ fun EnhancedMarkdown(
                         runCatching { context.startActivity(intent) }
                     }
                 }
-            }
+            },
+            syntaxHighlightColor = LocalWorkspaceColorsPalette.current.syntaxHighlight,
+            syntaxHighlightTextColor = LocalWorkspaceColorsPalette.current.textHeaders
         )
     }
 }

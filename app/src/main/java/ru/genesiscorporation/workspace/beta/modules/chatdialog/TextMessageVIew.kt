@@ -1,5 +1,13 @@
 package ru.genesiscorporation.workspace.beta.modules.chatdialog
 
+import android.app.DownloadManager
+import android.content.ContentValues
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.provider.MediaStore
+import android.webkit.MimeTypeMap
+import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -13,15 +21,20 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -32,18 +45,29 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
+import coil3.compose.AsyncImage
+import coil3.compose.AsyncImagePainter
+import coil3.network.NetworkHeaders
+import coil3.network.httpHeaders
+import coil3.request.ImageRequest
 import dev.jeziellago.compose.markdowntext.MarkdownText
 import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.R
+import ru.genesiscorporation.workspace.beta.data.UrnParser
+import ru.genesiscorporation.workspace.beta.data.remote.ApiError
+import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageElement
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.QuotedMessagePart
 import ru.genesiscorporation.workspace.beta.ui.Avatar
@@ -51,21 +75,26 @@ import ru.genesiscorporation.workspace.beta.ui.EnhancedMarkdown
 import ru.genesiscorporation.workspace.beta.ui.ReferenceMessageBase
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
+import java.io.File
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlin.context
 
 @Composable
 fun TextMessageView(
     item: MessageResponse,
     viewModel: ChatDialogViewModel,
-    navController: NavHostController
+    navController: NavHostController,
+    onImageLoad: () -> Unit
 ) {
     val quotedMessages by viewModel.quotedMessages.collectAsState()
     val zone = ZoneId.systemDefault()
     val hhmmFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    var showFullscreen by remember { mutableStateOf(false) }
     val bubbleShape = if (item.isOwn) {
         RoundedCornerShape(
             topStart = 8.dp,
@@ -114,7 +143,8 @@ fun TextMessageView(
                             viewModel.client.authHeaders(),
                             null,
                             item.user?.displayableName() ?: "",
-                            Modifier.padding(end = 4.dp, bottom = bottomPadding)
+                            Modifier
+                                .padding(end = 4.dp, bottom = bottomPadding)
                                 .size(30.dp)
                         )
                     }
@@ -147,7 +177,8 @@ fun TextMessageView(
                         viewModel.client.authHeaders(),
                         null,
                         item.user?.displayableName() ?: "",
-                        Modifier.padding(end = 4.dp, bottom = bottomPadding)
+                        Modifier
+                            .padding(end = 4.dp, bottom = bottomPadding)
                             .size(30.dp)
                     )
                 }
@@ -185,13 +216,73 @@ fun TextMessageView(
                             fontFamily = InterFontFamily,
                             fontWeight = FontWeight.Medium
                         )
-                        item.asQuotedMessages().forEach {
-                            QuotedMessagePartView(
-                                it,
-                                item.isOwn,
-                                viewModel,
-                                navController
-                            )
+                        val messageElements = MarkdownPayloadParser.parse(item.payload.content)
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            messageElements.forEach { element ->
+                                when (element) {
+                                    is MessageElement.Image -> {
+                                        val baseUrl by viewModel.userViewModel.repo.baseUrlFlow.collectAsStateWithLifecycle(
+                                            initialValue = ""
+                                        )
+                                        val authHeaders = viewModel.client.authHeaders()
+                                        val headers = NetworkHeaders.Builder()
+                                            .set(authHeaders.first().title, authHeaders.first().value)
+                                            .build()
+                                        val imageUrl = "$baseUrl/api/workspace/v1/messenger/files/${element.uuid}/actions/download"
+                                        if (imageUrl != null) {
+                                            val imageRequest = ImageRequest.Builder(LocalContext.current)
+                                                .data(imageUrl)
+                                                .httpHeaders(headers)
+                                                .build()
+                                            AsyncImage(
+                                                model = imageRequest,
+                                                contentDescription = null,
+                                                modifier = Modifier.clickable { showFullscreen = true },
+                                                onState = { state ->
+                                                    when (state) {
+                                                        is AsyncImagePainter.State.Success -> {
+                                                            onImageLoad()
+                                                        }
+
+                                                        else -> Unit
+                                                    }
+                                                }
+                                            )
+                                            if (showFullscreen) {
+                                                FullscreenZoomableImage(
+                                                    model = imageRequest,
+                                                    contentDescription = null,
+                                                    onDismiss = { showFullscreen = false },
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    is MessageElement.File -> FileAttachmentRow(
+                                        element = element,
+                                        viewModel = viewModel,
+                                        onOpenFile = {  },
+                                    )
+
+                                    is MessageElement.Quote -> QuotedMessagePartView(
+                                        element.uuid,
+                                        item.isOwn,
+                                        viewModel,
+                                        navController
+                                    )
+
+                                    is MessageElement.PlainText -> EnhancedMarkdown(
+                                        markdown = element.text,
+                                        style = TextStyle(
+                                            color = LocalWorkspaceColorsPalette.current.textHeaders,
+                                            fontSize = 14.sp,
+                                            fontFamily = InterFontFamily,
+                                        ),
+                                        navController = navController,
+                                        viewModel = viewModel
+                                    )
+                                }
+                            }
                         }
                     }
                     Spacer(modifier = Modifier.widthIn(min = 20.dp))
@@ -342,14 +433,13 @@ fun TextMessageView(
 }
 
 @Composable fun QuotedMessagePartView(
-    quotedMessagePart: QuotedMessagePart,
+    quotedMessageUuid: String,
     isOwn: Boolean,
     viewModel: ChatDialogViewModel,
     navController: NavHostController
 ) {
     val streamTopicMessages by viewModel.streamTopicMessages.collectAsStateWithLifecycle()
     Column() {
-        val quotedMessageUuid = quotedMessagePart.uuid
         if (quotedMessageUuid != null) {
             val messages = streamTopicMessages["${viewModel.chatId}.${viewModel.topicUuid ?: ""}"]
             val message = messages?.firstOrNull { it.uuid == quotedMessageUuid }
@@ -361,7 +451,7 @@ fun TextMessageView(
                 Column(
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
-                        .background( if (isOwn) LocalWorkspaceColorsPalette.current.messageOwnSelectedBg else LocalWorkspaceColorsPalette.current.messageOwnBackground )
+                        .background(if (isOwn) LocalWorkspaceColorsPalette.current.messageOwnSelectedBg else LocalWorkspaceColorsPalette.current.messageOwnBackground)
                         .padding(8.dp)
                 ) {
                     Text(
@@ -372,37 +462,171 @@ fun TextMessageView(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    val messageQuotedParts = message?.asQuotedMessages()
-                    if (messageQuotedParts != null) {
-                        messageQuotedParts.forEach {
-                            QuotedMessagePartView(
-                                it,
-                                isOwn,
-                                viewModel,
-                                navController
-                            )
+                    val messageContent = message?.payload?.content
+                    val messageElements = MarkdownPayloadParser.parse(messageContent ?: "")
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        messageElements.forEach { element ->
+                            when (element) {
+                                is MessageElement.Image -> {
+                                    Text("image")
+//                                    val baseUrl by viewModel.userViewModel.repo.baseUrlFlow.collectAsStateWithLifecycle(
+//                                        initialValue = ""
+//                                    )
+//                                    val authHeaders = viewModel.client.authHeaders()
+//                                    val headers = NetworkHeaders.Builder()
+//                                        .set(authHeaders.first().title, authHeaders.first().value)
+//                                        .build()
+//                                    val imageUrl = "$baseUrl/api/workspace/v1/messenger/files/${element.uuid}/actions/download"
+//                                    if (imageUrl != null) {
+//                                        val imageRequest = ImageRequest.Builder(LocalContext.current)
+//                                            .data(imageUrl)
+//                                            .httpHeaders(headers)
+//                                            .build()
+//                                        AsyncImage(
+//                                            model = imageRequest,
+//                                            contentDescription = null,
+//                                            modifier = Modifier.clickable { showFullscreen = true },
+//                                            onState = { state ->
+//                                                when (state) {
+//                                                    is AsyncImagePainter.State.Success -> {
+//                                                        onImageLoad()
+//                                                    }
+//
+//                                                    else -> Unit
+//                                                }
+//                                            }
+//                                        )
+//                                    }
+                                }
+
+                                is MessageElement.File -> FileAttachmentRow(
+                                    element = element,
+                                    viewModel = viewModel,
+                                    onOpenFile = { },
+                                )
+
+                                is MessageElement.Quote -> QuotedMessagePartView(
+                                    element.uuid,
+                                    false,
+                                    viewModel,
+                                    navController
+                                )
+
+                                is MessageElement.PlainText -> EnhancedMarkdown(
+                                    markdown = element.text,
+                                    style = TextStyle(
+                                        color = LocalWorkspaceColorsPalette.current.textHeaders,
+                                        fontSize = 14.sp,
+                                        fontFamily = InterFontFamily,
+                                    ),
+                                    navController = navController,
+                                    viewModel = viewModel
+                                )
+                            }
                         }
-                    } else {
-                        Text(
-                            "Не удалось загрузить сообщение",
-                            color = LocalWorkspaceColorsPalette.current.textAdditional30,
-                            fontSize = 12.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
                     }
                 }
             }
+        } else {
+            Text(
+                "Не удалось загрузить сообщение",
+                color = LocalWorkspaceColorsPalette.current.textAdditional30,
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
-        EnhancedMarkdown(
-            markdown = quotedMessagePart.text,
-            style = TextStyle(
-                color = LocalWorkspaceColorsPalette.current.textHeaders,
-                fontSize = 14.sp,
-                fontFamily = InterFontFamily,
-            ),
-            navController = navController,
-            viewModel = viewModel
-        )
     }
+}
+
+@Composable
+fun FileAttachmentRow(
+    element: MessageElement.File,
+    viewModel: ChatDialogViewModel,
+    onOpenFile: (File) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val state by viewModel
+        .stateFor(element.uuid, element.fileName)
+        .collectAsStateWithLifecycle()
+    LaunchedEffect(element.uuid, element.fileName) {
+        if (state is FileUiState.Idle) {
+            viewModel.load(element.uuid, element.fileName)
+        }
+    }
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(enabled = state is FileUiState.Ready) {
+                scope.launch {
+                    when (val result = viewModel.storage.saveToDownloads(element.uuid, element.fileName)) {
+                        is ApiResult.Success -> openDownloads(context)
+                        is ApiResult.Error -> {
+                            Toast.makeText(context, result.error.message, Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            }
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            painter = painterResource(R.drawable.ic_file_attachment),
+            contentDescription = null,
+            tint = LocalWorkspaceColorsPalette.current.primary
+        )
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            Text(text = element.fileName, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        if (state is FileUiState.Loading) {
+            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+        }
+    }
+}
+
+suspend fun AttachmentStorage.saveToDownloads(
+    uuid: String,
+    fileName: String,
+): ApiResult<Uri, ApiError> {
+    val local = when (val result = loadOrDownload(uuid, fileName)) {
+        is ApiResult.Success -> result.value.localFile
+        is ApiResult.Error -> return result
+    }
+    val resolver = context.contentResolver
+    val values = ContentValues().apply {
+        put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+        put(MediaStore.Downloads.MIME_TYPE, guessMimeType(fileName))
+        put(MediaStore.Downloads.IS_PENDING, 1)
+    }
+    val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+        ?: return ApiResult.Error(ApiError("Cannot create download", "SAVE_FAILED"))
+    resolver.openOutputStream(uri)?.use { out ->
+        local.inputStream().use { it.copyTo(out) }
+    } ?: return ApiResult.Error(ApiError("Cannot write download", "SAVE_FAILED"))
+    values.clear()
+    values.put(MediaStore.Downloads.IS_PENDING, 0)
+    resolver.update(uri, values, null, null)
+    return ApiResult.Success(uri)
+}
+
+fun openDownloads(context: Context) {
+    val intent = Intent(DownloadManager.ACTION_VIEW_DOWNLOADS).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    context.startActivity(intent)
+}
+
+private fun guessMimeType(fileName: String): String =
+    MimeTypeMap.getSingleton()
+        .getMimeTypeFromExtension(fileName.substringAfterLast('.', "").lowercase())
+        ?: "*/*"
+
+sealed interface FileUiState {
+    data object Idle : FileUiState
+    data object Loading : FileUiState
+    data class Ready(val attachment: LocalAttachment) : FileUiState
+    data class Error(val message: String) : FileUiState
 }

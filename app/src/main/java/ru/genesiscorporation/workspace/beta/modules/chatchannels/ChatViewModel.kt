@@ -20,9 +20,13 @@ import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.data.remote.dto.AddChatToFolderRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.AddFolderRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.AddStreamRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.AddTopicRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.DeleteChatFromFolderRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FoldersRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MarkMessagesReadUpToRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MarkStreamMessagesReadRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MarkTopicMessagesReadRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageReactionsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesByIdsRequest
@@ -35,6 +39,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamBindingsReques
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ToggleTopicDoneRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
+import ru.genesiscorporation.workspace.beta.data.remote.dto.UpdateStreamNotificationModeRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UpdateTopicNotificationModeRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UsersRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
@@ -55,7 +60,6 @@ sealed interface ChatNavEvent {
 }
 class ChatViewModel(
     val client: WorkspaceAPIClient,
-    val userViewModel: UserViewModel,
     private val repo: EventsRepository,
     val pendingDeepLink: String?,
     val onDeepLinkHandled: () -> Unit
@@ -76,7 +80,6 @@ class ChatViewModel(
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = emptyMap()
         )
-    private var users: List<UserResponseData> = emptyList()
 
     val folders: StateFlow<List<FolderResponseData>> = repo.folders
         .stateIn(
@@ -91,8 +94,12 @@ class ChatViewModel(
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = emptyMap()
         )
-    private val _currentlySelectedFolder = MutableStateFlow<FolderResponseData?>(null)
-    var currentlySelectedFolder: StateFlow<FolderResponseData?> = _currentlySelectedFolder
+    var currentlySelectedFolder: StateFlow<FolderResponseData?> = repo.currentlySelectedFolder
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = null
+        )
 
     private val _newFolderName = MutableStateFlow("")
     val newFolderName: StateFlow<String> = _newFolderName
@@ -102,10 +109,23 @@ class ChatViewModel(
     private val _queryState = MutableStateFlow<QueryState>(QueryState.Idle)
     val queryState: StateFlow<QueryState> = _queryState
 
+
+    private val _shouldShowCreateTopicView = MutableStateFlow<Boolean>(false)
+    var shouldShowCreateTopicView: StateFlow<Boolean> = _shouldShowCreateTopicView
+
+    val streamsQueryState: StateFlow<QueryState> = repo.streamsQueryState
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = QueryState.Idle
+        )
+
+    private val _topicsQueryState = MutableStateFlow<QueryState>(QueryState.Idle)
+    val topicsQueryState: StateFlow<QueryState> = _topicsQueryState
+
     var createdStream: Stream? = null
     private val _createQueryState = MutableStateFlow<QueryState>(QueryState.Idle)
     val createQueryState: StateFlow<QueryState> = _createQueryState
-    private val folderCreationFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
 
     private val _navEvents = MutableSharedFlow<ChatNavEvent>(extraBufferCapacity = 1)
     val navEvents: SharedFlow<ChatNavEvent> = _navEvents
@@ -122,12 +142,6 @@ class ChatViewModel(
         _newFolderName.value = newText
     }
 
-    init {
-        viewModelScope.launch {
-            loadServerSettings()
-        }
-    }
-
     var currentStreamId: String = ""
 
     fun poolMessage(uuid: String?): MessageResponse? {
@@ -136,8 +150,16 @@ class ChatViewModel(
 
     fun updateCurrentlySelectedFolder(newFolder: FolderResponseData) {
         if (newFolder.uuid != currentlySelectedFolder.value?.uuid) {
-            _currentlySelectedFolder.update { newFolder }
+            repo.updateCurrentlySelectedFolder(newFolder)
         }
+    }
+
+    fun onCreateTopicButtonTap() {
+        _shouldShowCreateTopicView.value = true
+    }
+
+    fun onDismissTopicCreationButtonTap() {
+        _shouldShowCreateTopicView.value = false
     }
 
     fun onSearchQueryChange(query: String) {
@@ -160,120 +182,11 @@ class ChatViewModel(
     }
 
     suspend fun loadServerSettings() {
-        _queryState.value = QueryState.Loading
-        val response = client.performRequest(ServerSettingsRequest(client.userViewModel.baseUrl.value ?: ""))
-        when(response) {
-            is ApiResult.Success -> {
-                repo.jitsiServerUrl = response.value.meetUrl
-                loadUserInfo()
-            }
-            is ApiResult.Error -> {
-
-            }
-        }
-    }
-
-    suspend fun loadUserInfo() {
-        val response = client.performRequest(OwnUserRequest())
-        when(response) {
-            is ApiResult.Success -> {
-                userViewModel.userData = response.value
-                repo.updateCurrentUser(response.value)
-                loadMessageReactions(response.value.uuid)
-            }
-
-            is ApiResult.Error -> {
-
-            }
-        }
-    }
-
-    suspend fun loadMessageReactions(userUuid: String) {
-        val response = client.performRequest(MessageReactionsRequest(userUuid))
-        when(response) {
-            is ApiResult.Success -> {
-                repo.setInitialMessageReactions(response.value)
-                loadAllUsersInfo()
-            }
-
-            is ApiResult.Error -> {
-                _queryState.value = QueryState.Error("")
-            }
-        }
-    }
-
-    suspend fun loadAllUsersInfo() {
-        val response = client.performRequest(UsersRequest())
-        when(response) {
-            is ApiResult.Success -> {
-                users = response.value
-                repo.setInitialUsers(response.value)
-                loadFolders()
-            }
-
-            is ApiResult.Error -> {
-                _queryState.value = QueryState.Error("")
-            }
-        }
-    }
-    suspend fun loadFolders() {
-        val response = client.performRequest(FoldersRequest())
-        when(response) {
-            is ApiResult.Success -> {
-                repo.setInitialFolders(response.value.sortedBy { LocalDateTime.parse(it.creationDate, folderCreationFormatter) })
-                if (!folders.value.isEmpty()) {
-                    _currentlySelectedFolder.value = folders.value.first()
-                }
-                loadSubscribedChannels()
-            }
-
-            is ApiResult.Error -> {
-                _queryState.value = QueryState.Error("")
-            }
-        }
-    }
-
-    suspend fun loadSubscribedChannels() {
-        val response = client.performRequest(StreamsRequest())
-        when(response) {
-            is ApiResult.Success -> {
-                val messageIds = response.value.mapNotNull { it.lastMessageUuid }
-                if (!messageIds.isEmpty()) {
-                    val messagesResponse = client.performRequest(MessagesByIdsRequest(messageIds))
-                    when (messagesResponse) {
-                        is ApiResult.Success -> {
-                            repo.setInitialMessagesPool(messagesResponse.value)
-                            val streamsWithMessages = response.value.map { stream ->
-                                var updatedStream = stream
-                                updatedStream.lastMessage = poolMessage(stream.lastMessageUuid)
-                                updatedStream
-                            }
-                            repo.setInitialStreams(streamsWithMessages)
-                            _queryState.value = QueryState.Success
-                            repo.start()
-                        }
-
-                        is ApiResult.Error -> {
-                            repo.setInitialStreams(response.value)
-                            _queryState.value = QueryState.Success
-                            repo.start()
-                        }
-                    }
-                } else {
-                    repo.setInitialStreams(response.value)
-                    _queryState.value = QueryState.Success
-                    repo.start()
-                }
-            }
-
-            is ApiResult.Error -> {
-                _queryState.value = QueryState.Error("")
-            }
-        }
+        repo.loadServerSettings()
     }
 
     suspend fun loadStreamBindings(stream: Stream) {
-        _queryState.value = QueryState.Loading
+        _topicsQueryState.value = QueryState.Loading
         val streamBindingsResponse = client.performRequest(StreamBindingsRequest(stream.uuid))
         when(streamBindingsResponse) {
             is ApiResult.Success -> {
@@ -287,8 +200,8 @@ class ChatViewModel(
     }
 
     suspend fun loadTopics(stream: Stream) {
-        _queryState.value = QueryState.Loading
-        val response = client.performRequest(TopicsRequest(stream.uuid))
+        _topicsQueryState.value = QueryState.Loading
+        val response = client.performRequest(TopicsRequest(listOf(stream.uuid)))
         when(response) {
             is ApiResult.Success -> {
                 val messageIds = response.value.mapNotNull { it.lastMessageUuid }
@@ -303,21 +216,21 @@ class ChatViewModel(
                                 updatedTopic
                             }
                             repo.addStreamTopics(stream.uuid, topicsWithMessages)
-                            _queryState.value = QueryState.Success
+                            _topicsQueryState.value = QueryState.Success
                         }
 
                         is ApiResult.Error -> {
                             repo.addStreamTopics(stream.uuid, response.value)
-                            _queryState.value = QueryState.Success
+                            _topicsQueryState.value = QueryState.Success
                         }
                     }
                 } else {
                     repo.addStreamTopics(stream.uuid, response.value)
-                    _queryState.value = QueryState.Success
+                    _topicsQueryState.value = QueryState.Success
                 }
             }
             is ApiResult.Error -> {
-                _queryState.value = QueryState.Error("")
+                _topicsQueryState.value = QueryState.Error("")
             }
         }
     }
@@ -344,11 +257,44 @@ class ChatViewModel(
         }
     }
 
+    suspend fun addTopic(name: String) {
+        val currentlySelectedStream = _currentlySelectedStream.value
+        if (currentlySelectedStream != null) {
+            val response = client.performRequest(AddTopicRequest(name, currentlySelectedStream.uuid))
+            when (response) {
+                is ApiResult.Success -> {
+
+                }
+
+                is ApiResult.Error -> {
+
+                }
+            }
+        }
+    }
+
     suspend fun setNextNotificationMode(topic: TopicsResponseData) {
         when (topic.notificationMode) {
             "mute" -> setTopicNotificationMode(topic.uuid, "default")
             "default" -> setTopicNotificationMode(topic.uuid, "follow")
             else -> setTopicNotificationMode(topic.uuid, "mute")
+        }
+    }
+
+    suspend fun setStreamNotificationMode(streamUuid: String, notificationMode: String) {
+        val response = client.performRequest(
+            UpdateStreamNotificationModeRequest(
+                streamUuid,
+                notificationMode
+            )
+        )
+        when(response) {
+            is ApiResult.Success -> {
+
+            }
+            is ApiResult.Error -> {
+
+            }
         }
     }
 
@@ -376,21 +322,11 @@ class ChatViewModel(
         }
     }
 
-    suspend fun addChatFolder(chatId: Int, chatType: String, folderUuid: String) {
-        val response = client.performRequest(AddChatToFolderRequest(folderUuid, chatId, chatType))
+    suspend fun addChatFolder(chatUuid: String, chatType: String, folderUuid: String) {
+        val response = client.performRequest(AddChatToFolderRequest(folderUuid, chatUuid, chatType))
         when(response) {
             is ApiResult.Success -> {
-                val foldersResponse = client.performRequest(FoldersRequest())
-                when(foldersResponse) {
-                    is ApiResult.Success -> {
-
-                        _queryState.value = QueryState.Success
-                    }
-
-                    is ApiResult.Error -> {
-
-                    }
-                }
+                _queryState.value = QueryState.Success
             }
 
             is ApiResult.Error -> {
@@ -402,7 +338,7 @@ class ChatViewModel(
     suspend fun deleteChatFromFolder(chatId: String, folder: FolderResponseData) {
         val folderChat = folder.items.firstOrNull() { it.streamUuid == chatId }
         if (folderChat != null) {
-            val response = client.performRequest(DeleteChatFromFolderRequest(folder.uuid, folderChat.uuid))
+            val response = client.performRequest(DeleteChatFromFolderRequest(folderChat.uuid))
             when (response) {
                 is ApiResult.Success -> {
                     val foldersResponse = client.performRequest(FoldersRequest())
@@ -411,7 +347,7 @@ class ChatViewModel(
 
                             if (currentlySelectedFolder.value != null) {
                                 val updatedCurrentlySelectedFolder = foldersResponse.value.firstOrNull() { it.uuid == currentlySelectedFolder.value?.uuid }
-                                _currentlySelectedFolder.update { updatedCurrentlySelectedFolder }
+                                repo.updateCurrentlySelectedFolder(updatedCurrentlySelectedFolder)
                             }
                             _queryState.value = QueryState.Success
                         }
@@ -429,7 +365,7 @@ class ChatViewModel(
 
                             if (currentlySelectedFolder.value != null) {
                                 val updatedCurrentlySelectedFolder = foldersResponse.value.firstOrNull() { it.uuid == currentlySelectedFolder.value?.uuid }
-                                _currentlySelectedFolder.update { updatedCurrentlySelectedFolder }
+
                             }
                             _queryState.value = QueryState.Success
                         }
@@ -454,6 +390,32 @@ class ChatViewModel(
             }
             is ApiResult.Error -> {
                 _createQueryState.value = QueryState.Error(response.error.message ?: "Error")
+            }
+        }
+    }
+
+    suspend fun markStreamMessagesRead(streamUuid: String) {
+        val markMessagesReadResponse = client.performRequest(MarkStreamMessagesReadRequest(streamUuid))
+        when(markMessagesReadResponse) {
+            is ApiResult.Success -> {
+
+            }
+
+            is ApiResult.Error -> {
+
+            }
+        }
+    }
+
+    suspend fun markTopicMessagesRead(topicUuid: String) {
+        val markMessagesReadResponse = client.performRequest(MarkTopicMessagesReadRequest(topicUuid))
+        when(markMessagesReadResponse) {
+            is ApiResult.Success -> {
+
+            }
+
+            is ApiResult.Error -> {
+
             }
         }
     }

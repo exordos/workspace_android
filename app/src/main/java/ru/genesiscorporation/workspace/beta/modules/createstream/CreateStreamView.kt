@@ -53,6 +53,7 @@ import androidx.navigation.NavHostController
 import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.R
+import ru.genesiscorporation.workspace.beta.data.remote.AuthHeader
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 import ru.genesiscorporation.workspace.beta.modules.createdirectstream.CreateDirectStreamViewModel
@@ -175,7 +176,8 @@ fun CreateStreamView(
                     ),
                     cursorBrush = SolidColor(LocalWorkspaceColorsPalette.current.textHeaders),
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
                         .padding(horizontal = 12.dp)
                 )
             }
@@ -232,8 +234,9 @@ fun CreateStreamView(
                 LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier
-                        .fillMaxSize()
-                        .padding(16.dp)
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .weight(1f)
                 ) {
                     items(items = filteredUsers) { item ->
                         UserWithCheckboxCell(
@@ -241,30 +244,31 @@ fun CreateStreamView(
                             { viewModel.didTapOnUser(item) },
                             selectedUserUuids.contains(item.uuid),
                             viewModel.client.userViewModel.baseUrl.collectAsState().value,
-                            viewModel
+                            viewModel.client.authHeaders()
                         )
                     }
                 }
-            }
-            Button(
-                onClick = {
-                    scope.launch {
-                        viewModel.createStream()
-                    }
-                },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = LocalWorkspaceColorsPalette.current.primary,
-                    contentColor = LocalWorkspaceColorsPalette.current.onPrimary
-                ),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.fillMaxWidth()
-                    .padding(20.dp, 6.dp, 20.dp, 6.dp)
-            ) {
-                Text(
-                    "Войти",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium
-                )
+                Button(
+                    onClick = {
+                        scope.launch {
+                            viewModel.createStream()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = LocalWorkspaceColorsPalette.current.primary,
+                        contentColor = LocalWorkspaceColorsPalette.current.onPrimary
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp, 6.dp, 20.dp, 6.dp)
+                ) {
+                    Text(
+                        "Создать",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
             }
         }
     }
@@ -276,7 +280,7 @@ fun UserWithCheckboxCell(
     onUserSelected: (UserResponseData) -> Unit,
     isSelected: Boolean,
     baseUrl: String?,
-    viewModel: CreateStreamViewModel
+    authHeaders: List<AuthHeader>
 ) {
     Box {
         Column(
@@ -323,7 +327,7 @@ fun UserWithCheckboxCell(
                 Avatar(
                     item.avatar,
                     baseUrl ?: "",
-                    viewModel.client.authHeaders(),
+                    authHeaders,
                     null,
                     item.displayableName(),
                     Modifier.size(40.dp)
