@@ -1,11 +1,8 @@
 package ru.genesiscorporation.workspace.beta.data
 
-import android.app.Activity
 import android.util.Log
-import androidx.compose.runtime.rememberCoroutineScope
 import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.client.plugins.websocket.webSocket
-import io.ktor.client.plugins.websocket.webSocketSession
 import io.ktor.client.request.headers
 import io.ktor.http.HttpHeaders
 import io.ktor.http.URLProtocol
@@ -15,11 +12,13 @@ import io.ktor.websocket.Frame
 import io.ktor.websocket.close
 import io.ktor.websocket.readReason
 import io.ktor.websocket.readText
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -27,6 +26,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -39,6 +40,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.DeletedMessageReacti
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Draft
 import ru.genesiscorporation.workspace.beta.data.remote.dto.DraftsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.EpochRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.EventsProbeRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FoldersRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageReaction
@@ -55,6 +57,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UsersRequest
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
+import java.net.URI
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import kotlin.collections.map
@@ -62,22 +65,31 @@ import kotlin.collections.orEmpty
 import kotlin.collections.plus
 import kotlin.plus
 
+private const val INITIAL_RETRY_DELAY_MILLIS = 1_000L
+private const val MAX_RETRY_DELAY_MILLIS = 30_000L
+private const val REALTIME_PROBE_INTERVAL_MILLIS = 30_000L
+private const val EVENTS_CURSOR_EXPIRED_STATUS_CODE = "410"
 
 class EventsRepository() {
 
-    val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
+    fun close() {
+        scope.cancel()
+    }
+
+    var client: WorkspaceAPIClient? = null
+    @Volatile
+    var latestEpoch: Int = 0
+    @Volatile
+    var epochGeneration: String = ""
+    private val connectionMutex = Mutex()
+    @Volatile
+    private var activeSession: DefaultClientWebSocketSession? = null
     private val heartbeatJob: Job = scope.every30Seconds {
         val webSocketClient = client ?: return@every30Seconds
         heartbeatTask(webSocketClient)
     }
-    fun close() {
-        scope.cancel()
-    }
-    var client: WorkspaceAPIClient? = null
-    var session: DefaultClientWebSocketSession? = null
-    var latestEpoch: Int = 0
-    var epochGeneration: String = ""
 
     var pushId: String? = null
 
@@ -97,7 +109,6 @@ class EventsRepository() {
     fun updateCurrentUser(newValue: UserResponseData) {
         _currentUser.update { newValue }
     }
-    private var isWebSocketOpen = false
 
     private val _streamsQueryState = MutableStateFlow<QueryState>(QueryState.Idle)
     val streamsQueryState: StateFlow<QueryState> = _streamsQueryState
@@ -486,62 +497,75 @@ class EventsRepository() {
         }
     }
 
-    fun CoroutineScope.every30Seconds(block: suspend () -> Unit): Job = launch {
+    private fun CoroutineScope.every30Seconds(block: suspend () -> Unit): Job = launch {
         while (isActive) {
+            delay(REALTIME_PROBE_INTERVAL_MILLIS)
             block()
-            delay(30_000)
         }
     }
 
-    suspend fun start() {
-        val webSocketClient = client
-        if (webSocketClient != null) {
-            val response = webSocketClient.performRequest(EpochRequest())
-            when (response) {
-                is ApiResult.Success -> {
-                    latestEpoch = response.value.epochVersion
-                    epochGeneration = response.value.epochGeneration
-                    startWebsocketConnection(webSocketClient)
+    private suspend fun probeVisibleEvents() {
+        val webSocketClient = client ?: return
+        val probedSession = activeSession ?: return
+        val probedEpochVersion = latestEpoch
+        val probedEpochGeneration = epochGeneration
+        if (probedEpochGeneration.isBlank()) return
+
+        when (
+            val response = webSocketClient.performRequest(
+                EventsProbeRequest(
+                    afterEpochVersion = probedEpochVersion,
+                    epochGeneration = probedEpochGeneration
+                )
+            )
+        ) {
+            is ApiResult.Success -> {
+                if (
+                    activeSession === probedSession &&
+                    shouldReconnectForEventsProbe(
+                        savedEpochVersion = latestEpoch,
+                        probeEpochVersions = response.value.map { it.epochVersion }
+                    )
+                ) {
+                    Log.d(
+                        "WebSocket",
+                        "Visible events are pending; reconnecting from the saved event cursor"
+                    )
+                    probedSession.close(
+                        CloseReason(CloseReason.Codes.NORMAL, "Visible events are pending")
+                    )
                 }
+            }
 
-                is ApiResult.Error -> {
-
+            is ApiResult.Error -> {
+                if (response.error.code == EVENTS_CURSOR_EXPIRED_STATUS_CODE &&
+                    activeSession === probedSession &&
+                    latestEpoch == probedEpochVersion &&
+                    epochGeneration == probedEpochGeneration
+                ) {
+                    Log.d("WebSocket", "Event cursor expired; reconnecting with a fresh cursor")
+                    clearRealtimeCursor()
+                    probedSession.close(
+                        CloseReason(CloseReason.Codes.NORMAL, "Event cursor expired")
+                    )
+                } else {
+                    Log.d("WebSocket", "Failed to probe visible events")
                 }
             }
         }
     }
 
-    suspend fun heartbeatTask(webSocketClient: WorkspaceAPIClient) {
+    private suspend fun heartbeatTask(webSocketClient: WorkspaceAPIClient) {
+        probeVisibleEvents()
 
-        if (!isWebSocketOpen) {
-            val webSocketClient = client
-            if (webSocketClient != null) {
-                startWebsocketConnection(webSocketClient)
-            }
+        val myUser = currentUser.value ?: return
+        val myStatus = if (myUser.status == "offline" || myUser.status == "idle") {
+            "active"
         } else {
-            val webSocketClient = client
-            if (webSocketClient != null) {
-                val response = webSocketClient.performRequest(EpochRequest())
-                when (response) {
-                    is ApiResult.Success -> {
-                        if (latestEpoch < response.value.epochVersion || epochGeneration != response.value.epochGeneration) {
-                            session?.close(CloseReason(CloseReason.Codes.NORMAL, "Lost connection to server"))
-                            scope.launch {
-                                startWebsocketConnection(webSocketClient)
-                            }
-                        }
-                    }
-
-                    is ApiResult.Error -> {
-
-                    }
-                }
-            }
+            myUser.status
         }
-        val myUser = currentUser.value
-        if (myUser != null) {
-            val myStatus = if (myUser.status == "offline" || myUser.status == "idle") "active" else myUser.status
-            val presenceResponse = webSocketClient.performRequest(
+        when (
+            webSocketClient.performRequest(
                 PresenceRequest(
                     myUser.uuid,
                     myStatus,
@@ -549,27 +573,86 @@ class EventsRepository() {
                     myUser.statusText
                 )
             )
-            when (presenceResponse) {
-                is ApiResult.Success -> {
+        ) {
+            is ApiResult.Success -> Unit
+            is ApiResult.Error -> Log.d("Presence", "Failed to update presence")
+        }
+    }
 
-                }
-                is ApiResult.Error -> {
+    suspend fun start() = connectionMutex.withLock {
+        val webSocketClient = client
+        if (webSocketClient == null) return@withLock
 
+        var retryDelayMillis = INITIAL_RETRY_DELAY_MILLIS
+        while (currentCoroutineContext().isActive) {
+            val currentBaseUrl = webSocketClient.userViewModel.baseUrl.value
+            if (currentBaseUrl == null) {
+                delay(retryDelayMillis)
+                retryDelayMillis = nextRetryDelayMillis(retryDelayMillis)
+                continue
+            }
+
+            if (epochGeneration.isBlank()) {
+                when (val response = webSocketClient.performRequest(EpochRequest())) {
+                    is ApiResult.Success -> {
+                        latestEpoch = response.value.epochVersion
+                        epochGeneration = response.value.epochGeneration
+                    }
+
+                    is ApiResult.Error -> {
+                        Log.d("WebSocket", "Failed to load the initial event cursor")
+                        delay(retryDelayMillis)
+                        retryDelayMillis = nextRetryDelayMillis(retryDelayMillis)
+                        continue
+                    }
                 }
+            }
+
+            var connectionEstablished = false
+            try {
+                startWebsocketConnection(webSocketClient, currentBaseUrl) {
+                    connectionEstablished = true
+                }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (exception: Exception) {
+                Log.d(
+                    "WebSocket",
+                    "Connection failed: ${exception::class.simpleName}: ${exception.message}"
+                )
+            }
+
+            if (currentCoroutineContext().isActive) {
+                if (connectionEstablished) {
+                    retryDelayMillis = INITIAL_RETRY_DELAY_MILLIS
+                }
+                Log.d("WebSocket", "Reconnecting in ${retryDelayMillis}ms")
+                delay(retryDelayMillis)
+                retryDelayMillis = nextRetryDelayMillis(retryDelayMillis)
             }
         }
     }
 
-    suspend fun startWebsocketConnection(webSocketClient: WorkspaceAPIClient) {
+    private fun clearRealtimeCursor() {
+        latestEpoch = 0
+        epochGeneration = ""
+    }
+
+    private suspend fun startWebsocketConnection(
+        webSocketClient: WorkspaceAPIClient,
+        baseUrl: String,
+        onConnected: () -> Unit
+    ) {
         val accessToken = webSocketClient.userViewModel.accessToken.value
-        val baseUrl = webSocketClient.userViewModel.baseUrl.value?.removePrefix("https://")
-        if (accessToken != null && baseUrl != null) {
-            isWebSocketOpen = true
-            try {
-                val session = webSocketClient.client.webSocketSession {
+        if (accessToken != null) {
+            val endpoint = resolveWebSocketEndpoint(baseUrl)
+            Log.d("WebSocket", "Connecting: ${endpoint.displayUrl()}")
+            webSocketClient.client.webSocket(
+                request = {
                     url {
-                        protocol = URLProtocol.WS
-                        this.host = baseUrl
+                        protocol = endpoint.protocol
+                        host = endpoint.host
+                        endpoint.port?.let { port = it }
                         path("/api/workspace/v1/events/ws")
                         parameters.append("last_epoch_version", latestEpoch.toString())
                         parameters.append("epoch_generation", epochGeneration)
@@ -578,18 +661,34 @@ class EventsRepository() {
                         append(HttpHeaders.SecWebSocketProtocol, "workspace.events.v1, bearer.$accessToken")
                     }
                 }
-                this.session = session
-                isWebSocketOpen = !session.closeReason.isCompleted
+            ) {
+                activeSession = this
+                onConnected()
+                Log.d("WebSocket", "Connected: ${endpoint.displayUrl()}")
                 try {
-                    for (frame in session.incoming) {
+                    for (frame in incoming) {
                         when (frame) {
-                            is Frame.Text -> {val receivedText = frame.readText()
+                            is Frame.Text -> {
+                                val receivedText = frame.readText()
                                 val jsonObject = json.decodeFromString<JsonObject>(receivedText)
+                                if (jsonObject["type"]?.jsonPrimitive?.contentOrNull == "ready") {
+                                    epochGeneration = jsonObject["epoch_generation"]
+                                        ?.jsonPrimitive
+                                        ?.contentOrNull
+                                        ?: epochGeneration
+                                }
                                 val action = jsonObject["action"]?.jsonPrimitive?.contentOrNull
                                 val newEpochVersion =
                                     jsonObject["epoch_version"]?.jsonPrimitive?.contentOrNull?.toInt()
                                 if (newEpochVersion != null) {
                                     latestEpoch = newEpochVersion
+                                }
+                                if (jsonObject["type"]?.jsonPrimitive?.contentOrNull == "ready") {
+                                    Log.d(
+                                        "WebSocket",
+                                        "Ready: epoch_version=$latestEpoch, " +
+                                            "epoch_generation=$epochGeneration"
+                                    )
                                 }
                                 val payload = jsonObject["payload"]?.toString()
                                 if (action != null && payload != null) {
@@ -622,27 +721,24 @@ class EventsRepository() {
                                     }
                                 }
                             }
+
                             is Frame.Binary -> Log.d("WebSocket", "Received binary data bundle")
                             is Frame.Close -> Log.d(
                                 "WebSocket",
                                 "Connection closing reason: ${frame.readReason()}"
                             )
+
                             else -> Log.d("WebSocket", "Received control or ping/pong frame")
                         }
                     }
                 } finally {
-                    val reason = session.closeReason.await()
+                    activeSession = null
+                    val reason = closeReason.await()
                     if (reason?.code?.toInt() == 4401) {
-                        client?.refreshToken()
+                        webSocketClient.refreshToken()
                     }
+                    Log.d("WebSocket", "Disconnected: $reason")
                 }
-            } catch (e: Exception) {
-                Log.d("WebSocket", "Failed: ${e::class.simpleName}: ${e.message}")
-                e.printStackTrace()
-            } finally {
-                this.session = null
-                isWebSocketOpen = false
-                Log.d("WebSocket", "Is inactive")
             }
         }
     }
@@ -878,6 +974,45 @@ class EventsRepository() {
         }
     }
 }
+
+internal data class WebSocketEndpoint(
+    val protocol: URLProtocol,
+    val host: String,
+    val port: Int?
+) {
+    fun displayUrl(): String = buildString {
+        append(protocol.name)
+        append("://")
+        append(host)
+        port?.let {
+            append(":")
+            append(it)
+        }
+    }
+}
+
+internal fun resolveWebSocketEndpoint(baseUrl: String): WebSocketEndpoint {
+    val uri = URI(baseUrl)
+    val protocol = when (uri.scheme?.lowercase()) {
+        "https" -> URLProtocol.WSS
+        "http" -> URLProtocol.WS
+        else -> throw IllegalArgumentException("Workspace base URL must use HTTP or HTTPS")
+    }
+    val host = requireNotNull(uri.host) { "Workspace base URL must contain a host" }
+    return WebSocketEndpoint(
+        protocol = protocol,
+        host = host,
+        port = uri.port.takeIf { it != -1 }
+    )
+}
+
+internal fun nextRetryDelayMillis(currentDelayMillis: Long): Long =
+    (currentDelayMillis * 2).coerceAtMost(MAX_RETRY_DELAY_MILLIS)
+
+internal fun shouldReconnectForEventsProbe(
+    savedEpochVersion: Int,
+    probeEpochVersions: List<Int>
+): Boolean = probeEpochVersions.any { it > savedEpochVersion }
 
 @Serializable
 data class PongMessage(

@@ -24,6 +24,7 @@ import io.ktor.http.Headers
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.Parameters
+import io.ktor.http.URLBuilder
 import io.ktor.http.append
 import io.ktor.http.content.PartData
 import io.ktor.http.content.TextContent
@@ -91,10 +92,7 @@ class WorkspaceAPIClient(
                     when (request.method) {
                         HTTPMethod.GET -> {
                             url {
-                                for ((key, value) in bodyDict) {
-                                    val paramName = key.replace(Regex("\\.\\d+$"), "")
-                                    parameters.append(paramName, value)
-                                }
+                                appendGetQueryParameters(bodyDict)
                             }
                         }
 
@@ -339,6 +337,14 @@ class WorkspaceAPIClient(
         authHeadersList += AuthHeader("Authorization", "Bearer $accessToken")
 
         return  authHeadersList
+    }
+}
+
+@PublishedApi
+internal fun URLBuilder.appendGetQueryParameters(body: Map<String, String>) {
+    for ((key, value) in body) {
+        val parameterName = key.replace(Regex("\\.\\d+$"), "")
+        parameters.append(parameterName, value)
     }
 }
 

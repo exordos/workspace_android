@@ -64,6 +64,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import com.google.firebase.messaging.FirebaseMessaging
 import io.ktor.client.HttpClient
+import io.ktor.client.plugins.HttpTimeout
 import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.data.FCMTokenHolder
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
@@ -134,6 +135,9 @@ class MainActivity : ComponentActivity() {
     private val workspaceApiClient: WorkspaceAPIClient by lazy {
         val client = HttpClient() {
             install(WebSockets)
+            install(HttpTimeout) {
+                connectTimeoutMillis = 30_000
+            }
             install(createSessionCapturePlugin(sessionCookieStore))
             install(ContentNegotiation) {
                 json()
