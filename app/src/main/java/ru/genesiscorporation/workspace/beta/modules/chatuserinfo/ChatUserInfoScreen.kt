@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -52,6 +53,8 @@ import ru.genesiscorporation.workspace.beta.modules.chatdialog.JitsiStyleRoomNam
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.pastEpochSecondsToRelativeRu
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 import ru.genesiscorporation.workspace.beta.modules.profile.ProfileViewModel
+import ru.genesiscorporation.workspace.beta.modules.share.shareWorkspaceLink
+import ru.genesiscorporation.workspace.beta.modules.share.workspaceUserShareLink
 import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
@@ -67,6 +70,8 @@ fun ChatUserInfoScreen(
     val context = LocalContext.current
     val state by viewModel.createQueryState.collectAsStateWithLifecycle()
     val user by viewModel.user.collectAsStateWithLifecycle()
+    val baseUrl by viewModel.client.userViewModel.baseUrl.collectAsStateWithLifecycle()
+    val shareLink = workspaceUserShareLink(baseUrl, user.uuid)
 
     LaunchedEffect(state) {
         if (state is QueryState.Success) {
@@ -168,55 +173,17 @@ fun ChatUserInfoScreen(
                     )
                 }
             }
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    onClick = {
-                        viewModel.shouldSendMessage = true
-                        scope.launch {
-                            viewModel.createPrivateStream(user)
-                        }
-                    },
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(52.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = LocalWorkspaceColorsPalette.current.cardBackgroundBase,
-                        contentColor = LocalWorkspaceColorsPalette.current.iconBase
-                    )
-                ) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.call),
-                        contentDescription = "Call"
-                    )
+            ChatUserActionButtonsRow(
+                shareEnabled = shareLink != null,
+                onMessage = { scope.launch { viewModel.createPrivateStream(user) } },
+                onCall = {
+                    viewModel.shouldSendMessage = true
+                    scope.launch { viewModel.createPrivateStream(user) }
+                },
+                onShare = {
+                    shareLink?.let { shareWorkspaceLink(context, user.displayableName(), it) }
                 }
-                Button(
-                    onClick = {
-                        scope.launch {
-                            viewModel.createPrivateStream(user)
-                        }
-                    },
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(52.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = LocalWorkspaceColorsPalette.current.cardBackgroundBase,
-                        contentColor = LocalWorkspaceColorsPalette.current.iconBase
-                    )
-                ) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.chat_bubble),
-                        contentDescription = "Chat"
-                    )
-                }
-            }
+            )
             ProfileRow(
                 "Email",
                 viewModel.email,
@@ -227,6 +194,102 @@ fun ChatUserInfoScreen(
                 user.uuid,
                 R.drawable.ic_userid
             )
+        }
+    }
+}
+
+@Composable
+internal fun ChatUserActionButtonsRow(
+    shareEnabled: Boolean,
+    onMessage: () -> Unit,
+    onCall: () -> Unit,
+    onShare: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Button(
+            onClick = onMessage,
+            modifier = Modifier
+                .weight(1f)
+                .height(64.dp),
+            shape = RoundedCornerShape(8.dp),
+            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = LocalWorkspaceColorsPalette.current.cardBackgroundBase,
+                contentColor = LocalWorkspaceColorsPalette.current.iconBase
+            )
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(
+                    painter = painterResource(id = R.drawable.chat_bubble),
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp)
+                )
+                Text(
+                    text = "Написать",
+                    fontSize = 12.sp,
+                    fontFamily = InterFontFamily,
+                    maxLines = 1
+                )
+            }
+        }
+        Button(
+            onClick = onCall,
+            modifier = Modifier
+                .weight(1f)
+                .height(64.dp),
+            shape = RoundedCornerShape(8.dp),
+            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = LocalWorkspaceColorsPalette.current.cardBackgroundBase,
+                contentColor = LocalWorkspaceColorsPalette.current.iconBase
+            )
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(
+                    painter = painterResource(id = R.drawable.call),
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp)
+                )
+                Text(
+                    text = "Позвонить",
+                    fontSize = 12.sp,
+                    fontFamily = InterFontFamily,
+                    maxLines = 1
+                )
+            }
+        }
+        Button(
+            onClick = onShare,
+            enabled = shareEnabled,
+            modifier = Modifier
+                .weight(1f)
+                .height(64.dp),
+            shape = RoundedCornerShape(8.dp),
+            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = LocalWorkspaceColorsPalette.current.cardBackgroundBase,
+                contentColor = LocalWorkspaceColorsPalette.current.iconBase
+            )
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(
+                    painter = painterResource(id = R.drawable.ic_share),
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp)
+                )
+                Text(
+                    text = "Поделиться",
+                    fontSize = 12.sp,
+                    fontFamily = InterFontFamily,
+                    maxLines = 1
+                )
+            }
         }
     }
 }
