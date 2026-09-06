@@ -12,12 +12,16 @@ data class LoginRequest(
     val password: String,
     val otp: String?
 ): ApiRequest<LoginRequestData, LoginResponse, ApiError> {
+    companion object {
+        const val WORKSPACE_PROJECT_UUID = "fe02e55d-4548-4b3e-a175-fcae928f41b2"
+    }
+
     override val method: HTTPMethod = HTTPMethod.POST
     override val requiresApiKey: Boolean = false
     override val shouldApplySuffix: Boolean = false
     override val url: String = "/api/core/v1/iam/clients/default/actions/get_token/invoke"
     override val data = LoginRequestData(
-        username, password, "login+password", "openid email profile project:fe02e55d-4548-4b3e-a175-fcae928f41b2", "3600", "31536000"
+        username, password, "login+password", "openid email profile project:$WORKSPACE_PROJECT_UUID", "3600", "31536000"
     )
 
     override val additionalHeaders: Map<String, String> =
