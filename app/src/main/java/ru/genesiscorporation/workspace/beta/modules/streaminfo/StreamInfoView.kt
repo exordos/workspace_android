@@ -53,6 +53,9 @@ import org.jitsi.meet.sdk.JitsiMeetConferenceOptions
 import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
+import ru.genesiscorporation.workspace.beta.data.remote.dto.LoginRequest
+import ru.genesiscorporation.workspace.beta.modules.share.shareWorkspaceLink
+import ru.genesiscorporation.workspace.beta.modules.share.workspaceStreamShareLink
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.JitsiStyleRoomNameGenerator
 import ru.genesiscorporation.workspace.beta.modules.chatuserinfo.ChatUserInfoViewModel
 import ru.genesiscorporation.workspace.beta.modules.createdirectstream.UserCell
@@ -156,7 +159,16 @@ fun StreamInfoView(
                     }
                 }
             }
-//            ActionButtonsRow(viewModel, navController)
+            val baseUrl by viewModel.client.userViewModel.baseUrl.collectAsStateWithLifecycle()
+            val shareLink = workspaceStreamShareLink(
+                baseUrl,
+                LoginRequest.WORKSPACE_PROJECT_UUID,
+                stream.uuid
+            )
+            ActionButtonsRow(
+                shareEnabled = shareLink != null,
+                onShare = { shareLink?.let { shareWorkspaceLink(context, stream.name, it) } }
+            )
             NotificationButtonsRow(viewModel)
             val summary = topic?.summary
             if (summary != null) {
@@ -169,8 +181,8 @@ fun StreamInfoView(
 
 @Composable
 fun ActionButtonsRow(
-    viewModel: StreamInfoViewModel,
-    navController: NavHostController
+    shareEnabled: Boolean,
+    onShare: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -180,9 +192,8 @@ fun ActionButtonsRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Button(
-            onClick = {
-
-            },
+            onClick = {},
+            enabled = false,
             modifier = Modifier
                 .weight(1f)
                 .height(52.dp),
@@ -198,9 +209,8 @@ fun ActionButtonsRow(
             )
         }
         Button(
-            onClick = {
-
-            },
+            onClick = {},
+            enabled = false,
             modifier = Modifier
                 .weight(1f)
                 .height(52.dp),
@@ -216,9 +226,8 @@ fun ActionButtonsRow(
             )
         }
         Button(
-            onClick = {
-
-            },
+            onClick = onShare,
+            enabled = shareEnabled,
             modifier = Modifier
                 .weight(1f)
                 .height(52.dp),
@@ -230,7 +239,7 @@ fun ActionButtonsRow(
         ) {
             Icon(
                 painter = painterResource(id = R.drawable.ic_share),
-                contentDescription = "Chat"
+                contentDescription = "Поделиться стримом"
             )
         }
     }
