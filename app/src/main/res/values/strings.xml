@@ -8,4 +8,28 @@
         <item quantity="many">%d участников</item>
         <item quantity="other">%d участников</item>
     </plurals>
+    <string name="message_delete">Delete</string>
+    <string name="message_deleting">Deleting…</string>
+    <string name="message_delete_title">Delete message?</string>
+    <string name="message_delete_confirmation">This message will be deleted for all participants. This action cannot be undone.</string>
+    <string name="message_delete_cancel">Cancel</string>
+    <string name="message_select">Select</string>
+    <string name="messages_delete_confirmation">These messages will be deleted for all participants. This action cannot be undone.</string>
+    <string name="message_delete_not_allowed">This message cannot be deleted</string>
+    <string name="message_delete_failed">Could not delete the message. Please try again</string>
+    <string name="messages_selection_limit">You can select no more than %d messages</string>
+    <string name="messages_delete_partial_failure">Deleted: %1$d of %2$d. Could not delete: %3$d. You can retry deleting the remaining messages</string>
+    <string name="message_selection_description">Select message: %1$s</string>
+    <string name="messages_selection_own_only">You can only delete your own sent messages</string>
+    <plurals name="messages_selected_count">
+        <item quantity="one">%d message selected</item>
+        <item quantity="other">%d messages selected</item>
+    </plurals>
+    <plurals name="messages_delete_title">
+        <item quantity="one">Delete %d message?</item>
+        <item quantity="other">Delete %d messages?</item>
+    </plurals>
+    <string name="messages_forward">Forward</string>
+    <string name="messages_forward_limit">Select no more than %d messages to forward</string>
+    <string name="forward_members_online">%1$s, %2$d online</string>
 </resources>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="quote_snapshot_copy">Forwarded copy</string>
+    <string name="quote_loading">Loading message…</string>
+    <string name="quote_unavailable">Message unavailable</string>
+    <string name="quote_load_failed">Could not load the message</string>
+    <string name="quote_retry">Retry</string>
+    <string name="quote_forwarded_message">Forwarded message</string>
+    <string name="quote_default_author">Quoted message</string>
+</resources>

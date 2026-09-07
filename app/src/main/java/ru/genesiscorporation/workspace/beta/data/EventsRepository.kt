@@ -21,7 +21,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
@@ -119,6 +121,10 @@ class EventsRepository() {
 
     private val _streamTopicMessages = MutableStateFlow<Map<String, List<MessageResponse>>>(emptyMap())
     val streamTopicMessages: StateFlow<Map<String, List<MessageResponse>>> = _streamTopicMessages.asStateFlow()
+    private val _messageDeletedEvents = MutableSharedFlow<String>(extraBufferCapacity = 64)
+    val messageDeletedEvents = _messageDeletedEvents.asSharedFlow()
+    private val _messageUpdatedEvents = MutableSharedFlow<MessageResponse>(extraBufferCapacity = 64)
+    val messageUpdatedEvents = _messageUpdatedEvents.asSharedFlow()
 
     fun updateCurrentlySelectedFolder(newFolder: FolderResponseData?) {
         _currentlySelectedFolder.update { newFolder }
@@ -173,7 +179,48 @@ class EventsRepository() {
             if (updatedMessages == messages) return@update current
             current + (key to updatedMessages)
         }
+        val referenceUpdate = updatedMessage.copy(payload = updatedMessage.payload.copy())
+        if (!_messageUpdatedEvents.tryEmit(referenceUpdate)) {
+            scope.launch { _messageUpdatedEvents.emit(referenceUpdate) }
+        }
     }
+
+    fun removeMessage(messageUuid: String) {
+        _streamTopicMessages.update { current ->
+            current.mapValues { (_, messages) ->
+                messages.filterNot { it.uuid == messageUuid }
+            }
+        }
+        _messagesPool.update { current -> current.filterNot { it.uuid == messageUuid } }
+        _userReactions.update { current -> current.filterNot { it.messageUuid == messageUuid } }
+        _streams.update { current ->
+            current.map { stream ->
+                if (stream.lastMessageUuid == messageUuid) {
+                    stream.copy(lastMessageUuid = null, lastMessage = null)
+                } else {
+                    stream
+                }
+            }
+        }
+        _streamTopics.update { current ->
+            current.mapValues { (_, topics) ->
+                topics.map { it.withoutDeletedMessage(messageUuid) }
+            }
+        }
+        _topicsPool.update { current ->
+            current.map { it.withoutDeletedMessage(messageUuid) }
+        }
+        if (!_messageDeletedEvents.tryEmit(messageUuid)) {
+            scope.launch { _messageDeletedEvents.emit(messageUuid) }
+        }
+    }
+
+    private fun TopicsResponseData.withoutDeletedMessage(messageUuid: String): TopicsResponseData =
+        if (lastMessageUuid == messageUuid) {
+            copy(lastMessageUuid = null, lastMessage = null)
+        } else {
+            this
+        }
 
     private val _streamTopics = MutableStateFlow<Map<String, List<TopicsResponseData>>>(emptyMap())
     val streamTopics: StateFlow<Map<String, List<TopicsResponseData>>> = _streamTopics.asStateFlow()
@@ -776,7 +823,8 @@ class EventsRepository() {
                 updateMessage(message)
             }
             "deleted" -> {
-
+                val message = json.decodeFromString<JsonObject>(payload)
+                message["uuid"]?.jsonPrimitive?.contentOrNull?.let(::removeMessage)
             }
         }
     }

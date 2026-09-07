@@ -26,6 +26,20 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".modules.chatdialog.ForwardToWorkspaceActivity"
+            android:exported="false"
+            android:label="@string/forward_workspace_target"
+            android:theme="@android:style/Theme.NoDisplay" />
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.message-share-files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/message_share_paths" />
+        </provider>
         <service
             android:name=".data.MyFirebaseMessagingService"
             android:exported="false">

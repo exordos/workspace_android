@@ -1,6 +1,7 @@
 package ru.genesiscorporation.workspace.beta.modules.chatdialog
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -67,8 +68,10 @@ fun ImageMessageView(
     viewModel: ChatDialogViewModel,
     item: MessageResponse,
     navController: NavHostController,
-    onImageLoad: () -> Unit
+    onImageLoad: () -> Unit,
+    onForwardMessage: ((MessageResponse) -> Unit)? = null,
 ) {
+    var menuExpanded by remember(item.uuid) { mutableStateOf(false) }
     val zone = ZoneId.systemDefault()
     val scope = rememberCoroutineScope()
     val hhmmFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
@@ -159,86 +162,96 @@ fun ImageMessageView(
             }
         }
         Column {
-            Row(
-                verticalAlignment = Alignment.Bottom,
-                modifier = Modifier
-                    .background(
-                        if (item.isOwn)
-                            LocalWorkspaceColorsPalette.current.messageOwnBackground
-                        else LocalWorkspaceColorsPalette.current.messageBackground,
-                        shape = bubbleShape
-                    )
-                    .padding(10.dp)
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.Start,
+            Box {
+                Row(
+                    verticalAlignment = Alignment.Bottom,
                     modifier = Modifier
-                        .weight(2f, fill = false)
-                ) {
-                    val defaultName = if (item.isOwn) "Я" else "Собеседник"
-                    Text(
-                        text = item.user?.displayableName() ?: defaultName,
-                        color = if (item.isOwn) LocalWorkspaceColorsPalette.current.indicatorBlue else LocalWorkspaceColorsPalette.current.indicatorPurple,
-                        fontSize = 14.sp,
-                        fontFamily = InterFontFamily,
-                        fontWeight = FontWeight.Medium
-                    )
-                    val baseUrl by viewModel.userViewModel.repo.baseUrlFlow.collectAsStateWithLifecycle(
-                        initialValue = ""
-                    )
-                    val authHeaders = viewModel.client.authHeaders()
-                    val headers = NetworkHeaders.Builder()
-                        .set(authHeaders.first().title, authHeaders.first().value)
-                        .build()
-                    val imageUrl = UrnParser.parseUrl(imageUrn, baseUrl ?: "")
-                    if (imageUrl != null) {
-                        val imageRequest = ImageRequest.Builder(LocalContext.current)
-                            .data(imageUrl)
-                            .httpHeaders(headers)
-                            .build()
-                        AsyncImage(
-                            model = imageRequest,
-                            contentDescription = null,
-                            modifier = Modifier.clickable { showFullscreen = true },
-                            onState = { state ->
-                                when (state) {
-                                    is AsyncImagePainter.State.Success -> {
-                                        onImageLoad()
-                                    }
-
-                                    else -> Unit
-                                }
-                            }
+                        .background(
+                            if (item.isOwn)
+                                LocalWorkspaceColorsPalette.current.messageOwnBackground
+                            else LocalWorkspaceColorsPalette.current.messageBackground,
+                            shape = bubbleShape
                         )
-                        if (showFullscreen) {
-                            FullscreenZoomableImage(
+                        .combinedClickable(
+                            onClick = {},
+                            onLongClick = { menuExpanded = viewModel.canSelectMessage(item) },
+                        )
+                        .padding(10.dp)
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.Start,
+                        modifier = Modifier
+                            .weight(2f, fill = false)
+                    ) {
+                        val defaultName = if (item.isOwn) "Я" else "Собеседник"
+                        Text(
+                            text = item.user?.displayableName() ?: defaultName,
+                            color = if (item.isOwn) LocalWorkspaceColorsPalette.current.indicatorBlue else LocalWorkspaceColorsPalette.current.indicatorPurple,
+                            fontSize = 14.sp,
+                            fontFamily = InterFontFamily,
+                            fontWeight = FontWeight.Medium
+                        )
+                        val baseUrl by viewModel.userViewModel.repo.baseUrlFlow.collectAsStateWithLifecycle(
+                            initialValue = ""
+                        )
+                        val authHeaders = viewModel.client.authHeaders()
+                        val headers = NetworkHeaders.Builder()
+                            .set(authHeaders.first().title, authHeaders.first().value)
+                            .build()
+                        val imageUrl = UrnParser.parseUrl(imageUrn, baseUrl ?: "")
+                        if (imageUrl != null) {
+                            val imageRequest = ImageRequest.Builder(LocalContext.current)
+                                .data(imageUrl)
+                                .httpHeaders(headers)
+                                .build()
+                            AsyncImage(
                                 model = imageRequest,
                                 contentDescription = null,
-                                onDismiss = { showFullscreen = false },
+                                modifier = Modifier.combinedClickable(
+                                    onClick = { showFullscreen = true },
+                                    onLongClick = { menuExpanded = viewModel.canSelectMessage(item) },
+                                ),
+                                onState = { state ->
+                                    when (state) {
+                                        is AsyncImagePainter.State.Success -> {
+                                            onImageLoad()
+                                        }
+
+                                        else -> Unit
+                                    }
+                                }
                             )
-                        }
-                        if (text.isNotEmpty()) {
-                            Text(
-                                text = text,
-                                color = LocalWorkspaceColorsPalette.current.textHeaders,
-                                fontSize = 14.sp,
-                                fontFamily = InterFontFamily,
-                            )
+                            if (showFullscreen) {
+                                FullscreenZoomableImage(
+                                    model = imageRequest,
+                                    contentDescription = null,
+                                    onDismiss = { showFullscreen = false },
+                                )
+                            }
+                            if (text.isNotEmpty()) {
+                                Text(
+                                    text = text,
+                                    color = LocalWorkspaceColorsPalette.current.textHeaders,
+                                    fontSize = 14.sp,
+                                    fontFamily = InterFontFamily,
+                                )
+                            }
                         }
                     }
+    //                TappableAsyncImage(
+    //                    model = imageRequest,
+    //                    contentDescription = null,
+    //                )
+                    Spacer(modifier = Modifier.widthIn(min = 20.dp))
+                    val instant = Instant.parse(item.createdAt)
+                    Text(
+                        text = instant.atZone(zone).format(hhmmFormatter),
+                        color = LocalWorkspaceColorsPalette.current.messageTimeColor,
+                        fontSize = 14.sp,
+                        fontFamily = InterFontFamily,
+                    )
                 }
-//                TappableAsyncImage(
-//                    model = imageRequest,
-//                    contentDescription = null,
-//                )
-                Spacer(modifier = Modifier.widthIn(min = 20.dp))
-                val instant = Instant.parse(item.createdAt)
-                Text(
-                    text = instant.atZone(zone).format(hhmmFormatter),
-                    color = LocalWorkspaceColorsPalette.current.messageTimeColor,
-                    fontSize = 14.sp,
-                    fontFamily = InterFontFamily,
-                )
+                MessageDeletionMenu(item, viewModel, menuExpanded, { menuExpanded = false }, onForwardMessage)
             }
             if (!item.reactions.isEmpty()) {
                 Row(

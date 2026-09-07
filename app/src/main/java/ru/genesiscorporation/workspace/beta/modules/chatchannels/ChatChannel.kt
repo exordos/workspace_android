@@ -22,6 +22,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
+import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -145,7 +146,7 @@ fun ChatChannel(
                             )
                         }
                         MarkdownText(
-                            markdown = lastMessage.description(),
+                            markdown = lastMessage.description(stringResource(R.string.quote_forwarded_message)),
                             modifier = Modifier.weight(1f),
                             maxLines = 1,
                             style = TextStyle(

@@ -3,6 +3,8 @@ package ru.genesiscorporation.workspace.beta.data
 import android.content.Context
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -16,7 +18,11 @@ import kotlinx.serialization.json.Json
 
 private val Context.dataStore by preferencesDataStore(name = "settings")
 
-class ApiKeyRepository(private val context: Context, scope: CoroutineScope) {
+class ApiKeyRepository internal constructor(
+    private val dataStore: DataStore<Preferences>,
+    scope: CoroutineScope,
+) {
+    constructor(context: Context, scope: CoroutineScope) : this(context.dataStore, scope)
 
     companion object {
         private val BASE_URL = stringPreferencesKey("base_url")
@@ -24,16 +30,16 @@ class ApiKeyRepository(private val context: Context, scope: CoroutineScope) {
         private val json = Json { ignoreUnknownKeys = true }
     }
 
-    val baseUrlsFlow: Flow<List<String>> = context.dataStore.data
+    val baseUrlsFlow: Flow<List<String>> = dataStore.data
         .map { prefs ->
             prefs[BASE_URLS]?.let { json.decodeFromString<List<String>>(it) }
                 ?: emptyList()
         }
 
-    val baseUrlFlow: Flow<String?> = context.dataStore.data
+    val baseUrlFlow: Flow<String?> = dataStore.data
         .map { prefs -> prefs[BASE_URL] }
 
-    val accessTokenFlow: Flow<String?> = context.dataStore.data
+    val accessTokenFlow: Flow<String?> = dataStore.data
         .map { prefs ->
             val baseUrl = prefs[BASE_URL]
             if (baseUrl != null) {
@@ -52,7 +58,7 @@ class ApiKeyRepository(private val context: Context, scope: CoroutineScope) {
         )
     fun getAccessToken(): String? = accessToken.value
 
-    val refreshTokenFlow: Flow<String?> = context.dataStore.data
+    val refreshTokenFlow: Flow<String?> = dataStore.data
         .map { prefs ->
             val baseUrl = prefs[BASE_URL]
             if (baseUrl != null) {
@@ -63,7 +69,7 @@ class ApiKeyRepository(private val context: Context, scope: CoroutineScope) {
             }
         }
 
-    val emailFlow: Flow<String?> = context.dataStore.data
+    val emailFlow: Flow<String?> = dataStore.data
         .map { prefs ->
             val baseUrl = prefs[BASE_URL]
             if (baseUrl != null) {
@@ -74,7 +80,7 @@ class ApiKeyRepository(private val context: Context, scope: CoroutineScope) {
             }
         }
 
-    val userIdFlow: Flow<String?> = context.dataStore.data
+    val userIdFlow: Flow<String?> = dataStore.data
         .map { prefs ->
             val baseUrl = prefs[BASE_URL]
             if (baseUrl != null) {
@@ -86,7 +92,7 @@ class ApiKeyRepository(private val context: Context, scope: CoroutineScope) {
         }
 
     suspend fun addBaseUrl(url: String) {
-        context.dataStore.edit { prefs ->
+        dataStore.edit { prefs ->
             val current = prefs[BASE_URLS]
                 ?.let { json.decodeFromString<List<String>>(it) }
                 ?: emptyList()
@@ -98,7 +104,7 @@ class ApiKeyRepository(private val context: Context, scope: CoroutineScope) {
     }
 
     suspend fun removeBaseUrl(url: String) {
-        context.dataStore.edit { prefs ->
+        dataStore.edit { prefs ->
             val current = prefs[BASE_URLS]
                 ?.let { json.decodeFromString<List<String>>(it) }
                 ?: return@edit
@@ -112,7 +118,7 @@ class ApiKeyRepository(private val context: Context, scope: CoroutineScope) {
     }
 
     suspend fun saveAccessToken(accessToken: String) {
-        context.dataStore.edit { prefs ->
+        dataStore.edit { prefs ->
             val baseUrl = prefs[BASE_URL] ?: return@edit
             val key = stringPreferencesKey("${baseUrl}_access_token")
             prefs[key] = accessToken
@@ -120,7 +126,7 @@ class ApiKeyRepository(private val context: Context, scope: CoroutineScope) {
     }
 
     suspend fun saveRefreshToken(accessToken: String) {
-        context.dataStore.edit { prefs ->
+        dataStore.edit { prefs ->
             val baseUrl = prefs[BASE_URL] ?: return@edit
             val key = stringPreferencesKey("${baseUrl}_refresh_token")
             prefs[key] = accessToken
@@ -128,7 +134,7 @@ class ApiKeyRepository(private val context: Context, scope: CoroutineScope) {
     }
 
     suspend fun saveEmail(email: String) {
-        context.dataStore.edit { prefs ->
+        dataStore.edit { prefs ->
             val baseUrl = prefs[BASE_URL] ?: return@edit
             val key = stringPreferencesKey("${baseUrl}_email")
             prefs[key] = email
@@ -136,7 +142,7 @@ class ApiKeyRepository(private val context: Context, scope: CoroutineScope) {
     }
 
     suspend fun saveUserId(userId: String) {
-        context.dataStore.edit { prefs ->
+        dataStore.edit { prefs ->
             val baseUrl = prefs[BASE_URL] ?: return@edit
             val key = stringPreferencesKey("${baseUrl}_user_id")
             prefs[key] = userId
@@ -144,13 +150,13 @@ class ApiKeyRepository(private val context: Context, scope: CoroutineScope) {
     }
 
     private suspend fun saveBaseUrl(baseUrl: String) {
-        context.dataStore.edit { prefs ->
+        dataStore.edit { prefs ->
             prefs[BASE_URL] = baseUrl
         }
     }
 
     suspend fun clearAll() {
-        context.dataStore.edit { prefs ->
+        dataStore.edit { prefs ->
             prefs.clear()
         }
     }
