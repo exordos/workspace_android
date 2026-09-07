@@ -19,6 +19,7 @@ import io.ktor.client.request.setBody
 import io.ktor.client.request.url
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.utils.EmptyContent.contentType
+import io.ktor.http.ContentDisposition
 import io.ktor.http.ContentType
 import io.ktor.http.Headers
 import io.ktor.http.HttpHeaders
@@ -225,21 +226,7 @@ class WorkspaceAPIClient(
         val path = "/api/workspace/v1/messenger/files/"
         val bytes = readUriBytes(context, uri)
         val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
-        val fileName = fileName
-        val parts = formData {
-            append(
-                key = "file",
-                value = bytes,
-                headers = Headers.build {
-                    append(HttpHeaders.ContentType, mime)
-                    append(
-                        HttpHeaders.ContentDisposition,
-                        "filename=\"$fileName\""
-                    )
-                }
-            )
-            append(key = "stream_uuid", value = streamUuid)
-        }
+        val parts = workspaceFileUploadParts(fileName, mime, bytes, streamUuid)
         return uploadFile(path, parts)
     }
 
@@ -248,19 +235,7 @@ class WorkspaceAPIClient(
         val bytes = readUriBytes(context, uri)
         val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
         val fileName = "image.jpg"
-        val parts = formData {
-            append(
-                key = "file",
-                value = bytes,
-                headers = Headers.build {
-                    append(HttpHeaders.ContentType, mime)
-                    append(
-                        HttpHeaders.ContentDisposition,
-                        "filename=\"$fileName\""
-                    )
-                }
-            )
-        }
+        val parts = workspaceFileUploadParts(fileName, mime, bytes)
         return uploadFile(path, parts)
     }
 
@@ -337,6 +312,31 @@ class WorkspaceAPIClient(
         authHeadersList += AuthHeader("Authorization", "Bearer $accessToken")
 
         return  authHeadersList
+    }
+}
+
+internal fun workspaceFileUploadParts(
+    fileName: String,
+    mime: String,
+    bytes: ByteArray,
+    streamUuid: String? = null,
+): List<PartData> = buildList {
+    val disposition = ContentDisposition("form-data")
+        .withParameter(ContentDisposition.Parameters.Name, "file")
+        .withParameter(ContentDisposition.Parameters.FileName, fileName)
+    add(
+        PartData.FileItem(
+            provider = { ByteReadChannel(bytes) },
+            dispose = {},
+            partHeaders = Headers.build {
+                append(HttpHeaders.ContentDisposition, disposition.toString())
+                append(HttpHeaders.ContentType, mime)
+                append(HttpHeaders.ContentLength, bytes.size.toString())
+            },
+        )
+    )
+    if (streamUuid != null) {
+        addAll(formData { append("stream_uuid", streamUuid) })
     }
 }
 
