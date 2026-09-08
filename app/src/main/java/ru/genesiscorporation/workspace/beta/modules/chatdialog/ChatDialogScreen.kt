@@ -5,6 +5,7 @@ package ru.genesiscorporation.workspace.beta.modules.chatdialog
 import android.R.attr.end
 import android.net.Uri
 import android.util.Patterns
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -60,6 +61,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.OutlinedTextFieldDefaults.contentPadding
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -78,10 +81,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -128,6 +135,25 @@ fun ChatDialogScreen(
     val users by viewModel.users.collectAsStateWithLifecycle()
     val quotedMessages by viewModel.quotedMessages.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    val selectedMessageUuids by viewModel.selectedMessageUuids.collectAsStateWithLifecycle()
+    val selectionMode by viewModel.isSelectionMode.collectAsStateWithLifecycle()
+    val canDeleteSelected by viewModel.canDeleteSelectedMessages.collectAsStateWithLifecycle()
+    val deletingSelected by viewModel.deletingSelectedMessages.collectAsStateWithLifecycle()
+    var forwardingMessages by remember { mutableStateOf<List<MessageResponse>?>(null) }
+    var forwardingSelection by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    LaunchedEffect(selectionMode) {
+        if (selectionMode) {
+            focusManager.clearFocus()
+            keyboardController?.hide()
+        }
+    }
+    BackHandler(enabled = selectionMode) { viewModel.clearMessageSelection() }
+    val actionError by viewModel.actionError.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    MessageActionErrorEffect(actionError, snackbarHostState, viewModel::clearActionError)
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -205,198 +231,245 @@ fun ChatDialogScreen(
             }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = LocalWorkspaceColorsPalette.current.background,
-                    titleContentColor = LocalWorkspaceColorsPalette.current.textHeaders,
-                ),
-                expandedHeight = 60.dp,
-                windowInsets = WindowInsets(0, 0, 0, 0),
-                title = {
-                    Column(
-                        verticalArrangement = Arrangement.Center,
-                        modifier = Modifier
-                        .clickable(
-                            onClick = {
-                                val user = viewModel.user
-                                if (user != null) {
-//                                    navController.navigate(
-//                                        ChatFlow.ChatUserInfo(
-//                                            user.fullName,
-//                                            "${user.userId}",
-//                                            user.avatarUrl ?: "",
-//                                            user.email
-//                                        )
-//                                    )
+    Box(Modifier.fillMaxSize()) {
+        Scaffold(
+            modifier = if (forwardingMessages != null) Modifier.clearAndSetSemantics {} else Modifier,
+            snackbarHost = { SnackbarHost(snackbarHostState) },
+            bottomBar = {
+                if (selectionMode) {
+                    MessageSelectionBar(
+                        selectedMessageUuids = selectedMessageUuids,
+                        canDelete = canDeleteSelected,
+                        isDeleting = deletingSelected,
+                        onDelete = viewModel::deleteSelectedMessages,
+                        onCancel = viewModel::clearMessageSelection,
+                        onForward = {
+                            forwardingSelection = true
+                            forwardingMessages = viewModel.selectedMessages().sortedBy { Instant.parse(it.createdAt) }
+                        },
+                        isForwarding = forwardingMessages != null,
+                        canForward = selectedMessageUuids.size <= MAX_FORWARD_SOURCE_MESSAGES &&
+                            viewModel.selectedMessages().all(::canForwardMessage),
+                    )
+                }
+            },
+            topBar = {
+                TopAppBar(
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = LocalWorkspaceColorsPalette.current.background,
+                        titleContentColor = LocalWorkspaceColorsPalette.current.textHeaders,
+                    ),
+                    expandedHeight = 60.dp,
+                    windowInsets = WindowInsets(0, 0, 0, 0),
+                    title = {
+                        Column(
+                            verticalArrangement = Arrangement.Center,
+                            modifier = Modifier
+                            .clickable(
+                                onClick = {
+                                    val user = viewModel.user
+                                    if (user != null) {
+    //                                    navController.navigate(
+    //                                        ChatFlow.ChatUserInfo(
+    //                                            user.fullName,
+    //                                            "${user.userId}",
+    //                                            user.avatarUrl ?: "",
+    //                                            user.email
+    //                                        )
+    //                                    )
+                                    }
                                 }
-                            }
-                        )
-                    ) {
-                        val title = if (viewModel.isDirectMessages) viewModel.chatTitle else viewModel.topicName ?: viewModel.chatTitle
-                        Text(
-                            title,
-                            color = LocalWorkspaceColorsPalette.current.textHeaders,
-                            fontSize = 16.sp,
-                            fontFamily = InterFontFamily,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        val currentStreamBindings = streamBindings[viewModel.chatId]
-                        val user = directUser
-                        if (currentStreamBindings != null && currentStreamBindings.count() > 0) {
-                            val currentBindedOnlineUsers = currentStreamBindings.mapNotNull { binding -> users.firstOrNull { binding.userUuid == it.uuid && it.status == "active" } }
-                            var baseText = if (viewModel.isDirectMessages && user != null) {
-                                user.statusDescription()
-                            } else {
-                                context.resources.getQuantityString(
-                                    R.plurals.participants_count, currentStreamBindings.count(), currentStreamBindings.count()
+                            )
+                        ) {
+                            val title = if (viewModel.isDirectMessages) viewModel.chatTitle else viewModel.topicName ?: viewModel.chatTitle
+                            Text(
+                                title,
+                                color = LocalWorkspaceColorsPalette.current.textHeaders,
+                                fontSize = 16.sp,
+                                fontFamily = InterFontFamily,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            val currentStreamBindings = streamBindings[viewModel.chatId]
+                            val user = directUser
+                            if (currentStreamBindings != null && currentStreamBindings.count() > 0) {
+                                val currentBindedOnlineUsers = currentStreamBindings.mapNotNull { binding -> users.firstOrNull { binding.userUuid == it.uuid && it.status == "active" } }
+                                var baseText = if (viewModel.isDirectMessages && user != null) {
+                                    user.statusDescription()
+                                } else {
+                                    context.resources.getQuantityString(
+                                        R.plurals.participants_count, currentStreamBindings.count(), currentStreamBindings.count()
+                                    )
+                                }
+                                if (!viewModel.isDirectMessages && currentBindedOnlineUsers.count() > 0) {
+                                    baseText += ", ${currentBindedOnlineUsers.count()} онлайн"
+                                }
+                                Text(
+                                    baseText,
+                                    color = LocalWorkspaceColorsPalette.current.textAdditional30,
+                                    fontSize = 14.sp,
+                                    fontFamily = InterFontFamily,
                                 )
                             }
-                            if (!viewModel.isDirectMessages && currentBindedOnlineUsers.count() > 0) {
-                                baseText += ", ${currentBindedOnlineUsers.count()} онлайн"
-                            }
-                            Text(
-                                baseText,
-                                color = LocalWorkspaceColorsPalette.current.textAdditional30,
-                                fontSize = 14.sp,
-                                fontFamily = InterFontFamily,
+                        }
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = {
+                            if (selectionMode) viewModel.clearMessageSelection() else navController.popBackStack()
+                        }) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.arrow_back),
+                                contentDescription = "Back"
+                            )
+                        }
+                    },
+                    actions = {
+                        IconButton(
+                            enabled = !selectionMode,
+                            onClick = {
+                                val roomName = JitsiStyleRoomNameGenerator.generate()
+                                val messageText = "${viewModel.repo.jitsiServerUrl}/${roomName}"
+                                scope.launch {
+                                    viewModel.sendTextMessage(messageText)
+                                }
+                                val options = JitsiMeetConferenceOptions.Builder()
+                                    .setServerURL(URL(viewModel.repo.jitsiServerUrl))
+                                    .setRoom(roomName)
+                                    .build()
+
+                                JitsiMeetActivity.launch(context, options)
+                            },
+                            colors = IconButtonDefaults.iconButtonColors(
+                                containerColor = Color.Transparent,
+                                contentColor = LocalWorkspaceColorsPalette.current.iconBase
+                            )
+                        ) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.call),
+                                contentDescription = "Call"
+                            )
+                        }
+                        IconButton(
+                            enabled = !selectionMode,
+                            onClick = {
+                                navController.navigate(ChatFlow.StreamInfo(viewModel.chatId, viewModel.topicUuid))
+                            },
+                            colors = IconButtonDefaults.iconButtonColors(
+                                containerColor = Color.Transparent,
+                                contentColor = LocalWorkspaceColorsPalette.current.iconBase
+                            )
+                        ) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_more_vertical),
+                                contentDescription = "More"
                             )
                         }
                     }
-                },
-                navigationIcon = {
-                    IconButton(onClick = { navController.popBackStack() }) {
-                        Icon(
-                            painter = painterResource(id = R.drawable.arrow_back),
-                            contentDescription = "Back"
-                        )
-                    }
-                },
-                actions = {
-                    IconButton(
-                        onClick = {
-                            val roomName = JitsiStyleRoomNameGenerator.generate()
-                            val messageText = "${viewModel.repo.jitsiServerUrl}/${roomName}"
-                            scope.launch {
-                                viewModel.sendTextMessage(messageText)
-                            }
-                            val options = JitsiMeetConferenceOptions.Builder()
-                                .setServerURL(URL(viewModel.repo.jitsiServerUrl))
-                                .setRoom(roomName)
-                                .build()
-
-                            JitsiMeetActivity.launch(context, options)
-                        },
-                        colors = IconButtonDefaults.iconButtonColors(
-                            containerColor = Color.Transparent,
-                            contentColor = LocalWorkspaceColorsPalette.current.iconBase
-                        )
-                    ) {
-                        Icon(
-                            painter = painterResource(id = R.drawable.call),
-                            contentDescription = "Call"
-                        )
-                    }
-                    IconButton(
-                        onClick = {
-                            navController.navigate(ChatFlow.StreamInfo(viewModel.chatId, viewModel.topicUuid))
-                        },
-                        colors = IconButtonDefaults.iconButtonColors(
-                            containerColor = Color.Transparent,
-                            contentColor = LocalWorkspaceColorsPalette.current.iconBase
-                        )
-                    ) {
-                        Icon(
-                            painter = painterResource(id = R.drawable.ic_more_vertical),
-                            contentDescription = "More"
-                        )
-                    }
-                }
-            )
-        },
-    ) { innerPadding ->
-        val density = LocalDensity.current
-        val imeVisible = WindowInsets.isImeVisible
-        val navBarHeight = 70.dp
-        Box(
-            modifier = Modifier.fillMaxSize()
-                .padding(
-                    top = if (imeVisible) 0.dp else innerPadding.calculateTopPadding(),
-                    start = innerPadding.calculateStartPadding(LocalLayoutDirection.current),
-                    end = innerPadding.calculateEndPadding(LocalLayoutDirection.current),
                 )
-                .windowInsetsPadding(
-                    WindowInsets.ime
-                        .exclude(WindowInsets.navigationBars)
-                        .only(WindowInsetsSides.Bottom)
-                )
-                .offset {
-                    val extra = if (imeVisible) {
-                        with(density) { navBarHeight.roundToPx() }
-                    } else 0
-                    IntOffset(0, extra)
-                },
-            contentAlignment = Alignment.Center
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(LocalWorkspaceColorsPalette.current.background)
+            },
+        ) { innerPadding ->
+            val density = LocalDensity.current
+            val imeVisible = WindowInsets.isImeVisible
+            val navBarHeight = 70.dp
+            Box(
+                modifier = Modifier.fillMaxSize()
+                    .padding(
+                        top = if (imeVisible) 0.dp else innerPadding.calculateTopPadding(),
+                        bottom = if (selectionMode) innerPadding.calculateBottomPadding() else 0.dp,
+                        start = innerPadding.calculateStartPadding(LocalLayoutDirection.current),
+                        end = innerPadding.calculateEndPadding(LocalLayoutDirection.current),
+                    )
+                    .windowInsetsPadding(
+                        WindowInsets.ime
+                            .exclude(WindowInsets.navigationBars)
+                            .only(WindowInsetsSides.Bottom)
+                    )
+                    .offset {
+                        val extra = if (imeVisible) {
+                            with(density) { navBarHeight.roundToPx() }
+                        } else 0
+                        IntOffset(0, extra)
+                    },
+                contentAlignment = Alignment.Center
             ) {
-                val messages = streamTopicMessages["${viewModel.chatId}.${viewModel.topicUuid ?: ""}"]
-                if (isLoading) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        AnimatedGif(Modifier.size(80.dp))
-                    }
-                } else {
-                    if (messages?.isEmpty() ?: true) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(LocalWorkspaceColorsPalette.current.background)
+                ) {
+                    val messages = streamTopicMessages["${viewModel.chatId}.${viewModel.topicUuid ?: ""}"]
+                    if (isLoading) {
                         Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxWidth(),
+                            modifier = Modifier.fillMaxSize(),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(
-                                text = "Сообщений нет"
-                            )
+                            AnimatedGif(Modifier.size(80.dp))
                         }
                     } else {
-                        LazyColumn(
-                            state = listState,
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxWidth()
-                                .padding(start = 16.dp, top = 0.dp, end = 16.dp, bottom = 8.dp),
-                            verticalArrangement = Arrangement.spacedBy(
-                                space = 8.dp,
-                                alignment = Alignment.Bottom
-                            )
-                        ) {
-                            items(items = messages.sortedBy { LocalDateTime.parse(it.createdAt, messageFormatter) }, key = { "${it.uuid}" }) { item ->
-                                ChatMessage(
-                                    item,
-                                    viewModel,
-                                    navController,
-                                    {
-                                        if (viewModel.shouldScrollToBottom) {
-                                            scope.launch {
-                                                listState.scrollToItem(messages.lastIndex)
-                                            }
-                                        }
-                                    }
+                        if (messages?.isEmpty() ?: true) {
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "Сообщений нет"
                                 )
                             }
+                        } else {
+                            LazyColumn(
+                                state = listState,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth()
+                                    .padding(start = if (selectionMode) 0.dp else 16.dp, top = 0.dp, end = 16.dp, bottom = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(
+                                    space = 8.dp,
+                                    alignment = Alignment.Bottom
+                                )
+                            ) {
+                                items(items = messages.sortedBy { LocalDateTime.parse(it.createdAt, messageFormatter) }, key = { "${it.uuid}" }) { item ->
+                                    ChatMessage(
+                                        item,
+                                        viewModel,
+                                        navController,
+                                        {
+                                            if (viewModel.shouldScrollToBottom) {
+                                                scope.launch {
+                                                    listState.scrollToItem(messages.lastIndex)
+                                                }
+                                            }
+                                        },
+                                        onForwardMessage = { message ->
+                                            forwardingSelection = false
+                                            forwardingMessages = listOf(message.copy(payload = message.payload.copy()))
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                        if (!selectionMode) {
+                            SendMessageView(viewModel)
                         }
                     }
-                    SendMessageView(viewModel)
                 }
             }
+        }
+        forwardingMessages?.let { sources ->
+            ForwardMessagesAction(
+                sources = sources,
+                sessionStore = viewModel.forwardSession,
+                client = viewModel.client,
+                repo = viewModel.repo,
+                userViewModel = viewModel.userViewModel,
+                onDismiss = { forwardingMessages = null },
+                onForwarded = {
+                    forwardingMessages = null
+                    if (forwardingSelection) viewModel.clearMessageSelection()
+                },
+            )
         }
     }
 }
@@ -423,8 +496,12 @@ fun ChatMessage(
     item: MessageResponse,
     viewModel: ChatDialogViewModel,
     navController: NavHostController,
-    onImageLoad: () -> Unit
+    onImageLoad: () -> Unit,
+    onForwardMessage: ((MessageResponse) -> Unit)? = null,
 ) {
+    val selectedMessageUuids by viewModel.selectedMessageUuids.collectAsStateWithLifecycle()
+    val selectionMode by viewModel.isSelectionMode.collectAsStateWithLifecycle()
+    val deletingSelected by viewModel.deletingSelectedMessages.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val messageFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
     Column(
@@ -472,15 +549,20 @@ fun ChatMessage(
 //                )
 //                }
         }
-        Column(
-            horizontalAlignment = Alignment.Start
+        SelectableMessageRow(
+            messageUuid = item.uuid,
+            description = item.description(stringResource(R.string.quote_forwarded_message)),
+            selectionMode = selectionMode,
+            selected = item.uuid in selectedMessageUuids,
+            enabled = viewModel.canSelectMessage(item) && !deletingSelected,
+            onToggle = { viewModel.toggleMessageSelection(item) },
         ) {
             if (Patterns.WEB_URL.matcher(item.payload.content)
                     .matches() && item.payload.content.contains(viewModel.repo.jitsiServerUrl)
             ) {
-                CallMessageView(item, viewModel, navController)
+                CallMessageView(item, viewModel, navController, onForwardMessage)
             } else {
-                TextMessageView(item, viewModel, navController, onImageLoad)
+                TextMessageView(item, viewModel, navController, onImageLoad, onForwardMessage)
             }
         }
     }

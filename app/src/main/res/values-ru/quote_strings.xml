@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="quote_snapshot_copy">Пересланная копия</string>
+    <string name="quote_loading">Загрузка сообщения…</string>
+    <string name="quote_unavailable">Сообщение недоступно</string>
+    <string name="quote_load_failed">Не удалось загрузить сообщение</string>
+    <string name="quote_retry">Повторить</string>
+    <string name="quote_forwarded_message">Пересланное сообщение</string>
+    <string name="quote_default_author">Цитируемое сообщение</string>
+</resources>

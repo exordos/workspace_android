@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="forward_load_chats_failed">Не удалось загрузить чаты</string>
+    <string name="forward_load_topics_failed">Не удалось загрузить топики</string>
+    <string name="forward_selected_chat">выбранный чат</string>
+    <string name="forward_verifying">Проверяем пересылку…</string>
+    <string name="forward_confirm_title">Переслать сообщения?</string>
+    <string name="forward_verify_again">Проверить ещё раз</string>
+    <string name="forward_stop_verifying">Прекратить проверку</string>
+    <string name="forward_stop_verifying_title">Прекратить проверку пересылки?</string>
+    <string name="forward_stop_verifying_body">Сообщения или вложения уже могли быть отправлены. Это действие не отменяет отправку. Перед новой пересылкой проверьте чат получателя: иначе сообщения могут повториться.</string>
+    <string name="forward_search">Найти</string>
+    <string name="forward_all_chats">Все чаты</string>
+    <string name="forward_retry_loading">Повторить загрузку</string>
+    <string name="forward_no_chats">Чаты не найдены</string>
+    <string name="forward_no_topics">Топики не найдены</string>
+    <string name="forward_external_preparation_failed">Не удалось подготовить сообщения и вложения для других приложений</string>
+    <string name="forward_in_workspace">В Workspace</string>
+    <string name="forward_retry">Повторить</string>
+    <string name="forward_return_to_messages">Вернитесь к сообщениям и выберите пересылку ещё раз</string>
+    <string name="forward_recipient_unknown">Не удалось определить получателя</string>
+    <string name="forward_chat_forbidden">Нет разрешения отправлять сообщения в этот чат</string>
+    <string name="forward_destination_unavailable">Этот чат или топик больше недоступен</string>
+    <string name="forward_send_failed">Не удалось переслать сообщения. Попробуйте ещё раз</string>
+    <string name="forward_delivery_uncertain">Результат пересылки пока не подтверждён. Проверьте ещё раз перед новой отправкой</string>
+    <string name="forward_quotes_too_deep">В сообщении слишком много вложенных цитат</string>
+    <string name="forward_too_much_data">Для одной пересылки выбрано слишком много данных</string>
+    <string name="forward_nested_quote_failed">Не удалось подготовить вложенную цитату</string>
+    <string name="forward_quoted_message_unavailable">Цитируемое сообщение недоступно</string>
+    <string name="forward_too_much_text">Для одной пересылки выбрано слишком много текста</string>
+    <string name="forward_attachment_invalid">Неверная ссылка на вложение</string>
+    <string name="forward_attachment_limit">В одной пересылке может быть не больше 32 вложений</string>
+    <string name="forward_upload_check_failed">Не удалось проверить загрузку вложения</string>
+    <string name="forward_upload_uncertain">Загрузка вложения пока не подтверждена. Проверьте ещё раз</string>
+    <string name="forward_upload_unconfirmed">Загрузка вложения пока не подтверждена</string>
+    <string name="forward_upload_forbidden">Нет разрешения загружать вложения в этот чат</string>
+    <string name="forward_attachment_too_large">Вложение слишком большое для этого сервера</string>
+    <string name="forward_attachment_unsupported">Формат вложения не поддерживается</string>
+    <string name="forward_upload_failed">Не удалось загрузить вложение</string>
+    <string name="forward_source_metadata_failed">Не удалось получить данные исходного вложения</string>
+    <string name="forward_source_format_failed">Не удалось определить формат исходного вложения</string>
+    <string name="forward_source_download_failed">Не удалось загрузить исходное вложение</string>
+    <string name="forward_source_changed">Исходное вложение изменилось. Выберите сообщение ещё раз</string>
+    <plurals name="forward_message_destination">
+        <item quantity="one">%1$d сообщение → %2$s</item>
+        <item quantity="few">%1$d сообщения → %2$s</item>
+        <item quantity="many">%1$d сообщений → %2$s</item>
+        <item quantity="other">%1$d сообщения → %2$s</item>
+    </plurals>
+</resources>

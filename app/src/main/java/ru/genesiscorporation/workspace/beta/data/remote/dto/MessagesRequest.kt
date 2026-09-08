@@ -76,10 +76,18 @@ data class MessageResponse(
     private fun parseQuotedMessages(): List<QuotedMessagePart> {
         return quoteBlockRegex.findAll(payload.content.trim())
             .map { match ->
-                QuotedMessagePart(
-                    uuid = match.groupValues[2],
-                    text = match.groupValues[3].trim(),
-                )
+                val selectedText = runCatching {
+                    java.net.URLDecoder.decode(match.groupValues[3], "UTF-8")
+                }.getOrNull()
+                if (selectedText == null) {
+                    // Keep malformed references literal, as MarkdownPayloadParser does.
+                    QuotedMessagePart(uuid = null, text = match.value)
+                } else {
+                    QuotedMessagePart(
+                        uuid = match.groupValues[2],
+                        text = match.groupValues[4].trim().ifBlank { selectedText },
+                    )
+                }
             }
             .toList()
     }
@@ -95,8 +103,12 @@ data class MessageResponse(
         }
     }
 
-    fun description(): String {
-        return asQuotedMessages().last().text
+    fun description(forwardedLabel: String = "Forwarded message"): String {
+        val snapshotHeader = authoredQuoteHeaderRegex.find(payload.content.trim())
+        if (snapshotHeader?.groupValues?.get(1)?.isNotBlank() == true) return forwardedLabel
+        return asQuotedMessages().lastOrNull()?.text.orEmpty().ifBlank {
+            if (containsQuotedMessages()) forwardedLabel else payload.content
+        }
     }
 }
 
@@ -112,7 +124,10 @@ data class QuotedMessagePart(
 )
 
 private val quoteBlockRegex = Regex(
-    """\[([^\]]*)\]\(urn:quote:([0-9a-fA-F-]{36})\)\s*\n+([\s\S]*?)(?=\n*\[(?:[^\]]*)\]\(urn:quote:|\z)"""
+    """\[((?:\\.|[^\]\\])*)\]\(urn:quote:([0-9a-fA-F-]{36})(?:\?text=([^\s)&#]+))?\)\s*([\s\S]*?)(?=\n*\[(?:\\.|[^\]\\])*\]\(urn:quote:|\z)"""
+)
+private val authoredQuoteHeaderRegex = Regex(
+    """^>[ \t]?\*\*((?:\\.|[^\r\n])+)\*\*:\r?(?:\n|$)"""
 )
 
 sealed interface MessageElement {
@@ -130,6 +145,12 @@ sealed interface MessageElement {
     data class Quote(
         val displayName: String,
         val uuid: String,
+        val text: String,
+    ) : MessageElement
+
+    /** A forwarded snapshot is readable independently of the original conversation. */
+    data class SnapshotQuote(
+        val displayName: String,
         val text: String,
     ) : MessageElement
 

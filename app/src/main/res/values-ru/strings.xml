@@ -7,4 +7,32 @@
         <item quantity="many">%d участников</item>
         <item quantity="other">%d участников</item>
     </plurals>
+    <string name="message_delete">Удалить</string>
+    <string name="message_deleting">Удаление…</string>
+    <string name="message_delete_title">Удалить сообщение?</string>
+    <string name="message_delete_confirmation">Сообщение будет удалено для всех участников. Отменить это действие нельзя.</string>
+    <string name="message_delete_cancel">Отмена</string>
+    <string name="message_select">Выбрать</string>
+    <string name="messages_delete_confirmation">Сообщения будут удалены для всех участников. Отменить это действие нельзя.</string>
+    <string name="message_delete_not_allowed">Это сообщение нельзя удалить</string>
+    <string name="message_delete_failed">Не удалось удалить сообщение. Попробуйте ещё раз</string>
+    <string name="messages_selection_limit">Можно выбрать не больше %d сообщений</string>
+    <string name="messages_delete_partial_failure">Удалено: %1$d из %2$d. Не удалось удалить: %3$d. Оставшиеся сообщения можно удалить повторно</string>
+    <string name="message_selection_description">Выбрать сообщение: %1$s</string>
+    <string name="messages_selection_own_only">Можно удалить только свои отправленные сообщения</string>
+    <plurals name="messages_selected_count">
+        <item quantity="one">Выбрано %d сообщение</item>
+        <item quantity="few">Выбрано %d сообщения</item>
+        <item quantity="many">Выбрано %d сообщений</item>
+        <item quantity="other">Выбрано %d сообщений</item>
+    </plurals>
+    <plurals name="messages_delete_title">
+        <item quantity="one">Удалить %d сообщение?</item>
+        <item quantity="few">Удалить %d сообщения?</item>
+        <item quantity="many">Удалить %d сообщений?</item>
+        <item quantity="other">Удалить %d сообщений?</item>
+    </plurals>
+    <string name="messages_forward">Переслать</string>
+    <string name="messages_forward_limit">Для пересылки выберите не больше %d сообщений</string>
+    <string name="forward_members_online">%1$s, %2$d в сети</string>
 </resources>

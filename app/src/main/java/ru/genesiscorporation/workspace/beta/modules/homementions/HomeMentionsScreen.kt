@@ -28,6 +28,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
@@ -186,7 +187,7 @@ fun HomeMentionsScreen(
                                                 fontWeight = FontWeight.Medium
                                             )
                                             EnhancedMarkdown(
-                                                markdown = item.description(),
+                                                markdown = item.description(stringResource(R.string.quote_forwarded_message)),
                                                 style = TextStyle(
                                                     color = LocalWorkspaceColorsPalette.current.textHeaders,
                                                     fontSize = 14.sp,

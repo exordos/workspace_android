@@ -24,6 +24,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -137,7 +138,7 @@ fun ChatTopic(
                             )
                         }
                         MarkdownText(
-                            markdown = lastMessage.description(),
+                            markdown = lastMessage.description(stringResource(R.string.quote_forwarded_message)),
                             maxLines = 1,
                             style = TextStyle(
                                 color = LocalWorkspaceColorsPalette.current.textAdditional50,

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity
+            android:name="ru.genesiscorporation.workspace.beta.sharefixture.ExternalShareReceiverActivity"
+            android:exported="true"
+            android:label="CASSI share receiver"
+            android:theme="@android:style/Theme.NoDisplay" />
+    </application>
+</manifest>

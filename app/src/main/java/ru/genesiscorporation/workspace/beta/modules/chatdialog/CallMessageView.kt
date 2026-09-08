@@ -1,6 +1,7 @@
 package ru.genesiscorporation.workspace.beta.modules.chatdialog
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,6 +14,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -44,8 +49,10 @@ import kotlin.time.ExperimentalTime
 fun CallMessageView(
     item: MessageResponse,
     viewModel: ChatDialogViewModel,
-    navController: NavHostController
+    navController: NavHostController,
+    onForwardMessage: ((MessageResponse) -> Unit)? = null,
 ) {
+    var menuExpanded by remember(item.uuid) { mutableStateOf(false) }
     val zone = ZoneId.systemDefault()
     val hhmmFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
     val scope = rememberCoroutineScope()
@@ -134,65 +141,71 @@ fun CallMessageView(
                 }
             }
         }
-        Row(
-            verticalAlignment = Alignment.Bottom,
-            modifier = Modifier
-                .background(
-                    LocalWorkspaceColorsPalette.current.messageActiveCallBackground,
-                    shape = bubbleShape
-                )
-                .padding(10.dp)
-                .clickable {
-                    val serverUrl = viewModel.repo.jitsiServerUrl
-                    if (serverUrl.isNotEmpty()) {
-                        runCatching {
-                            val options = JitsiMeetConferenceOptions.Builder()
-                                .setServerURL(URL(serverUrl))
-                                .setRoom(itemUrl.path.drop(1))
-                                .build()
-                            JitsiMeetActivity.launch(context, options)
+        Box {
+            Row(
+                verticalAlignment = Alignment.Bottom,
+                modifier = Modifier
+                    .background(
+                        LocalWorkspaceColorsPalette.current.messageActiveCallBackground,
+                        shape = bubbleShape
+                    )
+                    .padding(10.dp)
+                    .combinedClickable(
+                        onLongClick = { menuExpanded = viewModel.canSelectMessage(item) },
+                        onClick = {
+                            val serverUrl = viewModel.repo.jitsiServerUrl
+                            if (serverUrl.isNotEmpty()) {
+                                runCatching {
+                                    val options = JitsiMeetConferenceOptions.Builder()
+                                        .setServerURL(URL(serverUrl))
+                                        .setRoom(itemUrl.path.drop(1))
+                                        .build()
+                                    JitsiMeetActivity.launch(context, options)
+                                }
+                            }
                         }
+                    )
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.End
+                ) {
+                    Row {
+                        Text(
+                            text = "Звонок",
+                            color = LocalWorkspaceColorsPalette.current.indicatorGreen,
+                            fontSize = 14.sp,
+                            fontFamily = InterFontFamily,
+                        )
+                        Text(
+                            text = itemUrl.path.drop(1),
+                            color = LocalWorkspaceColorsPalette.current.textHeaders,
+                            fontSize = 14.sp,
+                            fontFamily = InterFontFamily,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .padding(horizontal = 12.dp)
+                        )
+                        Icon(
+                            painter = painterResource(R.drawable.call),
+                            "Call",
+                            tint = LocalWorkspaceColorsPalette.current.indicatorGreen
+                        )
+                    }
+                    Row(
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        val instant = Instant.parse(item.createdAt)
+                        Text(
+                            text = instant.atZone(zone).format(hhmmFormatter),
+                            color = LocalWorkspaceColorsPalette.current.messageTimeColor,
+                            fontSize = 14.sp,
+                            fontFamily = InterFontFamily,
+                        )
                     }
                 }
-        ) {
-            Column(
-                horizontalAlignment = Alignment.End
-            ) {
-                Row {
-                    Text(
-                        text = "Звонок",
-                        color = LocalWorkspaceColorsPalette.current.indicatorGreen,
-                        fontSize = 14.sp,
-                        fontFamily = InterFontFamily,
-                    )
-                    Text(
-                        text = itemUrl.path.drop(1),
-                        color = LocalWorkspaceColorsPalette.current.textHeaders,
-                        fontSize = 14.sp,
-                        fontFamily = InterFontFamily,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier
-                            .padding(horizontal = 12.dp)
-                    )
-                    Icon(
-                        painter = painterResource(R.drawable.call),
-                        "Call",
-                        tint = LocalWorkspaceColorsPalette.current.indicatorGreen
-                    )
-                }
-                Row(
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    val instant = Instant.parse(item.createdAt)
-                    Text(
-                        text = instant.atZone(zone).format(hhmmFormatter),
-                        color = LocalWorkspaceColorsPalette.current.messageTimeColor,
-                        fontSize = 14.sp,
-                        fontFamily = InterFontFamily,
-                    )
-                }
             }
+            MessageDeletionMenu(item, viewModel, menuExpanded, { menuExpanded = false }, onForwardMessage)
         }
     }
 }

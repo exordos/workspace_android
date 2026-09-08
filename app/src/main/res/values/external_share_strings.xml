@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="external_share_attachment">Attachment</string>
+    <string name="external_share_attachments">Attachments</string>
+    <string name="external_share_workspace_link">[Workspace link]</string>
+</resources>

@@ -12,6 +12,8 @@ import io.ktor.client.request.header
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
@@ -27,6 +29,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.data.remote.dto.AddMessageReactionRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.DeleteDraftRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.DeleteMessageRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Draft
 import ru.genesiscorporation.workspace.beta.data.remote.dto.EditMessageRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MarkMessagesReadRequest
@@ -36,6 +39,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageReaction
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponsePayload
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesByIdsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.RemoveMessageReactionRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.SendMessageRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
@@ -113,6 +117,117 @@ class ChatDialogViewModel(
         )
 
     private var possibleMessage: MessageResponse? = null
+
+    internal val forwardSession = ForwardSessionStore()
+
+    private val quoteResolver = MessageQuoteResolver(
+        scope = viewModelScope,
+        request = { client.performRequest(MessagesByIdsRequest(it)) },
+    )
+    internal val quoteStates: StateFlow<Map<String, MessageQuoteState>> = quoteResolver.states
+
+    fun loadQuotedMessages(messageUuids: Collection<String>) = quoteResolver.load(messageUuids)
+
+    fun retryQuotedMessage(messageUuid: String) = quoteResolver.retry(messageUuid)
+
+    private val messageDeletion = MessageDeletion(
+        canDelete = { canDeleteMessage(it) },
+        request = { client.performRequest(DeleteMessageRequest(it)) },
+        onDeleted = { messageUuid ->
+            repo.removeMessage(messageUuid)
+            clearDeletedComposerReference(messageUuid)
+        },
+    )
+    val deletingMessageUuids: StateFlow<Set<String>> = messageDeletion.deletingMessageUuids
+    val actionError: StateFlow<MessageActionError?> = messageDeletion.actionError
+
+    private val messageSelection = MessageSelection(
+        canSelect = { canSelectMessage(it) },
+        canDelete = { canDeleteMessage(it) && it.uuid !in deletingMessageUuids.value },
+        deletion = messageDeletion,
+    )
+    val selectedMessageUuids: StateFlow<Set<String>> = messageSelection.selectedMessageUuids
+    val isSelectionMode: StateFlow<Boolean> = messageSelection.isSelectionMode
+    val canDeleteSelectedMessages: StateFlow<Boolean> = messageSelection.canDeleteSelectedMessages
+    val deletingSelectedMessages: StateFlow<Boolean> = messageSelection.deletingSelectedMessages
+
+    fun canSelectMessage(message: MessageResponse): Boolean = canSelectMessage(
+        message = message,
+        streamUuid = chatId,
+        topicUuid = topicUuid,
+        pendingMessageUuid = possibleMessage?.uuid,
+    )
+
+    fun selectedMessages(): List<MessageResponse> = messageSelection.selectedMessages()
+
+    fun startMessageSelection(message: MessageResponse) = messageSelection.startMessageSelection(message)
+
+    fun toggleMessageSelection(message: MessageResponse) = messageSelection.toggleMessageSelection(message)
+
+    fun clearMessageSelection() = messageSelection.clearMessageSelection()
+
+    fun deleteSelectedMessages() {
+        viewModelScope.launch { messageSelection.deleteSelectedMessages() }
+    }
+
+    init {
+        viewModelScope.launch {
+            repo.streamTopicMessages.collect { conversations ->
+                conversations["$chatId.$topicUuid"]?.let(messageSelection::refreshMessages)
+            }
+        }
+        viewModelScope.launch {
+            repo.messageDeletedEvents.collect { messageUuid ->
+                quoteResolver.invalidate(messageUuid)
+                messageSelection.removeMessage(messageUuid)
+                clearDeletedComposerReference(messageUuid)
+            }
+        }
+        viewModelScope.launch {
+            repo.messageUpdatedEvents.collect(quoteResolver::update)
+        }
+        viewModelScope.launch {
+            var accountIdentity: Pair<String?, String?>? = null
+            combine(userViewModel.repo.baseUrlFlow, repo.currentUser) { baseUrl, user ->
+                baseUrl to user?.uuid
+            }.distinctUntilChanged().collect { identity ->
+                if (identity.first != null && identity.second != null) {
+                    if (accountIdentity != null && accountIdentity != identity) quoteResolver.reset()
+                    accountIdentity = identity
+                } else if (accountIdentity != null) {
+                    quoteResolver.reset()
+                    accountIdentity = null
+                }
+            }
+        }
+    }
+
+    fun canDeleteMessage(message: MessageResponse): Boolean = canDeleteMessage(
+        message = message,
+        streamUuid = chatId,
+        topicUuid = topicUuid,
+        pendingMessageUuid = possibleMessage?.uuid,
+    )
+
+    fun deleteMessage(message: MessageResponse) {
+        if (deletingSelectedMessages.value) return
+        viewModelScope.launch {
+            messageDeletion.delete(message)
+        }
+    }
+
+    fun clearActionError(error: MessageActionError) {
+        messageDeletion.clearActionError(error)
+    }
+
+    private fun clearDeletedComposerReference(messageUuid: String) {
+        if (editingMessage?.uuid == messageUuid) {
+            clearEditingMessage()
+        }
+        _quotedMessages.value.filter { it.message.uuid == messageUuid }.forEach {
+            clearQuotingMessage(it)
+        }
+    }
 
     var user: UserResponseData? = null
 
@@ -551,11 +666,11 @@ data class AttachedUri(
 )
 
 object MarkdownPayloadParser {
-    private val imageRegex = Regex("""!\[([^\]]*)\]\(urn:image:([^)]+)\)""")
-    private val fileRegex = Regex("""\[([^\]]*)\]\(urn:file:([^)]+)\)""")
-    private val quoteRegex = Regex("""\[([^\]]*)\]\(urn:quote:([^)]+)\)""")
+    private val imageRegex = Regex("""!\[((?:\\.|[^\]\\])*)\]\(urn:image:([^)]+)\)""")
+    private val fileRegex = Regex("""\[((?:\\.|[^\]\\])*)\]\(urn:file:([^)]+)\)""")
+    private val quoteRegex = Regex("""\[((?:\\.|[^\]\\])*)\]\(urn:quote:([0-9a-fA-F-]{36})(?:\?text=([^\s)&#]+))?\)""")
     fun parse(content: String): List<MessageElement> {
-        val input = content.replace("\\n", "\n").trim()
+        val input = content.trim()
         if (input.isEmpty()) return emptyList()
         val elements = mutableListOf<MessageElement>()
         var index = 0
@@ -584,43 +699,98 @@ object MarkdownPayloadParser {
         val element: MessageElement,
     )
     private fun findNextSpecial(input: String, fromIndex: Int): SpecialMatch? {
-        val image = imageRegex.find(input, fromIndex)
-        val file = fileRegex.find(input, fromIndex)
-        val quote = quoteRegex.find(input, fromIndex)
-        val candidates = listOfNotNull(
-            image?.let {
-                SpecialMatch(
-                    start = it.range.first,
-                    end = it.range.last + 1,
-                    element = MessageElement.Image(
-                        fileName = it.groupValues[1],
-                        uuid = it.groupValues[2],
-                    ),
-                )
-            },
-            file?.let {
-                SpecialMatch(
-                    start = it.range.first,
-                    end = it.range.last + 1,
-                    element = MessageElement.File(
-                        fileName = it.groupValues[1],
-                        uuid = it.groupValues[2],
-                    ),
-                )
-            },
-            quote?.let {
-                SpecialMatch(
-                    start = it.range.first,
-                    end = it.range.last + 1,
-                    element = MessageElement.Quote(
-                        displayName = it.groupValues[1],
-                        uuid = it.groupValues[2],
-                        text = "", // remove if you dropped this field
-                    ),
-                )
-            },
-        )
-        return candidates.minByOrNull { it.start }
+        var searchIndex = fromIndex
+        while (searchIndex < input.length) {
+            val image = imageRegex.find(input, searchIndex)
+            val file = fileRegex.find(input, searchIndex)
+            val quote = quoteRegex.find(input, searchIndex)
+            val candidates = listOfNotNull(
+                findSnapshotQuote(input, searchIndex),
+                image?.let {
+                    SpecialMatch(
+                        start = it.range.first,
+                        end = it.range.last + 1,
+                        element = MessageElement.Image(
+                            fileName = it.groupValues[1].replace(Regex("""\\(.)"""), "$1"),
+                            uuid = it.groupValues[2],
+                        ),
+                    )
+                },
+                file?.let {
+                    SpecialMatch(
+                        start = it.range.first,
+                        end = it.range.last + 1,
+                        element = MessageElement.File(
+                            fileName = it.groupValues[1].replace(Regex("""\\(.)"""), "$1"),
+                            uuid = it.groupValues[2],
+                        ),
+                    )
+                },
+                quote?.let {
+                    val selectedText = runCatching {
+                        java.net.URLDecoder.decode(it.groupValues[3], "UTF-8")
+                    }.getOrNull() ?: return@let null
+                    SpecialMatch(
+                        start = it.range.first,
+                        end = it.range.last + 1,
+                        element = MessageElement.Quote(
+                            displayName = it.groupValues[1].replace(Regex("""\\(.)"""), "$1"),
+                            uuid = it.groupValues[2],
+                            text = selectedText,
+                        ),
+                    )
+                },
+            )
+            val next = candidates.minByOrNull { it.start } ?: return null
+            val literal = listOfNotNull(findCodeBlock(input, searchIndex), findInlineCode(input, searchIndex)).minByOrNull { it.start }
+            if (literal != null && literal.start <= next.start) {
+                searchIndex = literal.end
+                continue
+            }
+            return next
+        }
+        return null
+    }
+
+    private fun findSnapshotQuote(input: String, fromIndex: Int): SpecialMatch? {
+        val author = Regex("""(?m)^>[ \t]?\*\*((?:\\.|[^\r\n])+)\*\*:\r?$""")
+            .findAll(input, fromIndex)
+            .firstOrNull { match ->
+                val start = match.range.first
+                val previousLineStart = if (start > 1) input.lastIndexOf('\n', start - 2) + 1 else 0
+                // An author marker must start the block, not appear in an ordinary quote's body.
+                (start == 0 || input.getOrNull(previousLineStart) != '>') &&
+                    match.groupValues[1].isNotBlank()
+            } ?: return null
+        val start = author.range.first
+        var end = start
+        val lines = mutableListOf<String>()
+        while (end < input.length && input[end] == '>') {
+            val lineEnd = input.indexOf('\n', end).let { if (it < 0) input.length else it }
+            lines += input.substring(end + 1, lineEnd).removePrefix(" ").removePrefix("\t").removeSuffix("\r")
+            end = if (lineEnd < input.length) lineEnd + 1 else lineEnd
+        }
+        val label = author.groupValues[1].replace(Regex("""\\(.)"""), "$1")
+        val body = lines.drop(1).joinToString("\n")
+        return SpecialMatch(start, end, MessageElement.SnapshotQuote(label, body))
+    }
+
+    /** References inside code are literal, including a code fence in a forwarded snapshot. */
+    private fun findCodeBlock(input: String, fromIndex: Int): SpecialMatch? {
+        val opening = Regex("(?m)^(`{3,}|~{3,})[^\\r\\n]*\\r?\\n").find(input, fromIndex) ?: return null
+        val fence = opening.groupValues[1]
+        val closing = Regex("(?m)^${Regex.escape(fence.first().toString())}{${fence.length},}[ \\t]*(?:\\r?\\n|$)")
+            .find(input, opening.range.last + 1)
+        val end = closing?.let { it.range.last + 1 } ?: input.length
+        return SpecialMatch(opening.range.first, end, MessageElement.PlainText(input.substring(opening.range.first, end)))
+    }
+
+    private fun findInlineCode(input: String, fromIndex: Int): SpecialMatch? {
+        val opening = Regex("`+").find(input, fromIndex) ?: return null
+        val closing = Regex("(?<!`)`{${opening.value.length}}(?!`)")
+            .find(input, opening.range.last + 1) ?: return null
+        val end = closing.range.last + 1
+        return SpecialMatch(opening.range.first, end, MessageElement.PlainText(input.substring(opening.range.first, end)))
     }
 }
 

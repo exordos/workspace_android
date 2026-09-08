@@ -29,5 +29,6 @@ data class Stream(
     @SerialName("direct_user_uuid") val directUserUuid: String? = null,
     @SerialName("notification_mode") var notificationMode: String,
     var directUser: UserResponseData? = null,
-    var lastMessage: MessageResponse? = null
+    var lastMessage: MessageResponse? = null,
+    @SerialName("is_archived") val isArchived: Boolean = false
 )

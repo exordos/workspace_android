@@ -26,9 +26,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -87,9 +84,11 @@ fun TextMessageView(
     item: MessageResponse,
     viewModel: ChatDialogViewModel,
     navController: NavHostController,
-    onImageLoad: () -> Unit
+    onImageLoad: () -> Unit,
+    onForwardMessage: ((MessageResponse) -> Unit)? = null,
 ) {
     val quotedMessages by viewModel.quotedMessages.collectAsState()
+    val deletingMessageUuids by viewModel.deletingMessageUuids.collectAsStateWithLifecycle()
     val zone = ZoneId.systemDefault()
     val hhmmFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
     val scope = rememberCoroutineScope()
@@ -110,7 +109,7 @@ fun TextMessageView(
             bottomEnd = 8.dp
         )
     }
-    var menuExpanded by remember { mutableStateOf(false) }
+    var menuExpanded by remember(item.uuid) { mutableStateOf(false) }
 
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -216,10 +215,10 @@ fun TextMessageView(
                             fontFamily = InterFontFamily,
                             fontWeight = FontWeight.Medium
                         )
-                        val messageElements = MarkdownPayloadParser.parse(item.payload.content)
+                        val messageElements = budgetMessageQuotes(MarkdownPayloadParser.parse(item.payload.content), MAX_RENDERED_QUOTE_NODES)
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            messageElements.forEach { element ->
-                                when (element) {
+                            messageElements.forEach { budgeted ->
+                                when (val element = budgeted.element) {
                                     is MessageElement.Image -> {
                                         val baseUrl by viewModel.userViewModel.repo.baseUrlFlow.collectAsStateWithLifecycle(
                                             initialValue = ""
@@ -237,7 +236,10 @@ fun TextMessageView(
                                             AsyncImage(
                                                 model = imageRequest,
                                                 contentDescription = null,
-                                                modifier = Modifier.clickable { showFullscreen = true },
+                                                modifier = Modifier.combinedClickable(
+                                                    onClick = { showFullscreen = true },
+                                                    onLongClick = { menuExpanded = true },
+                                                ),
                                                 onState = { state ->
                                                     when (state) {
                                                         is AsyncImagePainter.State.Success -> {
@@ -268,7 +270,14 @@ fun TextMessageView(
                                         element.uuid,
                                         item.isOwn,
                                         viewModel,
-                                        navController
+                                        navController,
+                                        displayName = element.displayName,
+                                        quoteNodeBudget = budgeted.quoteBudget,
+                                        selectedText = element.text.takeIf { it.isNotEmpty() },
+                                    )
+
+                                    is MessageElement.SnapshotQuote -> SnapshotQuoteView(
+                                        element, item.isOwn, viewModel, navController, budgeted.quoteBudget,
                                     )
 
                                     is MessageElement.PlainText -> EnhancedMarkdown(
@@ -294,103 +303,38 @@ fun TextMessageView(
                         fontFamily = InterFontFamily,
                     )
                 }
-                DropdownMenu(
-                    expanded = menuExpanded,
-                    onDismissRequest = { menuExpanded = false }
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                        horizontalArrangement = Arrangement.SpaceEvenly
-                    ) {
-                        listOf("👍", "❤️", "😂", "😮", "😢").forEach { emoji ->
-                            TextButton(
-                                onClick = {
-                                    scope.launch {
-                                        viewModel.onReactionTap(item.uuid, emoji)
-                                    }
-                                    menuExpanded = false
-                                },
-                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
-                                modifier = Modifier.size(40.dp)
-                            ) {
-                                Text(text = emoji, fontSize = 20.sp)
-                            }
-                        }
-                    }
-                    HorizontalDivider()
-                    DropdownMenuItem(
-                        text = {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Image(
-                                    painter = painterResource(id = R.drawable.ic_quote),
-                                    contentDescription = ""
-                                )
-                                Text(
-                                    "Ответить",
-                                    color = LocalWorkspaceColorsPalette.current.textHeaders,
-                                    fontSize = 14.sp,
-                                    fontFamily = InterFontFamily
-                                )
-                            }
-                        },
-                        onClick = {
-                            viewModel.onQuoteMessageClicked(item)
+                MessageDeletionControls(
+                    messageUuid = item.uuid,
+                    canDelete = viewModel.canDeleteMessage(item),
+                    isDeleting = item.uuid in deletingMessageUuids,
+                    onDelete = { viewModel.deleteMessage(item) },
+                ) { requestDelete ->
+                    MessageActionMenu(
+                        expanded = menuExpanded,
+                        onDismissRequest = { menuExpanded = false },
+                        canDelete = viewModel.canDeleteMessage(item),
+                        isDeleting = item.uuid in deletingMessageUuids,
+                        onDelete = {
                             menuExpanded = false
-                        }
+                            requestDelete()
+                        },
+                        onReaction = { emoji ->
+                            scope.launch { viewModel.onReactionTap(item.uuid, emoji) }
+                        },
+                        onReply = { viewModel.onQuoteMessageClicked(item) },
+                        onAddQuote = if (quotedMessages.isNotEmpty()) {
+                            { viewModel.onAddQuoteMessageClicked(item) }
+                        } else null,
+                        onForward = if (viewModel.canSelectMessage(item) && onForwardMessage != null) {
+                            { onForwardMessage(item) }
+                        } else null,
+                        onSelect = if (viewModel.canSelectMessage(item)) {
+                            { viewModel.startMessageSelection(item) }
+                        } else null,
+                        onEdit = if (item.isOwn) {
+                            { viewModel.onEditMessageClicked(item) }
+                        } else null,
                     )
-                    if (quotedMessages.count() > 0) {
-                        DropdownMenuItem(
-                            text = {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Image(
-                                        painter = painterResource(id = R.drawable.ic_add_quote),
-                                        contentDescription = ""
-                                    )
-                                    Text(
-                                        "Добавить цитату",
-                                        color = LocalWorkspaceColorsPalette.current.textHeaders,
-                                        fontSize = 14.sp,
-                                        fontFamily = InterFontFamily
-                                    )
-                                }
-                            },
-                            onClick = {
-                                viewModel.onAddQuoteMessageClicked(item)
-                                menuExpanded = false
-                            }
-                        )
-                    }
-                    if (item.isOwn) {
-                        DropdownMenuItem(
-                            text = {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                ) {
-                                    Image(
-                                        painter = painterResource(id = R.drawable.ic_edit),
-                                        contentDescription = ""
-                                    )
-                                    Text(
-                                        "Изменить",
-                                        color = LocalWorkspaceColorsPalette.current.textHeaders,
-                                        fontSize = 14.sp,
-                                        fontFamily = InterFontFamily
-                                    )
-                                }
-                            },
-                            onClick = {
-                                viewModel.onEditMessageClicked(item)
-                                menuExpanded = false
-                            }
-                        )
-                    }
                 }
             }
             if (!item.reactions.isEmpty()) {
@@ -428,113 +372,6 @@ fun TextMessageView(
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable fun QuotedMessagePartView(
-    quotedMessageUuid: String,
-    isOwn: Boolean,
-    viewModel: ChatDialogViewModel,
-    navController: NavHostController
-) {
-    val streamTopicMessages by viewModel.streamTopicMessages.collectAsStateWithLifecycle()
-    Column() {
-        if (quotedMessageUuid != null) {
-            val messages = streamTopicMessages["${viewModel.chatId}.${viewModel.topicUuid ?: ""}"]
-            val message = messages?.firstOrNull { it.uuid == quotedMessageUuid }
-            ReferenceMessageBase(
-                Modifier
-                    .padding(vertical = 4.dp),
-                shouldClose = false, onCloseTap = {}
-            ) {
-                Column(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (isOwn) LocalWorkspaceColorsPalette.current.messageOwnSelectedBg else LocalWorkspaceColorsPalette.current.messageOwnBackground)
-                        .padding(8.dp)
-                ) {
-                    Text(
-                        message?.user?.displayableName() ?: "Цитируемое сообщение",
-                        color = LocalWorkspaceColorsPalette.current.indicatorOrange,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    val messageContent = message?.payload?.content
-                    val messageElements = MarkdownPayloadParser.parse(messageContent ?: "")
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        messageElements.forEach { element ->
-                            when (element) {
-                                is MessageElement.Image -> {
-                                    Text("image")
-//                                    val baseUrl by viewModel.userViewModel.repo.baseUrlFlow.collectAsStateWithLifecycle(
-//                                        initialValue = ""
-//                                    )
-//                                    val authHeaders = viewModel.client.authHeaders()
-//                                    val headers = NetworkHeaders.Builder()
-//                                        .set(authHeaders.first().title, authHeaders.first().value)
-//                                        .build()
-//                                    val imageUrl = "$baseUrl/api/workspace/v1/messenger/files/${element.uuid}/actions/download"
-//                                    if (imageUrl != null) {
-//                                        val imageRequest = ImageRequest.Builder(LocalContext.current)
-//                                            .data(imageUrl)
-//                                            .httpHeaders(headers)
-//                                            .build()
-//                                        AsyncImage(
-//                                            model = imageRequest,
-//                                            contentDescription = null,
-//                                            modifier = Modifier.clickable { showFullscreen = true },
-//                                            onState = { state ->
-//                                                when (state) {
-//                                                    is AsyncImagePainter.State.Success -> {
-//                                                        onImageLoad()
-//                                                    }
-//
-//                                                    else -> Unit
-//                                                }
-//                                            }
-//                                        )
-//                                    }
-                                }
-
-                                is MessageElement.File -> FileAttachmentRow(
-                                    element = element,
-                                    viewModel = viewModel,
-                                    onOpenFile = { },
-                                )
-
-                                is MessageElement.Quote -> QuotedMessagePartView(
-                                    element.uuid,
-                                    false,
-                                    viewModel,
-                                    navController
-                                )
-
-                                is MessageElement.PlainText -> EnhancedMarkdown(
-                                    markdown = element.text,
-                                    style = TextStyle(
-                                        color = LocalWorkspaceColorsPalette.current.textHeaders,
-                                        fontSize = 14.sp,
-                                        fontFamily = InterFontFamily,
-                                    ),
-                                    navController = navController,
-                                    viewModel = viewModel
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        } else {
-            Text(
-                "Не удалось загрузить сообщение",
-                color = LocalWorkspaceColorsPalette.current.textAdditional30,
-                fontSize = 12.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
         }
     }
 }

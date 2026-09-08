@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="forward_workspace_target" translatable="false">Workspace</string>
+    <string name="forward_load_chats_failed">Could not load chats</string>
+    <string name="forward_load_topics_failed">Could not load topics</string>
+    <string name="forward_selected_chat">selected chat</string>
+    <string name="forward_verifying">Checking delivery…</string>
+    <string name="forward_confirm_title">Forward messages?</string>
+    <string name="forward_verify_again">Check again</string>
+    <string name="forward_stop_verifying">Stop checking</string>
+    <string name="forward_stop_verifying_title">Stop checking delivery?</string>
+    <string name="forward_stop_verifying_body">Messages or attachments may already have been sent. This does not cancel delivery. Before forwarding again, check the recipient chat to avoid duplicate messages.</string>
+    <string name="forward_search">Search</string>
+    <string name="forward_all_chats">All chats</string>
+    <string name="forward_retry_loading">Retry loading</string>
+    <string name="forward_no_chats">No chats found</string>
+    <string name="forward_no_topics">No topics found</string>
+    <string name="forward_external_preparation_failed">Could not prepare messages and attachments for other apps</string>
+    <string name="forward_in_workspace">In Workspace</string>
+    <string name="forward_retry">Retry</string>
+    <string name="forward_return_to_messages">Return to your messages and choose Forward again</string>
+    <string name="forward_recipient_unknown">Could not determine the recipient</string>
+    <string name="forward_chat_forbidden">You do not have permission to send messages to this chat</string>
+    <string name="forward_destination_unavailable">This chat or topic is no longer available</string>
+    <string name="forward_send_failed">Could not forward messages. Try again</string>
+    <string name="forward_delivery_uncertain">Delivery has not been confirmed yet. Check again before sending another copy</string>
+    <string name="forward_quotes_too_deep">The message contains too many nested quotes</string>
+    <string name="forward_too_much_data">Too much content selected for one forward</string>
+    <string name="forward_nested_quote_failed">Could not prepare a nested quote</string>
+    <string name="forward_quoted_message_unavailable">The quoted message is unavailable</string>
+    <string name="forward_too_much_text">Too much text selected for one forward</string>
+    <string name="forward_attachment_invalid">Invalid attachment link</string>
+    <string name="forward_attachment_limit">A forward can contain no more than 32 attachments</string>
+    <string name="forward_upload_check_failed">Could not check the attachment upload</string>
+    <string name="forward_upload_uncertain">The attachment upload has not been confirmed yet. Check again</string>
+    <string name="forward_upload_unconfirmed">The attachment upload has not been confirmed yet</string>
+    <string name="forward_upload_forbidden">You do not have permission to upload attachments to this chat</string>
+    <string name="forward_attachment_too_large">The attachment is too large for this server</string>
+    <string name="forward_attachment_unsupported">The attachment format is not supported</string>
+    <string name="forward_upload_failed">Could not upload the attachment</string>
+    <string name="forward_source_metadata_failed">Could not read the original attachment details</string>
+    <string name="forward_source_format_failed">Could not determine the original attachment format</string>
+    <string name="forward_source_download_failed">Could not download the original attachment</string>
+    <string name="forward_source_changed">The original attachment has changed. Select the message again</string>
+    <plurals name="forward_message_destination">
+        <item quantity="one">%1$d message → %2$s</item>
+        <item quantity="other">%1$d messages → %2$s</item>
+    </plurals>
+</resources>

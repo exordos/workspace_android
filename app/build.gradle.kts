@@ -51,6 +51,11 @@ android {
         compose = true
         buildConfig = true
     }
+
+    sourceSets {
+        getByName("test").setRoot("tests/unit")
+        getByName("androidTest").setRoot("tests/instrumented")
+    }
 }
 
 dependencies {
