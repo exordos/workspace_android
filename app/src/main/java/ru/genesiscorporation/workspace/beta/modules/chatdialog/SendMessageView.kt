@@ -1,7 +1,11 @@
 package ru.genesiscorporation.workspace.beta.modules.chatdialog
 
+import android.Manifest
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.provider.MediaStore
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -82,6 +86,7 @@ import java.io.File
 import kotlin.math.max
 import kotlin.math.min
 import android.provider.OpenableColumns
+import androidx.core.content.ContextCompat
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -362,13 +367,6 @@ fun AttachButton(
 ) {
     val context = LocalContext.current
     var menuExpanded by remember { mutableStateOf(false) }
-
-    val pickImageLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri ->
-        uri?.let(onImagePicked)
-    }
-
     var cameraImageUri by remember { mutableStateOf<Uri?>(null) }
     val takePhotoLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
@@ -377,6 +375,18 @@ fun AttachButton(
             cameraImageUri?.let(onPhotoTaken)
         }
     }
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            cameraImageUri?.let { takePhotoLauncher.launch(it) }
+        }
+    }
+    val pickImageLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        uri?.let(onImagePicked)
+    }
 
     val pickFileLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -384,6 +394,25 @@ fun AttachButton(
         uri?.let {
             val name = getFileName(context, it)
             onFilePicked(it, name)
+        }
+    }
+
+    fun launchCamera() {
+        val photoFile = File(context.cacheDir, "photo_${System.currentTimeMillis()}.jpg")
+        val uri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            photoFile
+        )
+        cameraImageUri = uri
+        when {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+                    PackageManager.PERMISSION_GRANTED -> {
+                takePhotoLauncher.launch(uri)
+            }
+            else -> {
+                cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+            }
         }
     }
     Box {
@@ -415,10 +444,7 @@ fun AttachButton(
             DropdownMenuItem(
                 text = { Text("Take photo") },
                 onClick = {
-                    menuExpanded = false
-                    val uri = createImageUri(context)
-                    cameraImageUri = uri
-                    takePhotoLauncher.launch(uri)
+                    launchCamera()
                 }
             )
             DropdownMenuItem(
@@ -447,15 +473,9 @@ fun getFileName(context: Context, uri: Uri): String? {
 }
 
 private fun createImageUri(context: Context): Uri {
-    val file = File(
-        context.cacheDir,
-        "camera_${System.currentTimeMillis()}.jpg"
-    )
-    return FileProvider.getUriForFile(
-        context,
-        "${context.packageName}.fileprovider",
-        file
-    )
+    val authority = "${context.packageName}.fileprovider"
+    val photoFile = File(context.cacheDir, "photo_${System.currentTimeMillis()}.jpg")
+    return FileProvider.getUriForFile(context, authority, photoFile)
 }
 private val MentionPattern =
     Regex("""\[([^\[\]]+)]\((urn:user:[^)]+)\)""")
