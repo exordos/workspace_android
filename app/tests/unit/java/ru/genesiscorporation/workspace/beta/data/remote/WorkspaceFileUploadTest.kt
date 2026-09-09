@@ -10,7 +10,7 @@ import org.junit.Test
 class WorkspaceFileUploadTest {
     @Test
     fun `file part has one complete form-data disposition`() {
-        val fileName = "report \"final\".txt"
+        val fileName = "отчёт \"final\".txt"
         val parts = workspaceFileUploadParts(
             fileName = fileName,
             mime = "text/plain",
@@ -48,5 +48,22 @@ class WorkspaceFileUploadTest {
 
         assertEquals(1, parts.size)
         assertTrue(parts.single() is PartData.FileItem)
+    }
+
+    @Test
+    fun `blank filename uses multipart fallback`() {
+        val parts = workspaceFileUploadParts(
+            fileName = "   ",
+            mime = "image/jpeg",
+            bytes = byteArrayOf(1),
+        )
+
+        val disposition = ContentDisposition.parse(
+            requireNotNull(parts.single().headers[HttpHeaders.ContentDisposition])
+        )
+        assertEquals(
+            "attachment",
+            disposition.parameter(ContentDisposition.Parameters.FileName),
+        )
     }
 }

@@ -299,11 +299,11 @@ fun SendMessageView(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     AttachButton(
-                        onImagePicked = {
-                            viewModel.addUri(it, "", "image")
+                        onImagePicked = { uri ->
+                            viewModel.addUri(uri, getFileName(context, uri) ?: "image", "image")
                         },
-                        onPhotoTaken = {
-                            viewModel.addUri(it, "", "image")
+                        onPhotoTaken = { uri ->
+                            viewModel.addUri(uri, getFileName(context, uri) ?: "image.jpg", "image")
                         },
                         onFilePicked = { uri, fileName ->
                             viewModel.addUri(uri, fileName ?: "", "file")

@@ -321,9 +321,10 @@ internal fun workspaceFileUploadParts(
     bytes: ByteArray,
     streamUuid: String? = null,
 ): List<PartData> = buildList {
+    val uploadFileName = fileName.ifBlank { "attachment" }
     val disposition = ContentDisposition("form-data")
         .withParameter(ContentDisposition.Parameters.Name, "file")
-        .withParameter(ContentDisposition.Parameters.FileName, fileName)
+        .withParameter(ContentDisposition.Parameters.FileName, uploadFileName)
     add(
         PartData.FileItem(
             provider = { ByteReadChannel(bytes) },
