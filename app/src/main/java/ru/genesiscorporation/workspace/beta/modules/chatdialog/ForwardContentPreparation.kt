@@ -1,49 +1,35 @@
 package ru.genesiscorporation.workspace.beta.modules.chatdialog
 
 import android.content.Context
-import io.ktor.client.call.body
-import io.ktor.client.request.forms.InputProvider
-import io.ktor.client.request.forms.MultiPartFormDataContent
-import io.ktor.client.request.forms.formData
-import io.ktor.client.request.header
-import io.ktor.client.request.post
-import io.ktor.client.request.setBody
-import io.ktor.client.statement.HttpResponse
 import io.ktor.http.ContentType
-import io.ktor.http.Headers
-import io.ktor.http.HttpHeaders
-import io.ktor.http.isSuccess
 import java.io.File
 import java.security.MessageDigest
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
-import kotlinx.io.asSource
-import kotlinx.io.buffered
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
 import ru.genesiscorporation.workspace.beta.R
+import ru.genesiscorporation.workspace.beta.data.EventsRepository
 import ru.genesiscorporation.workspace.beta.data.remote.ApiError
 import ru.genesiscorporation.workspace.beta.data.remote.ApiRequest
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.EmptyRequestData
 import ru.genesiscorporation.workspace.beta.data.remote.HTTPMethod
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
+import ru.genesiscorporation.workspace.beta.data.remote.workspaceFileUploadParts
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageElement
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
-import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesByIdsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UploadFileResponseData
 
-/** A recipient receives the captured text and target-scoped file copies, never a source ACL dependency. */
+/** Capture the selected source body, but keep reference-only nested quotes behind their own ACL. */
 internal class ForwardContentPreparation(
     private val sources: List<MessageResponse>,
-    private val resolve: suspend (String) -> MessageResponse?,
     private val copyFile: suspend (String, String, String) -> String,
+    private val resolveSourceLabel: (MessageResponse) -> String = { it.streamUuid },
+    private val resolveSourceIsDirect: (MessageResponse) -> Boolean = { false },
 ) {
-    private val resolved = mutableMapOf<String, MessageResponse>()
     private val prepared = mutableMapOf<String, String>()
 
     suspend fun prepare(target: ForwardDestination): String {
@@ -59,14 +45,26 @@ internal class ForwardContentPreparation(
                     is MessageElement.Image -> "![${escapeForwardFileLabel(element.fileName)}](urn:image:${copyFile(element.uuid, element.fileName, target.streamUuid)})"
                     is MessageElement.File -> "[${escapeForwardFileLabel(element.fileName)}](urn:file:${copyFile(element.uuid, element.fileName, target.streamUuid)})"
                     is MessageElement.SnapshotQuote -> buildForwardSnapshotBlock(element.displayName, render(element.text, visited, depth + 1))
+                    is MessageElement.ForwardSnapshot -> buildForwardSnapshotReference(
+                        element.displayName,
+                        element.uuid,
+                        if (element.plainText) element.text else
+                            render(element.text, visited + element.uuid, depth + 1),
+                        element.sourceLabel,
+                        element.sourceCreatedAt,
+                        element.plainText,
+                        element.sourceIsDirect,
+                    )
                     is MessageElement.Quote -> {
                         if (element.text.isNotEmpty()) {
-                            buildForwardSnapshotBlock(element.displayName, render(element.text, visited + element.uuid, depth + 1))
+                            buildForwardSnapshotReference(
+                                element.displayName,
+                                element.uuid,
+                                element.text,
+                                plainText = true,
+                            )
                         } else {
-                            if (element.uuid in visited) throw ForwardPreparationFailure(R.string.forward_nested_quote_failed)
-                            val source = resolved[element.uuid] ?: resolve(element.uuid)?.also { resolved[element.uuid] = it }
-                                ?: throw ForwardPreparationFailure(R.string.forward_quoted_message_unavailable)
-                            buildForwardSnapshotBlock(element.displayName, render(source.payload.content, visited + element.uuid, depth + 1))
+                            "[${escapeWorkspaceMarkdownInline(element.displayName)}](urn:quote:${element.uuid})"
                         }
                     }
                 }
@@ -78,8 +76,18 @@ internal class ForwardContentPreparation(
         val snapshots = sources.map { source ->
             source.copy(payload = source.payload.copy(content = render(source.payload.content, setOf(source.uuid), 0)))
         }
-        return requireNotNull(buildWorkspaceForwardMarkdown(snapshots)).also {
-            if (it.length > 100_000) throw ForwardPreparationFailure(R.string.forward_too_much_text)
+        if (snapshots.sumOf { it.payload.content.length } > 100_000) {
+            throw ForwardPreparationFailure(R.string.forward_too_much_text)
+        }
+        val markdown = requireNotNull(buildWorkspaceForwardMarkdown(
+            snapshots,
+            resolveSourceLabel,
+            resolveSourceIsDirect,
+        ))
+        if (markdown.length > 100_000) {
+            throw ForwardPreparationFailure(R.string.forward_too_much_text)
+        }
+        return markdown.also {
             prepared[target.streamUuid] = it
         }
     }
@@ -184,6 +192,7 @@ internal fun createForwardPreparation(
     sources: List<MessageResponse>,
     client: WorkspaceAPIClient,
     currentUserUuid: String,
+    repo: EventsRepository,
 ): ForwardContentPreparation {
     val copies = DestinationFileCopies(
         find = { stream, hash, name -> client.performRequest(ForwardFilesRequest(stream, hash, name)) },
@@ -209,43 +218,40 @@ internal fun createForwardPreparation(
                 PreparedForwardFile(file, safeName, hash, contentType)
             }
         },
-        upload = { file, stream -> uploadForwardFile(client, file, stream) },
+        upload = { file, stream ->
+            withContext(Dispatchers.IO) {
+                when (val response = client.uploadFile<UploadFileResponseData>(
+                    "/api/workspace/v1/messenger/files/",
+                    workspaceFileUploadParts(file.name, file.contentType, file.file, stream),
+                )) {
+                    is ApiResult.Success -> ApiResult.Success(response.value.uuid)
+                    is ApiResult.Error -> ApiResult.Error(response.error)
+                }
+            }
+        },
         currentUserUuid = currentUserUuid,
     )
     return ForwardContentPreparation(sources,
-        resolve = { id -> (client.performRequest(MessagesByIdsRequest(listOf(id))) as? ApiResult.Success)?.value?.singleOrNull { it.uuid == id } },
         copyFile = copies::copy,
+        resolveSourceLabel = { message ->
+            val stream = repo.streams.value.firstOrNull { it.uuid == message.streamUuid }
+            val topic = repo.streamTopics.value[message.streamUuid]
+                ?.firstOrNull { it.uuid == message.topicUuid }
+            val streamLabel = stream?.name?.trim().orEmpty().ifEmpty { message.streamUuid }
+            if (stream?.directUserUuid != null) {
+                stream?.directUser?.displayableName()?.trim().orEmpty().ifEmpty { streamLabel }
+            } else {
+                topic?.name?.trim()?.takeIf { it.isNotEmpty() }
+                    ?.let { "$streamLabel · $it" } ?: streamLabel
+            }
+        },
+        resolveSourceIsDirect = { message ->
+            repo.streams.value.firstOrNull { it.uuid == message.streamUuid }
+                ?.directUserUuid != null
+        },
     )
 }
 
 
 private fun escapeForwardFileLabel(value: String): String = value
     .replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
-
-
-/** Preserve status codes so an explicit rejection remains editable, while a lost upload ACK is not retried. */
-private suspend fun uploadForwardFile(client: WorkspaceAPIClient, file: PreparedForwardFile, stream: String): ApiResult<String, ApiError> {
-    return try {
-        val baseUrl = client.userViewModel.repo.baseUrlFlow.first().orEmpty()
-        suspend fun post(): HttpResponse {
-            val token = client.baseAccessToken ?: client.userViewModel.repo.accessTokenFlow.first().orEmpty()
-            return client.client.post("$baseUrl/api/workspace/v1/messenger/files/") {
-            header("Authorization", "Bearer $token")
-            setBody(MultiPartFormDataContent(formData {
-                append("file", InputProvider(size = file.file.length()) { file.file.inputStream().asSource().buffered() }, Headers.build {
-                    append(HttpHeaders.ContentType, file.contentType)
-                    append(HttpHeaders.ContentDisposition, "filename=\"${file.name}\"")
-                })
-                append("stream_uuid", stream)
-            }))
-            }
-        }
-        var response = post()
-        if (response.status.value == 401) { client.refreshToken(); response = post() }
-        if (response.status.isSuccess()) {
-            val uploaded = Json { ignoreUnknownKeys = true }.decodeFromString<UploadFileResponseData>(response.body<String>())
-            ApiResult.Success(uploaded.uuid)
-        } else ApiResult.Error(ApiError("Upload rejected", response.status.value.toString()))
-    } catch (cancelled: CancellationException) { throw cancelled }
-    catch (_: Exception) { ApiResult.Error(ApiError("Upload result unknown", "REQUEST_FAILED")) }
-}

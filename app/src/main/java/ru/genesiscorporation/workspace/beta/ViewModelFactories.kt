@@ -159,7 +159,7 @@ class ChatTopicsViewModelFactory(private val client: WorkspaceAPIClient, private
     }
 }
 
-class ChatDialogViewModelFactory(private val client: WorkspaceAPIClient, private val userViewModel: UserViewModel, private val chatTitle: String, private val chatId: String, private val topicName: String?, private val topicUuid: String, private val isDirectMessages: Boolean, private  val repo: EventsRepository, val userId: Int?, private val storage: AttachmentStorage) : ViewModelProvider.Factory {
+class ChatDialogViewModelFactory(private val client: WorkspaceAPIClient, private val userViewModel: UserViewModel, private val chatTitle: String, private val chatId: String, private val topicName: String?, private val topicUuid: String, private val isDirectMessages: Boolean, private  val repo: EventsRepository, val userId: Int?, private val storage: AttachmentStorage, private val anchorMessageUuid: String? = null) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(ChatDialogViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
@@ -173,7 +173,8 @@ class ChatDialogViewModelFactory(private val client: WorkspaceAPIClient, private
                 isDirectMessages,
                 repo,
                 userId,
-                storage
+                storage,
+                anchorMessageUuid,
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")

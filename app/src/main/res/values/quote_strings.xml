@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="quote_snapshot_copy">Forwarded copy</string>
+    <string name="forward_source_unavailable">The original message is unavailable</string>
     <string name="quote_loading">Loading message…</string>
     <string name="quote_unavailable">Message unavailable</string>
     <string name="quote_load_failed">Could not load the message</string>

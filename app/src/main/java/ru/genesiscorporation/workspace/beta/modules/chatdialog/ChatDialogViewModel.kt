@@ -40,25 +40,51 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponsePayload
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesByIdsRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.parseCanonicalMessageUuid
 import ru.genesiscorporation.workspace.beta.data.remote.dto.RemoveMessageReactionRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.SendMessageRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
+import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamBindingResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamBindingsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
+import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsByIdsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UsersRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import java.io.File
+import java.nio.charset.StandardCharsets
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 import kotlin.collections.filter
 import kotlin.collections.first
 import kotlin.collections.firstOrNull
-import kotlin.io.encoding.Base64
 import kotlin.text.toInt
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
+
+internal fun shouldLoadInitialMessages(
+    cachedMessages: List<MessageResponse>,
+    anchorMessageUuid: String?,
+): Boolean = cachedMessages.isEmpty() || anchorMessageUuid != null
+
+internal fun shouldMarkInitialPageReadThroughLatest(anchorMessageUuid: String?): Boolean =
+    anchorMessageUuid == null
+
+internal fun isWorkspaceMessageEditable(message: MessageResponse): Boolean =
+    message.isOwn && MarkdownPayloadParser.parse(message.payload.content)
+        .none { it is MessageElement.ForwardSnapshot }
+
+internal fun mergeLoadedMessagesPreservingAnchor(
+    loadedMessages: List<MessageResponse>,
+    cachedMessages: List<MessageResponse>,
+    anchorMessageUuid: String?,
+): List<MessageResponse> {
+    val cachedMessagesToPreserve = if (anchorMessageUuid == null) emptyList() else cachedMessages
+    return (loadedMessages + cachedMessagesToPreserve)
+        .distinctBy { it.uuid }
+        .sortedBy { it.createdAt }
+}
 
 class ChatDialogViewModel(
     val client: WorkspaceAPIClient,
@@ -70,7 +96,8 @@ class ChatDialogViewModel(
     val isDirectMessages: Boolean,
     val repo: EventsRepository,
     val userId: Int?,
-    val storage: AttachmentStorage
+    val storage: AttachmentStorage,
+    val anchorMessageUuid: String? = null,
 ): ViewModel() {
 
     val streamTopicMessages: StateFlow<Map<String, List<MessageResponse>>> = repo.streamTopicMessages
@@ -129,6 +156,41 @@ class ChatDialogViewModel(
     fun loadQuotedMessages(messageUuids: Collection<String>) = quoteResolver.load(messageUuids)
 
     fun retryQuotedMessage(messageUuid: String) = quoteResolver.retry(messageUuid)
+
+    /** The source message read is the ACL gate; snapshot routing text is never trusted. */
+    internal suspend fun resolveForwardSourceDestination(messageUuid: String): ForwardSourceDestination? =
+        resolveForwardSourceDestinationWithAcl(
+            messageUuid = messageUuid,
+            readSource = { uuid ->
+                (client.performRequest(MessagesByIdsRequest(listOf(uuid))) as? ApiResult.Success)
+                    ?.value?.singleOrNull { parseCanonicalMessageUuid(it.uuid) == uuid }
+            },
+            cachedStreams = { repo.streams.value },
+            readStreams = {
+                (client.performRequest(StreamsRequest()) as? ApiResult.Success)?.value.orEmpty()
+            },
+            cachedTopics = { streamUuid -> repo.streamTopics.value[streamUuid].orEmpty() },
+            readTopics = { topicUuid ->
+                (client.performRequest(TopicsByIdsRequest(listOf(topicUuid))) as? ApiResult.Success)
+                    ?.value.orEmpty()
+            },
+            cacheSource = { source ->
+                val key = "${source.streamUuid}.${source.topicUuid}"
+                val current = repo.streamTopicMessages.value[key].orEmpty()
+                if (current.none { it.uuid == source.uuid }) {
+                    repo.addStreamTopicMessages(source.streamUuid, source.topicUuid, current + source)
+                }
+            },
+            cacheStream = { stream ->
+                if (repo.streams.value.none { it.uuid == stream.uuid }) repo.addStream(stream)
+            },
+            cacheTopic = { topic ->
+                val current = repo.streamTopics.value[topic.streamUuid].orEmpty()
+                if (current.none { it.uuid == topic.uuid }) {
+                    repo.addStreamTopics(topic.streamUuid, current + topic)
+                }
+            },
+        )
 
     private val messageDeletion = MessageDeletion(
         canDelete = { canDeleteMessage(it) },
@@ -320,6 +382,7 @@ class ChatDialogViewModel(
     }
 
     fun onEditMessageClicked(message: MessageResponse) {
+        if (!isWorkspaceMessageEditable(message)) return
         _currentQuotedMessage.update { null }
         _quotedMessages.update { emptyList() }
         if (message.uuid != "") {
@@ -529,8 +592,11 @@ class ChatDialogViewModel(
         _isLoading.value = true
         viewModelScope.launch {
             val key = "${chatId}.${topicUuid}"
-            if (streamTopicMessages.value[key]?.isEmpty() ?: true) {
-                loadLatestMessages()
+            val cachedMessages = repo.streamTopicMessages.value[key].orEmpty()
+            if (shouldLoadInitialMessages(cachedMessages, anchorMessageUuid)) {
+                loadLatestMessages(anchorMessageUuid)
+            } else {
+                _isLoading.value = false
             }
             if (streamBindings.value[chatId]?.isEmpty() ?: true) {
                 loadStreamBindings()
@@ -542,16 +608,22 @@ class ChatDialogViewModel(
         }
     }
 
-    suspend fun loadLatestMessages() {
+    suspend fun loadLatestMessages(anchorToPreserve: String? = null) {
         val messagesRequest = MessagesRequest(chatId, topicUuid)
         val messagesResponse = client.performRequest(messagesRequest)
         when(messagesResponse) {
             is ApiResult.Success -> {
                 val lastMessage = messagesResponse.value.sortedBy { LocalDateTime.parse(it.createdAt, messageFormatter) }.lastOrNull()
-                if (lastMessage != null) {
+                if (lastMessage != null && shouldMarkInitialPageReadThroughLatest(anchorToPreserve)) {
                     markMessagesReadUpTo(lastMessage.uuid)
                 }
-                repo.addStreamTopicMessages(chatId, topicUuid ?: "", messagesResponse.value)
+                val key = "${chatId}.${topicUuid}"
+                val mergedMessages = mergeLoadedMessagesPreservingAnchor(
+                    messagesResponse.value,
+                    repo.streamTopicMessages.value[key].orEmpty(),
+                    anchorToPreserve,
+                )
+                repo.addStreamTopicMessages(chatId, topicUuid ?: "", mergedMessages)
                 _isLoading.value = false
             }
             is ApiResult.Error -> {
@@ -669,6 +741,7 @@ object MarkdownPayloadParser {
     private val imageRegex = Regex("""!\[((?:\\.|[^\]\\])*)\]\(urn:image:([^)]+)\)""")
     private val fileRegex = Regex("""\[((?:\\.|[^\]\\])*)\]\(urn:file:([^)]+)\)""")
     private val quoteRegex = Regex("""\[((?:\\.|[^\]\\])*)\]\(urn:quote:([0-9a-fA-F-]{36})(?:\?text=([^\s)&#]+))?\)""")
+    private val forwardRegex = Regex("""\[((?:\\.|[^\]\\])*)\]\(urn:forward:([0-9a-fA-F-]{36})\?([^\s)]*)\)""")
     fun parse(content: String): List<MessageElement> {
         val input = content.trim()
         if (input.isEmpty()) return emptyList()
@@ -698,12 +771,60 @@ object MarkdownPayloadParser {
         val end: Int,
         val element: MessageElement,
     )
+
+    private fun findNextValidQuote(input: String, fromIndex: Int): SpecialMatch? {
+        var match = quoteRegex.find(input, fromIndex)
+        while (match != null) {
+            val uuid = parseCanonicalMessageUuid(match.groupValues[2])
+            val selectedText = runCatching {
+                java.net.URLDecoder.decode(match.groupValues[3], "UTF-8")
+            }.getOrNull()
+            if (uuid != null && selectedText != null) {
+                return SpecialMatch(
+                    start = match.range.first,
+                    end = match.range.last + 1,
+                    element = MessageElement.Quote(
+                        displayName = match.groupValues[1].replace(Regex("""\\(.)"""), "$1"),
+                        uuid = uuid,
+                        text = selectedText,
+                    ),
+                )
+            }
+            match = quoteRegex.find(input, match.range.last + 1)
+        }
+        return null
+    }
+
+    private fun findNextValidForward(input: String, fromIndex: Int): SpecialMatch? {
+        var match = forwardRegex.find(input, fromIndex)
+        while (match != null) {
+            val uuid = parseCanonicalMessageUuid(match.groupValues[2])
+            val snapshot = parseForwardSnapshotQuery(match.groupValues[3])
+            if (uuid != null && snapshot != null) {
+                return SpecialMatch(
+                    start = match.range.first,
+                    end = match.range.last + 1,
+                    element = MessageElement.ForwardSnapshot(
+                        displayName = match.groupValues[1].replace(Regex("""\\(.)"""), "$1"),
+                        uuid = uuid,
+                        text = snapshot.text,
+                        plainText = snapshot.plainText,
+                        sourceLabel = snapshot.sourceLabel,
+                        sourceIsDirect = snapshot.sourceIsDirect,
+                        sourceCreatedAt = snapshot.sourceCreatedAt,
+                    ),
+                )
+            }
+            match = forwardRegex.find(input, match.range.last + 1)
+        }
+        return null
+    }
+
     private fun findNextSpecial(input: String, fromIndex: Int): SpecialMatch? {
         var searchIndex = fromIndex
         while (searchIndex < input.length) {
             val image = imageRegex.find(input, searchIndex)
             val file = fileRegex.find(input, searchIndex)
-            val quote = quoteRegex.find(input, searchIndex)
             val candidates = listOfNotNull(
                 findSnapshotQuote(input, searchIndex),
                 image?.let {
@@ -726,20 +847,8 @@ object MarkdownPayloadParser {
                         ),
                     )
                 },
-                quote?.let {
-                    val selectedText = runCatching {
-                        java.net.URLDecoder.decode(it.groupValues[3], "UTF-8")
-                    }.getOrNull() ?: return@let null
-                    SpecialMatch(
-                        start = it.range.first,
-                        end = it.range.last + 1,
-                        element = MessageElement.Quote(
-                            displayName = it.groupValues[1].replace(Regex("""\\(.)"""), "$1"),
-                            uuid = it.groupValues[2],
-                            text = selectedText,
-                        ),
-                    )
-                },
+                findNextValidForward(input, searchIndex),
+                findNextValidQuote(input, searchIndex),
             )
             val next = candidates.minByOrNull { it.start } ?: return null
             val literal = listOfNotNull(findCodeBlock(input, searchIndex), findInlineCode(input, searchIndex)).minByOrNull { it.start }
@@ -750,6 +859,45 @@ object MarkdownPayloadParser {
             return next
         }
         return null
+    }
+
+    private data class ParsedForwardSnapshot(
+        val text: String,
+        val plainText: Boolean,
+        val sourceLabel: String?,
+        val sourceIsDirect: Boolean,
+        val sourceCreatedAt: String?,
+    )
+
+    private fun parseForwardSnapshotQuery(raw: String): ParsedForwardSnapshot? {
+        val values = linkedMapOf<String, String>()
+        for (part in raw.split('&')) {
+            val separator = part.indexOf('=')
+            if (separator < 1) return null
+            val key = part.substring(0, separator)
+            if (key !in setOf("snapshot", "format", "source", "source_kind", "created_at") || key in values) return null
+            values[key] = part.substring(separator + 1)
+        }
+        val text = values["snapshot"]?.let(::decodeForwardSnapshot) ?: return null
+        val format = values["format"]
+        if (format != null && format != "plain") return null
+        val plainText = format == "plain"
+        val encodedSource = values["source"]
+        val sourceKind = values["source_kind"]
+        val encodedCreatedAt = values["created_at"]
+        if ((encodedSource == null) != (encodedCreatedAt == null)) return null
+        if (sourceKind != null && (sourceKind != "direct" || encodedSource == null)) return null
+        if (encodedSource == null || encodedCreatedAt == null) {
+            return ParsedForwardSnapshot(text, plainText, null, false, null)
+        }
+        val sourceLabel = decodeForwardSnapshot(encodedSource)?.trim()
+            ?.takeIf { it.isNotEmpty() && it.length <= 512 } ?: return null
+        val sourceCreatedAt = runCatching {
+            java.net.URLDecoder.decode(encodedCreatedAt, "UTF-8").trim()
+        }.getOrNull()?.takeIf { value ->
+            value.isNotEmpty() && runCatching { OffsetDateTime.parse(value) }.isSuccess
+        } ?: return null
+        return ParsedForwardSnapshot(text, plainText, sourceLabel, sourceKind == "direct", sourceCreatedAt)
     }
 
     private fun findSnapshotQuote(input: String, fromIndex: Int): SpecialMatch? {

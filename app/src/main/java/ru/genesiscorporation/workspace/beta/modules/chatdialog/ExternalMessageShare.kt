@@ -57,6 +57,16 @@ internal suspend fun materializeExternalMessages(
                     pieces += render(nested, visited, depth + 1, element.displayName)
                         .lineSequence().joinToString("\n") { "> $it" }
                 }
+                is MessageElement.ForwardSnapshot -> {
+                    val nestedText = if (element.plainText) {
+                        "${element.displayName}:\n${externalPlainText(element.text, labels.workspaceLink)}"
+                    } else {
+                        val nested = message.copy(payload = message.payload.copy(content = element.text))
+                        render(nested, visited + element.uuid, depth + 1, element.displayName)
+                    }
+                    pieces += nestedText
+                        .lineSequence().joinToString("\n") { "> $it" }
+                }
                 is MessageElement.Quote -> {
                     val uuid = requireNotNull(parseCanonicalMessageUuid(element.uuid))
                     val quote = if (element.text.isNotEmpty()) {

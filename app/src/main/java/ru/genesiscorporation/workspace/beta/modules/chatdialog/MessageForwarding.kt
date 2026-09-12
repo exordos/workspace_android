@@ -1,6 +1,11 @@
 package ru.genesiscorporation.workspace.beta.modules.chatdialog
 
 import androidx.annotation.StringRes
+import java.nio.ByteBuffer
+import java.nio.charset.CodingErrorAction
+import java.nio.charset.StandardCharsets
+import java.net.URLEncoder
+import java.util.Base64
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
@@ -14,6 +19,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.SendMessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
+import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.parseCanonicalMessageUuid
 
 internal const val MAX_FORWARD_SOURCE_MESSAGES = 32
@@ -24,7 +30,11 @@ internal fun canForwardMessage(message: MessageResponse): Boolean =
     isCanonicalForwardUuid(message.uuid) && message.authorUuid.isNotBlank()
 
 /** Keep the supplied (conversation) order, never merge or silently discard sources. */
-internal fun buildWorkspaceForwardMarkdown(messages: List<MessageResponse>): String? {
+internal fun buildWorkspaceForwardMarkdown(
+    messages: List<MessageResponse>,
+    resolveSourceLabel: (MessageResponse) -> String = { it.streamUuid },
+    resolveSourceIsDirect: (MessageResponse) -> Boolean = { false },
+): String? {
     if (messages.isEmpty() || messages.size > MAX_FORWARD_SOURCE_MESSAGES ||
         messages.any { !canForwardMessage(it) } ||
         messages.map { parseCanonicalMessageUuid(it.uuid) }.distinct().size != messages.size
@@ -32,8 +42,58 @@ internal fun buildWorkspaceForwardMarkdown(messages: List<MessageResponse>): Str
     return messages.joinToString("\n\n") { message ->
         val label = (message.user?.displayableName()?.trim()?.takeIf { it.isNotEmpty() }
             ?: message.authorUuid.trim()).replace(Regex("[\\r\\n\\t]+"), " ").take(512)
-        buildForwardSnapshotBlock(label, message.payload.content)
+        buildForwardSnapshotReference(
+            label,
+            message.uuid,
+            message.payload.content,
+            resolveSourceLabel(message).trim().ifEmpty { message.streamUuid },
+            message.createdAt,
+            sourceIsDirect = resolveSourceIsDirect(message),
+        )
     }
+}
+
+internal fun buildForwardSnapshotReference(
+    author: String,
+    sourceUuid: String,
+    content: String,
+    sourceLabel: String? = null,
+    sourceCreatedAt: String? = null,
+    plainText: Boolean = false,
+    sourceIsDirect: Boolean = false,
+): String {
+    require(isCanonicalForwardUuid(sourceUuid))
+    val snapshot = Base64.getUrlEncoder().withoutPadding()
+        .encodeToString(content.toByteArray(StandardCharsets.UTF_8))
+    val source = sourceLabel?.trim()?.takeIf { it.isNotEmpty() }?.take(512)
+    val createdAt = sourceCreatedAt?.trim()?.takeIf { it.isNotEmpty() }
+    require((source == null) == (createdAt == null))
+    require(!sourceIsDirect || source != null)
+    val format = if (plainText) "&format=plain" else ""
+    val metadata = if (source == null) "" else {
+        val encodedSource = Base64.getUrlEncoder().withoutPadding()
+            .encodeToString(source.toByteArray(StandardCharsets.UTF_8))
+        val encodedCreatedAt = URLEncoder.encode(requireNotNull(createdAt), "UTF-8")
+            .replace("+", "%20")
+        val kind = if (sourceIsDirect) "&source_kind=direct" else ""
+        "&source=$encodedSource$kind&created_at=$encodedCreatedAt"
+    }
+    return "[${escapeWorkspaceMarkdownInline(author)}](urn:forward:$sourceUuid?snapshot=$snapshot$format$metadata)"
+}
+
+internal fun decodeForwardSnapshot(encoded: String): String? {
+    if (!Regex("[A-Za-z0-9_-]*").matches(encoded) || encoded.length % 4 == 1) return null
+    return runCatching {
+        val bytes = Base64.getUrlDecoder().decode(encoded)
+        val decoded = StandardCharsets.UTF_8.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+            .decode(ByteBuffer.wrap(bytes)).toString()
+        decoded.takeIf {
+            Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(it.toByteArray(StandardCharsets.UTF_8)) == encoded
+        }
+    }.getOrNull()
 }
 
 internal fun buildForwardSnapshotBlock(author: String, content: String): String =
@@ -56,6 +116,48 @@ internal fun forwardableStreams(streams: List<Stream>): List<Stream> = streams
     .sortedByDescending(Stream::updatedAt)
 
 internal data class ForwardDestination(val streamUuid: String, val topicUuid: String)
+
+data class ForwardSourceDestination(
+    val streamName: String,
+    val streamUuid: String,
+    val topicName: String,
+    val topicUuid: String,
+    val isDirectMessages: Boolean,
+    val messageUuid: String,
+)
+
+/** Resolve route data only after an ACL-checked source read has succeeded. */
+internal suspend fun resolveForwardSourceDestinationWithAcl(
+    messageUuid: String,
+    readSource: suspend (String) -> MessageResponse?,
+    cachedStreams: () -> List<Stream>,
+    readStreams: suspend () -> List<Stream>,
+    cachedTopics: (String) -> List<TopicsResponseData>,
+    readTopics: suspend (String) -> List<TopicsResponseData>,
+    cacheSource: (MessageResponse) -> Unit = {},
+    cacheStream: (Stream) -> Unit = {},
+    cacheTopic: (TopicsResponseData) -> Unit = {},
+): ForwardSourceDestination? {
+    val uuid = parseCanonicalMessageUuid(messageUuid) ?: return null
+    val source = readSource(uuid)?.takeIf { parseCanonicalMessageUuid(it.uuid) == uuid } ?: return null
+    val stream = cachedStreams().firstOrNull { it.uuid == source.streamUuid }
+        ?: readStreams().singleOrNull { it.uuid == source.streamUuid }?.also(cacheStream)
+        ?: return null
+    val topic = cachedTopics(source.streamUuid).firstOrNull { it.uuid == source.topicUuid }
+        ?: readTopics(source.topicUuid).singleOrNull {
+            it.uuid == source.topicUuid && it.streamUuid == source.streamUuid
+        }?.also(cacheTopic)
+        ?: return null
+    cacheSource(source)
+    return ForwardSourceDestination(
+        streamName = stream.name,
+        streamUuid = stream.uuid,
+        topicName = topic.name,
+        topicUuid = topic.uuid,
+        isDirectMessages = stream.directUserUuid != null,
+        messageUuid = source.uuid,
+    )
+}
 
 internal enum class ForwardDeliveryStatus { EDITING, SENDING, VERIFYING, UNCERTAIN, COMPLETED }
 

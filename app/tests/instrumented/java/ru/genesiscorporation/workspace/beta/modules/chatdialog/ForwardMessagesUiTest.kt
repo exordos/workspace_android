@@ -63,20 +63,41 @@ class ForwardMessagesUiTest {
         compose.runOnIdle { assertEquals(1, abandoned); assertEquals(1, verified) }
     }
 
-    @Test fun forwardedCopiesHaveAnExplicitMarkerThatResolvedQuotesDoNotHave() {
+    @Test fun forwardedCopiesShowFigmaSourceAndTimeMetadata() {
         var snapshot by mutableStateOf(true)
         compose.setContent {
             WokspaceTheme(darkTheme = true, dynamicColor = false) {
-                if (snapshot) SnapshotQuoteCard("Alice", false) { Text("Captured body") }
+                if (snapshot) SnapshotQuoteCard(
+                    "Alice",
+                    false,
+                    sourceLabel = "Engineering · General",
+                    sourceCreatedAt = "2020-09-11T16:47:00Z",
+                ) { Text("Captured body") }
                 else MessageQuoteCard(MessageQuoteState.Loading, "Alice", false, onRetry = {}) {}
             }
         }
-        val marker = InstrumentationRegistry.getInstrumentation().targetContext.getString(R.string.quote_snapshot_copy)
-        compose.onNodeWithText(marker).assertIsDisplayed()
         compose.onNodeWithText("Alice").assertIsDisplayed()
+        compose.onNodeWithText("# Engineering · General").assertIsDisplayed()
+        compose.onNodeWithTag("snapshot-time", useUnmergedTree = true).assertIsDisplayed()
         compose.runOnIdle { snapshot = false }
-        compose.onNodeWithText(marker).assertDoesNotExist()
+        compose.onNodeWithTag("snapshot-source").assertDoesNotExist()
+        compose.onNodeWithTag("snapshot-time").assertDoesNotExist()
         compose.onNodeWithText("Alice").assertIsDisplayed()
+    }
+
+    @Test fun directSourcesDoNotShowAChannelMarker() {
+        compose.setContent {
+            WokspaceTheme(darkTheme = false, dynamicColor = false) {
+                SnapshotQuoteCard(
+                    "Alice",
+                    false,
+                    sourceLabel = "Bob Reed",
+                    sourceIsDirect = true,
+                ) { Text("Direct message") }
+            }
+        }
+        compose.onNodeWithText("Bob Reed").assertIsDisplayed()
+        compose.onNodeWithText("# Bob Reed").assertDoesNotExist()
     }
 
     @Test fun recipientSearchFoldersAndTopicChoiceUseActualSelections() {

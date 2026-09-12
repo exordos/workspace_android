@@ -85,6 +85,7 @@ fun TextMessageView(
     viewModel: ChatDialogViewModel,
     navController: NavHostController,
     onImageLoad: () -> Unit,
+    onNavigateForwardSource: (ForwardSourceDestination) -> Unit,
     onForwardMessage: ((MessageResponse) -> Unit)? = null,
 ) {
     val quotedMessages by viewModel.quotedMessages.collectAsState()
@@ -271,13 +272,20 @@ fun TextMessageView(
                                         item.isOwn,
                                         viewModel,
                                         navController,
+                                        onNavigateForwardSource,
                                         displayName = element.displayName,
                                         quoteNodeBudget = budgeted.quoteBudget,
                                         selectedText = element.text.takeIf { it.isNotEmpty() },
                                     )
 
                                     is MessageElement.SnapshotQuote -> SnapshotQuoteView(
-                                        element, item.isOwn, viewModel, navController, budgeted.quoteBudget,
+                                        element, item.isOwn, viewModel, navController,
+                                        onNavigateForwardSource, budgeted.quoteBudget,
+                                    )
+
+                                    is MessageElement.ForwardSnapshot -> ForwardSnapshotView(
+                                        element, item.isOwn, viewModel, navController,
+                                        onNavigateForwardSource, budgeted.quoteBudget,
                                     )
 
                                     is MessageElement.PlainText -> EnhancedMarkdown(
@@ -331,7 +339,7 @@ fun TextMessageView(
                         onSelect = if (viewModel.canSelectMessage(item)) {
                             { viewModel.startMessageSelection(item) }
                         } else null,
-                        onEdit = if (item.isOwn) {
+                        onEdit = if (isWorkspaceMessageEditable(item)) {
                             { viewModel.onEditMessageClicked(item) }
                         } else null,
                     )
