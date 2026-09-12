@@ -8,12 +8,16 @@ internal data class BudgetedMessageElement(val element: MessageElement, val quot
 
 /** Divide a fixed tree budget among siblings before composition or prefetch. */
 internal fun budgetMessageQuotes(elements: List<MessageElement>, budget: Int): List<BudgetedMessageElement> {
-    val quoteCount = elements.count { it is MessageElement.Quote || it is MessageElement.SnapshotQuote }.coerceAtMost(budget.coerceAtLeast(0))
+    val quoteCount = elements.count {
+        it is MessageElement.Quote || it is MessageElement.SnapshotQuote || it is MessageElement.ForwardSnapshot
+    }.coerceAtMost(budget.coerceAtLeast(0))
     var index = 0
     var omitted = false
     return buildList {
         elements.forEach { element ->
-            if (element !is MessageElement.Quote && element !is MessageElement.SnapshotQuote) {
+            if (element !is MessageElement.Quote && element !is MessageElement.SnapshotQuote &&
+                element !is MessageElement.ForwardSnapshot
+            ) {
                 add(BudgetedMessageElement(element))
             } else if (index < quoteCount) {
                 val share = budget / quoteCount + if (index < budget % quoteCount) 1 else 0

@@ -364,9 +364,21 @@ fun HomeNavigation(
                 client = workspaceApiClient,
             )
             Log.d("RepoCheck", "chatnav repo instance = ${System.identityHashCode(eventsRepository)}")
-            val chatDialogViewModelFactory = remember { ChatDialogViewModelFactory(workspaceApiClient, user, args.title, args.chatId, args.topicName, args.topicUuid, args.isDirectMessages, eventsRepository, args.userId, storage) }
+            val chatDialogViewModelFactory = remember { ChatDialogViewModelFactory(workspaceApiClient, user, args.title, args.chatId, args.topicName, args.topicUuid, args.isDirectMessages, eventsRepository, args.userId, storage, args.anchorMessageUuid) }
             val chatDialogViewModel: ChatDialogViewModel = viewModel(factory = chatDialogViewModelFactory)
-            ChatDialogScreen(chatDialogViewModel, navController)
+            ChatDialogScreen(chatDialogViewModel, navController) { destination ->
+                navController.navigate(
+                    HomeFlow.ChatDialog(
+                        title = destination.streamName,
+                        chatId = destination.streamUuid,
+                        topicName = destination.topicName,
+                        topicUuid = destination.topicUuid,
+                        isDirectMessages = destination.isDirectMessages,
+                        userId = null,
+                        anchorMessageUuid = destination.messageUuid,
+                    ),
+                )
+            }
         }
     }
 }
@@ -393,9 +405,21 @@ fun ChatNavigation(
                 context = LocalContext.current,
                 client = workspaceApiClient,
             )
-            val chatDialogViewModelFactory = remember { ChatDialogViewModelFactory(workspaceApiClient, user, args.title, args.chatId, args.topicName, args.topicUuid, args.isDirectMessages, eventsRepository, args.userId, storage) }
+            val chatDialogViewModelFactory = remember { ChatDialogViewModelFactory(workspaceApiClient, user, args.title, args.chatId, args.topicName, args.topicUuid, args.isDirectMessages, eventsRepository, args.userId, storage, args.anchorMessageUuid) }
             val chatDialogViewModel: ChatDialogViewModel = viewModel(factory = chatDialogViewModelFactory)
-            ChatDialogScreen(chatDialogViewModel, navController)
+            ChatDialogScreen(chatDialogViewModel, navController) { destination ->
+                navController.navigate(
+                    ChatFlow.ChatDialog(
+                        title = destination.streamName,
+                        chatId = destination.streamUuid,
+                        topicName = destination.topicName,
+                        topicUuid = destination.topicUuid,
+                        isDirectMessages = destination.isDirectMessages,
+                        userId = null,
+                        anchorMessageUuid = destination.messageUuid,
+                    ),
+                )
+            }
         }
         composable<ChatFlow.ChatTopic> {
             val args = it.toRoute<ChatFlow.ChatTopic>()

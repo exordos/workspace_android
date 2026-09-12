@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="quote_snapshot_copy">Пересланная копия</string>
+    <string name="forward_source_unavailable">Исходное сообщение недоступно</string>
     <string name="quote_loading">Загрузка сообщения…</string>
     <string name="quote_unavailable">Сообщение недоступно</string>
     <string name="quote_load_failed">Не удалось загрузить сообщение</string>

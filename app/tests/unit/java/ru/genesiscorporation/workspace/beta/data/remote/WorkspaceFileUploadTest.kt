@@ -3,6 +3,9 @@ package ru.genesiscorporation.workspace.beta.data.remote
 import io.ktor.http.ContentDisposition
 import io.ktor.http.HttpHeaders
 import io.ktor.http.content.PartData
+import java.io.File
+import kotlinx.coroutines.runBlocking
+import kotlinx.io.readByteArray
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -65,5 +68,27 @@ class WorkspaceFileUploadTest {
             "attachment",
             disposition.parameter(ContentDisposition.Parameters.FileName),
         )
+    }
+
+    @Test
+    fun `file upload part opens the file lazily for streaming and retry`() = runBlocking {
+        val file = File.createTempFile("workspace-stream-upload", ".txt")
+        try {
+            file.writeText("first")
+            val parts = workspaceFileUploadParts(
+                fileName = "streamed.txt",
+                mime = "text/plain",
+                file = file,
+                streamUuid = "d994e854-3d03-4b35-a464-794317491015",
+            )
+            file.writeText("other")
+
+            val filePart = parts.first() as PartData.BinaryItem
+            val content = filePart.provider().readByteArray().decodeToString()
+            assertEquals("other", content)
+            assertEquals("5", filePart.headers[HttpHeaders.ContentLength])
+        } finally {
+            file.delete()
+        }
     }
 }

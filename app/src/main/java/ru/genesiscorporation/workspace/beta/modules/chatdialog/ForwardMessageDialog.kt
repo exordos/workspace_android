@@ -116,7 +116,7 @@ internal fun ForwardMessagesDialog(
     val owner = "$baseUrl|$currentUserUuid"
     val forwarding = remember(sources, client, owner, sessionStore) {
         sessionStore.getOrCreate(owner) {
-        val preparation = createForwardPreparation(context, sources, client, currentUserUuid)
+        val preparation = createForwardPreparation(context, sources, client, currentUserUuid, repo)
         MessageForwarding(
             sources = sources,
             currentUserUuid = currentUserUuid,

@@ -30,13 +30,17 @@ import org.junit.runner.RunWith
 import ru.genesiscorporation.workspace.beta.SessionCookieStore
 import ru.genesiscorporation.workspace.beta.UserViewModel
 import ru.genesiscorporation.workspace.beta.data.ApiKeyRepository
+import ru.genesiscorporation.workspace.beta.data.EventsRepository
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ForwardMessageRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageElement
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponsePayload
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesByIdsRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.UploadFileResponseData
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.ForwardDeliveryStatus
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.ForwardDestination
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.MessageForwarding
+import ru.genesiscorporation.workspace.beta.modules.chatdialog.MarkdownPayloadParser
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.buildWorkspaceForwardMarkdown
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.createForwardPreparation
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.ForwardFileRecord
@@ -116,6 +120,41 @@ class ForwardMessageHttpContractTest {
         }
     }
 
+    @Test fun uploadFilePreservesAnExplicitRejectionStatus() = runBlocking {
+        ForwardLoopbackServer(listOf(413 to "{}")).use { server ->
+            preferences.addBaseUrl(server.baseUrl)
+            val result = api.uploadFile<UploadFileResponseData>(
+                "/api/workspace/v1/messenger/files/",
+                workspaceFileUploadParts("large.bin", "application/octet-stream", byteArrayOf(1), STREAM),
+            )
+
+            assertEquals("413", (result as ApiResult.Error).error.code)
+            assertEquals(1, server.awaitRequests().size)
+        }
+    }
+
+    @Test fun uploadFileRefreshesAnExpiredTokenBeforeRetrying() = runBlocking {
+        val uploaded = "00000000-0000-0000-0000-000000000009"
+        ForwardLoopbackServer(listOf(
+            401 to "{}",
+            200 to """{"access_token":"fresh-access","refresh_token":"fresh-refresh"}""",
+            201 to """{"uuid":"$uploaded","name":"report.pdf"}""",
+        )).use { server ->
+            preferences.addBaseUrl(server.baseUrl)
+            preferences.saveRefreshToken("refresh-fixture")
+            val result = api.uploadFile<UploadFileResponseData>(
+                "/api/workspace/v1/messenger/files/",
+                workspaceFileUploadParts("report.pdf", "application/pdf", "fixture".toByteArray(), STREAM),
+            )
+
+            assertEquals(uploaded, (result as ApiResult.Success).value.uuid)
+            val requests = server.awaitRequests()
+            assertEquals("Bearer cassi-forward-contract-fixture", requests[0].authorization)
+            assertEquals("POST /api/core/v1/iam/clients/default/actions/get_token/invoke HTTP/1.1", requests[1].line)
+            assertEquals("Bearer fresh-access", requests[2].authorization)
+        }
+    }
+
     @Test fun copiesSourceAttachmentsToTheDestinationBeforePostingTheMaterializedSnapshot() = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val originalFile = "00000000-0000-0000-0000-000000000007"
@@ -137,7 +176,8 @@ class ForwardMessageHttpContractTest {
             200 to Json.encodeToString(listOf(persisted)),
         )).use { server ->
             preferences.addBaseUrl(server.baseUrl)
-            val preparation = createForwardPreparation(context, listOf(source), api, AUTHOR)
+            val repo = EventsRepository()
+            val preparation = createForwardPreparation(context, listOf(source), api, AUTHOR, repo)
             var confirmed = false
             val forwarding = MessageForwarding(listOf(source), AUTHOR,
                 post = { uuid, target, text -> api.performRequest(ForwardMessageRequest(uuid, target.streamUuid, target.topicUuid, text)) },
@@ -151,15 +191,18 @@ class ForwardMessageHttpContractTest {
             assertTrue(requests[2].line.contains("stream_uuid=$STREAM"))
             assertTrue(requests[2].line.contains("hash=$fileHash"))
             assertEquals("POST /api/workspace/v1/messenger/files/ HTTP/1.1", requests[3].line)
+            repo.close()
             assertTrue(requests[3].body.contains("name=stream_uuid") || requests[3].body.contains("name=\"stream_uuid\""))
             assertTrue(requests[3].body.contains(STREAM))
             assertTrue(requests[3].body.contains(fileContent))
             assertTrue(requests[3].body.contains("application/pdf"))
             assertTrue(requests[3].body.contains("report.pdf"))
             val posted = Json.parseToJsonElement(requests[5].body).jsonObject["payload"]?.jsonObject?.get("content")?.jsonPrimitive?.content.orEmpty()
-            assertTrue(posted.contains("Private source text"))
-            assertTrue(posted.contains("urn:file:$destinationFile"))
-            assertFalse(posted.contains(originalFile))
+            val snapshot = MarkdownPayloadParser.parse(posted).single() as MessageElement.ForwardSnapshot
+            assertEquals(SOURCE, snapshot.uuid)
+            assertTrue(snapshot.text.contains("Private source text"))
+            assertTrue(snapshot.text.contains("urn:file:$destinationFile"))
+            assertFalse(snapshot.text.contains(originalFile))
             assertFalse(posted.contains("urn:quote:"))
         }
     }

@@ -54,7 +54,7 @@ object HomeFlow {
     @Serializable
     object HomeFeed
     @Serializable
-    data class ChatDialog(val title: String, val chatId: String, val topicName: String?, val topicUuid: String, val isDirectMessages: Boolean, val userId: Int?)
+    data class ChatDialog(val title: String, val chatId: String, val topicName: String?, val topicUuid: String, val isDirectMessages: Boolean, val userId: Int?, val anchorMessageUuid: String? = null)
 
 
 }
@@ -64,7 +64,7 @@ object ChatFlow {
     object ChatList
 
     @Serializable
-    data class ChatDialog(val title: String, val chatId: String, val topicName: String?, val topicUuid: String, val isDirectMessages: Boolean, val userId: Int?)
+    data class ChatDialog(val title: String, val chatId: String, val topicName: String?, val topicUuid: String, val isDirectMessages: Boolean, val userId: Int?, val anchorMessageUuid: String? = null)
     @Serializable
     data class ChatTopic(val channelName: String, val channelId: String)
 

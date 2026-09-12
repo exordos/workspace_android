@@ -123,11 +123,18 @@ import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.time.LocalDateTime
 
+internal fun shouldPerformInitialMessageScroll(
+    isLoading: Boolean,
+    hasDoneInitialScroll: Boolean,
+    messageCount: Int,
+): Boolean = !isLoading && !hasDoneInitialScroll && messageCount > 0
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ChatDialogScreen(
     viewModel: ChatDialogViewModel,
-    navController: NavHostController
+    navController: NavHostController,
+    onNavigateForwardSource: (ForwardSourceDestination) -> Unit,
 ) {
     val directUser by viewModel.directUser.collectAsStateWithLifecycle()
     val streamTopicMessages by viewModel.streamTopicMessages.collectAsStateWithLifecycle()
@@ -182,13 +189,22 @@ fun ChatDialogScreen(
             }
         }
     }
-    LaunchedEffect(streamTopicMessages["${viewModel.chatId}.${viewModel.topicUuid}"]?.size) {
+    LaunchedEffect(
+        isLoading,
+        streamTopicMessages["${viewModel.chatId}.${viewModel.topicUuid}"]?.size,
+    ) {
         val messages = streamTopicMessages["${viewModel.chatId}.${viewModel.topicUuid}"]
-        if (messages != null) {
-            if (messages.isNotEmpty()) {
-                listState.scrollToItem(messages.lastIndex)
-                hasDoneInitialScroll = true
+        if (shouldPerformInitialMessageScroll(isLoading, hasDoneInitialScroll, messages?.size ?: 0)) {
+            checkNotNull(messages)
+            val ordered = messages.sortedBy { LocalDateTime.parse(it.createdAt, messageFormatter) }
+            val anchorUuid = viewModel.anchorMessageUuid
+            val anchorIndex = anchorUuid?.let { anchor -> ordered.indexOfFirst { it.uuid == anchor } }
+            if (anchorUuid != null && (anchorIndex == null || anchorIndex < 0)) {
+                return@LaunchedEffect
             }
+            if (anchorIndex != null) viewModel.disableAutoScroll()
+            listState.scrollToItem(anchorIndex ?: ordered.lastIndex)
+            hasDoneInitialScroll = true
         }
     }
 
@@ -442,6 +458,7 @@ fun ChatDialogScreen(
                                                 }
                                             }
                                         },
+                                        onNavigateForwardSource,
                                         onForwardMessage = { message ->
                                             forwardingSelection = false
                                             forwardingMessages = listOf(message.copy(payload = message.payload.copy()))
@@ -497,6 +514,7 @@ fun ChatMessage(
     viewModel: ChatDialogViewModel,
     navController: NavHostController,
     onImageLoad: () -> Unit,
+    onNavigateForwardSource: (ForwardSourceDestination) -> Unit,
     onForwardMessage: ((MessageResponse) -> Unit)? = null,
 ) {
     val selectedMessageUuids by viewModel.selectedMessageUuids.collectAsStateWithLifecycle()
@@ -562,7 +580,14 @@ fun ChatMessage(
             ) {
                 CallMessageView(item, viewModel, navController, onForwardMessage)
             } else {
-                TextMessageView(item, viewModel, navController, onImageLoad, onForwardMessage)
+                TextMessageView(
+                    item,
+                    viewModel,
+                    navController,
+                    onImageLoad,
+                    onNavigateForwardSource,
+                    onForwardMessage,
+                )
             }
         }
     }

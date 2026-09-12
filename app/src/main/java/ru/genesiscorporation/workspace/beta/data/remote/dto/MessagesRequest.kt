@@ -5,6 +5,7 @@ import kotlinx.serialization.Serializable
 import ru.genesiscorporation.workspace.beta.data.remote.ApiError
 import ru.genesiscorporation.workspace.beta.data.remote.ApiRequest
 import ru.genesiscorporation.workspace.beta.data.remote.HTTPMethod
+import ru.genesiscorporation.workspace.beta.modules.chatdialog.MarkdownPayloadParser
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.QuotedMessage
 
 @Serializable
@@ -76,15 +77,16 @@ data class MessageResponse(
     private fun parseQuotedMessages(): List<QuotedMessagePart> {
         return quoteBlockRegex.findAll(payload.content.trim())
             .map { match ->
+                val messageUuid = parseCanonicalMessageUuid(match.groupValues[2])
                 val selectedText = runCatching {
                     java.net.URLDecoder.decode(match.groupValues[3], "UTF-8")
                 }.getOrNull()
-                if (selectedText == null) {
+                if (messageUuid == null || selectedText == null) {
                     // Keep malformed references literal, as MarkdownPayloadParser does.
                     QuotedMessagePart(uuid = null, text = match.value)
                 } else {
                     QuotedMessagePart(
-                        uuid = match.groupValues[2],
+                        uuid = messageUuid,
                         text = match.groupValues[4].trim().ifBlank { selectedText },
                     )
                 }
@@ -92,7 +94,8 @@ data class MessageResponse(
             .toList()
     }
     private fun containsQuotedMessages(): Boolean {
-        return quoteBlockRegex.containsMatchIn(payload.content)
+        return quoteBlockRegex.findAll(payload.content)
+            .any { parseCanonicalMessageUuid(it.groupValues[2]) != null }
     }
 
     fun asQuotedMessages(): List<QuotedMessagePart> {
@@ -104,6 +107,9 @@ data class MessageResponse(
     }
 
     fun description(forwardedLabel: String = "Forwarded message"): String {
+        if (MarkdownPayloadParser.parse(payload.content).any { it is MessageElement.ForwardSnapshot }) {
+            return forwardedLabel
+        }
         val snapshotHeader = authoredQuoteHeaderRegex.find(payload.content.trim())
         if (snapshotHeader?.groupValues?.get(1)?.isNotBlank() == true) return forwardedLabel
         return asQuotedMessages().lastOrNull()?.text.orEmpty().ifBlank {
@@ -129,7 +135,6 @@ private val quoteBlockRegex = Regex(
 private val authoredQuoteHeaderRegex = Regex(
     """^>[ \t]?\*\*((?:\\.|[^\r\n])+)\*\*:\r?(?:\n|$)"""
 )
-
 sealed interface MessageElement {
 
     data class Image(
@@ -152,6 +157,17 @@ sealed interface MessageElement {
     data class SnapshotQuote(
         val displayName: String,
         val text: String,
+    ) : MessageElement
+
+    /** An immutable forwarded copy with optional navigation back to its source UUID. */
+    data class ForwardSnapshot(
+        val displayName: String,
+        val uuid: String,
+        val text: String,
+        val plainText: Boolean = false,
+        val sourceLabel: String? = null,
+        val sourceIsDirect: Boolean = false,
+        val sourceCreatedAt: String? = null,
     ) : MessageElement
 
     data class PlainText(

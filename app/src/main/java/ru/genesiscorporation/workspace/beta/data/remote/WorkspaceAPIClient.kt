@@ -8,6 +8,7 @@ import io.ktor.client.call.body
 import io.ktor.client.plugins.ClientRequestException
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.forms.FormDataContent
+import io.ktor.client.request.forms.InputProvider
 import io.ktor.client.request.forms.MultiPartFormDataContent
 import io.ktor.client.request.forms.formData
 import io.ktor.client.request.get
@@ -36,8 +37,11 @@ import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.core.readBytes
 import io.ktor.utils.io.readRemaining
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import kotlinx.io.asSource
+import kotlinx.io.buffered
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -240,27 +244,35 @@ class WorkspaceAPIClient(
     }
 
     suspend inline fun <reified T> uploadFile(path: String, parts: List<PartData>): ApiResult<T, ApiError> {
-        val baseUrl = userViewModel.repo.baseUrlFlow.first()
-        val accessToken = if (baseAccessToken != null) baseAccessToken ?: "" else userViewModel.repo.accessTokenFlow.first() ?: ""
-        val httpResponse: HttpResponse = client.post("${baseUrl}${path}") {
-            setBody(
-                MultiPartFormDataContent(
-                    parts
-                )
-            )
+        return try {
+            var httpResponse = postMultipart(path, parts)
+            if (httpResponse.status.value == 401) {
+                refreshToken()
+                httpResponse = postMultipart(path, parts)
+            }
+            if (httpResponse.status.isSuccess()) {
+                val responseString: String = httpResponse.body()
+                ApiResult.Success(Json { ignoreUnknownKeys = true }.decodeFromString<T>(responseString))
+            } else {
+                if (httpResponse.status.value == 401) userViewModel.clearAll()
+                ApiResult.Error(ApiError("Request failed", httpResponse.status.value.toString()))
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            ApiResult.Error(ApiError("Request failed", "REQUEST_FAILED"))
+        }
+    }
+
+    @PublishedApi
+    internal suspend fun postMultipart(path: String, parts: List<PartData>): HttpResponse {
+        val baseUrl = userViewModel.repo.baseUrlFlow.first().orEmpty()
+        val accessToken = baseAccessToken
+            ?: userViewModel.repo.accessTokenFlow.first().orEmpty()
+        return client.post("$baseUrl$path") {
+            setBody(MultiPartFormDataContent(parts))
             header("User-Agent", "Workspace/android/${BuildConfig.VERSION_NAME}")
             header("Authorization", "Bearer $accessToken")
-        }
-        if (httpResponse.status.isSuccess()) {
-            val json = Json { ignoreUnknownKeys = true }
-
-            val responseString: String = httpResponse.body()
-            val response = json.decodeFromString<T>(responseString)
-            return ApiResult.Success(response)
-        } else {
-            val error = ApiError("Request failed", "REQUEST_FAILED")
-
-            return ApiResult.Error(error)
         }
     }
 
@@ -338,6 +350,26 @@ internal fun workspaceFileUploadParts(
     )
     if (streamUuid != null) {
         addAll(formData { append("stream_uuid", streamUuid) })
+    }
+}
+
+internal fun workspaceFileUploadParts(
+    fileName: String,
+    mime: String,
+    file: File,
+    streamUuid: String? = null,
+): List<PartData> {
+    val uploadFileName = fileName.ifBlank { "attachment" }
+    return formData {
+        append(
+            "file",
+            InputProvider(size = file.length()) { file.inputStream().asSource().buffered() },
+            Headers.build {
+                append(HttpHeaders.ContentType, mime)
+                append(HttpHeaders.ContentDisposition, "filename=\"$uploadFileName\"")
+            },
+        )
+        if (streamUuid != null) append("stream_uuid", streamUuid)
     }
 }
 

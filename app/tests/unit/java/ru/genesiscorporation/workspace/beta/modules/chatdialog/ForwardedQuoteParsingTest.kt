@@ -1,6 +1,7 @@
 package ru.genesiscorporation.workspace.beta.modules.chatdialog
 
 import kotlinx.serialization.json.Json
+import java.time.ZonedDateTime
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -11,6 +12,16 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponsePaylo
 class ForwardedQuoteParsingTest {
     private val first = "11111111-1111-4111-8111-111111111111"
     private val second = "22222222-2222-4222-8222-222222222222"
+
+    @Test
+    fun `historical forward timestamp includes its date`() {
+        val formatted = formatForwardSourceTimestamp(
+            "2020-09-11T16:47:00Z",
+            ZonedDateTime.parse("2026-09-12T10:00:00Z"),
+        )
+
+        assertTrue(formatted?.contains("2020") == true)
+    }
 
     @Test
     fun `reference-only forwarding preserves every source and has a nonempty preview`() {
@@ -144,6 +155,133 @@ class ForwardedQuoteParsingTest {
         assertEquals(first, quote.uuid)
         assertEquals("Selected text\nsecond line & #", quote.text)
         assertTrue(MarkdownPayloadParser.parse("[Alice](urn:quote:$first?text=%ZZ)").single() is MessageElement.PlainText)
+    }
+
+    @Test
+    fun `malformed selected quote uuid stays literal instead of reaching snapshot builder`() {
+        val markdown = "[Alice](urn:quote:${"1".repeat(36)}?text=Selected%20text)"
+
+        assertEquals(
+            listOf(MessageElement.PlainText(markdown)),
+            MarkdownPayloadParser.parse(markdown),
+        )
+        assertEquals(markdown, message(markdown).description())
+        assertEquals(null, message(markdown).asQuotedMessages().single().uuid)
+    }
+
+    @Test
+    fun `canonical forward snapshot preserves source uuid and UTF-8 markdown`() {
+        val snapshot = "## Заголовок\n\nForwarded **body** ✓"
+        val markdown = buildForwardSnapshotReference("Alice [team]", first, snapshot)
+        val forward = MarkdownPayloadParser.parse(markdown).single() as MessageElement.ForwardSnapshot
+
+        assertEquals("Alice [team]", forward.displayName)
+        assertEquals(first, forward.uuid)
+        assertEquals(snapshot, forward.text)
+        assertTrue(markdown.startsWith("[Alice \\[team\\]](urn:forward:$first?snapshot="))
+        assertTrue(markdown.substringAfter("?snapshot=").substringBefore(')').none { it in "+/=" })
+    }
+
+    @Test
+    fun `cross-client UTF-8 base64url vector stays stable`() {
+        assertEquals(
+            "[Alice](urn:forward:$first?snapshot=0J_RgNC40LLQtdGCIOKckw)",
+            buildForwardSnapshotReference("Alice", first, "Привет ✓"),
+        )
+    }
+
+    @Test
+    fun `plain snapshot format keeps markdown-looking selected text literal`() {
+        val text = "[docs](https://example.test) **literal**"
+        val markdown = buildForwardSnapshotReference("Alice", first, text, plainText = true)
+        val forward = MarkdownPayloadParser.parse(markdown).single() as MessageElement.ForwardSnapshot
+
+        assertTrue(markdown.contains("&format=plain"))
+        assertEquals(text, forward.text)
+        assertTrue(forward.plainText)
+    }
+
+    @Test
+    fun `source label and timestamp round trip with the web contract`() {
+        val markdown = buildForwardSnapshotReference(
+            "Alice",
+            first,
+            "Привет ✓",
+            "Engineering · Общий чат",
+            "2026-09-11T16:47:00+03:00",
+        )
+        assertEquals(
+            "[Alice](urn:forward:$first?snapshot=0J_RgNC40LLQtdGCIOKckw&source=RW5naW5lZXJpbmcgwrcg0J7QsdGJ0LjQuSDRh9Cw0YI&created_at=2026-09-11T16%3A47%3A00%2B03%3A00)",
+            markdown,
+        )
+        val forward = MarkdownPayloadParser.parse(markdown).single() as MessageElement.ForwardSnapshot
+        assertEquals("Engineering · Общий чат", forward.sourceLabel)
+        assertEquals("2026-09-11T16:47:00+03:00", forward.sourceCreatedAt)
+    }
+
+    @Test
+    fun `direct source kind round trips without a channel marker`() {
+        val markdown = buildForwardSnapshotReference(
+            "Alice",
+            first,
+            "Direct message",
+            "Bob Reed",
+            "2026-09-11T16:47:00+03:00",
+            sourceIsDirect = true,
+        )
+        val forward = MarkdownPayloadParser.parse(markdown).single() as MessageElement.ForwardSnapshot
+
+        assertTrue(markdown.contains("&source_kind=direct&"))
+        assertEquals("Bob Reed", forward.sourceLabel)
+        assertTrue(forward.sourceIsDirect)
+    }
+
+    @Test
+    fun `multiple forward snapshots remain separate and ordered in one message`() {
+        val markdown = listOf(
+            buildForwardSnapshotReference("Alice", first, "First body"),
+            buildForwardSnapshotReference("Bob", second, "Second body"),
+        ).joinToString("\n\n")
+        val forwards = MarkdownPayloadParser.parse(markdown).filterIsInstance<MessageElement.ForwardSnapshot>()
+
+        assertEquals(listOf(first, second), forwards.map { it.uuid })
+        assertEquals(listOf("First body", "Second body"), forwards.map { it.text })
+        assertEquals("Forwarded message", message(markdown).description())
+    }
+
+    @Test
+    fun `malformed forward snapshots stay literal and never trigger a source read`() {
+        for (urn in listOf(
+            "urn:forward:$first",
+            "urn:forward:$first?snapshot=%ZZ",
+            "urn:forward:$first?snapshot=Zm9v=",
+            "urn:forward:$first?snapshot=Zm9v&unknown=value",
+            "urn:forward:$first?snapshot=Zm9v&format=markdown",
+            "urn:forward:$first?snapshot=Zm9v&source_kind=direct",
+            "urn:forward:$first?snapshot=Zm9v&source=RW5naW5lZXJpbmc&source_kind=channel&created_at=2026-09-11T16%3A47%3A00Z",
+            "urn:forward:$first?snapshot=Zm9v&source=RW5naW5lZXJpbmc",
+            "urn:forward:$first?snapshot=Zm9v&created_at=2026-09-11T16%3A47%3A00Z",
+            "urn:forward:$first?snapshot=Zm9v&source=RW5naW5lZXJpbmc&created_at=not-a-date",
+        )) {
+            val markdown = "[Alice]($urn)"
+            assertEquals(listOf(MessageElement.PlainText(markdown)), MarkdownPayloadParser.parse(markdown))
+            assertEquals(markdown, message(markdown).description())
+        }
+    }
+
+    @Test
+    fun `malformed references do not hide later valid references of the same kind`() {
+        val validForward = buildForwardSnapshotReference("Valid", second, "Visible snapshot")
+        val malformedForward = "[Broken](urn:forward:$first?snapshot=A)"
+        val forwardElements = MarkdownPayloadParser.parse("$malformedForward\n\n$validForward")
+        assertEquals(MessageElement.PlainText(malformedForward), forwardElements[0])
+        assertEquals(second, (forwardElements[1] as MessageElement.ForwardSnapshot).uuid)
+
+        val malformedQuote = "[Broken](urn:quote:${"1".repeat(36)}?text=Hidden)"
+        val validQuote = "[Valid](urn:quote:$first?text=Visible)"
+        val quoteElements = MarkdownPayloadParser.parse("$malformedQuote\n\n$validQuote")
+        assertEquals(MessageElement.PlainText(malformedQuote), quoteElements[0])
+        assertEquals(first, (quoteElements[1] as MessageElement.Quote).uuid)
     }
 
     @Test

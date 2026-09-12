@@ -10,8 +10,11 @@ import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.data.remote.ApiError
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageElement
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponsePayload
 import ru.genesiscorporation.workspace.beta.data.remote.dto.SendMessageResponse
+import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
+import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 
 class MessageForwardingTest {
@@ -19,13 +22,112 @@ class MessageForwardingTest {
         val first = source(FIRST).copy(user = UserResponseData(username = "A ](link)\\nB", uuid = AUTHOR, status = "active", avatar = ""))
         val second = source(SECOND).copy(payload = MessageResponsePayload("markdown", "second source text"))
         val content = requireNotNull(buildWorkspaceForwardMarkdown(listOf(second, first)))
-        assertTrue(content.indexOf("second source text") < content.lastIndexOf("source text"))
-        assertTrue(content.contains("A \\]\\(link\\)\\\\nB"))
-        assertTrue(content.contains("> source text"))
+        val forwards = MarkdownPayloadParser.parse(content).filterIsInstance<MessageElement.ForwardSnapshot>()
+        assertEquals(listOf(SECOND, FIRST), forwards.map { it.uuid })
+        assertEquals(listOf("second source text", "source text"), forwards.map { it.text })
+        assertEquals(listOf(STREAM, STREAM), forwards.map { it.sourceLabel })
+        assertEquals(listOf("2026-09-07T12:00:00Z", "2026-09-07T12:00:00Z"), forwards.map { it.sourceCreatedAt })
+        assertEquals("A ](link)\\nB", forwards[1].displayName)
+        assertFalse(content.contains("source text"))
         assertFalse(content.contains("urn:quote:"))
+        assertTrue(content.contains("urn:forward:"))
         assertNull(buildWorkspaceForwardMarkdown(listOf(first, first)))
         assertNull(buildWorkspaceForwardMarkdown(listOf(first.copy(uuid = "local-one"))))
         assertNull(buildWorkspaceForwardMarkdown(emptyList()))
+    }
+
+    @Test fun `forward snapshot messages cannot be edited as encoded urns`() {
+        val forwarded = source(FIRST).copy(
+            payload = MessageResponsePayload(
+                "markdown",
+                requireNotNull(buildWorkspaceForwardMarkdown(listOf(source(SECOND)))),
+            ),
+        )
+
+        assertFalse(isWorkspaceMessageEditable(forwarded))
+        assertTrue(isWorkspaceMessageEditable(source(FIRST)))
+        assertFalse(isWorkspaceMessageEditable(source(FIRST).copy(isOwn = false)))
+    }
+
+    @Test fun `source navigation stops at the message ACL gate`() = runBlocking {
+        var streamReads = 0
+        var topicReads = 0
+        val destination = resolveForwardSourceDestinationWithAcl(
+            FIRST,
+            readSource = { null },
+            cachedStreams = { emptyList() },
+            readStreams = { streamReads++; listOf(stream()) },
+            cachedTopics = { emptyList() },
+            readTopics = { topicReads++; listOf(topic()) },
+        )
+        assertNull(destination)
+        assertEquals(0, streamReads)
+        assertEquals(0, topicReads)
+    }
+
+    @Test fun `source navigation uses only route data returned after the ACL read`() = runBlocking {
+        val destination = resolveForwardSourceDestinationWithAcl(
+            FIRST,
+            readSource = { source(FIRST) },
+            cachedStreams = { listOf(stream()) },
+            readStreams = { error("cached stream must win") },
+            cachedTopics = { listOf(topic()) },
+            readTopics = { error("cached topic must win") },
+        )
+        assertEquals(
+            ForwardSourceDestination("Engineering", STREAM, "General", TOPIC, false, FIRST),
+            destination,
+        )
+    }
+
+    @Test fun `source navigation caches fallback route data before opening the dialog`() = runBlocking {
+        val streams = mutableListOf<Stream>()
+        val topics = mutableMapOf<String, MutableList<TopicsResponseData>>()
+        val sources = mutableListOf<MessageResponse>()
+        val destination = resolveForwardSourceDestinationWithAcl(
+            FIRST,
+            readSource = { source(FIRST) },
+            cachedStreams = { streams },
+            readStreams = { listOf(stream()) },
+            cachedTopics = { streamUuid -> topics[streamUuid].orEmpty() },
+            readTopics = { listOf(topic()) },
+            cacheSource = { sources += it },
+            cacheStream = { streams += it },
+            cacheTopic = { topics.getOrPut(it.streamUuid, ::mutableListOf) += it },
+        )
+
+        assertNotNull(destination)
+        assertEquals(listOf(STREAM), streams.map { it.uuid })
+        assertEquals(listOf(TOPIC), topics[STREAM].orEmpty().map { it.uuid })
+        assertEquals(listOf(FIRST), sources.map { it.uuid })
+    }
+
+    @Test fun `cached source anchors still load the conversation and all survive the merge`() {
+        val cachedAnchor = source(FIRST)
+        val otherCachedAnchor = source(REQUESTED)
+        val loadedSource = source(SECOND)
+
+        assertTrue(shouldLoadInitialMessages(listOf(cachedAnchor), FIRST))
+        val merged = mergeLoadedMessagesPreservingAnchor(
+            loadedMessages = listOf(loadedSource),
+            cachedMessages = listOf(cachedAnchor, otherCachedAnchor),
+            anchorMessageUuid = FIRST,
+        )
+
+        assertEquals(setOf(FIRST, SECOND, REQUESTED), merged.map { it.uuid }.toSet())
+        assertSame(cachedAnchor, merged.single { it.uuid == FIRST })
+        assertSame(otherCachedAnchor, merged.single { it.uuid == REQUESTED })
+    }
+
+    @Test fun `anchored initialization defers read receipts to visible messages`() {
+        assertFalse(shouldMarkInitialPageReadThroughLatest(FIRST))
+        assertTrue(shouldMarkInitialPageReadThroughLatest(null))
+    }
+
+    @Test fun `initial anchor scroll waits until the loaded list is rendered`() {
+        assertFalse(shouldPerformInitialMessageScroll(isLoading = true, hasDoneInitialScroll = false, messageCount = 1))
+        assertTrue(shouldPerformInitialMessageScroll(isLoading = false, hasDoneInitialScroll = false, messageCount = 2))
+        assertFalse(shouldPerformInitialMessageScroll(isLoading = false, hasDoneInitialScroll = true, messageCount = 2))
     }
 
     @Test fun `readback uses returned uuid and confirms exact destination content and author`() = runBlocking {
@@ -197,6 +299,14 @@ class MessageForwardingTest {
         private const val TOPIC = "00000000-0000-0000-0000-000000000006"
         private const val AUTHOR = "00000000-0000-0000-0000-000000000007"
         private val TARGET = ForwardDestination(STREAM, TOPIC)
+        private fun stream() = Stream(
+            STREAM, 0, 0, 0, "2026-09-07T12:00:00Z", "Engineering", false,
+            0x7087FF, notificationMode = "all",
+        )
+        private fun topic() = TopicsResponseData(
+            TOPIC, "General", 0x7087FF, STREAM, "2026-09-07T12:00:00Z", 0,
+            false, true, notificationMode = "all",
+        )
         private fun source(uuid: String) = MessageResponse(uuid, "2026-09-07T12:00:00Z", "2026-09-07T12:00:00Z",
             STREAM, TOPIC, AUTHOR, AUTHOR, MessageResponsePayload("markdown", "source text"), true, emptyMap(), true)
     }

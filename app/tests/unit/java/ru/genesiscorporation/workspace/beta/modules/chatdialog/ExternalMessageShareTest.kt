@@ -50,6 +50,25 @@ class ExternalMessageShareTest {
         assertTrue(result.files.isEmpty())
     }
 
+    @Test fun `plain forward snapshot shares literal reference labels without resolving or attaching them`() = runBlocking {
+        var resolutions = 0
+        val snapshot = buildForwardSnapshotReference(
+            "Original Author",
+            SECOND,
+            "[literal file](urn:file:$FILE) and [literal quote](urn:quote:$THIRD)",
+            plainText = true,
+        )
+        val result = materializeExternalMessages(listOf(message(FIRST, snapshot, "CASSI"))) {
+            resolutions++
+            message(THIRD, "Must not be shared", "Quoted Author")
+        }
+        assertEquals(0, resolutions)
+        assertTrue(result.files.isEmpty())
+        assertTrue(result.text.contains("literal file and literal quote"))
+        assertFalse(result.text.contains("Must not be shared"))
+        assertFalse(result.text.contains("urn:"))
+    }
+
     companion object {
         private const val FIRST = "00000000-0000-0000-0000-000000000001"
         private const val SECOND = "00000000-0000-0000-0000-000000000002"
