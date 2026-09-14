@@ -165,7 +165,7 @@ fun StreamInboundView(
             val avatarUrn = stream.directUser?.avatar
             Avatar(
                 avatarUrn,
-                viewModel.client.userViewModel.baseUrl.value ?: "",
+                viewModel.client.userViewModel?.baseUrl?.value ?: "",
                 viewModel.client.authHeaders(),
                 stream.color,
                 stream.name,

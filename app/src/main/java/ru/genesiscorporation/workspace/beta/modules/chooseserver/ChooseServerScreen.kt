@@ -64,7 +64,7 @@ fun ChooseServerScreen(
             user.clearAll()
         }
         if (state is QueryState.Success) {
-            navController.navigate(LoginFlow.Login)
+            navController.navigate(LoginFlow.Login(true))
             viewModel.returnToIdleState()
         }
         if (state is QueryState.Error) {

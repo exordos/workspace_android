@@ -24,6 +24,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import ru.genesiscorporation.workspace.beta.UserViewModel
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
+import ru.genesiscorporation.workspace.beta.data.EventsRepositoryStore
 import ru.genesiscorporation.workspace.beta.data.remote.ApiError
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
@@ -68,11 +69,12 @@ class ChatDialogViewModel(
     val topicName: String?,
     val topicUuid: String,
     val isDirectMessages: Boolean,
-    val repo: EventsRepository,
+    val eventsRepositoryStore: EventsRepositoryStore,
     val userId: Int?,
     val storage: AttachmentStorage
 ): ViewModel() {
-
+    val repo = eventsRepositoryStore.get(client.getCurrentServerId()) ?: error("Cannot get current event repository")
+    
     val streamTopicMessages: StateFlow<Map<String, List<MessageResponse>>> = repo.streamTopicMessages
         .stateIn(
             scope = viewModelScope,
@@ -188,7 +190,7 @@ class ChatDialogViewModel(
         }
         viewModelScope.launch {
             var accountIdentity: Pair<String?, String?>? = null
-            combine(userViewModel.repo.baseUrlFlow, repo.currentUser) { baseUrl, user ->
+            combine(userViewModel.baseUrl, repo.currentUser) { baseUrl, user ->
                 baseUrl to user?.uuid
             }.distinctUntilChanged().collect { identity ->
                 if (identity.first != null && identity.second != null) {

@@ -4,8 +4,9 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import kotlinx.coroutines.CoroutineScope
-import ru.genesiscorporation.workspace.beta.data.ApiKeyRepository
+import ru.genesiscorporation.workspace.beta.data.ServerRepository
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
+import ru.genesiscorporation.workspace.beta.data.EventsRepositoryStore
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.modules.addfolder.AddFolderViewModel
 import ru.genesiscorporation.workspace.beta.modules.adduserstostream.AddUsersToStreamView
@@ -32,23 +33,22 @@ import ru.genesiscorporation.workspace.beta.modules.profile.ProfileViewModel
 import ru.genesiscorporation.workspace.beta.modules.streaminfo.StreamInfoViewModel
 import ru.genesiscorporation.workspace.beta.modules.topics.TopicsViewModel
 import ru.genesiscorporation.workspace.beta.modules.users.UsersViewModel
+import ru.genesiscorporation.workspace.beta.modules.visualsettings.VisualSettingsViewModel
 
 class UserViewModelFactory(
-    private val appContext: Context,
-    private val scope: CoroutineScope
+    private val repo: ServerRepository
 ) : ViewModelProvider.Factory {
 
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
-        val repo = ApiKeyRepository(appContext, scope)
         return UserViewModel(repo) as T
     }
 }
 
-class WorkspaceViewModelFactory(private val client: WorkspaceAPIClient, val repo: EventsRepository) : ViewModelProvider.Factory {
+class WorkspaceViewModelFactory(private val client: WorkspaceAPIClient, val eventsRepositoryStore: EventsRepositoryStore) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(WorkspaceViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return WorkspaceViewModel(client, repo) as T
+            return WorkspaceViewModel(client, eventsRepositoryStore) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
@@ -64,72 +64,72 @@ class ChooseServerViewModelFactory(private val client: WorkspaceAPIClient, priva
     }
 }
 
-class LoginViewModelFactory(private val client: WorkspaceAPIClient, private val userViewModel: UserViewModel) : ViewModelProvider.Factory {
+class LoginViewModelFactory(private val client: WorkspaceAPIClient, private val userViewModel: UserViewModel, val isFirstOrganization: Boolean) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(LoginViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return LoginViewModel(client, userViewModel) as T
+            return LoginViewModel(client, userViewModel, isFirstOrganization) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
 }
 
-class OtpViewModelFactory(private val client: WorkspaceAPIClient, private val userViewModel: UserViewModel, val login: String, val password: String) : ViewModelProvider.Factory {
+class OtpViewModelFactory(private val client: WorkspaceAPIClient, private val userViewModel: UserViewModel, val login: String, val password: String, val isFirstOrganization: Boolean) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(OtpViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return OtpViewModel(client, userViewModel, login, password) as T
+            return OtpViewModel(client, userViewModel, login, password, isFirstOrganization) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
 }
 
 
-class CreationBaseViewModelFactory(private val repo: EventsRepository) : ViewModelProvider.Factory {
+class CreationBaseViewModelFactory(private val eventsRepositoryStore: EventsRepositoryStore) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(CreationBaseViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return CreationBaseViewModel(repo) as T
+            return CreationBaseViewModel(eventsRepositoryStore) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
 }
 
-class CreateStreamViewModelFactory(private val client: WorkspaceAPIClient, private val repo: EventsRepository) : ViewModelProvider.Factory {
+class CreateStreamViewModelFactory(private val client: WorkspaceAPIClient, private val eventsRepositoryStore: EventsRepositoryStore) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(CreateStreamViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return CreateStreamViewModel(client, repo) as T
+            return CreateStreamViewModel(client, eventsRepositoryStore) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
 }
 
-class FolderSettingsViewModelFactory(private val repo: EventsRepository) : ViewModelProvider.Factory {
+class FolderSettingsViewModelFactory(private val client: WorkspaceAPIClient, private val eventsRepositoryStore: EventsRepositoryStore) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(FolderSettingsViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return FolderSettingsViewModel(repo) as T
+            return FolderSettingsViewModel(client, eventsRepositoryStore) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
 }
 
-class AddFolderViewModelFactory(private val client: WorkspaceAPIClient, private val repo: EventsRepository) : ViewModelProvider.Factory {
+class AddFolderViewModelFactory(private val client: WorkspaceAPIClient, private val eventsRepositoryStore: EventsRepositoryStore) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(AddFolderViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return AddFolderViewModel(client, repo) as T
+            return AddFolderViewModel(client, eventsRepositoryStore) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
 }
 
-class CreateDirectStreamViewModelFactory(private val client: WorkspaceAPIClient, private val repo: EventsRepository) : ViewModelProvider.Factory {
+class CreateDirectStreamViewModelFactory(private val client: WorkspaceAPIClient, private val eventsRepositoryStore: EventsRepositoryStore) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(CreateDirectStreamViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return CreateDirectStreamViewModel(client, repo) as T
+            return CreateDirectStreamViewModel(client, eventsRepositoryStore) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
@@ -137,29 +137,29 @@ class CreateDirectStreamViewModelFactory(private val client: WorkspaceAPIClient,
 
 class ChatViewModelFactory(private val client: WorkspaceAPIClient,
                            private val userViewModel: UserViewModel,
-                           private  val repo: EventsRepository,
+                           private  val eventsRepositoryStore: EventsRepositoryStore,
                            private  val pendingDeepLink: String?,
                            private  val onDeepLinkHandled: () -> Unit) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(ChatViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return ChatViewModel(client, repo, pendingDeepLink, onDeepLinkHandled) as T
+            return ChatViewModel(client, eventsRepositoryStore, pendingDeepLink, onDeepLinkHandled) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
 }
 
-class ChatTopicsViewModelFactory(private val client: WorkspaceAPIClient, private val userViewModel: UserViewModel, private val channelName: String, private val channelStreamId: String, private  val repo: EventsRepository) : ViewModelProvider.Factory {
+class ChatTopicsViewModelFactory(private val client: WorkspaceAPIClient, private val userViewModel: UserViewModel, private val channelName: String, private val channelStreamId: String, private  val eventsRepositoryStore: EventsRepositoryStore) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(TopicsViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return TopicsViewModel(client, userViewModel, channelName, channelStreamId, repo) as T
+            return TopicsViewModel(client, userViewModel, channelName, channelStreamId, eventsRepositoryStore) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
 }
 
-class ChatDialogViewModelFactory(private val client: WorkspaceAPIClient, private val userViewModel: UserViewModel, private val chatTitle: String, private val chatId: String, private val topicName: String?, private val topicUuid: String, private val isDirectMessages: Boolean, private  val repo: EventsRepository, val userId: Int?, private val storage: AttachmentStorage) : ViewModelProvider.Factory {
+class ChatDialogViewModelFactory(private val client: WorkspaceAPIClient, private val userViewModel: UserViewModel, private val chatTitle: String, private val chatId: String, private val topicName: String?, private val topicUuid: String, private val isDirectMessages: Boolean, private  val eventsRepositoryStore: EventsRepositoryStore, val userId: Int?, private val storage: AttachmentStorage) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(ChatDialogViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
@@ -171,7 +171,7 @@ class ChatDialogViewModelFactory(private val client: WorkspaceAPIClient, private
                 topicName,
                 topicUuid,
                 isDirectMessages,
-                repo,
+                eventsRepositoryStore,
                 userId,
                 storage
             ) as T
@@ -180,7 +180,7 @@ class ChatDialogViewModelFactory(private val client: WorkspaceAPIClient, private
     }
 }
 
-class StreamInfoViewModelFactory(private val client: WorkspaceAPIClient, private val streamUuid: String, private val topicUuid: String, private  val repo: EventsRepository) : ViewModelProvider.Factory {
+class StreamInfoViewModelFactory(private val client: WorkspaceAPIClient, private val streamUuid: String, private val topicUuid: String, private  val eventsRepositoryStore: EventsRepositoryStore) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(StreamInfoViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
@@ -188,121 +188,121 @@ class StreamInfoViewModelFactory(private val client: WorkspaceAPIClient, private
                 streamUuid,
                 topicUuid,
                 client,
-                repo
+                eventsRepositoryStore
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
 }
-class ProfileViewModelFactory(private val client: WorkspaceAPIClient, private val userViewModel: UserViewModel, private val repo: EventsRepository) : ViewModelProvider.Factory {
+class ProfileViewModelFactory(private val client: WorkspaceAPIClient, private val userViewModel: UserViewModel, private val eventsRepositoryStore: EventsRepositoryStore) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(ProfileViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return ProfileViewModel(client, userViewModel, repo) as T
+            return ProfileViewModel(client, userViewModel, eventsRepositoryStore) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
 }
 
-class OwnUserSettingsViewModelFactory(private val client: WorkspaceAPIClient, private val repo: EventsRepository) : ViewModelProvider.Factory {
+class OwnUserSettingsViewModelFactory(private val client: WorkspaceAPIClient, private val eventsRepositoryStore: EventsRepositoryStore) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(OwnUserSettingsViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return OwnUserSettingsViewModel(client, repo) as T
+            return OwnUserSettingsViewModel(client, eventsRepositoryStore) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
 }
 
-class UsersViewModelFactory(private val client: WorkspaceAPIClient) : ViewModelProvider.Factory {
+class VisualSettingsViewModelFactory(private val userViewModel: UserViewModel) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
-        if (modelClass.isAssignableFrom(UsersViewModel::class.java)) {
+        if (modelClass.isAssignableFrom(VisualSettingsViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return UsersViewModel(client) as T
+            return VisualSettingsViewModel(userViewModel) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
 }
 
-class ChatUserInfoViewModelFactory(private val client: WorkspaceAPIClient, val userName: String, val userId: String, val avatarUrl: String, val email: String, val repo: EventsRepository) : ViewModelProvider.Factory {
+class ChatUserInfoViewModelFactory(private val client: WorkspaceAPIClient, val userName: String, val userId: String, val avatarUrl: String, val email: String, val eventsRepositoryStore: EventsRepositoryStore) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(ChatUserInfoViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return ChatUserInfoViewModel(userName, userId, avatarUrl, email, client, repo) as T
+            return ChatUserInfoViewModel(userName, userId, avatarUrl, email, client, eventsRepositoryStore) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
 }
 
-class AddUsersToStreamViewModelFactory(private val client: WorkspaceAPIClient, private val streamUuid: String, private  val repo: EventsRepository) : ViewModelProvider.Factory {
+class AddUsersToStreamViewModelFactory(private val client: WorkspaceAPIClient, private val streamUuid: String, private  val eventsRepositoryStore: EventsRepositoryStore) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(AddUsersToStreamViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
             return AddUsersToStreamViewModel(
                 streamUuid,
                 client,
-                repo
+                eventsRepositoryStore
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
 }
 
-class MailViewModelFactory(private val repo: EventsRepository) : ViewModelProvider.Factory {
+class MailViewModelFactory(private val eventsRepositoryStore: EventsRepositoryStore) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(MailViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return MailViewModel(repo) as T
+            return MailViewModel(eventsRepositoryStore) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
 }
 
-class CalendarViewModelFactory(private val repo: EventsRepository) : ViewModelProvider.Factory {
+class CalendarViewModelFactory(private val eventsRepositoryStore: EventsRepositoryStore) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(CalendarViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return CalendarViewModel(repo) as T
+            return CalendarViewModel(eventsRepositoryStore) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
 }
 
-class HomeViewModelFactory(private val repo: EventsRepository, private val client: WorkspaceAPIClient) : ViewModelProvider.Factory {
+class HomeViewModelFactory(private val eventsRepositoryStore: EventsRepositoryStore, private val client: WorkspaceAPIClient) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(HomeViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return HomeViewModel(client, repo) as T
+            return HomeViewModel(client, eventsRepositoryStore) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
 }
 
-class HomeMentionsViewModelFactory(private val repo: EventsRepository, private val client: WorkspaceAPIClient) : ViewModelProvider.Factory {
+class HomeMentionsViewModelFactory(private val eventsRepositoryStore: EventsRepositoryStore, private val client: WorkspaceAPIClient) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(HomeMentionsViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return HomeMentionsViewModel(client, repo) as T
+            return HomeMentionsViewModel(client, eventsRepositoryStore) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
 }
 
-class HomeInboundsViewModelFactory(private val repo: EventsRepository, private val client: WorkspaceAPIClient) : ViewModelProvider.Factory {
+class HomeInboundsViewModelFactory(private val eventsRepositoryStore: EventsRepositoryStore, private val client: WorkspaceAPIClient) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(HomeInboundsViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return HomeInboundsViewModel(client, repo) as T
+            return HomeInboundsViewModel(client, eventsRepositoryStore) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
 }
 
-class HomeDraftsViewModelFactory(private val repo: EventsRepository, private val client: WorkspaceAPIClient) : ViewModelProvider.Factory {
+class HomeDraftsViewModelFactory(private val eventsRepositoryStore: EventsRepositoryStore, private val client: WorkspaceAPIClient) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(HomeDraftsViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return HomeDraftsViewModel(client, repo) as T
+            return HomeDraftsViewModel(client, eventsRepositoryStore) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }

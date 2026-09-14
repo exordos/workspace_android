@@ -220,7 +220,7 @@ fun TextMessageView(
                             messageElements.forEach { budgeted ->
                                 when (val element = budgeted.element) {
                                     is MessageElement.Image -> {
-                                        val baseUrl by viewModel.userViewModel.repo.baseUrlFlow.collectAsStateWithLifecycle(
+                                        val baseUrl by viewModel.userViewModel.baseUrl.collectAsStateWithLifecycle(
                                             initialValue = ""
                                         )
                                         val authHeaders = viewModel.client.authHeaders()

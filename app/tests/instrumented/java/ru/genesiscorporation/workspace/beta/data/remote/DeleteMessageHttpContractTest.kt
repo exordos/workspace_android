@@ -28,9 +28,8 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import ru.genesiscorporation.workspace.beta.R
-import ru.genesiscorporation.workspace.beta.SessionCookieStore
 import ru.genesiscorporation.workspace.beta.UserViewModel
-import ru.genesiscorporation.workspace.beta.data.ApiKeyRepository
+import ru.genesiscorporation.workspace.beta.data.ServerRepository
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
 import ru.genesiscorporation.workspace.beta.data.remote.dto.DeleteMessageRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
@@ -48,7 +47,7 @@ import java.util.UUID
 class DeleteMessageHttpContractTest {
     private lateinit var files: File
     private lateinit var storeJob: Job
-    private lateinit var preferences: ApiKeyRepository
+    private lateinit var preferences: ServerRepository
     private lateinit var user: UserViewModel
     private lateinit var http: HttpClient
     private lateinit var api: WorkspaceAPIClient
@@ -67,7 +66,7 @@ class DeleteMessageHttpContractTest {
         val store = PreferenceDataStoreFactory.create(scope = storeScope) {
             File(files, "delete-http.preferences_pb")
         }
-        preferences = ApiKeyRepository(store, storeScope)
+        preferences = ServerRepository(store, storeScope)
         user = UserViewModel(preferences)
         http = HttpClient(CIO) {
             install(HttpTimeout) {

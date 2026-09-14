@@ -187,7 +187,7 @@ internal fun MessageQuoteCard(
 
 @Composable
 private fun QuotedMessageImage(element: MessageElement.Image, viewModel: ChatDialogViewModel) {
-    val baseUrl by viewModel.userViewModel.repo.baseUrlFlow.collectAsStateWithLifecycle(initialValue = "")
+    val baseUrl by viewModel.userViewModel.baseUrl.collectAsStateWithLifecycle(initialValue = "")
     val headers = NetworkHeaders.Builder().apply {
         viewModel.client.authHeaders().forEach { set(it.title, it.value) }
     }.build()

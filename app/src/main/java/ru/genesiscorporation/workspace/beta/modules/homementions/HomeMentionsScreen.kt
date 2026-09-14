@@ -161,7 +161,7 @@ fun HomeMentionsScreen(
                                 ) {
                                     Avatar(
                                         item.user?.avatar,
-                                        viewModel.client.userViewModel.baseUrl.value ?: "",
+                                        viewModel.client.userViewModel?.baseUrl?.value ?: "",
                                         viewModel.client.authHeaders(),
                                         null,
                                         item.user?.displayableName() ?: "",

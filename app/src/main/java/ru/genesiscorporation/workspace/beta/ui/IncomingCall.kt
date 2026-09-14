@@ -101,7 +101,7 @@ fun IncomingCall(
             Button(
                 onClick = {
                     val options = JitsiMeetConferenceOptions.Builder()
-                        .setServerURL(URL(viewModel.repo.jitsiServerUrl))
+//                        .setServerURL(URL(viewModel.repo.jitsiServerUrl))
                         .setRoom(itemUrl.path.drop(1))
                         .build()
                     viewModel.setCurrentCallMessage(null)

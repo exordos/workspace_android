@@ -10,7 +10,6 @@ import ru.genesiscorporation.workspace.beta.data.remote.HTTPMethod
 class FoldersRequest(): ApiRequest<EmptyRequestData, List<FolderResponseData>, ApiError> {
     override val method: HTTPMethod = HTTPMethod.GET
     override val requiresApiKey: Boolean = true
-    override val shouldApplySuffix: Boolean = false
     override val url: String = "/api/workspace/v1/messenger/folders/"
     override val data = EmptyRequestData()
 }

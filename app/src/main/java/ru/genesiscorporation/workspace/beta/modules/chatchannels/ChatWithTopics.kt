@@ -44,12 +44,15 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.ChatFlow
+import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
+import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 import ru.genesiscorporation.workspace.beta.ui.AnimatedGif
 import ru.genesiscorporation.workspace.beta.ui.FullScreenError
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.time.LocalDateTime
+import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 import kotlin.collections.mapNotNull
 import kotlin.collections.sortedByDescending
@@ -138,11 +141,7 @@ fun ChatWithTopics(
                             .fillMaxSize()
                     ) {
                         items(
-                            items = filteredSubscriptions.sortedByDescending {
-                                LocalDateTime.parse(
-                                    it.lastMessage?.createdAt ?: it.updatedAt, messageFormatter
-                                )
-                            }
+                            items = if (chatViewModel.client.userViewModel?.streamsOrderIsUnreadFirst?.value ?: true) filteredSubscriptions.sortedForInbox() else filteredSubscriptions.sortedByActivity()
                         ) { item ->
                             Row(
                                 verticalAlignment = Alignment.CenterVertically
@@ -258,13 +257,7 @@ fun ChatWithTopics(
                                                         .weight(1f)
                                                 ) {
                                                     items(
-                                                        items = topics.sortedByDescending {
-                                                            LocalDateTime.parse(
-                                                                it.lastMessage?.createdAt
-                                                                    ?: it.updatedAt,
-                                                                messageFormatter
-                                                            )
-                                                        }
+                                                        items = if (chatViewModel.client.userViewModel?.streamsOrderIsUnreadFirst?.value ?: true) topics.topicsSortedForInbox() else topics.topicsSortedByActivity()
                                                     ) { item ->
                                                         ChatTopic(
                                                             chatViewModel,
@@ -305,3 +298,37 @@ fun ChatWithTopics(
         else -> { }
     }
 }
+
+private val streamDateFormatter = DateTimeFormatter.ISO_LOCAL_DATE_TIME
+
+fun Stream.sortKey(): LocalDateTime =
+    OffsetDateTime.parse(lastMessage?.createdAt ?: updatedAt)
+        .toLocalDateTime()
+
+fun List<Stream>.sortedForInbox(): List<Stream> =
+    sortedWith(
+        compareByDescending<Stream> { it.activeUnreadCount > 0 }
+            .thenByDescending { it.sortKey() }
+    )
+
+fun List<Stream>.sortedByActivity(): List<Stream> =
+    sortedByDescending { it.sortKey() }
+
+fun TopicsResponseData.sortKey(): LocalDateTime =
+    OffsetDateTime.parse(lastMessage?.createdAt ?: updatedAt)
+        .toLocalDateTime()
+private val TopicsResponseData.isNotMuted: Boolean
+    get() = notificationMode != "mute"
+
+fun List<TopicsResponseData>.topicsSortedForInbox(): List<TopicsResponseData> =
+    sortedWith(
+        compareByDescending<TopicsResponseData> { it.isNotMuted }
+            .thenByDescending { it.unreadCount }
+            .thenByDescending { it.sortKey() }
+    )
+
+fun List<TopicsResponseData>.topicsSortedByActivity(): List<TopicsResponseData> =
+    sortedWith(
+        compareByDescending<TopicsResponseData> { it.isNotMuted }
+            .thenByDescending { it.sortKey() }
+    )

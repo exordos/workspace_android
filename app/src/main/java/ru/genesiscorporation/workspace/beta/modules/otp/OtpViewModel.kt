@@ -15,7 +15,8 @@ class OtpViewModel(
     val client: WorkspaceAPIClient,
     val userViewModel: UserViewModel,
     val login: String,
-    val password: String
+    val password: String,
+    val isFirstOrganization: Boolean
 ): ViewModel() {
 
     private val _queryState = MutableStateFlow<QueryState>(QueryState.Idle)
@@ -48,9 +49,8 @@ class OtpViewModel(
         when(response) {
             is ApiResult.Success -> {
                 val userResponse = response.value
-                userViewModel.setAccessToken(userResponse.accessToken)
-                userViewModel.setRefreshToken(userResponse.refreshToken)
-                client.baseAccessToken = userResponse.accessToken
+                userViewModel.setTokens(userResponse.accessToken,userResponse.refreshToken)
+                _queryState.value = QueryState.Success
             }
             is ApiResult.Error -> {
                 _queryState.value = QueryState.Error(response.error.message ?: "Введён неверный код")

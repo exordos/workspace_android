@@ -44,37 +44,52 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.properties.Properties
 import kotlinx.serialization.properties.encodeToStringMap
 import okhttp3.Response
-import ru.genesiscorporation.workspace.beta.SessionCookieStore
 import ru.genesiscorporation.workspace.beta.UserViewModel
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UploadFileResponseData
 import kotlin.io.encoding.Base64
 import ru.genesiscorporation.workspace.beta.BuildConfig
+import ru.genesiscorporation.workspace.beta.data.ServerConfig
+import ru.genesiscorporation.workspace.beta.data.TokenPair
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.dto.LoginRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TokenRefreshRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UploadAvatarResponseData
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 import java.io.File
+import java.util.UUID
 
 class WorkspaceAPIClient(
-    val client: HttpClient,
-    val userViewModel: UserViewModel,
-    val sessionCookieStore: SessionCookieStore
+    val client: HttpClient
 ): APIClient {
-    var baseAccessToken: String? = null
+
+    fun getCurrentServerId(): String {
+        return userViewModel?.selectedServerId?.value ?: ""
+    }
+    var userViewModel: UserViewModel? = null
+
+    fun attachUserViewModel(userViewModel: UserViewModel) {
+        this.userViewModel = userViewModel
+    }
+
+    fun requireUserViewModel(): UserViewModel =
+        userViewModel ?: error("UserViewModel not attached. Call attachUserState() first.")
+
+
     @OptIn(ExperimentalSerializationApi::class)
     suspend inline fun <reified RequestData : Any, reified Response : Any, reified ResponseError : Any> performRequest(
-        request: ApiRequest<RequestData, Response, ResponseError>
+        request: ApiRequest<RequestData, Response, ResponseError>,
+        serverId: String? = null
     ): ApiResult<Response, ApiError> {
-        val baseUrl = userViewModel.repo.baseUrlFlow.first()
-        val accessToken = if (baseAccessToken != null) baseAccessToken ?: "" else userViewModel.baseUrl.value ?: ""
-        val isOidc = accessToken.contains("__Host-sessionid=")
-        val urlSuffix = if (request.shouldApplySuffix) {
-            if (isOidc) "/json" else "/api/v1"
-        } else {
-            ""
+        var activeServerConfig = if (serverId != null) requireUserViewModel().getServer(serverId) else  requireUserViewModel().selectedServer.value
+        if (request.isAbsoluteUrl) {
+            activeServerConfig = ServerConfig(UUID.randomUUID().toString(), request.url, "", "")
         }
-        val urlString = if (request.isAbsoluteUrl) request.url else "${baseUrl}${urlSuffix}${request.url}"
+        activeServerConfig ?: return ApiResult.Error(ApiError("Internal error", "INTERNAL_ERROR"))
+
+        val baseUrl = activeServerConfig.baseUrl
+        val accessToken = if (serverId != null) requireUserViewModel().getTokens(serverId)?.accessToken else  requireUserViewModel().accessToken.value
+
+        val urlString = if (request.isAbsoluteUrl) request.url else "${baseUrl}${request.url}"
         return try {
             val requestBuilder: HttpRequestBuilder = HttpRequestBuilder().apply {
                 url(urlString)
@@ -174,29 +189,29 @@ class WorkspaceAPIClient(
 
                 val responseString: String = httpResponse.body()
                 if (Response::class == String::class) {
-                    val finalResponseString = if (request.shouldReturnUrl) httpResponse.call.request.url.toString() else if (request.hasSessionCookie) sessionCookieStore.getFullSessionCookie() ?: "" else responseString
+                    val finalResponseString = if (request.shouldReturnUrl) httpResponse.call.request.url.toString()  else responseString
                     ApiResult.Success(finalResponseString as Response)
                 } else {
                     val response = json.decodeFromString<Response>(responseString)
                     ApiResult.Success(response)
                 }
             } else if (httpResponse.status.value == 401 && request !is LoginRequest && request !is TokenRefreshRequest) {
-                refreshToken()
-                requestBuilder.headers.set("Authorization", "Bearer ${baseAccessToken ?: ""}")
+                refreshToken(serverId)
+                requestBuilder.headers.set("Authorization", "Bearer ${accessToken ?: ""}")
                 val httpResponseAfterRefresh: HttpResponse = client.request(requestBuilder)
                 if (httpResponseAfterRefresh.status.isSuccess()) {
                     val json = Json { ignoreUnknownKeys = true }
 
                     val responseString: String = httpResponseAfterRefresh.body()
                     if (Response::class == String::class) {
-                        val finalResponseString = if (request.shouldReturnUrl) httpResponseAfterRefresh.call.request.url.toString() else if (request.hasSessionCookie) sessionCookieStore.getFullSessionCookie() ?: "" else responseString
+                        val finalResponseString = if (request.shouldReturnUrl) httpResponseAfterRefresh.call.request.url.toString()  else responseString
                         ApiResult.Success(finalResponseString as Response)
                     } else {
                         val response = json.decodeFromString<Response>(responseString)
                         ApiResult.Success(response)
                     }
                 } else if (httpResponseAfterRefresh.status.value == 401) {
-                    userViewModel.clearAll()
+                    requireUserViewModel().clearAll()
                     val error = ApiError("Request failed", "REQUEST_FAILED")
 
                     ApiResult.Error(error)
@@ -239,9 +254,15 @@ class WorkspaceAPIClient(
         return uploadFile(path, parts)
     }
 
-    suspend inline fun <reified T> uploadFile(path: String, parts: List<PartData>): ApiResult<T, ApiError> {
-        val baseUrl = userViewModel.repo.baseUrlFlow.first()
-        val accessToken = if (baseAccessToken != null) baseAccessToken ?: "" else userViewModel.repo.accessTokenFlow.first() ?: ""
+    suspend inline fun <reified T> uploadFile(
+        path: String, parts: List<PartData>
+        ): ApiResult<T, ApiError> {
+
+        val activeServerConfig = requireUserViewModel().selectedServer.value
+        activeServerConfig ?: return ApiResult.Error(ApiError("Internal error", "INTERNAL_ERROR"))
+
+        val baseUrl = activeServerConfig.baseUrl
+        val accessToken = requireUserViewModel().selectedServer.value
         val httpResponse: HttpResponse = client.post("${baseUrl}${path}") {
             setBody(
                 MultiPartFormDataContent(
@@ -264,9 +285,15 @@ class WorkspaceAPIClient(
         }
     }
 
-    suspend fun downloadFile(path: String, destination: File): ApiResult<File, ApiError> {
-        val baseUrl = userViewModel.repo.baseUrlFlow.first()
-        val accessToken = if (baseAccessToken != null) baseAccessToken ?: "" else userViewModel.repo.accessTokenFlow.first() ?: ""
+    suspend fun downloadFile(
+        path: String, destination: File
+    ): ApiResult<File, ApiError> {
+
+        val activeServerConfig = requireUserViewModel().selectedServer.value
+        activeServerConfig ?: return ApiResult.Error(ApiError("Internal error", "INTERNAL_ERROR"))
+
+        val baseUrl = activeServerConfig.baseUrl
+        val accessToken = requireUserViewModel().selectedServer.value
         val httpResponse: HttpResponse = client.get("${baseUrl}${path}") {
             header("User-Agent", "Workspace/android/${BuildConfig.VERSION_NAME}")
             header("Authorization", "Bearer $accessToken")
@@ -282,19 +309,18 @@ class WorkspaceAPIClient(
         }
     }
 
-    suspend fun refreshToken() {
-        val refreshToken = userViewModel.repo.refreshTokenFlow.first()
-        if (refreshToken != null) {
-            val refreshResponse = performRequest(TokenRefreshRequest(refreshToken))
+    suspend fun refreshToken(serverId: String? = null) {
+        val tokenPair = if (serverId != null) requireUserViewModel().getTokens(serverId) else requireUserViewModel().getCurrentTokens()
+        if (tokenPair != null) {
+            val refreshResponse = performRequest(TokenRefreshRequest(tokenPair.refreshToken), serverId)
             when(refreshResponse) {
                 is ApiResult.Success -> {
                     val userResponse = refreshResponse.value
-                    userViewModel.setAccessToken(userResponse.accessToken)
-                    userViewModel.setRefreshToken(userResponse.refreshToken)
-                    baseAccessToken = userResponse.accessToken
+                    requireUserViewModel().setAccessToken(userResponse.accessToken, serverId )
+                    requireUserViewModel().setRefreshToken(userResponse.refreshToken, serverId)
                 }
                 is ApiResult.Error -> {
-                    userViewModel.clearAll()
+                    requireUserViewModel().clearAll()
                 }
             }
         }
@@ -308,7 +334,7 @@ class WorkspaceAPIClient(
 
     fun authHeaders(): List<AuthHeader> {
         val authHeadersList: MutableList<AuthHeader> = mutableListOf()
-        val accessToken = if (baseAccessToken != null) baseAccessToken ?: "" else userViewModel.baseUrl.value ?: ""
+        val accessToken =  requireUserViewModel().accessToken.value ?: ""
         authHeadersList += AuthHeader("Authorization", "Bearer $accessToken")
 
         return  authHeadersList

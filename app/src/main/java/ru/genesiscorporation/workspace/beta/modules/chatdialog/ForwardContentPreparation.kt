@@ -226,9 +226,12 @@ private fun escapeForwardFileLabel(value: String): String = value
 /** Preserve status codes so an explicit rejection remains editable, while a lost upload ACK is not retried. */
 private suspend fun uploadForwardFile(client: WorkspaceAPIClient, file: PreparedForwardFile, stream: String): ApiResult<String, ApiError> {
     return try {
-        val baseUrl = client.userViewModel.repo.baseUrlFlow.first().orEmpty()
+        val activeServerConfig = client.userViewModel?.selectedServer?.value
+        activeServerConfig ?: return ApiResult.Error(ApiError("Internal error", "INTERNAL_ERROR"))
+
+        val baseUrl = activeServerConfig.baseUrl
         suspend fun post(): HttpResponse {
-            val token = client.baseAccessToken ?: client.userViewModel.repo.accessTokenFlow.first().orEmpty()
+            val token = client.userViewModel?.selectedServer?.value
             return client.client.post("$baseUrl/api/workspace/v1/messenger/files/") {
             header("Authorization", "Bearer $token")
             setBody(MultiPartFormDataContent(formData {

@@ -90,9 +90,9 @@ object LoginFlow {
     object ChooseServer
 
     @Serializable
-    object Login
+    data class Login(val isFirstOrganization: Boolean)
     @Serializable
-    data class Otp(val login: String, val password: String)
+    data class Otp(val login: String, val password: String, val isFirstOrganization: Boolean)
 }
 
 object StreamCreationFlow {
@@ -120,11 +120,18 @@ object ProfileFlow {
     object Main
     @Serializable
     object OwnUserSettings
+    @Serializable
+    object VisualSettings
 
     @Serializable
     object FolderSettings
     @Serializable
     object AddFolder
+
+    @Serializable
+    data class Login(val isFirstOrganization: Boolean)
+    @Serializable
+    data class Otp(val login: String, val password: String, val isFirstOrganization: Boolean)
 }
 
 object Calls: Destinations {

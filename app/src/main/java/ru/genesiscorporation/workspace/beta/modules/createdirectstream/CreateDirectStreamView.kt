@@ -197,7 +197,7 @@ fun CreateDirectStreamView(
                                     viewModel.createPrivateStream(item)
                                 }
                             },
-                            viewModel.client.userViewModel.baseUrl.collectAsState().value,
+                            viewModel.client.userViewModel?.baseUrl?.collectAsState()?.value,
                             viewModel
                         )
                     }

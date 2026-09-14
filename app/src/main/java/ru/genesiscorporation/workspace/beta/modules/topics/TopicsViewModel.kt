@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.UserViewModel
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
+import ru.genesiscorporation.workspace.beta.data.EventsRepositoryStore
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.modules.chatchannels.TopicHeader
@@ -17,7 +18,7 @@ class TopicsViewModel(
     val userViewModel: UserViewModel,
     val channelName: String,
     val channelStreamId: String,
-    private val repo: EventsRepository
+    private val eventsRepositoryStore: EventsRepositoryStore
 ): ViewModel() {
 
     private val _subscriptions = MutableStateFlow<List<TopicHeader>>(emptyList())

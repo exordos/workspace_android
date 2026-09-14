@@ -23,8 +23,6 @@ interface ApiRequest<RequestData, Response, ResponseError> {
 
     val shouldReturnUrl: Boolean
         get() = false
-    val shouldApplySuffix: Boolean
-        get() = false
     val hasSessionCookie: Boolean
         get() = false
     val isJson: Boolean

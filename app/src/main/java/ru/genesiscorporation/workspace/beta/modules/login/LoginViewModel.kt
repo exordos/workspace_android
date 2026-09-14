@@ -15,7 +15,8 @@ import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 
 class LoginViewModel(
     val client: WorkspaceAPIClient,
-    val userViewModel: UserViewModel
+    val userViewModel: UserViewModel,
+    val isFirstOrganization: Boolean
 ): ViewModel() {
 
     private val _queryState = MutableStateFlow<QueryState>(QueryState.Idle)
@@ -51,9 +52,8 @@ class LoginViewModel(
         when(response) {
             is ApiResult.Success -> {
                 val userResponse = response.value
-                userViewModel.setAccessToken(userResponse.accessToken)
-                userViewModel.setRefreshToken(userResponse.refreshToken)
-                client.baseAccessToken = userResponse.accessToken
+                userViewModel.setTokens(userResponse.accessToken,userResponse.refreshToken)
+                _queryState.value = QueryState.Success
             }
             is ApiResult.Error -> {
                 if (response.error.code == "401") {

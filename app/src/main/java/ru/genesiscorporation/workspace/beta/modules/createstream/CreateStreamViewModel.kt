@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
+import ru.genesiscorporation.workspace.beta.data.EventsRepositoryStore
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.data.remote.dto.AddStreamRequest
@@ -20,8 +21,10 @@ import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 
 class CreateStreamViewModel(
     val client: WorkspaceAPIClient,
-    val eventsRepository: EventsRepository
+    val eventsRepositoryStore: EventsRepositoryStore
 ): ViewModel() {
+    val eventsRepository = eventsRepositoryStore.get(client.getCurrentServerId()) ?: error("Cannot get current event repository")
+
     val users: StateFlow<List<UserResponseData>> = eventsRepository.users
         .stateIn(
             scope = viewModelScope,

@@ -18,7 +18,6 @@ data class LoginRequest(
 
     override val method: HTTPMethod = HTTPMethod.POST
     override val requiresApiKey: Boolean = false
-    override val shouldApplySuffix: Boolean = false
     override val url: String = "/api/core/v1/iam/clients/default/actions/get_token/invoke"
     override val data = LoginRequestData(
         username, password, "login+password", "openid email profile project:$WORKSPACE_PROJECT_UUID", "3600", "31536000"

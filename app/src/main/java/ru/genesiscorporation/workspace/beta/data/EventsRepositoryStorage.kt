@@ -4,31 +4,33 @@ import io.ktor.client.HttpClient
 import ru.genesiscorporation.workspace.beta.UserViewModel
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 
-class EventsRepositoryStorage(
-    val client: WorkspaceAPIClient
+class EventsRepositoryStore(
+    private val tokenStore: SecureTokenStore,
+    var client: WorkspaceAPIClient
 ) {
-    var storage: MutableMap<String, EventsRepository> = mutableMapOf()
-    var userViewModel: UserViewModel? = null
-
-    fun getCurrentEventsRepository(): EventsRepository? {
-        if (storage.isEmpty()) {
-            return null
-        } else {
-            val baseUrl = userViewModel?.baseUrl?.value
-            if (baseUrl != null) {
-                return storage[baseUrl]
-            } else {
-                return null
-            }
+    private val repos = mutableMapOf<String, EventsRepository>()
+    @Synchronized
+    fun getOrCreate(config: ServerConfig): EventsRepository {
+        return repos.getOrPut(config.id) {
+            EventsRepository(config.id, config, tokenStore, client)
         }
     }
+    @Synchronized
+    fun syncWith(servers: List<ServerConfig>) {
+        val ids = servers.map { it.id }.toSet()
 
-    fun addEventsRepository() {
-        val baseUrl = userViewModel?.baseUrl?.value
-        if (baseUrl != null) {
-            val eventsRepository = EventsRepository()
-            eventsRepository.client = client
-            storage[baseUrl] = eventsRepository
-        }
+        servers.forEach { getOrCreate(it) }
+
+        repos.keys
+            .filter { it !in ids }
+            .forEach { id -> repos.remove(id)?.close() }
+    }
+    @Synchronized
+    fun get(serverId: String): EventsRepository? = repos[serverId]
+
+    @Synchronized
+    fun clear() {
+        repos.values.forEach { it.close() }
+        repos.clear()
     }
 }

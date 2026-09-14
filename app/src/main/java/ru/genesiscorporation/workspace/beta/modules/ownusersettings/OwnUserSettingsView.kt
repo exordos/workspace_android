@@ -119,7 +119,7 @@ fun OwnUserSettingsView(
                             ) {
                                 Avatar(
                                     userData.avatar,
-                                    viewModel.client.userViewModel.baseUrl.value ?: "",
+                                    viewModel.client.userViewModel?.baseUrl?.value ?: "",
                                     viewModel.client.authHeaders(),
                                     null,
                                     userData.displayableName(),

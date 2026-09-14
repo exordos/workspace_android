@@ -27,9 +27,8 @@ import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import ru.genesiscorporation.workspace.beta.SessionCookieStore
 import ru.genesiscorporation.workspace.beta.UserViewModel
-import ru.genesiscorporation.workspace.beta.data.ApiKeyRepository
+import ru.genesiscorporation.workspace.beta.data.ServerRepository
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ForwardMessageRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponsePayload
@@ -51,7 +50,7 @@ import java.util.UUID
 class ForwardMessageHttpContractTest {
     private lateinit var files: File
     private lateinit var storeJob: Job
-    private lateinit var preferences: ApiKeyRepository
+    private lateinit var preferences: ServerRepository
     private lateinit var user: UserViewModel
     private lateinit var http: HttpClient
     private lateinit var api: WorkspaceAPIClient
@@ -61,7 +60,7 @@ class ForwardMessageHttpContractTest {
         storeJob = SupervisorJob()
         val scope = CoroutineScope(storeJob + Dispatchers.IO)
         val store = PreferenceDataStoreFactory.create(scope = scope) { File(files, "forward.preferences_pb") }
-        preferences = ApiKeyRepository(store, scope)
+        preferences = ServerRepository(store, scope)
         user = UserViewModel(preferences)
         http = HttpClient(CIO) {
             install(HttpTimeout) { requestTimeoutMillis = 5_000; connectTimeoutMillis = 5_000 }
