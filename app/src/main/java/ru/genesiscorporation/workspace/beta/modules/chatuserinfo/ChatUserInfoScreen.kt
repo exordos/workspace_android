@@ -70,8 +70,7 @@ fun ChatUserInfoScreen(
     val context = LocalContext.current
     val state by viewModel.createQueryState.collectAsStateWithLifecycle()
     val user by viewModel.user.collectAsStateWithLifecycle()
-    val baseUrl by viewModel.client.userViewModel.baseUrl.collectAsStateWithLifecycle()
-    val shareLink = workspaceUserShareLink(baseUrl, user.uuid)
+    val shareLink = workspaceUserShareLink(viewModel.client.userViewModel?.baseUrl?.collectAsState()?.value, user.uuid)
 
     LaunchedEffect(state) {
         if (state is QueryState.Success) {
@@ -146,7 +145,7 @@ fun ChatUserInfoScreen(
             ) {
                 Avatar(
                     user.avatar,
-                    viewModel.client.userViewModel.baseUrl.value ?: "",
+                    viewModel.client.userViewModel?.baseUrl?.value ?: "",
                     viewModel.client.authHeaders(),
                     null,
                     user.displayableName(),

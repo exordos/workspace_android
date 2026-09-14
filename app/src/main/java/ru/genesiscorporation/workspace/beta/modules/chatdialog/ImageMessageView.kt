@@ -191,7 +191,7 @@ fun ImageMessageView(
                             fontFamily = InterFontFamily,
                             fontWeight = FontWeight.Medium
                         )
-                        val baseUrl by viewModel.userViewModel.repo.baseUrlFlow.collectAsStateWithLifecycle(
+                        val baseUrl by viewModel.userViewModel.baseUrl.collectAsStateWithLifecycle(
                             initialValue = ""
                         )
                         val authHeaders = viewModel.client.authHeaders()

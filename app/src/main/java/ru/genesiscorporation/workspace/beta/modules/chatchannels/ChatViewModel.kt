@@ -15,6 +15,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import ru.genesiscorporation.workspace.beta.UserViewModel
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
+import ru.genesiscorporation.workspace.beta.data.EventsRepositoryStore
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.data.remote.dto.AddChatToFolderRequest
@@ -60,10 +61,12 @@ sealed interface ChatNavEvent {
 }
 class ChatViewModel(
     val client: WorkspaceAPIClient,
-    private val repo: EventsRepository,
+    private val eventsRepositoryStore: EventsRepositoryStore,
     val pendingDeepLink: String?,
     val onDeepLinkHandled: () -> Unit
 ): ViewModel() {
+    val repo = eventsRepositoryStore.get(client.getCurrentServerId()) ?: error("Cannot get current event repository")
+
     val streams: StateFlow<List<Stream>> = repo.streams
         .stateIn(
             scope = viewModelScope,
@@ -89,11 +92,6 @@ class ChatViewModel(
         )
 
     val streamBindings: StateFlow<Map<String, List<StreamBindingResponseData>>> = repo.streamBindings
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = emptyMap()
-        )
     var currentlySelectedFolder: StateFlow<FolderResponseData?> = repo.currentlySelectedFolder
         .stateIn(
             scope = viewModelScope,
@@ -173,7 +171,8 @@ class ChatViewModel(
     suspend fun updateSelectedChat(newChat: Stream?) {
         _currentlySelectedStream.update { newChat }
         if (newChat != null) {
-            if (streamBindings.value[newChat.uuid]?.isEmpty() ?: true) {
+            val currentStreamBindings = streamBindings.value[newChat.uuid]
+            if (currentStreamBindings?.isEmpty() ?: true) {
                 loadStreamBindings(newChat)
             } else if (streamTopics.value[newChat.uuid]?.isEmpty() ?: true) {
                 loadTopics(newChat)

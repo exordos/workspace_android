@@ -41,8 +41,11 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import ru.genesiscorporation.workspace.beta.LoginFlow
+import ru.genesiscorporation.workspace.beta.ProfileFlow
+import ru.genesiscorporation.workspace.beta.ProfileNavigation
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 import ru.genesiscorporation.workspace.beta.modules.login.LoginViewModel
@@ -66,6 +69,12 @@ fun OtpScreen(
             Toast
                 .makeText(context, "Код введён неверно", Toast.LENGTH_SHORT)
                 .show()
+        } else if (state is QueryState.Success && !viewModel.isFirstOrganization) {
+            navController.navigate(ProfileFlow.Main) {
+                popUpTo(navController.graph.id) {
+                    inclusive = true
+                }
+            }
         }
     }
 

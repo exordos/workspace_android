@@ -72,7 +72,12 @@ private const val MAX_RETRY_DELAY_MILLIS = 30_000L
 private const val REALTIME_PROBE_INTERVAL_MILLIS = 30_000L
 private const val EVENTS_CURSOR_EXPIRED_STATUS_CODE = "410"
 
-class EventsRepository() {
+class EventsRepository(
+    val serverId: String,
+    private val config: ServerConfig,
+    private val tokenStore: SecureTokenStore,
+    var client: WorkspaceAPIClient
+) {
 
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
@@ -80,7 +85,6 @@ class EventsRepository() {
         scope.cancel()
     }
 
-    var client: WorkspaceAPIClient? = null
     @Volatile
     var latestEpoch: Int = 0
     @Volatile
@@ -270,7 +274,7 @@ class EventsRepository() {
     }
 
     private val _streamBindings = MutableStateFlow<Map<String, List<StreamBindingResponseData>>>(emptyMap())
-    val streamBindings: StateFlow<Map<String, List<StreamBindingResponseData>>> = _streamBindings.asStateFlow()
+    val streamBindings: StateFlow<Map<String, List<StreamBindingResponseData>>> = _streamBindings
 
     fun addStreamBindings(streamUuid: String, streamBindings: List<StreamBindingResponseData>) {
         _streamBindings.update { current ->
@@ -632,7 +636,7 @@ class EventsRepository() {
 
         var retryDelayMillis = INITIAL_RETRY_DELAY_MILLIS
         while (currentCoroutineContext().isActive) {
-            val currentBaseUrl = webSocketClient.userViewModel.baseUrl.value
+            val currentBaseUrl = webSocketClient.requireUserViewModel().baseUrl.value
             if (currentBaseUrl == null) {
                 delay(retryDelayMillis)
                 retryDelayMillis = nextRetryDelayMillis(retryDelayMillis)
@@ -690,7 +694,7 @@ class EventsRepository() {
         baseUrl: String,
         onConnected: () -> Unit
     ) {
-        val accessToken = webSocketClient.userViewModel.accessToken.value
+        val accessToken = webSocketClient.requireUserViewModel().accessToken.value
         if (accessToken != null) {
             val endpoint = resolveWebSocketEndpoint(baseUrl)
             Log.d("WebSocket", "Connecting: ${endpoint.displayUrl()}")
@@ -893,7 +897,7 @@ class EventsRepository() {
     suspend fun loadServerSettings() {
         val webSocketClient = client ?: return
         _streamsQueryState.value = QueryState.Loading
-        val response = webSocketClient.performRequest(ServerSettingsRequest(webSocketClient.userViewModel.baseUrl.value ?: ""))
+        val response = webSocketClient.performRequest(ServerSettingsRequest(webSocketClient.requireUserViewModel().baseUrl.value ?: ""))
         when(response) {
             is ApiResult.Success -> {
                 jitsiServerUrl = response.value.meetUrl

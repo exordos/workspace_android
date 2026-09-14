@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.UserViewModel
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
+import ru.genesiscorporation.workspace.beta.data.EventsRepositoryStore
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.data.remote.dto.DeleteFcmTokenRequest
@@ -18,8 +19,10 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 
 class OwnUserSettingsViewModel(
     val client: WorkspaceAPIClient,
-    private val repo: EventsRepository
+    private val eventsRepositoryStore: EventsRepositoryStore
 ): ViewModel() {
+    val repo = eventsRepositoryStore.get(client.getCurrentServerId()) ?: error("Cannot get current event repository")
+
     val user: StateFlow<UserResponseData?> = repo.currentUser
         .stateIn(
             scope = viewModelScope,

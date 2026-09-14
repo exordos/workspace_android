@@ -94,12 +94,14 @@ fun LoginScreen(
             val message = (state as QueryState.Error).message
             if (message == "needs_otp") {
                 viewModel.idleQueryState()
-                navController.navigate(LoginFlow.Otp(loginText, passwordText))
+                navController.navigate(LoginFlow.Otp(loginText, passwordText, viewModel.isFirstOrganization))
             } else {
                 Toast
                     .makeText(context, message, Toast.LENGTH_SHORT)
                     .show()
             }
+        } else if (state is QueryState.Success && !viewModel.isFirstOrganization) {
+            navController.popBackStack()
         }
     }
 
@@ -120,7 +122,7 @@ fun LoginScreen(
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    val organizationImageUrl = UrnParser.parseUrl(viewModel.userViewModel.organizationImageUrl, "")
+                    val organizationImageUrl = UrnParser.parseUrl(viewModel.userViewModel.organizationImageUrl.collectAsState().value, "")
                     if (organizationImageUrl != null) {
                         AsyncImage(
                             model = organizationImageUrl,
@@ -137,14 +139,14 @@ fun LoginScreen(
                         )
                     }
                     Text(
-                        viewModel.userViewModel.organizationName ?: "Название организации",
+                        viewModel.userViewModel.organizationName.collectAsState().value ?: "Название организации",
                         color = LocalWorkspaceColorsPalette.current.textHeaders,
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Medium,
                         modifier = Modifier.padding(20.dp, 12.dp, 4.dp, 20.dp)
                     )
                     Text(
-                        viewModel.userViewModel.organizationUrl ?: "",
+                        viewModel.userViewModel.organizationUrl.collectAsState().value ?: "",
                         color = LocalWorkspaceColorsPalette.current.textAdditional50,
                         fontSize = 14.sp,
                         fontFamily = InterFontFamily

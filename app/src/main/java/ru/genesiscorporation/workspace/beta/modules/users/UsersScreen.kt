@@ -175,7 +175,7 @@ fun UserCell(
         ) {
             Avatar(
                 item.avatar,
-                viewModel.client.userViewModel.baseUrl.value ?: "",
+                viewModel.client.userViewModel?.baseUrl?.value ?: "",
                 viewModel.client.authHeaders(),
                 null,
                 item.displayableName(),

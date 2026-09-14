@@ -12,7 +12,6 @@ data class TokenRefreshRequest(
 ): ApiRequest<TokenRefreshRequestData, LoginResponse, ApiError> {
     override val method: HTTPMethod = HTTPMethod.POST
     override val requiresApiKey: Boolean = false
-    override val shouldApplySuffix: Boolean = false
     override val url: String = "/api/core/v1/iam/clients/default/actions/get_token/invoke"
     override val data = TokenRefreshRequestData("refresh_token", refreshToken)
 }

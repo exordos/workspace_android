@@ -7,12 +7,14 @@ import kotlinx.coroutines.flow.StateFlow
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.data.remote.dto.SendFcmTokenRequest
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
+import ru.genesiscorporation.workspace.beta.data.EventsRepositoryStore
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 
 class WorkspaceViewModel(
     val client: WorkspaceAPIClient,
-    val repo: EventsRepository
+    val eventsRepositoryStore: EventsRepositoryStore
 ): ViewModel() {
+//    val repo = eventsRepositoryStore.get(client.getCurrentServerId()) ?: error("Cannot get current event repository")
     private val _currentCallMessage = MutableStateFlow<MessageResponse?>(null)
     val currentCallMessage: StateFlow<MessageResponse?> = _currentCallMessage
 

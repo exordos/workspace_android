@@ -100,7 +100,7 @@ fun ChatChannel(
             val lastMessage = item.lastMessage
             Avatar(
                 avatarUrn,
-                viewModel.client.userViewModel.baseUrl.value ?: "",
+                viewModel.client.userViewModel?.baseUrl?.value ?: "",
                 viewModel.client.authHeaders(),
                 item.color,
                 item.name,

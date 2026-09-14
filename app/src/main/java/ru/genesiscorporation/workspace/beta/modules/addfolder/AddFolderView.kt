@@ -164,7 +164,7 @@ fun AddFolderView(
                         item,
                         { viewModel.didTapOnUser(item) },
                         selectedUserUuids.contains(item.uuid),
-                        viewModel.client.userViewModel.baseUrl.collectAsState().value,
+                        viewModel.client.userViewModel?.baseUrl?.collectAsState()?.value,
                         viewModel
                     )
                 }

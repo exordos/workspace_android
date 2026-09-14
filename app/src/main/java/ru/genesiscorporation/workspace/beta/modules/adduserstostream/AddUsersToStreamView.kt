@@ -168,7 +168,7 @@ fun AddUsersToStreamView(
                             item,
                             { viewModel.didTapOnUser(item) },
                             selectedUserUuids.contains(item.uuid),
-                            viewModel.client.userViewModel.baseUrl.collectAsState().value,
+                            viewModel.client.userViewModel?.baseUrl?.collectAsState()?.value,
                             viewModel.client.authHeaders()
                         )
                     }

@@ -12,7 +12,6 @@ class FolderChatsRequest(
 ): ApiRequest<EmptyRequestData, List<FolderChatResponseData>, ApiError> {
     override val method: HTTPMethod = HTTPMethod.GET
     override val requiresApiKey: Boolean = true
-    override val shouldApplySuffix: Boolean = false
     override val url: String = "/workspace/v1/folders/${folderUuid}/items/"
     override val data = EmptyRequestData()
 }

@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
+import ru.genesiscorporation.workspace.beta.data.EventsRepositoryStore
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.data.remote.dto.AddStreamRequest
@@ -29,8 +30,9 @@ class ChatUserInfoViewModel(
     val avatarUrl: String,
     val email: String,
     val client: WorkspaceAPIClient,
-    val repo: EventsRepository
+    val eventsRepositoryStore: EventsRepositoryStore
 ): ViewModel() {
+    val repo = eventsRepositoryStore.get(client.getCurrentServerId()) ?: error("Cannot get current event repository")
 
     val user: StateFlow<UserResponseData> = repo.users
         .map { list -> list.first { it.uuid == userUuid } }

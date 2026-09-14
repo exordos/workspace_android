@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
+import ru.genesiscorporation.workspace.beta.data.EventsRepositoryStore
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MentionedMessagesRequest
@@ -20,8 +21,10 @@ import kotlin.collections.map
 
 class HomeMentionsViewModel(
     val client: WorkspaceAPIClient,
-    val eventsRepository: EventsRepository
+    val eventsRepositoryStore: EventsRepositoryStore
 ): ViewModel() {
+    val eventsRepository = eventsRepositoryStore.get(client.getCurrentServerId()) ?: error("Cannot get current event repository")
+
     private val _messagesQueryState = MutableStateFlow<QueryState>(QueryState.Idle)
     val messagesQueryState: StateFlow<QueryState> = _messagesQueryState
 

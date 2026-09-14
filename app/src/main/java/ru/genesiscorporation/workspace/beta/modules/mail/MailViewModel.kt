@@ -2,7 +2,8 @@ package ru.genesiscorporation.workspace.beta.modules.mail
 
 import androidx.lifecycle.ViewModel
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
+import ru.genesiscorporation.workspace.beta.data.EventsRepositoryStore
 
 class MailViewModel(
-    val eventsRepository: EventsRepository
+    val eventsRepositoryStore: EventsRepositoryStore
 ): ViewModel()

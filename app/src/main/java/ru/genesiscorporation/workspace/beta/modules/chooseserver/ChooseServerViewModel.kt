@@ -4,9 +4,11 @@ import androidx.lifecycle.ViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import ru.genesiscorporation.workspace.beta.UserViewModel
+import ru.genesiscorporation.workspace.beta.data.ServerConfig
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ServerSettingsRequest
+import java.util.UUID
 
 sealed interface QueryState {
     object Idle : QueryState
@@ -38,10 +40,7 @@ class ChooseServerViewModel(
         val response = client.performRequest(ServerSettingsRequest(baseUrl = serverText.value))
         when(response) {
             is ApiResult.Success -> {
-                userViewModel.addBaseUrl(serverText.value)
-                userViewModel.organizationName = response.value.realmName
-                userViewModel.organizationUrl = response.value.realmUrl
-                userViewModel.organizationImageUrl = response.value.realmIcon
+                userViewModel.addServer(serverText.value, response.value.realmIcon, response.value.realmName)
                 _queryState.value = QueryState.Success
             }
             is ApiResult.Error -> {

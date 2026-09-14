@@ -78,26 +78,11 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.ChatFlow
-import ru.genesiscorporation.workspace.beta.LoginFlow
-import ru.genesiscorporation.workspace.beta.UsersViewModelFactory
-import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
-import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
-import ru.genesiscorporation.workspace.beta.modules.chatdialog.formatHHmm
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
-import ru.genesiscorporation.workspace.beta.modules.users.UsersScreen
-import ru.genesiscorporation.workspace.beta.modules.users.UsersViewModel
 import ru.genesiscorporation.workspace.beta.ui.AddChatToFolder
-import ru.genesiscorporation.workspace.beta.ui.AnimatedGif
-import ru.genesiscorporation.workspace.beta.ui.Avatar
-import ru.genesiscorporation.workspace.beta.ui.CreateFolder
 import ru.genesiscorporation.workspace.beta.ui.CreateTopic
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
-import kotlin.collections.mapNotNull
-import kotlin.collections.sortedByDescending
-import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

@@ -79,9 +79,6 @@ fun StreamInfoView(
     val users by viewModel.users.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val currentUserId by viewModel.client.userViewModel.repo.userIdFlow.collectAsStateWithLifecycle(
-        initialValue = 0
-    )
 //    val profile = viewModel.repo.users.collectAsState().value.firstOrNull { it.userId.toString() == viewModel.userId }
 
     Scaffold(
@@ -125,7 +122,7 @@ fun StreamInfoView(
             ) {
                 Avatar(
                     null,
-                    viewModel.client.userViewModel.baseUrl.value ?: "",
+                    viewModel.client.userViewModel?.baseUrl?.value ?: "",
                     viewModel.client.authHeaders(),
                     stream.color,
                     stream.name,
@@ -159,9 +156,8 @@ fun StreamInfoView(
                     }
                 }
             }
-            val baseUrl by viewModel.client.userViewModel.baseUrl.collectAsStateWithLifecycle()
             val shareLink = workspaceStreamShareLink(
-                baseUrl,
+                viewModel.client.userViewModel?.baseUrl?.value ?: "",
                 LoginRequest.WORKSPACE_PROJECT_UUID,
                 stream.uuid
             )
@@ -413,7 +409,7 @@ fun UserRow(
     navController: NavHostController
 ) {
     Column {
-        val baseUrl = viewModel.client.userViewModel.baseUrl.collectAsState().value
+        val baseUrl = viewModel.client.userViewModel?.baseUrl?.collectAsState()?.value
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier

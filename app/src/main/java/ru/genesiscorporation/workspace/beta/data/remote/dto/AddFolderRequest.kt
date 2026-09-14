@@ -12,7 +12,6 @@ class AddFolderRequest(
 ): ApiRequest<AddFolderRequestData, AddFolderResponseData, ApiError> {
     override val method: HTTPMethod = HTTPMethod.POST
     override val requiresApiKey: Boolean = true
-    override val shouldApplySuffix: Boolean = false
     override val isJson: Boolean = true
     override val url: String = "/api/workspace/v1/messenger/folders/"
     override val data = AddFolderRequestData(title)
