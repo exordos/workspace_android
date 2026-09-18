@@ -13,26 +13,50 @@ class SecureTokenStore(context: Context) {
         EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
         EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
     )
-    fun get(serverId: String): TokenPair? {
-        val access = prefs.getString(accessKey(serverId), null) ?: return null
-        val refresh = prefs.getString(refreshKey(serverId), null) ?: return null
-        return TokenPair(access, refresh)
+    fun get(serverId: String): TokenPair? = synchronized(tokenLock) {
+        val access = prefs.getString(accessKey(serverId), null)
+            ?: return@synchronized null
+        val refresh = prefs.getString(refreshKey(serverId), null)
+            ?: return@synchronized null
+        TokenPair(access, refresh)
     }
-    fun save(serverId: String, tokens: TokenPair) {
+    fun save(serverId: String, tokens: TokenPair) = synchronized(tokenLock) {
         prefs.edit()
             .putString(accessKey(serverId), tokens.accessToken)
             .putString(refreshKey(serverId), tokens.refreshToken)
             .apply()
     }
-    fun clear(serverId: String) {
+
+    fun saveIfRefreshTokenMatches(
+        serverId: String,
+        expectedRefreshToken: String,
+        tokens: TokenPair,
+    ): Boolean = synchronized(tokenLock) {
+        if (prefs.getString(refreshKey(serverId), null) != expectedRefreshToken) {
+            return@synchronized false
+        }
+        prefs.edit()
+            .putString(accessKey(serverId), tokens.accessToken)
+            .putString(refreshKey(serverId), tokens.refreshToken)
+            .apply()
+        true
+    }
+
+    fun clear(serverId: String) = synchronized(tokenLock) {
         prefs.edit()
             .remove(accessKey(serverId))
             .remove(refreshKey(serverId))
             .apply()
     }
-    fun clearAll() {
+
+    fun clearAll() = synchronized(tokenLock) {
         prefs.edit().clear().apply()
     }
+
     private fun accessKey(serverId: String) = "access_$serverId"
     private fun refreshKey(serverId: String) = "refresh_$serverId"
+
+    private companion object {
+        private val tokenLock = Any()
+    }
 }

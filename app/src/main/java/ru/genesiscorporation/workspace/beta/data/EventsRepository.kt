@@ -70,7 +70,7 @@ import kotlin.plus
 private const val INITIAL_RETRY_DELAY_MILLIS = 1_000L
 private const val MAX_RETRY_DELAY_MILLIS = 30_000L
 private const val REALTIME_PROBE_INTERVAL_MILLIS = 30_000L
-private const val EVENTS_CURSOR_EXPIRED_STATUS_CODE = "410"
+private const val EVENTS_CURSOR_EXPIRED_STATUS_CODE = 410
 
 class EventsRepository(
     val serverId: String,
@@ -567,7 +567,8 @@ class EventsRepository(
                 EventsProbeRequest(
                     afterEpochVersion = probedEpochVersion,
                     epochGeneration = probedEpochGeneration
-                )
+                ),
+                serverId,
             )
         ) {
             is ApiResult.Success -> {
@@ -589,7 +590,7 @@ class EventsRepository(
             }
 
             is ApiResult.Error -> {
-                if (response.error.code == EVENTS_CURSOR_EXPIRED_STATUS_CODE &&
+                if (response.error.httpStatusCode == EVENTS_CURSOR_EXPIRED_STATUS_CODE &&
                     activeSession === probedSession &&
                     latestEpoch == probedEpochVersion &&
                     epochGeneration == probedEpochGeneration
@@ -622,7 +623,8 @@ class EventsRepository(
                     myStatus,
                     myUser.statusEmoji,
                     myUser.statusText
-                )
+                ),
+                serverId,
             )
         ) {
             is ApiResult.Success -> Unit
@@ -636,15 +638,16 @@ class EventsRepository(
 
         var retryDelayMillis = INITIAL_RETRY_DELAY_MILLIS
         while (currentCoroutineContext().isActive) {
-            val currentBaseUrl = webSocketClient.requireUserViewModel().baseUrl.value
-            if (currentBaseUrl == null) {
-                delay(retryDelayMillis)
-                retryDelayMillis = nextRetryDelayMillis(retryDelayMillis)
-                continue
-            }
+            val currentBaseUrl = config.baseUrl
 
             if (epochGeneration.isBlank()) {
-                when (val response = webSocketClient.performRequest(EpochRequest())) {
+                when (
+                    val response = webSocketClient.performRequest(
+                        EpochRequest(),
+                        serverId,
+                        config,
+                    )
+                ) {
                     is ApiResult.Success -> {
                         latestEpoch = response.value.epochVersion
                         epochGeneration = response.value.epochGeneration
@@ -694,7 +697,7 @@ class EventsRepository(
         baseUrl: String,
         onConnected: () -> Unit
     ) {
-        val accessToken = webSocketClient.requireUserViewModel().accessToken.value
+        val accessToken = tokenStore.get(serverId)?.accessToken
         if (accessToken != null) {
             val endpoint = resolveWebSocketEndpoint(baseUrl)
             Log.d("WebSocket", "Connecting: ${endpoint.displayUrl()}")
@@ -714,9 +717,9 @@ class EventsRepository(
                 }
             ) {
                 activeSession = this
-                onConnected()
-                Log.d("WebSocket", "Connected: ${endpoint.displayUrl()}")
                 try {
+                    onConnected()
+                    Log.d("WebSocket", "Connected: ${endpoint.displayUrl()}")
                     for (frame in incoming) {
                         when (frame) {
                             is Frame.Text -> {
@@ -786,7 +789,7 @@ class EventsRepository(
                     activeSession = null
                     val reason = closeReason.await()
                     if (reason?.code?.toInt() == 4401) {
-                        webSocketClient.refreshToken()
+                        webSocketClient.refreshSession(serverId, accessToken)
                     }
                     Log.d("WebSocket", "Disconnected: $reason")
                 }
@@ -900,8 +903,9 @@ class EventsRepository(
             _streamsQueryState.value = QueryState.Loading
             val response = webSocketClient.performRequest(
                 ServerSettingsRequest(
-                    webSocketClient.requireUserViewModel().baseUrl.value ?: ""
-                )
+                    config.baseUrl,
+                ),
+                serverId,
             )
             when (response) {
                 is ApiResult.Success -> {
@@ -918,7 +922,7 @@ class EventsRepository(
 
     suspend fun loadUserInfo() {
         val webSocketClient = client ?: return
-        val response = webSocketClient.performRequest(OwnUserRequest())
+        val response = webSocketClient.performRequest(OwnUserRequest(), serverId)
         when(response) {
             is ApiResult.Success -> {
                 updateCurrentUser(response.value)
@@ -933,7 +937,7 @@ class EventsRepository(
 
     suspend fun loadMessageReactions(userUuid: String) {
         val webSocketClient = client ?: return
-        val response = webSocketClient.performRequest(MessageReactionsRequest(userUuid))
+        val response = webSocketClient.performRequest(MessageReactionsRequest(userUuid), serverId)
         when(response) {
             is ApiResult.Success -> {
                 setInitialMessageReactions(response.value)
@@ -948,7 +952,7 @@ class EventsRepository(
 
     suspend fun loadAllUsersInfo() {
         val webSocketClient = client ?: return
-        val response = webSocketClient.performRequest(UsersRequest())
+        val response = webSocketClient.performRequest(UsersRequest(), serverId)
         when(response) {
             is ApiResult.Success -> {
                 setInitialUsers(response.value)
@@ -962,7 +966,7 @@ class EventsRepository(
     }
     suspend fun loadFolders() {
         val webSocketClient = client ?: return
-        val response = webSocketClient.performRequest(FoldersRequest())
+        val response = webSocketClient.performRequest(FoldersRequest(), serverId)
         when(response) {
             is ApiResult.Success -> {
                 setInitialFolders(response.value.sortedBy { LocalDateTime.parse(it.creationDate, folderCreationFormatter) })
@@ -981,12 +985,15 @@ class EventsRepository(
 
     suspend fun loadSubscribedChannels() {
         val webSocketClient = client ?: return
-        val response = webSocketClient.performRequest(StreamsRequest())
+        val response = webSocketClient.performRequest(StreamsRequest(), serverId)
         when(response) {
             is ApiResult.Success -> {
                 val messageIds = response.value.mapNotNull { it.lastMessageUuid }
                 if (!messageIds.isEmpty()) {
-                    val messagesResponse = webSocketClient.performRequest(MessagesByIdsRequest(messageIds))
+                    val messagesResponse = webSocketClient.performRequest(
+                        MessagesByIdsRequest(messageIds),
+                        serverId,
+                    )
                     when (messagesResponse) {
                         is ApiResult.Success -> {
                             setInitialMessagesPool(messagesResponse.value)
@@ -1018,7 +1025,7 @@ class EventsRepository(
 
     suspend fun loadDrafts() {
         val webSocketClient = client ?: return
-        val response = webSocketClient.performRequest(DraftsRequest())
+        val response = webSocketClient.performRequest(DraftsRequest(), serverId)
         when(response) {
             is ApiResult.Success -> {
                 setInitialDraftsPool(response.value)

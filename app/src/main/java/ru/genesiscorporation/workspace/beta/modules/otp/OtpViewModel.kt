@@ -49,8 +49,15 @@ class OtpViewModel(
         when(response) {
             is ApiResult.Success -> {
                 val userResponse = response.value
-                userViewModel.setTokens(userResponse.accessToken,userResponse.refreshToken)
-                _queryState.value = QueryState.Success
+                val saved = userViewModel.setTokensAndWait(
+                    accessToken = userResponse.accessToken,
+                    refreshToken = userResponse.refreshToken,
+                )
+                _queryState.value = if (saved) {
+                    QueryState.Success
+                } else {
+                    QueryState.Error("Error")
+                }
             }
             is ApiResult.Error -> {
                 _queryState.value = QueryState.Error(response.error.message ?: "Введён неверный код")

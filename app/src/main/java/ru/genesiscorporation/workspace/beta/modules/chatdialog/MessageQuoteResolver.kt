@@ -138,7 +138,7 @@ internal class MessageQuoteResolver(
                             MessageQuoteState.Ready(message.copy(payload = message.payload.copy()))
                         } ?: MessageQuoteState.Unavailable
                     }
-                    result is ApiResult.Error && result.error.code in setOf("403", "404") ->
+                    result is ApiResult.Error && result.error.httpStatusCode in setOf(403, 404) ->
                         MessageQuoteState.Unavailable
                     else -> MessageQuoteState.Error
                 }

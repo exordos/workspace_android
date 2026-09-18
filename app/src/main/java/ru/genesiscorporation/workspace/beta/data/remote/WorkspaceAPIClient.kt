@@ -36,7 +36,9 @@ import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.core.readBytes
 import io.ktor.utils.io.readRemaining
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
@@ -61,6 +63,7 @@ import java.util.UUID
 class WorkspaceAPIClient(
     val client: HttpClient
 ): APIClient {
+    private val refreshMutex = Mutex()
 
     fun getCurrentServerId(): String {
         return userViewModel?.selectedServerId?.value ?: ""
@@ -74,20 +77,29 @@ class WorkspaceAPIClient(
     fun requireUserViewModel(): UserViewModel =
         userViewModel ?: error("UserViewModel not attached. Call attachUserState() first.")
 
-
     @OptIn(ExperimentalSerializationApi::class)
     suspend inline fun <reified RequestData : Any, reified Response : Any, reified ResponseError : Any> performRequest(
         request: ApiRequest<RequestData, Response, ResponseError>,
-        serverId: String? = null
+        serverId: String? = null,
+        serverConfig: ServerConfig? = null,
     ): ApiResult<Response, ApiError> {
-        var activeServerConfig = if (serverId != null) requireUserViewModel().getServer(serverId) else  requireUserViewModel().selectedServer.value
+        if (serverConfig != null && serverId != null && serverConfig.id != serverId) {
+            return ApiResult.Error(ApiError("Server configuration changed", "SERVER_CHANGED"))
+        }
+        var activeServerConfig = serverConfig
+            ?: if (serverId != null) {
+                requireUserViewModel().getServer(serverId)
+            } else {
+                requireUserViewModel().selectedServer.value
+            }
         if (request.isAbsoluteUrl) {
             activeServerConfig = ServerConfig(UUID.randomUUID().toString(), request.url, "", "", false)
         }
         activeServerConfig ?: return ApiResult.Error(ApiError("Internal error", "INTERNAL_ERROR"))
 
+        val activeServerId = serverId ?: activeServerConfig.id
         val baseUrl = activeServerConfig.baseUrl
-        val accessToken = if (serverId != null) requireUserViewModel().getTokens(serverId)?.accessToken else  requireUserViewModel().accessToken.value
+        val accessToken = requireUserViewModel().getTokens(activeServerId)?.accessToken
 
         val urlString = if (request.isAbsoluteUrl) request.url else "${baseUrl}${request.url}"
         return try {
@@ -102,7 +114,9 @@ class WorkspaceAPIClient(
                 }
                 header("User-Agent", "Workspace/android/${BuildConfig.VERSION_NAME}")
 
-                if (RequestData::class != EmptyRequestData::class) {
+                if (request.multipartParts != null) {
+                    setBody(MultiPartFormDataContent(request.multipartParts.orEmpty()))
+                } else if (RequestData::class != EmptyRequestData::class) {
                     val bodyDict = Properties.encodeToStringMap(request.data)
 
                     when (request.method) {
@@ -195,9 +209,22 @@ class WorkspaceAPIClient(
                     val response = json.decodeFromString<Response>(responseString)
                     ApiResult.Success(response)
                 }
-            } else if (httpResponse.status.value == 401 && request !is LoginRequest && request !is TokenRefreshRequest) {
-                val newAccessToken = refreshToken(serverId)
-                requestBuilder.headers.set("Authorization", "Bearer ${newAccessToken ?: ""}")
+            } else if (
+                httpResponse.status.value == 401 &&
+                request.requiresApiKey &&
+                request !is LoginRequest &&
+                request !is TokenRefreshRequest
+            ) {
+                val refreshedTokens = when (
+                    val refresh = refreshSession(activeServerId, accessToken.orEmpty())
+                ) {
+                    is ApiResult.Success -> refresh.value
+                    is ApiResult.Error -> return ApiResult.Error(refresh.error)
+                }
+                requestBuilder.headers.set(
+                    "Authorization",
+                    "Bearer ${refreshedTokens.accessToken}",
+                )
                 val httpResponseAfterRefresh: HttpResponse = client.request(requestBuilder)
                 if (httpResponseAfterRefresh.status.isSuccess()) {
                     val json = Json { ignoreUnknownKeys = true }
@@ -210,16 +237,20 @@ class WorkspaceAPIClient(
                         val response = json.decodeFromString<Response>(responseString)
                         ApiResult.Success(response)
                     }
-                } else if (httpResponseAfterRefresh.status.value == 401) {
-                    requireUserViewModel().setNeedsToRelogin(true, activeServerConfig.id)
-                    val error = ApiError("Request failed", "REQUEST_FAILED")
-
-                    ApiResult.Error(error)
                 } else {
-                    val json = Json { ignoreUnknownKeys = true }
                     val responseString: String = httpResponseAfterRefresh.body()
-                    val response = json.decodeFromString<ResponseStatusError>(responseString)
-                    val error = ApiError(response.msg, response.code)
+                    val error = if (httpResponseAfterRefresh.status.value == 401) {
+                        requireUserViewModel().repo.setNeedsToReloginIfTokensCurrent(
+                            serverId = activeServerId,
+                            expectedTokens = refreshedTokens,
+                        )
+                        ApiError("Request remained unauthorized after token refresh", "401")
+                    } else {
+                        responseError(
+                            responseBody = responseString,
+                            statusCode = httpResponseAfterRefresh.status.value,
+                        )
+                    }
 
                     ApiResult.Error(error)
                 }
@@ -230,6 +261,8 @@ class WorkspaceAPIClient(
 
                 ApiResult.Error(error)
             }
+        } catch (cancellation: CancellationException) {
+            throw cancellation
         } catch (t: Throwable) {
             val error = ApiError("Request failed", "REQUEST_FAILED")
 
@@ -262,7 +295,10 @@ class WorkspaceAPIClient(
         activeServerConfig ?: return ApiResult.Error(ApiError("Internal error", "INTERNAL_ERROR"))
 
         val baseUrl = activeServerConfig.baseUrl
-        val accessToken = requireUserViewModel().selectedServer.value
+        val accessToken = requireUserViewModel()
+            .getTokens(activeServerConfig.id)
+            ?.accessToken
+            .orEmpty()
         val httpResponse: HttpResponse = client.post("${baseUrl}${path}") {
             setBody(
                 MultiPartFormDataContent(
@@ -293,7 +329,10 @@ class WorkspaceAPIClient(
         activeServerConfig ?: return ApiResult.Error(ApiError("Internal error", "INTERNAL_ERROR"))
 
         val baseUrl = activeServerConfig.baseUrl
-        val accessToken = requireUserViewModel().selectedServer.value
+        val accessToken = requireUserViewModel()
+            .getTokens(activeServerConfig.id)
+            ?.accessToken
+            .orEmpty()
         val httpResponse: HttpResponse = client.get("${baseUrl}${path}") {
             header("User-Agent", "Workspace/android/${BuildConfig.VERSION_NAME}")
             header("Authorization", "Bearer $accessToken")
@@ -309,28 +348,74 @@ class WorkspaceAPIClient(
         }
     }
 
-    suspend fun refreshToken(serverId: String? = null): String? {
-        val tokenPair = if (serverId != null) requireUserViewModel().getTokens(serverId) else requireUserViewModel().getCurrentTokens()
-        if (tokenPair != null) {
-            val refreshResponse = performRequest(TokenRefreshRequest(tokenPair.refreshToken), serverId)
-            when(refreshResponse) {
-                is ApiResult.Success -> {
-                    val userResponse = refreshResponse.value
-                    requireUserViewModel().setAccessToken(userResponse.accessToken, serverId )
-                    requireUserViewModel().setRefreshToken(userResponse.refreshToken, serverId)
-                    return  userResponse.accessToken
+    suspend fun refreshToken(serverId: String? = null): ApiResult<String, ApiError> {
+        val targetServerId = serverId
+            ?: requireUserViewModel().selectedServerId.value
+            ?: return ApiResult.Error(authenticationChangedError())
+        val failedAccessToken = requireUserViewModel()
+            .getTokens(targetServerId)
+            ?.accessToken
+            .orEmpty()
+        return when (val refresh = refreshSession(targetServerId, failedAccessToken)) {
+            is ApiResult.Success -> ApiResult.Success(refresh.value.accessToken)
+            is ApiResult.Error -> refresh
+        }
+    }
+
+    @PublishedApi
+    internal suspend fun refreshSession(
+        serverId: String,
+        failedAccessToken: String,
+    ): ApiResult<TokenPair, ApiError> = refreshMutex.withLock {
+        val currentTokens = requireUserViewModel().getTokens(serverId)
+        val currentAccessToken = currentTokens?.accessToken
+        if (
+            !currentAccessToken.isNullOrBlank() &&
+            currentAccessToken != failedAccessToken
+        ) {
+            return@withLock ApiResult.Success(requireNotNull(currentTokens))
+        }
+
+        val storedRefreshToken = currentTokens?.refreshToken
+        if (storedRefreshToken.isNullOrBlank()) {
+            requireUserViewModel().repo.setNeedsToReloginIfRefreshTokenCurrent(
+                serverId = serverId,
+                expectedRefreshToken = null,
+            )
+            return@withLock ApiResult.Error(authenticationExpiredError())
+        }
+
+        when (
+            val refreshResponse = performRequest(
+                TokenRefreshRequest(storedRefreshToken),
+                serverId,
+            )
+        ) {
+            is ApiResult.Success -> {
+                val userResponse = refreshResponse.value
+                val refreshedTokens = TokenPair(
+                    accessToken = userResponse.accessToken,
+                    refreshToken = userResponse.refreshToken,
+                )
+                val saved = requireUserViewModel().repo.saveRefreshedTokensIfCurrent(
+                    serverId = serverId,
+                    expectedRefreshToken = storedRefreshToken,
+                    tokens = refreshedTokens,
+                )
+                if (!saved) {
+                    return@withLock ApiResult.Error(authenticationChangedError())
                 }
-                is ApiResult.Error -> {
-                    if (serverId != null) {
-                        requireUserViewModel().setNeedsToRelogin(true, serverId)
-                    } else {
-                        requireUserViewModel().setNeedsToReloginCurrentServer(true)
-                    }
-                    return null
-                }
+                ApiResult.Success(refreshedTokens)
             }
-        } else {
-            return null
+            is ApiResult.Error -> {
+                if (shouldRequireReloginAfterRefresh(refreshResponse.error)) {
+                    requireUserViewModel().repo.setNeedsToReloginIfRefreshTokenCurrent(
+                        serverId = serverId,
+                        expectedRefreshToken = storedRefreshToken,
+                    )
+                }
+                ApiResult.Error(refreshResponse.error)
+            }
         }
     }
 
@@ -342,12 +427,45 @@ class WorkspaceAPIClient(
 
     fun authHeaders(): List<AuthHeader> {
         val authHeadersList: MutableList<AuthHeader> = mutableListOf()
-        val accessToken =  requireUserViewModel().accessToken.value ?: ""
+        val user = requireUserViewModel()
+        val accessToken = user.selectedServerId.value
+            ?.let(user::getTokens)
+            ?.accessToken
+            .orEmpty()
         authHeadersList += AuthHeader("Authorization", "Bearer $accessToken")
 
         return  authHeadersList
     }
 }
+
+internal fun shouldRequireReloginAfterRefresh(error: ApiError): Boolean {
+    if (error.httpStatusCode == 401) return true
+    val normalized = "${error.code} ${error.errorMessage}"
+        .lowercase()
+        .filter(Char::isLetterOrDigit)
+    return normalized.contains("invalidgrant") ||
+        normalized.contains("invalidrefreshtoken")
+}
+
+@PublishedApi
+internal fun responseError(responseBody: String, statusCode: Int): ApiError {
+    val structured = runCatching {
+        responseErrorJson.decodeFromString<ResponseStatusError>(responseBody)
+    }.getOrNull()
+    return if (structured != null) {
+        ApiError(structured.msg, structured.code, statusCode)
+    } else {
+        ApiError(responseBody, statusCode.toString(), statusCode)
+    }
+}
+
+private val responseErrorJson = Json { ignoreUnknownKeys = true }
+
+private fun authenticationExpiredError(): ApiError =
+    ApiError("Authentication expired. Sign in again", "401")
+
+private fun authenticationChangedError(): ApiError =
+    ApiError("Authentication changed while refreshing", "AUTHENTICATION_CHANGED")
 
 internal fun workspaceFileUploadParts(
     fileName: String,

@@ -1,15 +1,40 @@
 package ru.genesiscorporation.workspace.beta.modules.chatdialog
 
 import kotlinx.coroutines.runBlocking
+import io.ktor.http.HttpHeaders
+import io.ktor.http.content.PartData
 import org.junit.Assert.*
 import org.junit.Test
 import ru.genesiscorporation.workspace.beta.data.remote.ApiError
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
+import ru.genesiscorporation.workspace.beta.data.remote.HTTPMethod
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ForwardFileUploadRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponsePayload
 import java.io.File
 
 class ForwardContentPreparationTest {
+    @Test fun `forward file upload uses a typed multipart API request`() {
+        val request = ForwardFileUploadRequest(preparedFile(), STREAM)
+
+        assertEquals(HTTPMethod.POST, request.method)
+        assertEquals("/api/workspace/v1/messenger/files/", request.url)
+        assertEquals(2, request.multipartParts.size)
+
+        val filePart = request.multipartParts[0] as PartData.BinaryItem
+        assertEquals("file", filePart.name)
+        assertTrue(
+            filePart.headers
+                .getAll(HttpHeaders.ContentDisposition)
+                .orEmpty()
+                .any { it.contains("report.pdf") },
+        )
+
+        val streamPart = request.multipartParts[1] as PartData.FormItem
+        assertEquals("stream_uuid", streamPart.name)
+        assertEquals(STREAM, streamPart.value)
+    }
+
     @Test fun `materialized forwarding embeds text and destination-scoped attachments`() = runBlocking {
         val copies = mutableListOf<Triple<String, String, String>>()
         val source = message(SOURCE, "Private source text\n\n[report.pdf](urn:file:$FILE)")
@@ -114,6 +139,26 @@ class ForwardContentPreparationTest {
             currentUserUuid = AUTHOR)
         repeat(2) {
             val failure = runCatching { copies.copy(FILE, "report.pdf", STREAM) }.exceptionOrNull() as ForwardPreparationFailure
+            assertFalse(failure.uncertain)
+        }
+        assertEquals(2, uploads)
+    }
+
+    @Test fun `structured upload rejection keeps its HTTP status for a deliberate retry`() = runBlocking {
+        var uploads = 0
+        val copies = DestinationFileCopies(
+            find = { _, _, _ -> ApiResult.Success(emptyList()) },
+            load = { _, _ -> preparedFile() },
+            upload = { _, _ ->
+                uploads++
+                ApiResult.Error(ApiError("unsupported", "UNSUPPORTED_MEDIA_TYPE", 415))
+            },
+            currentUserUuid = AUTHOR,
+        )
+        repeat(2) {
+            val failure = runCatching {
+                copies.copy(FILE, "report.pdf", STREAM)
+            }.exceptionOrNull() as ForwardPreparationFailure
             assertFalse(failure.uncertain)
         }
         assertEquals(2, uploads)

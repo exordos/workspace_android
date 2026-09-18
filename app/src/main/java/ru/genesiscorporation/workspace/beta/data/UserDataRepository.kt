@@ -19,6 +19,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -46,6 +48,7 @@ class ServerRepository internal constructor(
     constructor(context: Context, tokenStore: SecureTokenStore, eventsRepositoryStore: EventsRepositoryStore, appScope: CoroutineScope) : this(context.dataStore, tokenStore, eventsRepositoryStore, appScope)
 
     private val tokensVersion = MutableStateFlow(0)
+    private val sessionMutationMutex = Mutex()
     private val SELECTED_SERVER_ID = stringPreferencesKey("selected_server_id")
 
     val selectedServerIdFlow: Flow<String?> =
@@ -88,7 +91,7 @@ class ServerRepository internal constructor(
         }
         setSelectedServerId(config.id)
         eventsRepositoryStore.getOrCreate(config)
-        tokens?.let { tokenStore.save(config.id, it) }
+        tokens?.let { saveTokens(config.id, it) }
     }
     suspend fun removeServer(serverId: String) {
         dataStore.edit { prefs ->
@@ -97,7 +100,10 @@ class ServerRepository internal constructor(
                 .orEmpty()
             prefs[SERVERS] = json.encodeToString(current.filterNot { it.id == serverId })
         }
-        tokenStore.clear(serverId) // always clear secrets when removing
+        sessionMutationMutex.withLock {
+            tokenStore.clear(serverId) // always clear secrets when removing
+            tokensVersion.value = tokensVersion.value + 1
+        }
     }
 
     suspend fun updateServer(
@@ -111,7 +117,7 @@ class ServerRepository internal constructor(
             val updated = current.map { if (it.id == config.id) config else it }
             prefs[SERVERS] = json.encodeToString(updated)
         }
-        tokens?.let { tokenStore.save(config.id, it) }
+        tokens?.let { saveTokens(config.id, it) }
     }
 
     suspend fun getServer(serverId: String): ServerConfig? {
@@ -120,9 +126,54 @@ class ServerRepository internal constructor(
 
     fun tokensFor(serverId: String): TokenPair? = tokenStore.get(serverId)
 
-    fun saveTokens(serverId: String, tokens: TokenPair) {
-        tokenStore.save(serverId, tokens)
-        tokensVersion.value = tokensVersion.value + 1
+    suspend fun saveTokens(serverId: String, tokens: TokenPair) =
+        sessionMutationMutex.withLock {
+            saveTokensLocked(serverId, tokens)
+        }
+
+    suspend fun saveTokensAndClearRelogin(serverId: String, tokens: TokenPair) =
+        sessionMutationMutex.withLock {
+            saveTokensLocked(serverId, tokens)
+            setNeedsToRelogin(false, serverId)
+        }
+
+    suspend fun saveRefreshedTokensIfCurrent(
+        serverId: String,
+        expectedRefreshToken: String,
+        tokens: TokenPair,
+    ): Boolean = sessionMutationMutex.withLock {
+        val saved = tokenStore.saveIfRefreshTokenMatches(
+            serverId = serverId,
+            expectedRefreshToken = expectedRefreshToken,
+            tokens = tokens,
+        )
+        if (saved) {
+            tokensVersion.value = tokensVersion.value + 1
+            setNeedsToRelogin(false, serverId)
+        }
+        saved
+    }
+
+    suspend fun setNeedsToReloginIfRefreshTokenCurrent(
+        serverId: String,
+        expectedRefreshToken: String?,
+    ): Boolean = sessionMutationMutex.withLock {
+        if (tokenStore.get(serverId)?.refreshToken != expectedRefreshToken) {
+            return@withLock false
+        }
+        setNeedsToRelogin(true, serverId)
+        true
+    }
+
+    suspend fun setNeedsToReloginIfTokensCurrent(
+        serverId: String,
+        expectedTokens: TokenPair,
+    ): Boolean = sessionMutationMutex.withLock {
+        if (tokenStore.get(serverId) != expectedTokens) {
+            return@withLock false
+        }
+        setNeedsToRelogin(true, serverId)
+        true
     }
 
     suspend fun setSelectedServerId(serverId: String?) {
@@ -160,6 +211,11 @@ class ServerRepository internal constructor(
             }
             prefs[SERVERS] = json.encodeToString(updated)
         }
+    }
+
+    private fun saveTokensLocked(serverId: String, tokens: TokenPair) {
+        tokenStore.save(serverId, tokens)
+        tokensVersion.value = tokensVersion.value + 1
     }
 
 //    companion object {
