@@ -52,7 +52,10 @@ class LoginViewModel(
         when(response) {
             is ApiResult.Success -> {
                 val userResponse = response.value
-                userViewModel.setTokens(userResponse.accessToken,userResponse.refreshToken)
+                userViewModel.setTokensAndWait(
+                    accessToken = userResponse.accessToken,
+                    refreshToken = userResponse.refreshToken,
+                )
                 _queryState.value = QueryState.Success
             }
             is ApiResult.Error -> {

@@ -124,6 +124,28 @@ class ServerRepository internal constructor(
         tokensVersion.value = tokensVersion.value + 1
     }
 
+    fun saveRefreshedTokensIfCurrent(
+        serverId: String,
+        expectedRefreshToken: String,
+        tokens: TokenPair,
+    ): Boolean {
+        val currentTokens = tokenStore.get(serverId) ?: return false
+        if (currentTokens.refreshToken != expectedRefreshToken) return false
+        saveTokens(serverId, tokens)
+        return true
+    }
+
+    fun clearTokensIfRefreshTokenMatches(
+        serverId: String,
+        expectedRefreshToken: String,
+    ): Boolean {
+        val currentTokens = tokenStore.get(serverId) ?: return false
+        if (currentTokens.refreshToken != expectedRefreshToken) return false
+        tokenStore.clear(serverId)
+        tokensVersion.value = tokensVersion.value + 1
+        return true
+    }
+
     suspend fun setSelectedServerId(serverId: String) {
         dataStore.edit { it[SELECTED_SERVER_ID] = serverId }
     }
