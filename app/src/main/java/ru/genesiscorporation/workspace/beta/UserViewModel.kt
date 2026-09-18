@@ -109,42 +109,14 @@ class UserViewModel(
         return repo.tokensFor(serverId)
     }
 
-    fun setAccessToken(newKey: String) {
-        viewModelScope.launch {
-            val id = selectedServer.value?.id ?: return@launch
-            val refresh = repo.tokensFor(id)?.refreshToken.orEmpty()
-            repo.saveTokens(id, TokenPair(newKey, refresh))
-        }
-    }
-
-    fun setAccessToken(newKey: String, id: String?) {
-        viewModelScope.launch {
-            val serverId = id ?: selectedServer.value?.id ?: return@launch
-            val refresh = repo.tokensFor(serverId)?.refreshToken.orEmpty()
-            repo.saveTokens(serverId, TokenPair(newKey, refresh))
-        }
-    }
-    fun setRefreshToken(newKey: String) {
-        viewModelScope.launch {
-            val id = selectedServer.value?.id ?: return@launch
-            val access = repo.tokensFor(id)?.accessToken.orEmpty()
-            repo.saveTokens(id, TokenPair(access, newKey))
-        }
-    }
-
-    fun setRefreshToken(newKey: String, id: String?) {
-        viewModelScope.launch {
-            val serverId = id ?: selectedServer.value?.id ?: return@launch
-            val access = repo.tokensFor(serverId)?.accessToken.orEmpty()
-            repo.saveTokens(serverId, TokenPair(access, newKey))
-        }
-    }
-
-    fun setTokens(access: String, refresh: String) {
-        viewModelScope.launch {
-            val id = selectedServer.value?.id ?: return@launch
-            repo.saveTokens(id, TokenPair(access, refresh))
-        }
+    suspend fun setTokensAndWait(
+        accessToken: String,
+        refreshToken: String,
+        serverId: String? = null,
+    ): Boolean {
+        val targetServerId = serverId ?: selectedServer.value?.id ?: return false
+        repo.saveTokens(targetServerId, TokenPair(accessToken, refreshToken))
+        return true
     }
 
     fun clearAll() {

@@ -786,7 +786,7 @@ class EventsRepository(
                     activeSession = null
                     val reason = closeReason.await()
                     if (reason?.code?.toInt() == 4401) {
-                        webSocketClient.refreshToken()
+                        webSocketClient.refreshToken(serverId)
                     }
                     Log.d("WebSocket", "Disconnected: $reason")
                 }
