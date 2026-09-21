@@ -2,9 +2,12 @@ package ru.genesiscorporation.workspace.beta.modules.profile
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.UserViewModel
@@ -24,7 +27,19 @@ class ProfileViewModel(
 ): ViewModel() {
     private val _queryState = MutableStateFlow<QueryState>(QueryState.Idle)
     val queryState: StateFlow<QueryState> = _queryState
-    val repo = eventsRepositoryStore.get(client.getCurrentServerId()) ?: error("Cannot get current event repository")
+//    val repo = eventsRepositoryStore.get(client.getCurrentServerId()) ?: error("Cannot get current event repository")
+
+    private val currentServerId: Flow<String?> = userViewModel.selectedServerId
+
+    val eventsRepo: StateFlow<EventsRepository?> = combine(
+        currentServerId,
+        userViewModel.servers,
+    ) { id, servers ->
+        id?.let { eventsRepositoryStore.getOrCreateForId(it, servers) }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    val repo = eventsRepo.value ?: error("Cannot get current event repository")
+
 
     val user: StateFlow<UserResponseData?> = repo.currentUser
         .stateIn(
@@ -32,6 +47,8 @@ class ProfileViewModel(
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = null
         )
+
+    val selectedServerId: StateFlow<String?> = userViewModel.selectedServerId
 
 
     private val _shouldShowAddOrganizationView = MutableStateFlow<Boolean>(false)
@@ -77,7 +94,7 @@ class ProfileViewModel(
                 deleteToken("workspace:android:$token")
             }
         }
-        userViewModel.clearAll()
+        userViewModel.removeCurrentServer()
     }
 
     suspend fun deleteToken(token: String) {

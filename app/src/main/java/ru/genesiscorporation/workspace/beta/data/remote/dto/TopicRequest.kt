@@ -45,6 +45,7 @@ data class TopicsResponseData(
     @SerialName("stream_uuid") val streamUuid: String,
     @SerialName("updated_at") var updatedAt: String,
     @SerialName("unread_count") var unreadCount: Int,
+    @SerialName("active_unread_count") var activeUnreadCount: Int,
     @SerialName("is_done") var isDone: Boolean,
     @SerialName("is_default") val isDefault: Boolean,
     @SerialName("last_message_uuid") var lastMessageUuid: String? = null,

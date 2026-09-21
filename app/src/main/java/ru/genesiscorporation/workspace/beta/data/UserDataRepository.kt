@@ -30,6 +30,7 @@ data class ServerConfig(
     val baseUrl: String,
     val imageUrl: String,
     val name: String,
+    var needsToRelogin: Boolean
 )
 data class TokenPair(
     val accessToken: String,
@@ -124,8 +125,8 @@ class ServerRepository internal constructor(
         tokensVersion.value = tokensVersion.value + 1
     }
 
-    suspend fun setSelectedServerId(serverId: String) {
-        dataStore.edit { it[SELECTED_SERVER_ID] = serverId }
+    suspend fun setSelectedServerId(serverId: String?) {
+        dataStore.edit { it[SELECTED_SERVER_ID] = serverId ?: "" }
     }
 
     suspend fun setStreamsOrderIsUnreadFirst(isUnreadFirst: Boolean) {
@@ -143,6 +144,22 @@ class ServerRepository internal constructor(
         tokensVersion,
     ) { id, _ ->
         id?.let { tokenStore.get(it)?.refreshToken }
+    }
+
+    suspend fun setNeedsToRelogin(newValue: Boolean, serverUuid: String) {
+        dataStore.edit { prefs ->
+            val current = prefs[SERVERS]
+                ?.let { json.decodeFromString<List<ServerConfig>>(it) }
+                .orEmpty()
+            val updated = current.map { server ->
+                if (server.id == serverUuid) {
+                    server.copy(needsToRelogin = newValue)
+                } else {
+                    server
+                }
+            }
+            prefs[SERVERS] = json.encodeToString(updated)
+        }
     }
 
 //    companion object {

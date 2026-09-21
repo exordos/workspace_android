@@ -46,7 +46,7 @@ class HomeInboundsViewModel(
     }
 
     fun loadTopicsIfNeeded() {
-        val unreadStreams = streams.value.filter { it.unreadCount > 0 }
+        val unreadStreams = streams.value.filter { it.activeUnreadCount > 0 }
         val streamWithLoadedTopicsUuids = streamTopics.value.keys
         val unreadStreamsToLoadTopics = unreadStreams.filter { !streamWithLoadedTopicsUuids.contains(it.uuid) }
         if (unreadStreamsToLoadTopics.count() > 0) {

@@ -67,6 +67,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -117,6 +118,7 @@ import androidx.compose.ui.platform.LocalLocale
 import kotlinx.coroutines.flow.distinctUntilChanged
 import net.fellbaum.jemoji.EmojiManager
 import ru.genesiscorporation.workspace.beta.ChatFlow
+import ru.genesiscorporation.workspace.beta.LocalBottomBarVisible
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.ui.AnimatedGif
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
@@ -165,6 +167,12 @@ fun ChatDialogScreen(
     var imeHeight = remember { mutableStateOf(0) }
     val ime = WindowInsets.ime
     val localDensity = LocalDensity.current
+    val setBottomBarVisible = LocalBottomBarVisible.current
+
+    DisposableEffect(Unit) {
+        setBottomBarVisible(false)
+        onDispose { setBottomBarVisible(true) }
+    }
 
     LaunchedEffect(key1 = Unit) {
         val keyboardFlow = snapshotFlow {
@@ -370,27 +378,15 @@ fun ChatDialogScreen(
             },
         ) { innerPadding ->
             val density = LocalDensity.current
-            val imeVisible = WindowInsets.isImeVisible
             val navBarHeight = 70.dp
             Box(
                 modifier = Modifier.fillMaxSize()
-                    .padding(
-                        top = if (imeVisible) 0.dp else innerPadding.calculateTopPadding(),
-                        bottom = if (selectionMode) innerPadding.calculateBottomPadding() else 0.dp,
-                        start = innerPadding.calculateStartPadding(LocalLayoutDirection.current),
-                        end = innerPadding.calculateEndPadding(LocalLayoutDirection.current),
-                    )
+                    .padding(innerPadding)
                     .windowInsetsPadding(
                         WindowInsets.ime
                             .exclude(WindowInsets.navigationBars)
                             .only(WindowInsetsSides.Bottom)
-                    )
-                    .offset {
-                        val extra = if (imeVisible) {
-                            with(density) { navBarHeight.roundToPx() }
-                        } else 0
-                        IntOffset(0, extra)
-                    },
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 Column(
@@ -430,7 +426,7 @@ fun ChatDialogScreen(
                                     alignment = Alignment.Bottom
                                 )
                             ) {
-                                items(items = messages.sortedBy { LocalDateTime.parse(it.createdAt, messageFormatter) }, key = { "${it.uuid}" }) { item ->
+                                items(items = messages.sortedBy { Instant.parse(it.createdAt) }, key = { "${it.uuid}" }) { item ->
                                     ChatMessage(
                                         item,
                                         viewModel,

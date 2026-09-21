@@ -34,6 +34,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -174,6 +175,9 @@ class MainActivity : ComponentActivity() {
     }
 }
 private fun Intent.deeplinkOrNull(): String? = getStringExtra("deeplink")
+val LocalBottomBarVisible = staticCompositionLocalOf<(Boolean) -> Unit> {
+    error("LocalBottomBarVisible not provided")
+}
 
 @Composable
 fun WorkspaceApp(
@@ -230,12 +234,17 @@ fun ApplicationSwitcher(
 ) {
     val user = UserState.current
     val accessToken by user.accessToken.collectAsState()
+    val servers by user.servers.collectAsState()
     val isAccessTokenLoaded by user.isAccessTokenLoaded.collectAsState()
+    val isServersLoaded by user.isServersLoaded.collectAsState()
+    var navController = rememberNavController()
+    val chooseServerViewModelFactory = remember { ChooseServerViewModelFactory(workspaceApiClient, user) }
+    val chooseServerViewModel: ChooseServerViewModel = viewModel(factory = chooseServerViewModelFactory)
 
     Log.d("RepoCheck", "initnav repo instance = ${System.identityHashCode(eventsRepositoryStore)}")
     val workspaceViewModelFactory = remember { WorkspaceViewModelFactory(workspaceApiClient, eventsRepositoryStore) }
     var workspaceViewModel: WorkspaceViewModel = viewModel(factory = workspaceViewModelFactory)
-    if (!isAccessTokenLoaded) {
+    if (!isAccessTokenLoaded || !isServersLoaded) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -244,6 +253,8 @@ fun ApplicationSwitcher(
         ) {
             CircularProgressIndicator()
         }
+    } else if (servers.isEmpty()) {
+        ChooseServerScreen(chooseServerViewModel, navController)
     } else if (accessToken == null) {
         LoginNavigation(workspaceApiClient)
     } else {
@@ -273,6 +284,7 @@ fun WorkspaceApp(
     val user = UserState.current
     val currentCallMessage by viewModel.currentCallMessage.collectAsState()
     var currentDestination = rememberSaveable { mutableStateOf(0 ) }
+    var showNavigation by rememberSaveable { mutableStateOf(true) }
 
 
     LaunchedEffect(lifecycleOwner) {
@@ -292,8 +304,14 @@ fun WorkspaceApp(
 
 
     NavigationSuiteScaffold(
-        layoutType = NavigationSuiteType.ShortNavigationBarCompact,
+        layoutType = if (showNavigation) {
+            NavigationSuiteType.ShortNavigationBarCompact
+        } else {
+            NavigationSuiteType.None
+        },
         navigationSuiteItems = {
+            if (!showNavigation) return@NavigationSuiteScaffold
+
             destinationList.forEachIndexed { index, destination ->
                 item(
                     icon = {
@@ -317,6 +335,10 @@ fun WorkspaceApp(
             }
         }
     ) {
+
+        CompositionLocalProvider(
+            LocalBottomBarVisible provides { visible -> showNavigation = visible }
+        ) {
             Box(
                 Modifier
                     .windowInsetsPadding(WindowInsets.statusBars)
@@ -327,15 +349,23 @@ fun WorkspaceApp(
                         HomeNavigation(workspaceApiClient, eventsRepositoryStore)
                     }
                     composable(Chat.route) {
-                        ChatNavigation(workspaceApiClient, eventsRepositoryStore, pendingDeepLink, onDeepLinkHandled)
+                        ChatNavigation(
+                            workspaceApiClient,
+                            eventsRepositoryStore,
+                            pendingDeepLink,
+                            onDeepLinkHandled
+                        )
                     }
                     composable(Calendar.route) {
-                        val calendarViewModelFactory = remember { CalendarViewModelFactory(eventsRepositoryStore) }
-                        var calendarViewModel: CalendarViewModel = viewModel(factory = calendarViewModelFactory)
+                        val calendarViewModelFactory =
+                            remember { CalendarViewModelFactory(eventsRepositoryStore) }
+                        var calendarViewModel: CalendarViewModel =
+                            viewModel(factory = calendarViewModelFactory)
                         CalendarScreen(calendarViewModel, navController)
                     }
                     composable(Mail.route) {
-                        val mailViewModelFactory = remember { MailViewModelFactory(eventsRepositoryStore) }
+                        val mailViewModelFactory =
+                            remember { MailViewModelFactory(eventsRepositoryStore) }
                         var mailViewModel: MailViewModel = viewModel(factory = mailViewModelFactory)
                         MailScreen(mailViewModel, navController)
                     }
@@ -348,7 +378,7 @@ fun WorkspaceApp(
                     IncomingCall(callMessage, viewModel, context)
                 }
             }
-//        }
+        }
     }
 }
 
@@ -471,12 +501,7 @@ fun ChatNavigation(
 fun LoginNavigation(workspaceApiClient: WorkspaceAPIClient) {
     val navController = rememberNavController()
     val user = UserState.current
-    NavHost(navController = navController, startDestination = LoginFlow.ChooseServer) {
-        composable<LoginFlow.ChooseServer> {
-            val chooseServerViewModelFactory = remember { ChooseServerViewModelFactory(workspaceApiClient, user) }
-            val chooseServerViewModel: ChooseServerViewModel = viewModel(factory = chooseServerViewModelFactory)
-            ChooseServerScreen(chooseServerViewModel, navController)
-        }
+    NavHost(navController = navController, startDestination = LoginFlow.Login(false)) {
         composable<LoginFlow.Login> {
             val args = it.toRoute<LoginFlow.Login>()
             val loginViewModelFactory = remember { LoginViewModelFactory(workspaceApiClient, user, args.isFirstOrganization) }

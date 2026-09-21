@@ -894,17 +894,24 @@ class EventsRepository(
         }
     }
 
-    suspend fun loadServerSettings() {
-        val webSocketClient = client ?: return
-        _streamsQueryState.value = QueryState.Loading
-        val response = webSocketClient.performRequest(ServerSettingsRequest(webSocketClient.requireUserViewModel().baseUrl.value ?: ""))
-        when(response) {
-            is ApiResult.Success -> {
-                jitsiServerUrl = response.value.meetUrl
-                loadUserInfo()
-            }
-            is ApiResult.Error -> {
-                _streamsQueryState.value = QueryState.Error("")
+    fun loadServerSettings() {
+        scope.launch {
+            val webSocketClient = client
+            _streamsQueryState.value = QueryState.Loading
+            val response = webSocketClient.performRequest(
+                ServerSettingsRequest(
+                    webSocketClient.requireUserViewModel().baseUrl.value ?: ""
+                )
+            )
+            when (response) {
+                is ApiResult.Success -> {
+                    jitsiServerUrl = response.value.meetUrl
+                    loadUserInfo()
+                }
+
+                is ApiResult.Error -> {
+                    _streamsQueryState.value = QueryState.Error("")
+                }
             }
         }
     }

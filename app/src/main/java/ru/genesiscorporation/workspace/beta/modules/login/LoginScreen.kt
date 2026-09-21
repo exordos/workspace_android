@@ -17,6 +17,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -37,6 +38,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -73,6 +75,7 @@ import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.UserState
 import ru.genesiscorporation.workspace.beta.data.UrnParser
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
+import ru.genesiscorporation.workspace.beta.modules.profile.ProfileViewModel
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 
@@ -88,6 +91,7 @@ fun LoginScreen(
     val state by viewModel.queryState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var passwordVisible by remember { mutableStateOf(false) }
+    val servers by viewModel.userViewModel.servers.collectAsState()
 
     LaunchedEffect(state) {
         if (state is QueryState.Error) {
@@ -274,7 +278,7 @@ fun LoginScreen(
                 Button(
                     onClick = {
                         scope.launch {
-                            viewModel.userViewModel.clearAll()
+                            viewModel.userViewModel.removeCurrentServer()
                             navController.popBackStack()
                         }
                     },
@@ -297,6 +301,22 @@ fun LoginScreen(
                     )
                 }
             }
+            if (viewModel.userViewModel.selectedServer.value?.needsToRelogin ?: false && servers.count() > 1) {
+                HorizontalDivider(
+                    modifier = Modifier
+                        .padding(20.dp),
+                    thickness = 1.dp,
+                    color = LocalWorkspaceColorsPalette.current.divider,
+                )
+                Text(
+                    "Ваши организации",
+                    color = LocalWorkspaceColorsPalette.current.textHeaders,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(20.dp, 12.dp, 4.dp, 20.dp)
+                )
+                Organizations(viewModel)
+            }
         }
     }
     if (state is QueryState.Loading) {
@@ -311,6 +331,110 @@ fun LoginScreen(
             contentAlignment = Alignment.Center
         ) {
             CircularProgressIndicator()
+        }
+    }
+}
+
+@Composable
+fun Organizations(
+    viewModel: LoginViewModel,
+) {
+    val state by viewModel.queryState.collectAsStateWithLifecycle()
+    val serverConfigs = viewModel.userViewModel.servers.collectAsState()
+    val selectedServerId = viewModel.userViewModel.selectedServerId.collectAsState()
+    Box(
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.Start,
+            modifier = Modifier
+                .fillMaxWidth()
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Image(
+                    painter = painterResource(id = R.drawable.ic_organizations),
+                    contentDescription = null,
+                    modifier = Modifier.padding(12.dp, 6.dp, 8.dp, 6.dp)
+                )
+                Text(
+                    text = "Организации"
+                )
+            }
+            for (serverConfig in serverConfigs.value.filterNot { it.id == selectedServerId.value }) {
+                Column(
+                    horizontalAlignment = Alignment.Start,
+                    modifier = Modifier.clickable(
+                        onClick = {
+                            if (serverConfig.id != selectedServerId.value) {
+                                viewModel.userViewModel.selectServer(serverConfig.id)
+                            }
+                        }
+                    )
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(start = 12.dp)
+                    ) {
+                        val organizationImageUrl = UrnParser.parseUrl(
+                            viewModel.userViewModel.organizationImageUrl.collectAsState().value,
+                            ""
+                        )
+                        if (organizationImageUrl != null) {
+                            AsyncImage(
+                                model = organizationImageUrl,
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .padding(vertical = 5.dp)
+                            )
+                        }
+                        Text(
+                            text = serverConfig.name,
+                            fontSize = 14.sp,
+                            fontFamily = InterFontFamily,
+                            color = LocalWorkspaceColorsPalette.current.textHeaders,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (serverConfig.id == viewModel.userViewModel.selectedServerId.collectAsState().value) {
+                            Text(
+                                text = "Текущая",
+                                fontSize = 12.sp,
+                                fontFamily = InterFontFamily,
+                                color = LocalWorkspaceColorsPalette.current.indicatorGreen
+                            )
+                        } else if (serverConfig.needsToRelogin) {
+                            Text(
+                                text = "Сессия истекла",
+                                fontSize = 12.sp,
+                                fontFamily = InterFontFamily,
+                                color = LocalWorkspaceColorsPalette.current.indicatorRed
+                            )
+                        }
+                    }
+                    HorizontalDivider(
+                        modifier = Modifier
+                            .padding(horizontal = 12.dp),
+                        thickness = 1.dp,
+                        color = LocalWorkspaceColorsPalette.current.divider,
+                    )
+                }
+            }
+        }
+        if (state is QueryState.Loading) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.4f))
+                    .clickable(
+                        indication = null,
+                        interactionSource = remember { MutableInteractionSource() }
+                    ) {  },
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator()
+            }
         }
     }
 }

@@ -15,11 +15,21 @@ class EventsRepositoryStore(
             EventsRepository(config.id, config, tokenStore, client)
         }
     }
+
+    @Synchronized
+    fun getOrCreateForId(serverId: String, configs: List<ServerConfig>): EventsRepository? {
+        repos[serverId]?.let { return it }
+        val config = configs.find { it.id == serverId } ?: return null
+        return getOrCreate(config)
+    }
+
     @Synchronized
     fun syncWith(servers: List<ServerConfig>) {
         val ids = servers.map { it.id }.toSet()
 
-        servers.forEach { getOrCreate(it) }
+        servers.forEach {
+            getOrCreate(it)
+        }
 
         repos.keys
             .filter { it !in ids }
