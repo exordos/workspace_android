@@ -60,9 +60,6 @@ fun ChooseServerScreen(
     val context = LocalContext.current
 
     LaunchedEffect(state) {
-        if (state is QueryState.Idle) {
-            user.clearAll()
-        }
         if (state is QueryState.Success) {
             navController.navigate(LoginFlow.Login(true))
             viewModel.returnToIdleState()

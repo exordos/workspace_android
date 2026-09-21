@@ -206,7 +206,7 @@ fun StreamInboundView(
                 )
             }
         }
-        val unreadTopics = streamTopics[stream.uuid]?.filter { it.unreadCount > 0 }
+        val unreadTopics = streamTopics[stream.uuid]?.filter { it.activeUnreadCount > 0 }
         if (unreadTopics != null) {
             for (unreadTopic in unreadTopics) {
                 Column(

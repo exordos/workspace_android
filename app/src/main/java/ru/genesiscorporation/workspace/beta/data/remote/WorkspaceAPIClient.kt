@@ -82,7 +82,7 @@ class WorkspaceAPIClient(
     ): ApiResult<Response, ApiError> {
         var activeServerConfig = if (serverId != null) requireUserViewModel().getServer(serverId) else  requireUserViewModel().selectedServer.value
         if (request.isAbsoluteUrl) {
-            activeServerConfig = ServerConfig(UUID.randomUUID().toString(), request.url, "", "")
+            activeServerConfig = ServerConfig(UUID.randomUUID().toString(), request.url, "", "", false)
         }
         activeServerConfig ?: return ApiResult.Error(ApiError("Internal error", "INTERNAL_ERROR"))
 
@@ -196,8 +196,8 @@ class WorkspaceAPIClient(
                     ApiResult.Success(response)
                 }
             } else if (httpResponse.status.value == 401 && request !is LoginRequest && request !is TokenRefreshRequest) {
-                refreshToken(serverId)
-                requestBuilder.headers.set("Authorization", "Bearer ${accessToken ?: ""}")
+                val newAccessToken = refreshToken(serverId)
+                requestBuilder.headers.set("Authorization", "Bearer ${newAccessToken ?: ""}")
                 val httpResponseAfterRefresh: HttpResponse = client.request(requestBuilder)
                 if (httpResponseAfterRefresh.status.isSuccess()) {
                     val json = Json { ignoreUnknownKeys = true }
@@ -211,7 +211,7 @@ class WorkspaceAPIClient(
                         ApiResult.Success(response)
                     }
                 } else if (httpResponseAfterRefresh.status.value == 401) {
-                    requireUserViewModel().clearAll()
+                    requireUserViewModel().setNeedsToRelogin(true, activeServerConfig.id)
                     val error = ApiError("Request failed", "REQUEST_FAILED")
 
                     ApiResult.Error(error)
@@ -309,7 +309,7 @@ class WorkspaceAPIClient(
         }
     }
 
-    suspend fun refreshToken(serverId: String? = null) {
+    suspend fun refreshToken(serverId: String? = null): String? {
         val tokenPair = if (serverId != null) requireUserViewModel().getTokens(serverId) else requireUserViewModel().getCurrentTokens()
         if (tokenPair != null) {
             val refreshResponse = performRequest(TokenRefreshRequest(tokenPair.refreshToken), serverId)
@@ -318,11 +318,19 @@ class WorkspaceAPIClient(
                     val userResponse = refreshResponse.value
                     requireUserViewModel().setAccessToken(userResponse.accessToken, serverId )
                     requireUserViewModel().setRefreshToken(userResponse.refreshToken, serverId)
+                    return  userResponse.accessToken
                 }
                 is ApiResult.Error -> {
-                    requireUserViewModel().clearAll()
+                    if (serverId != null) {
+                        requireUserViewModel().setNeedsToRelogin(true, serverId)
+                    } else {
+                        requireUserViewModel().setNeedsToReloginCurrentServer(true)
+                    }
+                    return null
                 }
             }
+        } else {
+            return null
         }
     }
 

@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -30,8 +31,12 @@ class UserViewModel(
 
     val streamsOrderIsUnreadFirst: StateFlow<Boolean> = repo.isUnreadFirst
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
-    val servers: StateFlow<List<ServerConfig>> = repo.serversFlow
+    private val serversSharing = repo.serversFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val servers: StateFlow<List<ServerConfig>> = serversSharing
+    val isServersLoaded: StateFlow<Boolean> = repo.serversFlow
+        .map { true }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
     val selectedServer: StateFlow<ServerConfig?> = combine(
         servers,
         selectedServerId,
@@ -61,7 +66,7 @@ class UserViewModel(
         return repo.getServer(serverId)
     }
 
-    fun selectServer(serverId: String) {
+    fun selectServer(serverId: String?) {
         viewModelScope.launch {
             repo.setSelectedServerId(serverId)
         }
@@ -78,11 +83,24 @@ class UserViewModel(
                 name = name,
                 baseUrl = baseUrl,
                 imageUrl = imageUrl,
+                needsToRelogin = false
             )
             repo.addServer(config, tokens)
             repo.setSelectedServerId(config.id)
         }
     }
+
+    fun setNeedsToReloginCurrentServer(newValue: Boolean) {
+        val currentServerUuid = selectedServerId.value ?: return
+        setNeedsToRelogin(newValue, currentServerUuid)
+    }
+
+    fun setNeedsToRelogin(newValue: Boolean, serverUuid: String) {
+        viewModelScope.launch {
+            repo.setNeedsToRelogin(newValue, serverUuid)
+        }
+    }
+
     fun updateServer(config: ServerConfig, tokens: TokenPair? = null) {
         viewModelScope.launch {
             repo.updateServer(config, tokens)
@@ -91,7 +109,15 @@ class UserViewModel(
     fun removeServer(serverId: String) {
         viewModelScope.launch {
             repo.removeServer(serverId)
+            val nextServer = servers.value.firstOrNull()
+            selectServer(nextServer?.id)
         }
+    }
+
+
+    fun removeCurrentServer() {
+        val currentServerUuid = selectedServerId.value ?: return
+        removeServer(currentServerUuid)
     }
 
     fun setStreamsOrderIsUnreadFirst(isUnreadFirst: Boolean) {

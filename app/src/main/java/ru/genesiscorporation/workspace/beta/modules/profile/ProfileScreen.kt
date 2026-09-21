@@ -44,6 +44,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -82,10 +83,28 @@ fun ProfileScreen(
     viewModel: ProfileViewModel,
     navController: NavHostController
 ) {
+    val serverId by  viewModel.userViewModel.selectedServerId.collectAsState()
+
+    key(serverId) {
+        // entire screen state is recreated when serverId changes
+        ProfileScreenContent(viewModel, navController)
+    }
+
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ProfileScreenContent(
+    viewModel: ProfileViewModel,
+    navController: NavHostController
+) {
+
     val shouldShowAddOrganizationView by viewModel.shouldShowAddOrganizationView.collectAsStateWithLifecycle()
     val currentUser = viewModel.user.collectAsState()
     val state by viewModel.queryState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val eventsRepo by viewModel.eventsRepo.collectAsState()
+
 
     LaunchedEffect(state) {
         if (state is QueryState.Success) {
@@ -129,7 +148,7 @@ fun ProfileScreen(
                     horizontalAlignment = Alignment.Start,
                     verticalArrangement = Arrangement.Top
                 ) {
-                    val userData = currentUser.value
+                    val userData = eventsRepo?.currentUser?.collectAsState()?.value
                     if (userData != null) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -382,6 +401,13 @@ fun Organizations(
                                 fontSize = 12.sp,
                                 fontFamily = InterFontFamily,
                                 color = LocalWorkspaceColorsPalette.current.indicatorGreen
+                            )
+                        } else if (serverConfig.needsToRelogin) {
+                            Text(
+                                text = "Сессия истекла",
+                                fontSize = 12.sp,
+                                fontFamily = InterFontFamily,
+                                color = LocalWorkspaceColorsPalette.current.indicatorRed
                             )
                         }
                     }
