@@ -1,6 +1,6 @@
 package ru.genesiscorporation.workspace.beta.data.remote
 
-import io.ktor.client.statement.HttpResponse
+import io.ktor.http.content.PartData
 import kotlinx.serialization.Serializable
 
 interface APIClient {
@@ -10,7 +10,8 @@ interface APIClient {
 @Serializable
 data class ApiError(
     val errorMessage: String,
-    val code: String
+    val code: String,
+    val httpStatusCode: Int? = code.toIntOrNull(),
 ) : Throwable()
 
 interface ApiRequest<RequestData, Response, ResponseError> {
@@ -25,6 +26,8 @@ interface ApiRequest<RequestData, Response, ResponseError> {
         get() = false
     val hasSessionCookie: Boolean
         get() = false
+    val multipartParts: List<PartData>?
+        get() = null
     val isJson: Boolean
         get() = true
     val data: RequestData

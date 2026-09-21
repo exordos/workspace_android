@@ -52,11 +52,18 @@ class LoginViewModel(
         when(response) {
             is ApiResult.Success -> {
                 val userResponse = response.value
-                userViewModel.setTokens(userResponse.accessToken,userResponse.refreshToken)
-                _queryState.value = QueryState.Success
+                val saved = userViewModel.setTokensAndWait(
+                    accessToken = userResponse.accessToken,
+                    refreshToken = userResponse.refreshToken,
+                )
+                _queryState.value = if (saved) {
+                    QueryState.Success
+                } else {
+                    QueryState.Error("Error")
+                }
             }
             is ApiResult.Error -> {
-                if (response.error.code == "401") {
+                if (response.error.httpStatusCode == 401) {
                     _queryState.value = QueryState.Error("needs_otp")
                 } else {
                     _queryState.value = QueryState.Error(response.error.message ?: "Error")

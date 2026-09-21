@@ -129,7 +129,7 @@ internal class MessageForwarding(
                     }
                 }
                 is ApiResult.Error -> {
-                    val code = result.error.code.toIntOrNull()
+                    val code = result.error.httpStatusCode
                     if (code != null && code in 400..499 && code !in setOf(408, 409, 425)) {
                         _state.value = ForwardDeliveryState(error = when (code) {
                             403 -> R.string.forward_chat_forbidden

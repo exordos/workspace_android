@@ -1,18 +1,7 @@
 package ru.genesiscorporation.workspace.beta.modules.chatdialog
 
 import android.content.Context
-import io.ktor.client.call.body
-import io.ktor.client.request.forms.InputProvider
-import io.ktor.client.request.forms.MultiPartFormDataContent
-import io.ktor.client.request.forms.formData
-import io.ktor.client.request.header
-import io.ktor.client.request.post
-import io.ktor.client.request.setBody
-import io.ktor.client.statement.HttpResponse
 import io.ktor.http.ContentType
-import io.ktor.http.Headers
-import io.ktor.http.HttpHeaders
-import io.ktor.http.isSuccess
 import java.io.File
 import java.security.MessageDigest
 import java.util.UUID
@@ -20,11 +9,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
-import kotlinx.io.asSource
-import kotlinx.io.buffered
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.data.remote.ApiError
 import ru.genesiscorporation.workspace.beta.data.remote.ApiRequest
@@ -32,10 +18,10 @@ import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.EmptyRequestData
 import ru.genesiscorporation.workspace.beta.data.remote.HTTPMethod
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ForwardFileUploadRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageElement
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesByIdsRequest
-import ru.genesiscorporation.workspace.beta.data.remote.dto.UploadFileResponseData
 
 /** A recipient receives the captured text and target-scoped file copies, never a source ACL dependency. */
 internal class ForwardContentPreparation(
@@ -132,7 +118,7 @@ internal class DestinationFileCopies(
                 confirmed.uuid.also { copies[key] = it }
             }
             is ApiResult.Error -> {
-                val code = response.error.code.toIntOrNull()
+                val code = response.error.httpStatusCode
                 if (code != null && code in 400..499 && code !in setOf(408, 409, 425)) {
                     startedUploads -= key
                     throw ForwardPreparationFailure(when (code) {
@@ -225,30 +211,8 @@ private fun escapeForwardFileLabel(value: String): String = value
 
 /** Preserve status codes so an explicit rejection remains editable, while a lost upload ACK is not retried. */
 private suspend fun uploadForwardFile(client: WorkspaceAPIClient, file: PreparedForwardFile, stream: String): ApiResult<String, ApiError> {
-    return try {
-        val activeServerConfig = client.userViewModel?.selectedServer?.value
-        activeServerConfig ?: return ApiResult.Error(ApiError("Internal error", "INTERNAL_ERROR"))
-
-        val baseUrl = activeServerConfig.baseUrl
-        suspend fun post(): HttpResponse {
-            val token = client.userViewModel?.selectedServer?.value
-            return client.client.post("$baseUrl/api/workspace/v1/messenger/files/") {
-            header("Authorization", "Bearer $token")
-            setBody(MultiPartFormDataContent(formData {
-                append("file", InputProvider(size = file.file.length()) { file.file.inputStream().asSource().buffered() }, Headers.build {
-                    append(HttpHeaders.ContentType, file.contentType)
-                    append(HttpHeaders.ContentDisposition, "filename=\"${file.name}\"")
-                })
-                append("stream_uuid", stream)
-            }))
-            }
-        }
-        var response = post()
-        if (response.status.value == 401) { client.refreshToken(); response = post() }
-        if (response.status.isSuccess()) {
-            val uploaded = Json { ignoreUnknownKeys = true }.decodeFromString<UploadFileResponseData>(response.body<String>())
-            ApiResult.Success(uploaded.uuid)
-        } else ApiResult.Error(ApiError("Upload rejected", response.status.value.toString()))
-    } catch (cancelled: CancellationException) { throw cancelled }
-    catch (_: Exception) { ApiResult.Error(ApiError("Upload result unknown", "REQUEST_FAILED")) }
+    return when (val response = client.performRequest(ForwardFileUploadRequest(file, stream))) {
+        is ApiResult.Success -> ApiResult.Success(response.value.uuid)
+        is ApiResult.Error -> response
+    }
 }
