@@ -69,12 +69,8 @@ fun OtpScreen(
             Toast
                 .makeText(context, "Код введён неверно", Toast.LENGTH_SHORT)
                 .show()
-        } else if (state is QueryState.Success && !viewModel.isFirstOrganization) {
-            navController.navigate(ProfileFlow.Main) {
-                popUpTo(navController.graph.id) {
-                    inclusive = true
-                }
-            }
+        } else if (state is QueryState.Success) {
+            navController.navigate(LoginFlow.Projects(viewModel.isFirstOrganization))
         }
     }
 
