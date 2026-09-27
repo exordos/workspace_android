@@ -61,7 +61,6 @@ fun ChooseServerScreen(
 
     LaunchedEffect(state) {
         if (state is QueryState.Success) {
-            navController.navigate(LoginFlow.Login(true))
             viewModel.returnToIdleState()
         }
         if (state is QueryState.Error) {

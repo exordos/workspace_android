@@ -116,6 +116,8 @@ class EventsRepository(
         _currentUser.update { newValue }
     }
 
+    private var didLoadData: Boolean = false
+
     private val _streamsQueryState = MutableStateFlow<QueryState>(QueryState.Idle)
     val streamsQueryState: StateFlow<QueryState> = _streamsQueryState
 
@@ -977,7 +979,6 @@ class EventsRepository(
             }
 
             is ApiResult.Error -> {
-                _streamsQueryState.value = QueryState.Error("")
                 _streamsQueryState.value = QueryState.Error("")
             }
         }

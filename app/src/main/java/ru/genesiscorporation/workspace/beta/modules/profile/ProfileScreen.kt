@@ -86,7 +86,6 @@ fun ProfileScreen(
     val serverId by  viewModel.userViewModel.selectedServerId.collectAsState()
 
     key(serverId) {
-        // entire screen state is recreated when serverId changes
         ProfileScreenContent(viewModel, navController)
     }
 

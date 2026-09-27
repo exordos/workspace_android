@@ -49,6 +49,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -79,6 +80,8 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
+import ru.genesiscorporation.workspace.beta.modules.home.HomeScreenContent
+import ru.genesiscorporation.workspace.beta.modules.home.HomeViewModel
 import ru.genesiscorporation.workspace.beta.ui.AddChatToFolder
 import ru.genesiscorporation.workspace.beta.ui.CreateTopic
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
@@ -87,6 +90,18 @@ import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
+    chatViewModel: ChatViewModel,
+    navController: NavHostController
+) {
+    val serverId by  chatViewModel.userViewModel.selectedServerId.collectAsState()
+
+    key(serverId) {
+        ChatScreenContent(chatViewModel, navController)
+    }
+}
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ChatScreenContent(
     chatViewModel: ChatViewModel,
     navController: NavHostController
 ) {

@@ -24,6 +24,13 @@ class EventsRepositoryStore(
     }
 
     @Synchronized
+    fun startAllRepos() {
+        repos.keys.forEach {
+            repos[it]?.loadServerSettings()
+        }
+    }
+
+    @Synchronized
     fun syncWith(servers: List<ServerConfig>) {
         val ids = servers.map { it.id }.toSet()
 

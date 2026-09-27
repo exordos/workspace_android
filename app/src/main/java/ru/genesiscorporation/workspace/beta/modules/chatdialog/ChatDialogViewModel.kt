@@ -668,7 +668,7 @@ data class AttachedUri(
 )
 
 object MarkdownPayloadParser {
-    private val imageRegex = Regex("""!\[((?:\\.|[^\]\\])*)\]\(urn:image:([^)]+)\)""")
+    private val imageRegex = Regex("""!?\[((?:\\.|[^\]\\])*)\]\(urn:image:([^)]+)\)""")
     private val fileRegex = Regex("""\[((?:\\.|[^\]\\])*)\]\(urn:file:([^)]+)\)""")
     private val quoteRegex = Regex("""\[((?:\\.|[^\]\\])*)\]\(urn:quote:([0-9a-fA-F-]{36})(?:\?text=([^\s)&#]+))?\)""")
     fun parse(content: String): List<MessageElement> {

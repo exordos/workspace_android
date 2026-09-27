@@ -3,12 +3,16 @@ package ru.genesiscorporation.workspace.beta.modules.chatchannels
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -61,42 +65,70 @@ sealed interface ChatNavEvent {
 }
 class ChatViewModel(
     val client: WorkspaceAPIClient,
+    val userViewModel: UserViewModel,
     private val eventsRepositoryStore: EventsRepositoryStore,
     val pendingDeepLink: String?,
     val onDeepLinkHandled: () -> Unit
 ): ViewModel() {
-    val repo = eventsRepositoryStore.get(client.getCurrentServerId()) ?: error("Cannot get current event repository")
+//    val repo = eventsRepositoryStore.get(client.getCurrentServerId()) ?: error("Cannot get current event repository")
 
-    val streams: StateFlow<List<Stream>> = repo.streams
+    private val currentServerId: Flow<String?> = userViewModel.selectedServerId
+
+    val eventsRepo: StateFlow<EventsRepository?> = combine(
+        currentServerId,
+        userViewModel.servers,
+    ) { id, servers ->
+        id?.let { eventsRepositoryStore.getOrCreateForId(it, servers) }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    val streams: StateFlow<List<Stream>> = eventsRepo
+        .flatMapLatest { repo ->
+            repo?.streams ?: flowOf(emptyList())
+        }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = emptyList()
+            initialValue = emptyList(),
         )
 
     private val _currentlySelectedStream = MutableStateFlow<Stream?>(null)
     var currentlySelectedStream: StateFlow<Stream?> = _currentlySelectedStream
 
-    val streamTopics: StateFlow<Map<String, List<TopicsResponseData>>> = repo.streamTopics
+    val streamTopics: StateFlow<Map<String, List<TopicsResponseData>>> = eventsRepo
+        .flatMapLatest { repo ->
+            repo?.streamTopics ?: flowOf(emptyMap())
+        }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = emptyMap()
+            initialValue = emptyMap(),
         )
-
-    val folders: StateFlow<List<FolderResponseData>> = repo.folders
+    val folders: StateFlow<List<FolderResponseData>> = eventsRepo
+        .flatMapLatest { repo ->
+            repo?.folders ?: flowOf(emptyList())
+        }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = emptyList()
+            initialValue = emptyList(),
         )
-
-    val streamBindings: StateFlow<Map<String, List<StreamBindingResponseData>>> = repo.streamBindings
-    var currentlySelectedFolder: StateFlow<FolderResponseData?> = repo.currentlySelectedFolder
+    val streamBindings: StateFlow<Map<String, List<StreamBindingResponseData>>> = eventsRepo
+        .flatMapLatest { repo ->
+            repo?.streamBindings ?: flowOf(emptyMap())
+        }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = null
+            initialValue = emptyMap(),
+        )
+    val currentlySelectedFolder: StateFlow<FolderResponseData?> = eventsRepo
+        .flatMapLatest { repo ->
+            repo?.currentlySelectedFolder ?: flowOf(null)
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = null,
         )
 
     private val _newFolderName = MutableStateFlow("")
@@ -111,11 +143,14 @@ class ChatViewModel(
     private val _shouldShowCreateTopicView = MutableStateFlow<Boolean>(false)
     var shouldShowCreateTopicView: StateFlow<Boolean> = _shouldShowCreateTopicView
 
-    val streamsQueryState: StateFlow<QueryState> = repo.streamsQueryState
+    val streamsQueryState: StateFlow<QueryState> = eventsRepo
+        .flatMapLatest { repo ->
+            repo?.streamsQueryState ?: flowOf(QueryState.Idle)
+        }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = QueryState.Idle
+            initialValue = QueryState.Idle,
         )
 
     private val _topicsQueryState = MutableStateFlow<QueryState>(QueryState.Idle)
@@ -143,12 +178,12 @@ class ChatViewModel(
     var currentStreamId: String = ""
 
     fun poolMessage(uuid: String?): MessageResponse? {
-        return repo.messagesPool.value.firstOrNull { it.uuid == uuid }
+        return eventsRepo.value?.messagesPool?.value?.firstOrNull { it.uuid == uuid }
     }
 
     fun updateCurrentlySelectedFolder(newFolder: FolderResponseData) {
         if (newFolder.uuid != currentlySelectedFolder.value?.uuid) {
-            repo.updateCurrentlySelectedFolder(newFolder)
+            eventsRepo.value?.updateCurrentlySelectedFolder(newFolder)
         }
     }
 
@@ -181,7 +216,7 @@ class ChatViewModel(
     }
 
     suspend fun loadServerSettings() {
-        repo.loadServerSettings()
+        eventsRepo.value?.loadServerSettings()
     }
 
     suspend fun loadStreamBindings(stream: Stream) {
@@ -189,7 +224,7 @@ class ChatViewModel(
         val streamBindingsResponse = client.performRequest(StreamBindingsRequest(stream.uuid))
         when(streamBindingsResponse) {
             is ApiResult.Success -> {
-                repo.addStreamBindings(stream.uuid, streamBindingsResponse.value)
+                eventsRepo.value?.addStreamBindings(stream.uuid, streamBindingsResponse.value)
                 loadTopics(stream)
             }
             is ApiResult.Error -> {
@@ -208,23 +243,23 @@ class ChatViewModel(
                     val messagesResponse = client.performRequest(MessagesByIdsRequest(messageIds))
                     when (messagesResponse) {
                         is ApiResult.Success -> {
-                            repo.updateMessagesPool(messagesResponse.value)
+                            eventsRepo.value?.updateMessagesPool(messagesResponse.value)
                             val topicsWithMessages = response.value.map { topic ->
                                 var updatedTopic = topic
                                 updatedTopic.lastMessage = poolMessage(topic.lastMessageUuid)
                                 updatedTopic
                             }
-                            repo.addStreamTopics(stream.uuid, topicsWithMessages)
+                            eventsRepo.value?.addStreamTopics(stream.uuid, topicsWithMessages)
                             _topicsQueryState.value = QueryState.Success
                         }
 
                         is ApiResult.Error -> {
-                            repo.addStreamTopics(stream.uuid, response.value)
+                            eventsRepo.value?.addStreamTopics(stream.uuid, response.value)
                             _topicsQueryState.value = QueryState.Success
                         }
                     }
                 } else {
-                    repo.addStreamTopics(stream.uuid, response.value)
+                    eventsRepo.value?.addStreamTopics(stream.uuid, response.value)
                     _topicsQueryState.value = QueryState.Success
                 }
             }
@@ -346,7 +381,7 @@ class ChatViewModel(
 
                             if (currentlySelectedFolder.value != null) {
                                 val updatedCurrentlySelectedFolder = foldersResponse.value.firstOrNull() { it.uuid == currentlySelectedFolder.value?.uuid }
-                                repo.updateCurrentlySelectedFolder(updatedCurrentlySelectedFolder)
+                                eventsRepo.value?.updateCurrentlySelectedFolder(updatedCurrentlySelectedFolder)
                             }
                             _queryState.value = QueryState.Success
                         }

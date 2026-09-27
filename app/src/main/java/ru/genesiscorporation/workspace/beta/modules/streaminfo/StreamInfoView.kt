@@ -158,7 +158,7 @@ fun StreamInfoView(
             }
             val shareLink = workspaceStreamShareLink(
                 viewModel.client.userViewModel?.baseUrl?.value ?: "",
-                LoginRequest.WORKSPACE_PROJECT_UUID,
+                viewModel.client.userViewModel?.selectedServer?.value?.projectUuid ?: "",
                 stream.uuid
             )
             ActionButtonsRow(

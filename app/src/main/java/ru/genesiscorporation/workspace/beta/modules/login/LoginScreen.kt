@@ -104,8 +104,8 @@ fun LoginScreen(
                     .makeText(context, message, Toast.LENGTH_SHORT)
                     .show()
             }
-        } else if (state is QueryState.Success && !viewModel.isFirstOrganization) {
-            navController.popBackStack()
+        } else if (state is QueryState.Success) {
+            navController.navigate(LoginFlow.Projects(viewModel.isFirstOrganization))
         }
     }
 
