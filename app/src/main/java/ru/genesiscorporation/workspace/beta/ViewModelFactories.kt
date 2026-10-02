@@ -30,6 +30,7 @@ import ru.genesiscorporation.workspace.beta.modules.mail.MailViewModel
 import ru.genesiscorporation.workspace.beta.modules.otp.OtpViewModel
 import ru.genesiscorporation.workspace.beta.modules.ownusersettings.OwnUserSettingsViewModel
 import ru.genesiscorporation.workspace.beta.modules.profile.ProfileViewModel
+import ru.genesiscorporation.workspace.beta.modules.projects.ProjectsViewModel
 import ru.genesiscorporation.workspace.beta.modules.streaminfo.StreamInfoViewModel
 import ru.genesiscorporation.workspace.beta.modules.topics.TopicsViewModel
 import ru.genesiscorporation.workspace.beta.modules.users.UsersViewModel
@@ -79,6 +80,16 @@ class OtpViewModelFactory(private val client: WorkspaceAPIClient, private val us
         if (modelClass.isAssignableFrom(OtpViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
             return OtpViewModel(client, userViewModel, login, password, isFirstOrganization) as T
+        }
+        throw IllegalArgumentException("Unknown ViewModel class")
+    }
+}
+
+class ProjectsViewModelFactory(private val client: WorkspaceAPIClient, private val userViewModel: UserViewModel, val isFirstOrganization: Boolean) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        if (modelClass.isAssignableFrom(ProjectsViewModel::class.java)) {
+            @Suppress("UNCHECKED_CAST")
+            return ProjectsViewModel(client, userViewModel, isFirstOrganization) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
@@ -143,7 +154,7 @@ class ChatViewModelFactory(private val client: WorkspaceAPIClient,
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(ChatViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return ChatViewModel(client, eventsRepositoryStore, pendingDeepLink, onDeepLinkHandled) as T
+            return ChatViewModel(client, userViewModel, eventsRepositoryStore, pendingDeepLink, onDeepLinkHandled) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
@@ -268,11 +279,11 @@ class CalendarViewModelFactory(private val eventsRepositoryStore: EventsReposito
     }
 }
 
-class HomeViewModelFactory(private val eventsRepositoryStore: EventsRepositoryStore, private val client: WorkspaceAPIClient) : ViewModelProvider.Factory {
+class HomeViewModelFactory(private val eventsRepositoryStore: EventsRepositoryStore, private val client: WorkspaceAPIClient, private val userViewModel: UserViewModel) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(HomeViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return HomeViewModel(client, eventsRepositoryStore) as T
+            return HomeViewModel(client, userViewModel, eventsRepositoryStore) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }

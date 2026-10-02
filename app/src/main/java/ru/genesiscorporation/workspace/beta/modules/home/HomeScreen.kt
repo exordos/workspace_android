@@ -25,6 +25,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,6 +43,7 @@ import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.HomeFlow
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
+import ru.genesiscorporation.workspace.beta.modules.profile.ProfileScreenContent
 import ru.genesiscorporation.workspace.beta.ui.AnimatedGif
 import ru.genesiscorporation.workspace.beta.ui.FullScreenError
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
@@ -50,6 +52,19 @@ import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
+    viewModel: HomeViewModel,
+    navController: NavHostController
+) {
+    val serverId by  viewModel.userViewModel.selectedServerId.collectAsState()
+
+    key(serverId) {
+        HomeScreenContent(viewModel, navController)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun HomeScreenContent(
     viewModel: HomeViewModel,
     navController: NavHostController
 ) {

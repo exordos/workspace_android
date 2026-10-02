@@ -32,7 +32,8 @@ data class ServerConfig(
     val baseUrl: String,
     val imageUrl: String,
     val name: String,
-    var needsToRelogin: Boolean
+    var needsToRelogin: Boolean = false,
+    var projectUuid: String? = null
 )
 data class TokenPair(
     val accessToken: String,
@@ -216,6 +217,19 @@ class ServerRepository internal constructor(
     private fun saveTokensLocked(serverId: String, tokens: TokenPair) {
         tokenStore.save(serverId, tokens)
         tokensVersion.value = tokensVersion.value + 1
+    }
+
+    suspend fun updateServerProjectUuid(serverId: String, projectUuid: String) {
+        dataStore.edit { prefs ->
+            val current = prefs[SERVERS]
+                ?.let { json.decodeFromString<List<ServerConfig>>(it) }
+                .orEmpty()
+            val updated = current.map { server ->
+                if (server.id == serverId) server.copy(projectUuid = projectUuid)
+                else server
+            }
+            prefs[SERVERS] = json.encodeToString(updated)
+        }
     }
 
 //    companion object {

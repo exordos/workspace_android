@@ -48,7 +48,7 @@ class LoginViewModel(
 
     suspend fun onLoginClick() {
         _queryState.value = QueryState.Loading
-        val response = client.performRequest(LoginRequest(loginText.value, passwordText.value, null))
+        val response = client.performRequest(LoginRequest(loginText.value, passwordText.value))
         when(response) {
             is ApiResult.Success -> {
                 val userResponse = response.value

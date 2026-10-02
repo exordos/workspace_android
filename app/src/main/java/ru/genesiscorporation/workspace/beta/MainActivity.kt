@@ -109,6 +109,8 @@ import ru.genesiscorporation.workspace.beta.modules.otp.OtpScreen
 import ru.genesiscorporation.workspace.beta.modules.otp.OtpViewModel
 import ru.genesiscorporation.workspace.beta.modules.ownusersettings.OwnUserSettingsView
 import ru.genesiscorporation.workspace.beta.modules.ownusersettings.OwnUserSettingsViewModel
+import ru.genesiscorporation.workspace.beta.modules.projects.ProjectsScreen
+import ru.genesiscorporation.workspace.beta.modules.projects.ProjectsViewModel
 import ru.genesiscorporation.workspace.beta.modules.streaminfo.StreamInfoView
 import ru.genesiscorporation.workspace.beta.modules.streaminfo.StreamInfoViewModel
 import ru.genesiscorporation.workspace.beta.modules.visualsettings.VisualSettingsScreen
@@ -157,6 +159,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         app.workspaceApiClient.attachUserViewModel(userState)
+
         pendingDeepLink = intent.deeplinkOrNull()
         setContent {
             WorkspaceApp(
@@ -235,6 +238,7 @@ fun ApplicationSwitcher(
     val user = UserState.current
     val accessToken by user.accessToken.collectAsState()
     val servers by user.servers.collectAsState()
+    val selectedServer by user.selectedServer.collectAsState()
     val isAccessTokenLoaded by user.isAccessTokenLoaded.collectAsState()
     val isServersLoaded by user.isServersLoaded.collectAsState()
     var navController = rememberNavController()
@@ -255,7 +259,7 @@ fun ApplicationSwitcher(
         }
     } else if (servers.isEmpty()) {
         ChooseServerScreen(chooseServerViewModel, navController)
-    } else if (accessToken == null) {
+    } else if (selectedServer?.projectUuid == null) {
         LoginNavigation(workspaceApiClient)
     } else {
         WorkspaceApp( workspaceViewModel, workspaceApiClient, eventsRepositoryStore, pendingDeepLink, onDeepLinkHandled)
@@ -286,6 +290,9 @@ fun WorkspaceApp(
     var currentDestination = rememberSaveable { mutableStateOf(0 ) }
     var showNavigation by rememberSaveable { mutableStateOf(true) }
 
+    LaunchedEffect(Unit) {
+        eventsRepositoryStore.startAllRepos()
+    }
 
     LaunchedEffect(lifecycleOwner) {
 
@@ -389,7 +396,7 @@ fun HomeNavigation(
 ) {
     val navController = rememberNavController()
     val user = UserState.current
-    val homeViewModelFactory = remember { HomeViewModelFactory(eventsRepositoryStore, workspaceApiClient) }
+    val homeViewModelFactory = remember { HomeViewModelFactory(eventsRepositoryStore, workspaceApiClient, user) }
     val homeViewModel: HomeViewModel = viewModel(factory = homeViewModelFactory)
 
     NavHost(navController = navController, startDestination = HomeFlow.HomeBase) {
@@ -514,6 +521,13 @@ fun LoginNavigation(workspaceApiClient: WorkspaceAPIClient) {
             val otpViewModelFactory = remember { OtpViewModelFactory(workspaceApiClient, user, args.login, args.password, args.isFirstOrganization) }
             val otpViewModel: OtpViewModel = viewModel(factory = otpViewModelFactory)
             OtpScreen(otpViewModel, navController)
+        }
+
+        composable<LoginFlow.Projects> {
+            val args = it.toRoute<LoginFlow.Projects>()
+            val projectsViewModelFactory = remember { ProjectsViewModelFactory(workspaceApiClient, user, args.isFirstOrganization) }
+            val projectsViewModel: ProjectsViewModel = viewModel(factory = projectsViewModelFactory)
+            ProjectsScreen(projectsViewModel, navController)
         }
     }
 }

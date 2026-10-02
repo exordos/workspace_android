@@ -86,13 +86,14 @@ object ChatFlow {
 
 
 object LoginFlow {
-    @Serializable
-    object ChooseServer
 
     @Serializable
     data class Login(val isFirstOrganization: Boolean)
     @Serializable
     data class Otp(val login: String, val password: String, val isFirstOrganization: Boolean)
+    @Serializable
+    data class Projects(val isFirstOrganization: Boolean)
+
 }
 
 object StreamCreationFlow {

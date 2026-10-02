@@ -7,6 +7,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -38,14 +40,15 @@ class ProfileViewModel(
         id?.let { eventsRepositoryStore.getOrCreateForId(it, servers) }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-    val repo = eventsRepo.value ?: error("Cannot get current event repository")
 
-
-    val user: StateFlow<UserResponseData?> = repo.currentUser
+    val user: StateFlow<UserResponseData?> = eventsRepo
+        .flatMapLatest { repo ->
+            repo?.currentUser ?: flowOf(null)
+        }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = null
+            initialValue = null,
         )
 
     val selectedServerId: StateFlow<String?> = userViewModel.selectedServerId
@@ -85,7 +88,7 @@ class ProfileViewModel(
     }
 
     fun currentPushToken(): String? {
-        return repo.pushId
+        return eventsRepo.value?.pushId
     }
     fun logout() {
         val token = currentPushToken()
