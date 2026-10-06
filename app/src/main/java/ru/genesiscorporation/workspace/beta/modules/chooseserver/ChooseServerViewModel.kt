@@ -36,11 +36,13 @@ class ChooseServerViewModel(
     }
 
     suspend fun getServerSettings() {
-        _queryState.value = QueryState.Loading
-        val response = client.performRequest(ServerSettingsRequest(baseUrl = serverText.value))
+        val previousState = _queryState.value
+        if (previousState is QueryState.Loading || !_queryState.compareAndSet(previousState, QueryState.Loading)) return
+        val serverUrl = serverText.value
+        val response = client.performRequest(ServerSettingsRequest(baseUrl = serverUrl))
         when(response) {
             is ApiResult.Success -> {
-                userViewModel.addServer(serverText.value, response.value.realmIcon, response.value.realmName)
+                userViewModel.addServer(serverUrl, response.value.realmIcon, response.value.realmName)
                 _queryState.value = QueryState.Success
             }
             is ApiResult.Error -> {
