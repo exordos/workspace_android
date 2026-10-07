@@ -27,10 +27,14 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
-import androidx.test.espresso.Espresso.pressBack
+import android.view.KeyEvent
+import android.view.View
+import android.view.ViewGroup
+import android.view.inspector.WindowInspector
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.CompletableDeferred
@@ -81,7 +85,23 @@ class MessageDeletionUiTest {
         compose.onNodeWithTag("cancel-message-deletion").performClick()
         compose.onNodeWithText(localizedString(R.string.message_delete_title)).assertDoesNotExist()
         openConfirmation()
-        pressBack()
+        // The closing popup can still own focus when the dialog first appears.
+        // Wait for the actual dialog window before injecting system Back.
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        compose.waitUntil(timeoutMillis = 5_000) {
+            var focused = false
+            instrumentation.runOnMainSync {
+                focused = WindowInspector.getGlobalWindowViews().any {
+                    it.hasWindowFocus() && containsDialogLayout(it)
+                }
+            }
+            focused
+        }
+        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodesWithText(localizedString(R.string.message_delete_title))
+                .fetchSemanticsNodes().isEmpty()
+        }
         compose.onNodeWithText(localizedString(R.string.message_delete_title)).assertDoesNotExist()
         compose.onNodeWithText(MESSAGE_TEXT).assertIsDisplayed()
         compose.runOnIdle { assertEquals(0, requests) }
@@ -152,6 +172,13 @@ class MessageDeletionUiTest {
 
     private fun openMenu() {
         compose.onNodeWithText("Действия").performClick()
+    }
+
+    private fun containsDialogLayout(view: View): Boolean {
+        if (view.javaClass.name == "androidx.compose.ui.window.DialogLayout") return true
+        return view is ViewGroup && (0 until view.childCount).any {
+            containsDialogLayout(view.getChildAt(it))
+        }
     }
 
     private fun openConfirmation() {

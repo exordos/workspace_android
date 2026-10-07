@@ -18,6 +18,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -29,6 +30,10 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import ru.genesiscorporation.workspace.beta.UserViewModel
 import ru.genesiscorporation.workspace.beta.data.ServerRepository
+import ru.genesiscorporation.workspace.beta.data.SecureTokenStore
+import ru.genesiscorporation.workspace.beta.data.EventsRepositoryStore
+import ru.genesiscorporation.workspace.beta.data.ServerConfig
+import ru.genesiscorporation.workspace.beta.data.TokenPair
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ForwardMessageRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponsePayload
@@ -54,22 +59,31 @@ class ForwardMessageHttpContractTest {
     private lateinit var user: UserViewModel
     private lateinit var http: HttpClient
     private lateinit var api: WorkspaceAPIClient
+    private lateinit var tokenStore: SecureTokenStore
+    private lateinit var eventsStore: EventsRepositoryStore
+    private lateinit var serverId: String
 
     @Before fun setUp() {
         files = File(InstrumentationRegistry.getInstrumentation().targetContext.cacheDir, "cassi-forward-http-${UUID.randomUUID()}").apply { check(mkdirs()) }
         storeJob = SupervisorJob()
         val scope = CoroutineScope(storeJob + Dispatchers.IO)
         val store = PreferenceDataStoreFactory.create(scope = scope) { File(files, "forward.preferences_pb") }
-        preferences = ServerRepository(store, scope)
-        user = UserViewModel(preferences)
         http = HttpClient(CIO) {
             install(HttpTimeout) { requestTimeoutMillis = 5_000; connectTimeoutMillis = 5_000 }
             install(ContentNegotiation) { json() }
         }
-        api = WorkspaceAPIClient(http, user, SessionCookieStore()).apply { baseAccessToken = "cassi-forward-contract-fixture" }
+        api = WorkspaceAPIClient(http)
+        tokenStore = SecureTokenStore(InstrumentationRegistry.getInstrumentation().targetContext)
+        eventsStore = EventsRepositoryStore(tokenStore, api)
+        preferences = ServerRepository(store, tokenStore, eventsStore, scope)
+        user = UserViewModel(preferences)
+        api.attachUserViewModel(user)
+        serverId = "cassi-forward-http-${UUID.randomUUID()}"
     }
 
     @After fun tearDown() = runBlocking {
+        preferences.removeServer(serverId)
+        eventsStore.clear()
         http.close()
         user.viewModelScope.cancel()
         storeJob.cancelAndJoin()
@@ -77,11 +91,22 @@ class ForwardMessageHttpContractTest {
         Unit
     }
 
+    private suspend fun saveSession(baseUrl: String) {
+        preferences.addServer(
+            ServerConfig(serverId, baseUrl, "", "Forward HTTP test"),
+            TokenPair("cassi-forward-contract-fixture", "cassi-forward-refresh-fixture"),
+        )
+        withTimeout(5_000) {
+            user.selectedServer.first { it?.id == serverId }
+            user.accessToken.first { it == "cassi-forward-contract-fixture" }
+        }
+    }
+
     @Test fun postAndReadbackConfirmTheReturnedMessageWithoutOptimisticSuccess() = runBlocking {
         val content = requireNotNull(buildWorkspaceForwardMarkdown(listOf(message(SOURCE))))
         val persisted = message(RETURNED).copy(payload = MessageResponsePayload("markdown", content))
         ForwardLoopbackServer(listOf(201 to """{"uuid":"$RETURNED","topic_uuid":"$TOPIC"}""", 200 to Json.encodeToString(listOf(persisted)))).use { server ->
-            preferences.addBaseUrl(server.baseUrl)
+            saveSession(server.baseUrl)
             val confirmed = mutableListOf<MessageResponse>()
             val forwarding = sender { confirmed += it }
             forwarding.send(ForwardDestination(STREAM, TOPIC))
@@ -101,7 +126,7 @@ class ForwardMessageHttpContractTest {
 
     @Test fun ambiguousServerFailureReadsButDoesNotRepeatThePost() = runBlocking {
         ForwardLoopbackServer(listOf(500 to "{}", 200 to "[]", 200 to "[]")).use { server ->
-            preferences.addBaseUrl(server.baseUrl)
+            saveSession(server.baseUrl)
             var confirmed = false
             val forwarding = sender { confirmed = true }
             forwarding.send(ForwardDestination(STREAM, TOPIC))
@@ -135,7 +160,7 @@ class ForwardMessageHttpContractTest {
             201 to """{"uuid":"$RETURNED","topic_uuid":"$TOPIC"}""",
             200 to Json.encodeToString(listOf(persisted)),
         )).use { server ->
-            preferences.addBaseUrl(server.baseUrl)
+            saveSession(server.baseUrl)
             val preparation = createForwardPreparation(context, listOf(source), api, AUTHOR)
             var confirmed = false
             val forwarding = MessageForwarding(listOf(source), AUTHOR,
