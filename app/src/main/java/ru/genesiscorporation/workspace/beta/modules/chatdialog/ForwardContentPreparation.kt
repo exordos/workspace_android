@@ -179,8 +179,7 @@ internal fun createForwardPreparation(
                     ?.takeIf { it.uuid == uuid } ?: throw ForwardPreparationFailure(R.string.forward_source_metadata_failed)
                 val contentType = runCatching { ContentType.parse(metadata.contentType).toString() }.getOrNull()
                     ?: throw ForwardPreparationFailure(R.string.forward_source_format_failed)
-                val safeName = metadata.name.substringAfterLast('/').substringAfterLast('\\')
-                    .replace(Regex("[^\\p{L}\\p{N}._ -]"), "_").trim('.').take(160).ifBlank { "attachment" }
+                val safeName = localAttachmentFileName(metadata.name)
                 val directory = File(context.cacheDir, "message-shares/${UUID.randomUUID()}").apply { check(mkdirs()) }
                 val file = File(directory, safeName)
                 val result = client.downloadFile("/api/workspace/v1/messenger/files/$uuid/actions/download", file)

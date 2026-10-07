@@ -434,7 +434,7 @@ suspend fun AttachmentStorage.saveToDownloads(
     }
     val resolver = context.contentResolver
     val values = ContentValues().apply {
-        put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+        put(MediaStore.Downloads.DISPLAY_NAME, localAttachmentFileName(fileName))
         put(MediaStore.Downloads.MIME_TYPE, guessMimeType(fileName))
         put(MediaStore.Downloads.IS_PENDING, 1)
     }

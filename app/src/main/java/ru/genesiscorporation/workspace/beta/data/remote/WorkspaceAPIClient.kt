@@ -10,10 +10,10 @@ import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.forms.FormDataContent
 import io.ktor.client.request.forms.MultiPartFormDataContent
 import io.ktor.client.request.forms.formData
-import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.parameter
 import io.ktor.client.request.post
+import io.ktor.client.request.prepareGet
 import io.ktor.client.request.request
 import io.ktor.client.request.setBody
 import io.ktor.client.request.url
@@ -33,13 +33,14 @@ import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.http.withCharset
 import io.ktor.utils.io.ByteReadChannel
-import io.ktor.utils.io.core.readBytes
-import io.ktor.utils.io.readRemaining
+import io.ktor.utils.io.readAvailable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -58,10 +59,19 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.TokenRefreshRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UploadAvatarResponseData
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 import java.io.File
+import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.util.UUID
 
+// Leave headroom for other app state while an attachment is being cached.
+internal const val DOWNLOAD_STORAGE_RESERVE_BYTES = 32L * 1024 * 1024
+
+private class DownloadStorageLimitException : IOException()
+
 class WorkspaceAPIClient(
-    val client: HttpClient
+    val client: HttpClient,
+    private val availableStorageBytes: (File) -> Long = { it.usableSpace },
 ): APIClient {
     private val refreshMutex = Mutex()
 
@@ -333,18 +343,65 @@ class WorkspaceAPIClient(
             .getTokens(activeServerConfig.id)
             ?.accessToken
             .orEmpty()
-        val httpResponse: HttpResponse = client.get("${baseUrl}${path}") {
-            header("User-Agent", "Workspace/android/${BuildConfig.VERSION_NAME}")
-            header("Authorization", "Bearer $accessToken")
-        }
-        if (httpResponse.status.isSuccess()) {
-            val channel: ByteReadChannel = httpResponse.body()
-            destination.parentFile?.mkdirs()
-            destination.writeBytes(channel.readRemaining().readBytes())
-            return ApiResult.Success(destination)
-        } else {
-            val error = ApiError("Request failed", "REQUEST_FAILED")
-            return ApiResult.Error(error)
+        return withContext(Dispatchers.IO) {
+            var partial: File? = null
+            try {
+                client.prepareGet("${baseUrl}${path}") {
+                    header("User-Agent", "Workspace/android/${BuildConfig.VERSION_NAME}")
+                    header("Authorization", "Bearer $accessToken")
+                }.execute { response ->
+                    if (!response.status.isSuccess()) {
+                        return@execute ApiResult.Error(ApiError("Request failed", "REQUEST_FAILED"))
+                    }
+                    val parent = requireNotNull(destination.absoluteFile.parentFile)
+                    if (!parent.isDirectory && !parent.mkdirs()) {
+                        throw IOException("Cannot create attachment directory")
+                    }
+                    val byteBudget = (availableStorageBytes(parent) - DOWNLOAD_STORAGE_RESERVE_BYTES)
+                        .coerceAtLeast(0L)
+                    val expected = response.headers[HttpHeaders.ContentLength]?.toLongOrNull()
+                    if (byteBudget == 0L || (response.headers[HttpHeaders.ContentEncoding] == null &&
+                            expected != null && expected > byteBudget)) {
+                        throw DownloadStorageLimitException()
+                    }
+                    val temporary = File.createTempFile("workspace-download-", ".part", parent)
+                    partial = temporary
+                    val channel: ByteReadChannel = response.body()
+                    var received = 0L
+                    temporary.outputStream().use { output ->
+                        val buffer = ByteArray(64 * 1024)
+                        while (true) {
+                            currentCoroutineContext().ensureActive()
+                            val count = channel.readAvailable(buffer)
+                            if (count < 0) break
+                            if (count > 0) {
+                                if (count.toLong() > byteBudget - received ||
+                                    availableStorageBytes(parent) < DOWNLOAD_STORAGE_RESERVE_BYTES + count) {
+                                    throw DownloadStorageLimitException()
+                                }
+                                output.write(buffer, 0, count)
+                                received += count
+                            }
+                        }
+                    }
+                    if (response.headers[HttpHeaders.ContentEncoding] == null &&
+                        expected != null && received != expected) {
+                        throw IOException("Incomplete attachment response")
+                    }
+                    currentCoroutineContext().ensureActive()
+                    Files.move(temporary.toPath(), destination.toPath(),
+                        StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+                    ApiResult.Success(destination)
+                }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: DownloadStorageLimitException) {
+                ApiResult.Error(ApiError("Not enough storage to download attachment", "INSUFFICIENT_STORAGE"))
+            } catch (_: Exception) {
+                ApiResult.Error(ApiError("Cannot download attachment", "DOWNLOAD_FAILED"))
+            } finally {
+                partial?.delete()
+            }
         }
     }
 

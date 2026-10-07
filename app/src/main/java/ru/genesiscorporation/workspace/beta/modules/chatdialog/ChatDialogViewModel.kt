@@ -88,16 +88,17 @@ class ChatDialogViewModel(
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = emptyMap()
         )
-    val stream: StateFlow<Stream> = repo.streams
-        .map { list -> list.first { it.uuid == chatId } }
+    val stream: StateFlow<Stream?> = repo.streams
+        .map { list -> list.firstOrNull { it.uuid == chatId } }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = repo.streams.value.first { it.uuid == chatId }
+            initialValue = repo.streams.value.firstOrNull { it.uuid == chatId }
         )
 
-    val directUser: StateFlow<UserResponseData?> = repo.users
-        .map { list -> list.firstOrNull() { it.uuid == stream.value.directUserUuid } }
+    val directUser: StateFlow<UserResponseData?> = combine(repo.users, stream) { users, currentStream ->
+        users.firstOrNull { it.uuid == currentStream?.directUserUuid }
+    }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
@@ -481,9 +482,12 @@ class ChatDialogViewModel(
         val response = client.performRequest(sendMessageRequest)
         when (response) {
             is ApiResult.Success -> {
-                newMessage.uuid = response.value.uuid
-                newMessage.topicUuid = response.value.topicUuid
-                repo.updateMessage(newMessage)
+                // The WebSocket event can arrive before this HTTP response.
+                // Replace the optimistic snapshot instead of mutating its key.
+                repo.reconcileSentMessage(newMessage.uuid, newMessage.copy(
+                    uuid = response.value.uuid,
+                    topicUuid = response.value.topicUuid,
+                ))
                 deleteCurrentTopicDraftIfNeeded()
                 possibleMessage = null
             }
@@ -808,7 +812,7 @@ class AttachmentStorage(
     private val dir: File
         get() = File(context.filesDir, "attachments").apply { mkdirs() }
     fun localFile(uuid: String, fileName: String): File {
-        val safeName = fileName.replace(Regex("""[^\w.\- ]"""), "_")
+        val safeName = localAttachmentFileName(fileName)
         return File(dir, "$uuid-$safeName")
     }
     fun isCached(uuid: String, fileName: String): Boolean {

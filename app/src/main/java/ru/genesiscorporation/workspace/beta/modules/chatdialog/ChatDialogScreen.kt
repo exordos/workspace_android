@@ -133,6 +133,8 @@ fun ChatDialogScreen(
 ) {
     val directUser by viewModel.directUser.collectAsStateWithLifecycle()
     val streamTopicMessages by viewModel.streamTopicMessages.collectAsStateWithLifecycle()
+    val messages = streamTopicMessages["${viewModel.chatId}.${viewModel.topicUuid}"]
+        ?.distinctBy { it.uuid }
     val streamBindings by viewModel.streamBindings.collectAsStateWithLifecycle()
     val users by viewModel.users.collectAsStateWithLifecycle()
     val quotedMessages by viewModel.quotedMessages.collectAsState()
@@ -190,8 +192,7 @@ fun ChatDialogScreen(
             }
         }
     }
-    LaunchedEffect(streamTopicMessages["${viewModel.chatId}.${viewModel.topicUuid}"]?.size) {
-        val messages = streamTopicMessages["${viewModel.chatId}.${viewModel.topicUuid}"]
+    LaunchedEffect(messages?.size) {
         if (messages != null) {
             if (messages.isNotEmpty()) {
                 listState.scrollToItem(messages.lastIndex)
@@ -200,8 +201,7 @@ fun ChatDialogScreen(
         }
     }
 
-    LaunchedEffect(streamTopicMessages["${viewModel.chatId}.${viewModel.topicUuid ?: ""}"]?.lastOrNull()) {
-        val messages = streamTopicMessages["${viewModel.chatId}.${viewModel.topicUuid ?: ""}"]
+    LaunchedEffect(messages?.lastOrNull()) {
         if (messages != null) {
             if (messages.isNotEmpty() && viewModel.shouldScrollToBottom) {
                 listState.scrollToItem(messages.lastIndex)
@@ -394,7 +394,6 @@ fun ChatDialogScreen(
                         .fillMaxSize()
                         .background(LocalWorkspaceColorsPalette.current.background)
                 ) {
-                    val messages = streamTopicMessages["${viewModel.chatId}.${viewModel.topicUuid ?: ""}"]
                     if (isLoading) {
                         Box(
                             modifier = Modifier.fillMaxSize(),
@@ -426,7 +425,7 @@ fun ChatDialogScreen(
                                     alignment = Alignment.Bottom
                                 )
                             ) {
-                                items(items = messages.sortedBy { Instant.parse(it.createdAt) }, key = { "${it.uuid}" }) { item ->
+                                items(items = messages.sortedBy { Instant.parse(it.createdAt) }, key = { it.uuid }) { item ->
                                     ChatMessage(
                                         item,
                                         viewModel,
