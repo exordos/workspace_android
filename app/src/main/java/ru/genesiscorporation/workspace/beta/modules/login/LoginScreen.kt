@@ -1,439 +1,223 @@
 package ru.genesiscorporation.workspace.beta.modules.login
 
-import android.graphics.Bitmap
-import android.net.Uri
-import android.os.Build
-import android.util.Log
-import android.webkit.WebResourceError
-import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import android.widget.Toast
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.LoginFlow
 import ru.genesiscorporation.workspace.beta.R
-import ru.genesiscorporation.workspace.beta.UserState
 import ru.genesiscorporation.workspace.beta.data.UrnParser
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
-import ru.genesiscorporation.workspace.beta.modules.profile.ProfileViewModel
-import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
-import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
+import ru.genesiscorporation.workspace.beta.ui.AuthColors
+import ru.genesiscorporation.workspace.beta.ui.AuthLoadingOverlay
+import ru.genesiscorporation.workspace.beta.ui.AuthLogo
+import ru.genesiscorporation.workspace.beta.ui.AuthLogoutButton
+import ru.genesiscorporation.workspace.beta.ui.AuthPrimaryButton
+import ru.genesiscorporation.workspace.beta.ui.AuthScreen
+import ru.genesiscorporation.workspace.beta.ui.AuthTextField
+import ru.genesiscorporation.workspace.beta.ui.authColors
 
 @Composable
-fun LoginScreen(
-    viewModel: LoginViewModel,
-    navController: NavHostController
-) {
-    val loginText by viewModel.loginText.collectAsState()
-    val passwordText by viewModel.passwordText.collectAsState()
-    val scope = rememberCoroutineScope()
-    val webUrl by viewModel.webUrl.collectAsStateWithLifecycle()
+fun LoginScreen(viewModel: LoginViewModel, navController: NavHostController) {
+    val login by viewModel.loginText.collectAsState()
+    val password by viewModel.passwordText.collectAsState()
     val state by viewModel.queryState.collectAsStateWithLifecycle()
-    val context = LocalContext.current
-    var passwordVisible by remember { mutableStateOf(false) }
+    val organizationName by viewModel.userViewModel.organizationName.collectAsState()
+    val organizationUrl by viewModel.userViewModel.organizationUrl.collectAsState()
+    val organizationImage by viewModel.userViewModel.organizationImageUrl.collectAsState()
     val servers by viewModel.userViewModel.servers.collectAsState()
+    val selectedServer by viewModel.userViewModel.selectedServer.collectAsState()
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val colors = authColors()
+    val loading = state is QueryState.Loading
 
     LaunchedEffect(state) {
-        if (state is QueryState.Error) {
-            val message = (state as QueryState.Error).message
-            if (message == "needs_otp") {
-                viewModel.idleQueryState()
-                navController.navigate(LoginFlow.Otp(loginText, passwordText, viewModel.isFirstOrganization))
-            } else {
-                Toast
-                    .makeText(context, message, Toast.LENGTH_SHORT)
-                    .show()
+        when (val current = state) {
+            is QueryState.Error -> {
+                if (current.message == "needs_otp") {
+                    viewModel.idleQueryState()
+                    navController.navigate(LoginFlow.Otp(login, password, viewModel.isFirstOrganization))
+                } else {
+                    Toast.makeText(context, current.message, Toast.LENGTH_SHORT).show()
+                }
             }
-        } else if (state is QueryState.Success) {
-            navController.navigate(LoginFlow.Projects(viewModel.isFirstOrganization))
+            QueryState.Success -> navController.navigate(LoginFlow.Projects(viewModel.isFirstOrganization))
+            else -> Unit
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize()
-        .background(LocalWorkspaceColorsPalette.current.background),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(modifier = Modifier.fillMaxWidth()
-            .imePadding()
-            .verticalScroll(rememberScrollState())
-            .background(LocalWorkspaceColorsPalette.current.background)
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    val organizationImageUrl = UrnParser.parseUrl(viewModel.userViewModel.organizationImageUrl.collectAsState().value, "")
-                    if (organizationImageUrl != null) {
-                        AsyncImage(
-                            model = organizationImageUrl,
-                            contentDescription = null,
-                            modifier = Modifier.padding(top = 48.dp)
-                                .size(116.dp)
-                        )
-                    } else {
-                        Image(
-                            painter = painterResource(id = R.drawable.icon),
-                            contentDescription = null,
-                            modifier = Modifier.size(116.dp)
-                                .padding(top = 48.dp)
-                        )
-                    }
-                    Text(
-                        viewModel.userViewModel.organizationName.collectAsState().value ?: "Название организации",
-                        color = LocalWorkspaceColorsPalette.current.textHeaders,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.padding(20.dp, 12.dp, 4.dp, 20.dp)
-                    )
-                    Text(
-                        viewModel.userViewModel.organizationUrl.collectAsState().value ?: "",
-                        color = LocalWorkspaceColorsPalette.current.textAdditional50,
-                        fontSize = 14.sp,
-                        fontFamily = InterFontFamily
-                    )
+    AuthScreen(colors = colors) {
+        CredentialsContent(
+            login = login,
+            password = password,
+            organizationName = organizationName ?: "Название организации",
+            organizationUrl = organizationUrl.orEmpty(),
+            organizationImageUrl = UrnParser.parseUrl(organizationImage, ""),
+            loading = loading,
+            colors = colors,
+            onLoginChange = viewModel::onLoginChange,
+            onPasswordChange = viewModel::onPasswordChange,
+            onLogin = { scope.launch { viewModel.onLoginClick() } },
+            onLogout = {
+                scope.launch {
+                    viewModel.userViewModel.removeCurrentServer()
+                    navController.popBackStack()
                 }
-            }
-            HorizontalDivider(
-                modifier = Modifier
-                    .padding(20.dp),
-                thickness = 1.dp,
-                color = LocalWorkspaceColorsPalette.current.divider,
+            },
+        )
+        if (selectedServer?.needsToRelogin == true && servers.size > 1) {
+            Spacer(Modifier.height(24.dp))
+            Box(Modifier.fillMaxWidth().height(1.dp).background(colors.divider))
+            Text(
+                text = "Ваши организации",
+                color = colors.text,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 12.dp),
             )
-            Column(
-                horizontalAlignment = Alignment.Start
-            ) {
-
-                Text(
-                    "Логин",
-                    color = LocalWorkspaceColorsPalette.current.textAdditional30,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.padding(horizontal = 20.dp)
-                )
-                Box(
-                    contentAlignment = Alignment.CenterStart,
-                    modifier = Modifier
-                        .padding(horizontal = 20.dp)
-                        .fillMaxWidth()
-                        .height(40.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .padding(vertical = 4.dp)
-                        .background(
-                            LocalWorkspaceColorsPalette.current.searchBackground,
-                            RoundedCornerShape(8.dp)
-                        )
-                ) {
-                    BasicTextField(
-                        value = loginText,
-                        onValueChange = viewModel::onLoginChange,
-                        textStyle = TextStyle(
-                            color = LocalWorkspaceColorsPalette.current.textHeaders,
-                            fontSize = 14.sp,
-                            fontFamily = InterFontFamily,
-                        ),
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Email
-                        ),
-                        cursorBrush = SolidColor(LocalWorkspaceColorsPalette.current.textHeaders),
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                            .padding(horizontal = 12.dp)
-                    )
-                }
-                Text(
-                    "Пароль",
-                    color = LocalWorkspaceColorsPalette.current.textAdditional30,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.padding(horizontal = 20.dp)
-                )
-                Box(
-                    contentAlignment = Alignment.CenterStart,
-                    modifier = Modifier
-                        .padding(horizontal = 20.dp)
-                        .fillMaxWidth()
-                        .height(40.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .padding(vertical = 4.dp)
-                        .background(
-                            LocalWorkspaceColorsPalette.current.searchBackground,
-                            RoundedCornerShape(8.dp)
-                        )
-                ) {
-                    BasicTextField(
-                        value = passwordText,
-                        onValueChange = viewModel::onPasswordChange,
-                        textStyle = TextStyle(
-                            color = LocalWorkspaceColorsPalette.current.textHeaders,
-                            fontSize = 14.sp,
-                            fontFamily = InterFontFamily,
-                        ),
-                        cursorBrush = SolidColor(LocalWorkspaceColorsPalette.current.textHeaders),
-                        singleLine = true,
-                        visualTransformation = if (passwordVisible) {
-                            VisualTransformation.None
-                        } else {
-                            PasswordVisualTransformation()
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                            .padding(start = 12.dp, end = 44.dp)
-                    )
-                    IconButton(
-                        onClick = { passwordVisible = !passwordVisible },
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                    ) {
-                        Image(
-                            painter = if (passwordVisible) painterResource(id = R.drawable.ic_visibility_off) else painterResource(
-                                id = R.drawable.ic_visibility
-                            ),
-                            contentDescription = null
-                        )
-                    }
-                }
-                Button(
-                    onClick = {
-                        scope.launch {
-                            viewModel.onLoginClick()
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = LocalWorkspaceColorsPalette.current.primary,
-                        contentColor = LocalWorkspaceColorsPalette.current.onPrimary
-                    ),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                        .padding(20.dp, 6.dp, 20.dp, 6.dp)
-                ) {
-                    Text(
-                        "Войти",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-                Button(
-                    onClick = {
-                        scope.launch {
-                            viewModel.userViewModel.removeCurrentServer()
-                            navController.popBackStack()
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color.Transparent,
-                        contentColor = LocalWorkspaceColorsPalette.current.indicatorRed
-                    ),
-                    border = BorderStroke(
-                        width = 1.dp,
-                        color = LocalWorkspaceColorsPalette.current.indicatorRed
-                    ),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                        .padding(20.dp, 6.dp, 20.dp, 6.dp)
-                ) {
-                    Text(
-                        "Выйти из организации",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-            }
-            if (viewModel.userViewModel.selectedServer.value?.needsToRelogin ?: false && servers.count() > 1) {
-                HorizontalDivider(
-                    modifier = Modifier
-                        .padding(20.dp),
-                    thickness = 1.dp,
-                    color = LocalWorkspaceColorsPalette.current.divider,
-                )
-                Text(
-                    "Ваши организации",
-                    color = LocalWorkspaceColorsPalette.current.textHeaders,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.padding(20.dp, 12.dp, 4.dp, 20.dp)
-                )
-                Organizations(viewModel)
-            }
+            Organizations(viewModel)
         }
     }
-    if (state is QueryState.Loading) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.4f))
-                .clickable(
-                    indication = null,
-                    interactionSource = remember { MutableInteractionSource() }
-                ) { },
-            contentAlignment = Alignment.Center
-        ) {
-            CircularProgressIndicator()
-        }
-    }
+    if (loading) AuthLoadingOverlay(colors)
 }
 
 @Composable
-fun Organizations(
-    viewModel: LoginViewModel,
+internal fun CredentialsContent(
+    login: String,
+    password: String,
+    organizationName: String,
+    organizationUrl: String,
+    organizationImageUrl: String?,
+    loading: Boolean,
+    colors: AuthColors,
+    onLoginChange: (String) -> Unit,
+    onPasswordChange: (String) -> Unit,
+    onLogin: () -> Unit,
+    onLogout: () -> Unit,
 ) {
-    val state by viewModel.queryState.collectAsStateWithLifecycle()
-    val serverConfigs = viewModel.userViewModel.servers.collectAsState()
-    val selectedServerId = viewModel.userViewModel.selectedServerId.collectAsState()
-    Box(
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.Start,
-            modifier = Modifier
-                .fillMaxWidth()
-        ) {
+    var passwordVisible by rememberSaveable { mutableStateOf(false) }
+    val canSubmit = !loading && login.isNotBlank() && password.isNotBlank()
+    Spacer(Modifier.height(54.dp))
+    AuthLogo(colors, imageUrl = organizationImageUrl, contentDescription = organizationName)
+    Text(
+        text = organizationName,
+        color = colors.text,
+        fontSize = 18.sp,
+        lineHeight = 23.sp,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.padding(top = 16.dp),
+    )
+    Text(
+        text = organizationUrl,
+        color = colors.mutedText,
+        fontSize = 16.sp,
+        lineHeight = 20.sp,
+        modifier = Modifier.padding(top = 6.dp),
+    )
+    Box(Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 18.dp).height(1.dp).background(colors.divider))
+    AuthTextField(
+        value = login,
+        onValueChange = onLoginChange,
+        label = "Имя пользователя или email",
+        placeholder = "username или email@example.com",
+        colors = colors,
+        enabled = !loading,
+        keyboardType = KeyboardType.Email,
+        imeAction = ImeAction.Next,
+    )
+    Spacer(Modifier.height(14.dp))
+    AuthTextField(
+        value = password,
+        onValueChange = onPasswordChange,
+        label = "Пароль",
+        placeholder = "Введите пароль",
+        colors = colors,
+        enabled = !loading,
+        keyboardType = KeyboardType.Password,
+        imeAction = ImeAction.Done,
+        visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+        onImeAction = { if (canSubmit) onLogin() },
+        trailingContent = {
+            IconButton(
+                onClick = { passwordVisible = !passwordVisible },
+                enabled = !loading,
+                modifier = Modifier.size(28.dp),
+            ) {
+                Icon(
+                    painter = painterResource(if (passwordVisible) R.drawable.ic_visibility_off else R.drawable.ic_visibility),
+                    contentDescription = if (passwordVisible) "Скрыть пароль" else "Показать пароль",
+                    tint = colors.mutedText,
+                    modifier = Modifier.size(25.dp),
+                )
+            }
+        },
+    )
+    Spacer(Modifier.height(26.dp))
+    AuthPrimaryButton(text = "Войти", enabled = canSubmit, colors = colors, onClick = onLogin)
+    Spacer(Modifier.height(14.dp))
+    AuthLogoutButton(colors = colors, onClick = onLogout, enabled = !loading)
+}
+
+@Composable
+fun Organizations(viewModel: LoginViewModel) {
+    val servers by viewModel.userViewModel.servers.collectAsState()
+    val selectedServerId by viewModel.userViewModel.selectedServerId.collectAsState()
+    val colors = authColors()
+    Column(modifier = Modifier.fillMaxWidth()) {
+        servers.filterNot { it.id == selectedServerId }.forEach { server ->
             Row(
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp)
+                    .background(colors.field, RoundedCornerShape(10.dp))
+                    .clickable { viewModel.userViewModel.selectServer(server.id) }
+                    .padding(12.dp),
             ) {
-                Image(
-                    painter = painterResource(id = R.drawable.ic_organizations),
+                AsyncImage(
+                    model = UrnParser.parseUrl(server.imageUrl, ""),
                     contentDescription = null,
-                    modifier = Modifier.padding(12.dp, 6.dp, 8.dp, 6.dp)
+                    modifier = Modifier.size(44.dp),
                 )
-                Text(
-                    text = "Организации"
-                )
-            }
-            for (serverConfig in serverConfigs.value.filterNot { it.id == selectedServerId.value }) {
-                Column(
-                    horizontalAlignment = Alignment.Start,
-                    modifier = Modifier.clickable(
-                        onClick = {
-                            if (serverConfig.id != selectedServerId.value) {
-                                viewModel.userViewModel.selectServer(serverConfig.id)
-                            }
-                        }
-                    )
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(start = 12.dp)
-                    ) {
-                        val organizationImageUrl = UrnParser.parseUrl(
-                            viewModel.userViewModel.organizationImageUrl.collectAsState().value,
-                            ""
-                        )
-                        if (organizationImageUrl != null) {
-                            AsyncImage(
-                                model = organizationImageUrl,
-                                contentDescription = null,
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .padding(vertical = 5.dp)
-                            )
-                        }
-                        Text(
-                            text = serverConfig.name,
-                            fontSize = 14.sp,
-                            fontFamily = InterFontFamily,
-                            color = LocalWorkspaceColorsPalette.current.textHeaders,
-                            modifier = Modifier.weight(1f)
-                        )
-                        if (serverConfig.id == viewModel.userViewModel.selectedServerId.collectAsState().value) {
-                            Text(
-                                text = "Текущая",
-                                fontSize = 12.sp,
-                                fontFamily = InterFontFamily,
-                                color = LocalWorkspaceColorsPalette.current.indicatorGreen
-                            )
-                        } else if (serverConfig.needsToRelogin) {
-                            Text(
-                                text = "Сессия истекла",
-                                fontSize = 12.sp,
-                                fontFamily = InterFontFamily,
-                                color = LocalWorkspaceColorsPalette.current.indicatorRed
-                            )
-                        }
+                Column(Modifier.weight(1f).padding(start = 14.dp)) {
+                    Text(server.name, color = colors.text, fontSize = 17.sp)
+                    if (server.needsToRelogin) {
+                        Text("Сессия истекла", color = colors.error, fontSize = 14.sp)
                     }
-                    HorizontalDivider(
-                        modifier = Modifier
-                            .padding(horizontal = 12.dp),
-                        thickness = 1.dp,
-                        color = LocalWorkspaceColorsPalette.current.divider,
-                    )
                 }
-            }
-        }
-        if (state is QueryState.Loading) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.4f))
-                    .clickable(
-                        indication = null,
-                        interactionSource = remember { MutableInteractionSource() }
-                    ) {  },
-                contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator()
             }
         }
     }

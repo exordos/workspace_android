@@ -1,226 +1,172 @@
 package ru.genesiscorporation.workspace.beta.modules.projects
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CenterAlignedTopAppBar
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.Scaffold
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
 import kotlinx.coroutines.launch
-import ru.genesiscorporation.workspace.beta.R
-import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
+import ru.genesiscorporation.workspace.beta.LoginFlow
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ProjectResponseData
-import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
-import ru.genesiscorporation.workspace.beta.modules.foldersettings.FolderSettingsViewModel
-import ru.genesiscorporation.workspace.beta.ui.AnimatedGif
-import ru.genesiscorporation.workspace.beta.ui.FullScreenError
-import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
-import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
+import ru.genesiscorporation.workspace.beta.ui.AuthColors
+import ru.genesiscorporation.workspace.beta.ui.AuthLoadingOverlay
+import ru.genesiscorporation.workspace.beta.ui.AuthPrimaryButton
+import ru.genesiscorporation.workspace.beta.ui.AuthLazyScreen
+import ru.genesiscorporation.workspace.beta.ui.authColors
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ProjectsScreen(
-    viewModel:ProjectsViewModel,
-    navController: NavHostController
-) {
+fun ProjectsScreen(viewModel: ProjectsViewModel, navController: NavHostController) {
     val scope = rememberCoroutineScope()
     val projects by viewModel.projects.collectAsState()
     val selectedProject by viewModel.selectedProject.collectAsState()
-    val projectsQueryState by viewModel.projectsQueryState.collectAsState()
+    val state by viewModel.projectsQueryState.collectAsState()
+    val loginState by viewModel.queryState.collectAsState()
+    ProjectsContent(
+        projects = projects,
+        selectedProject = selectedProject,
+        state = state,
+        loginState = loginState,
+        onProjectSelected = viewModel::setSelectedProject,
+        onRetry = { scope.launch { viewModel.getProjects() } },
+        onOpenProject = { scope.launch { viewModel.onLoginClick() } },
+        onReturnToLogin = { navController.returnToCredentials() },
+    )
+}
 
-    Scaffold(
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = {
-                    Text(
-                        "Выбор проекта",
-                        color = LocalWorkspaceColorsPalette.current.textHeaders,
-                        fontSize = 14.sp,
-                        fontFamily = InterFontFamily,
-                        fontWeight = FontWeight.Medium
-                    )
-                },
-                navigationIcon = {
-                    IconButton(onClick = { navController.navigateUp() }) {
-                        Icon(
-                            painter = painterResource(id = R.drawable.arrow_back),
-                            contentDescription = "Back"
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = LocalWorkspaceColorsPalette.current.background,
-                    titleContentColor = LocalWorkspaceColorsPalette.current.textHeaders,
-                    navigationIconContentColor = LocalWorkspaceColorsPalette.current.textHeaders
+internal fun NavHostController.returnToCredentials() {
+    popBackStack<LoginFlow.Login>(inclusive = false)
+}
+
+@Composable
+internal fun ProjectsContent(
+    projects: List<ProjectResponseData>,
+    selectedProject: ProjectResponseData?,
+    state: QueryState,
+    loginState: QueryState,
+    onProjectSelected: (ProjectResponseData) -> Unit,
+    onRetry: () -> Unit,
+    onOpenProject: () -> Unit,
+    onReturnToLogin: () -> Unit,
+) {
+    val colors = authColors()
+    val loading = state is QueryState.Loading || loginState is QueryState.Loading
+
+    AuthLazyScreen(colors = colors, errorMessage = (state as? QueryState.Error)?.message) {
+        item(contentType = "projects-header") {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Spacer(Modifier.height(48.dp))
+                Text("Выберите проект", color = colors.text, fontSize = 26.sp, lineHeight = 32.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Сообщения и настройки каждого проекта изолированы",
+                    color = colors.mutedText,
+                    fontSize = 16.sp,
+                    lineHeight = 22.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 10.dp, bottom = 28.dp),
                 )
-            )
-        },
-        containerColor = LocalWorkspaceColorsPalette.current.background
-    ) { innerPadding ->
-
-        when (projectsQueryState) {
-            QueryState.Loading -> {
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .fillMaxSize()
-                ) {
-                    AnimatedGif(Modifier.size(80.dp))
-                }
             }
-
-            is QueryState.Error -> {
-                FullScreenError {
-                    scope.launch {
-                        viewModel.getProjects()
-                    }
-                }
-            }
-
-            QueryState.Success -> {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding)
-                ) {
-                    Text(
-                        "Выберите проект",
-                        color = LocalWorkspaceColorsPalette.current.textAdditional30,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.padding(12.dp)
+        }
+        items(projects, key = { it.uuid }, contentType = { "project" }) { project ->
+            ProjectCell(project, project.uuid == selectedProject?.uuid, colors, !loading, onProjectSelected)
+        }
+        item(contentType = "projects-actions") {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                if (state is QueryState.Error) {
+                    AuthPrimaryButton(
+                        text = "Повторить",
+                        enabled = !loading,
+                        colors = colors,
+                        onClick = onRetry,
                     )
-                    LazyColumn(
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(16.dp)
-                            .weight(1f)
-                    ) {
-                        items(items = projects) { item ->
-                            ProjectCell(item, item.uuid == selectedProject?.uuid) {
-                                viewModel.setSelectedProject(item)
-                            }
-                        }
-                    }
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                viewModel.onLoginClick()
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = LocalWorkspaceColorsPalette.current.primary,
-                            contentColor = LocalWorkspaceColorsPalette.current.onPrimary
-                        ),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                            .padding(20.dp, 6.dp, 20.dp, 6.dp)
-                    ) {
-                        Text(
-                            "Войти",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
+                } else if (state is QueryState.Success) {
+                    Spacer(Modifier.height(16.dp))
+                    AuthPrimaryButton(
+                        text = "Открыть проект",
+                        enabled = !loading && selectedProject != null,
+                        colors = colors,
+                        onClick = onOpenProject,
+                    )
                 }
+                Text(
+                    "Вернуться к логину",
+                    color = colors.accent,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(top = 14.dp)
+                        .clickable(enabled = !loading, onClick = onReturnToLogin)
+                        .padding(vertical = 8.dp),
+                )
             }
-
-            else -> {}
         }
     }
+    if (loading) AuthLoadingOverlay(colors)
 }
 
 @Composable
 fun ProjectCell(
     project: ProjectResponseData,
     isSelected: Boolean,
-    onProjectSelected: (ProjectResponseData) -> Unit
+    colors: AuthColors = authColors(),
+    enabled: Boolean = true,
+    onProjectSelected: (ProjectResponseData) -> Unit,
 ) {
     Row(
-        verticalAlignment = Alignment.Top,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier
-            .clickable(
-                onClick = {
-                    onProjectSelected(project)
-                }
-            )
+        modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (isSelected) colors.logoBackground else colors.field, RoundedCornerShape(10.dp))
+            .border(1.dp, if (isSelected) colors.accent else Color.Transparent, RoundedCornerShape(10.dp))
+            .selectable(selected = isSelected, enabled = enabled, role = Role.RadioButton, onClick = { onProjectSelected(project) })
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (isSelected) {
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier.padding(top = 4.dp)
-            ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_radio_filled),
-                    contentDescription = null,
-                    tint = LocalWorkspaceColorsPalette.current.primary
-                )
-                Icon(
-                    painter = painterResource(R.drawable.ic_checkbox_tick),
-                    contentDescription = null
-                )
+        RadioButton(
+            selected = isSelected,
+            enabled = enabled,
+            onClick = null,
+            colors = RadioButtonDefaults.colors(
+                selectedColor = colors.accent,
+                unselectedColor = colors.mutedText,
+                disabledSelectedColor = colors.disabled,
+                disabledUnselectedColor = colors.mutedText,
+            ),
+        )
+        Column(Modifier.weight(1f).padding(start = 8.dp)) {
+            Text(project.name, color = colors.text, fontSize = 17.sp, lineHeight = 21.sp, fontWeight = FontWeight.Medium)
+            Text(
+                text = "ID …${project.uuid.takeLast(8)}",
+                color = colors.mutedText,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+            if (project.description.isNotBlank()) {
+                Text(project.description, color = colors.mutedText, fontSize = 13.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 4.dp))
             }
-        } else {
-            Icon(
-                painter = painterResource(R.drawable.ic_radio_empty),
-                contentDescription = null,
-                tint = LocalWorkspaceColorsPalette.current.primary,
-                modifier = Modifier.padding(top = 4.dp)
-            )
-        }
-        Column(
-            horizontalAlignment = Alignment.Start,
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Text(
-                text = project.name,
-                color = LocalWorkspaceColorsPalette.current.textHeaders,
-                fontSize = 14.sp,
-                fontFamily = InterFontFamily,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = project.description,
-                color = LocalWorkspaceColorsPalette.current.textAdditional30,
-                fontSize = 14.sp,
-                fontFamily = InterFontFamily,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
         }
     }
 }
