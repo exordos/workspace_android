@@ -162,6 +162,6 @@ class ForwardMessagesUiTest {
         private const val SECOND = "00000000-0000-0000-0000-000000000002"
         private const val TOPIC = "00000000-0000-0000-0000-000000000003"
         private fun stream(uuid: String, name: String) = Stream(uuid, 0, 0, 0, "2026-09-07T12:00:00Z", name, false, 0x7087FF, notificationMode = "all")
-        private fun topic() = TopicsResponseData(TOPIC, "General topic", 0x7087FF, SECOND, "2026-09-07T12:00:00Z", 0, false, true, notificationMode = "all")
+        private fun topic() = TopicsResponseData(TOPIC, "General topic", 0x7087FF, SECOND, "2026-09-07T12:00:00Z", 0, 0, false, true, notificationMode = "all")
     }
 }

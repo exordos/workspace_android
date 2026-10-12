@@ -191,6 +191,30 @@ class EventsRepository(
         }
     }
 
+    /** Reconcile HTTP confirmation with either ordering of the matching WS event. */
+    fun reconcileSentMessage(pendingUuid: String, confirmed: MessageResponse) {
+        val key = "${confirmed.streamUuid}.${confirmed.topicUuid}"
+        _streamTopicMessages.update { current ->
+            val hadPending = current.values.any { messages -> messages.any { it.uuid == pendingUuid } }
+            val cleaned = current.mapValues { (_, messages) ->
+                messages.filterNot { it.uuid == pendingUuid }
+            }
+            if (!hadPending && key !in cleaned) return@update cleaned
+            val messages = cleaned[key].orEmpty()
+            val reconciled = if (messages.any { it.uuid == confirmed.uuid }) {
+                messages.distinctBy { it.uuid }
+            } else messages + confirmed
+            cleaned + (key to reconciled)
+        }
+        _messagesPool.update { current ->
+            if (current.any { it.uuid == confirmed.uuid }) {
+                current.filterNot { it.uuid == pendingUuid }.distinctBy { it.uuid }
+            } else if (current.any { it.uuid == pendingUuid }) {
+                current.map { if (it.uuid == pendingUuid) confirmed else it }
+            } else current + confirmed
+        }
+    }
+
     fun removeMessage(messageUuid: String) {
         _streamTopicMessages.update { current ->
             current.mapValues { (_, messages) ->

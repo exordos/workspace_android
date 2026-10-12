@@ -18,6 +18,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -30,6 +31,10 @@ import org.junit.runner.RunWith
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.UserViewModel
 import ru.genesiscorporation.workspace.beta.data.ServerRepository
+import ru.genesiscorporation.workspace.beta.data.SecureTokenStore
+import ru.genesiscorporation.workspace.beta.data.EventsRepositoryStore
+import ru.genesiscorporation.workspace.beta.data.ServerConfig
+import ru.genesiscorporation.workspace.beta.data.TokenPair
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
 import ru.genesiscorporation.workspace.beta.data.remote.dto.DeleteMessageRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
@@ -51,6 +56,9 @@ class DeleteMessageHttpContractTest {
     private lateinit var user: UserViewModel
     private lateinit var http: HttpClient
     private lateinit var api: WorkspaceAPIClient
+    private lateinit var tokenStore: SecureTokenStore
+    private lateinit var eventsStore: EventsRepositoryStore
+    private lateinit var serverId: String
     private lateinit var messages: EventsRepository
 
     @Before
@@ -66,8 +74,6 @@ class DeleteMessageHttpContractTest {
         val store = PreferenceDataStoreFactory.create(scope = storeScope) {
             File(files, "delete-http.preferences_pb")
         }
-        preferences = ServerRepository(store, storeScope)
-        user = UserViewModel(preferences)
         http = HttpClient(CIO) {
             install(HttpTimeout) {
                 requestTimeoutMillis = 5_000
@@ -75,14 +81,23 @@ class DeleteMessageHttpContractTest {
             }
             install(ContentNegotiation) { json() }
         }
-        api = WorkspaceAPIClient(http, user, SessionCookieStore()).apply {
-            baseAccessToken = "cassi-delete-contract-fixture"
-        }
-        messages = EventsRepository()
+        api = WorkspaceAPIClient(http)
+        tokenStore = SecureTokenStore(InstrumentationRegistry.getInstrumentation().targetContext)
+        eventsStore = EventsRepositoryStore(tokenStore, api)
+        preferences = ServerRepository(store, tokenStore, eventsStore, storeScope)
+        user = UserViewModel(preferences)
+        api.attachUserViewModel(user)
+        serverId = "cassi-delete-http-${UUID.randomUUID()}"
+        messages = EventsRepository(
+            serverId, ServerConfig(serverId, "http://127.0.0.1", "", "Delete cache test"),
+            tokenStore, api,
+        )
     }
 
     @After
     fun tearDown() = runBlocking {
+        preferences.removeServer(serverId)
+        eventsStore.clear()
         http.close()
         user.viewModelScope.cancel()
         messages.close()
@@ -91,10 +106,21 @@ class DeleteMessageHttpContractTest {
         Unit
     }
 
+    private suspend fun saveSession(baseUrl: String) {
+        preferences.addServer(
+            ServerConfig(serverId, baseUrl, "", "Delete HTTP test"),
+            TokenPair("cassi-delete-contract-fixture", "cassi-delete-refresh-fixture"),
+        )
+        withTimeout(5_000) {
+            user.selectedServer.first { it?.id == serverId }
+            user.accessToken.first { it == "cassi-delete-contract-fixture" }
+        }
+    }
+
     @Test
     fun empty204ResponseSucceedsAndUsesExactDeleteContract() = runBlocking {
         LoopbackDeleteServer(204, "No Content").use { server ->
-            preferences.addBaseUrl(server.baseUrl)
+            saveSession(server.baseUrl)
 
             val response = api.performRequest(DeleteMessageRequest(MESSAGE_UUID))
 
@@ -110,7 +136,7 @@ class DeleteMessageHttpContractTest {
         messages.addStreamTopicMessages(STREAM_UUID, TOPIC_UUID, listOf(selected, kept))
         messages.setInitialMessagesPool(listOf(selected, kept))
         LoopbackDeleteServer(204, "No Content").use { server ->
-            preferences.addBaseUrl(server.baseUrl)
+            saveSession(server.baseUrl)
             val deletion = deletion()
 
             deletion.delete(selected)
@@ -146,7 +172,7 @@ class DeleteMessageHttpContractTest {
                 LoopbackResponse(204, "No Content"),
             ),
         ).use { server ->
-            preferences.addBaseUrl(server.baseUrl)
+            saveSession(server.baseUrl)
             val deletion = deletion()
             val selection = MessageSelection(
                 canSelect = { canSelectMessage(it, STREAM_UUID, TOPIC_UUID) },
@@ -182,7 +208,7 @@ class DeleteMessageHttpContractTest {
         messages.addStreamTopicMessages(STREAM_UUID, TOPIC_UUID, listOf(selected))
         messages.setInitialMessagesPool(listOf(selected))
         LoopbackDeleteServer(status, reason, """{"error":"Cannot delete message"}""").use { server ->
-            preferences.addBaseUrl(server.baseUrl)
+            saveSession(server.baseUrl)
             val deletion = deletion()
 
             deletion.delete(selected)

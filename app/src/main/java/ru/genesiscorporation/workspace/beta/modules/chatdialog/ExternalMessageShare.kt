@@ -112,8 +112,7 @@ internal suspend fun prepareExternalShareIntent(
             val metadata = (client.performRequest(ForwardSourceFileRequest(attachment.uuid)) as? ApiResult.Success)?.value
                 ?.takeIf { it.uuid == attachment.uuid } ?: error("Cannot read original attachment metadata")
             val declaredMime = ContentType.parse(metadata.contentType).toString()
-            val safeName = metadata.name.substringAfterLast('/').substringAfterLast('\\')
-                .replace(Regex("[^\\p{L}\\p{N}._ -]"), "_").trim('.').take(160).ifBlank { "attachment" }
+            val safeName = localAttachmentFileName(metadata.name)
             val directory = File(sessionDir, index.toString()).apply { check(mkdirs()) }
             val file = File(directory, safeName)
             val result = client.downloadFile("/api/workspace/v1/messenger/files/${attachment.uuid}/actions/download", file)

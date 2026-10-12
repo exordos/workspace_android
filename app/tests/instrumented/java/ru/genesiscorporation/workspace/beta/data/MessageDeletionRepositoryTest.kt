@@ -5,6 +5,14 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.cio.CIO
+import org.junit.Before
+import org.junit.runner.RunWith
+import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
+import java.util.UUID
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -16,12 +24,30 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponsePaylo
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 
+@RunWith(AndroidJUnit4::class)
 class MessageDeletionRepositoryTest {
-    private val repository = EventsRepository()
+    private lateinit var repository: EventsRepository
+    private lateinit var http: HttpClient
+
+    @Before
+    fun createRepository() {
+        // The repository now owns Android-backed token storage. Keep these
+        // cache and event assertions in the instrumented runtime.
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val id = "cassi-message-cache-${UUID.randomUUID()}"
+        http = HttpClient(CIO)
+        repository = EventsRepository(
+            id,
+            ServerConfig(id, "http://127.0.0.1", "", "Message cache test"),
+            SecureTokenStore(context),
+            WorkspaceAPIClient(http),
+        )
+    }
 
     @After
     fun closeRepository() {
         repository.close()
+        http.close()
     }
 
     @Test
@@ -97,6 +123,37 @@ class MessageDeletionRepositoryTest {
         assertTrue(repository.streamTopicMessages.value.isEmpty())
     }
 
+    @Test
+    fun `WebSocket before HTTP confirmation leaves one message without mutating the pending snapshot`() {
+        val pending = message("pending-client-id")
+        val server = message("server-id").copy(payload = MessageResponsePayload("markdown", "Server content"))
+        repository.addStreamTopicMessages("stream", "topic", listOf(pending))
+        repository.setInitialMessagesPool(listOf(pending))
+        repository.addMessageToStreamTopic(server)
+        repository.updateMessagesPool(listOf(server))
+
+        repository.reconcileSentMessage(pending.uuid, pending.copy(uuid = server.uuid))
+
+        assertEquals("pending-client-id", pending.uuid)
+        assertEquals(listOf(server), repository.streamTopicMessages.value["stream.topic"])
+        assertEquals(listOf(server), repository.messagesPool.value)
+    }
+
+    @Test
+    fun `HTTP confirmation before WebSocket leaves one canonical message`() {
+        val pending = message("pending-client-id")
+        val confirmed = pending.copy(uuid = "server-id")
+        repository.addStreamTopicMessages("stream", "topic", listOf(pending))
+        repository.setInitialMessagesPool(listOf(pending))
+
+        repository.reconcileSentMessage(pending.uuid, confirmed)
+        repository.addMessageToStreamTopic(confirmed)
+
+        assertEquals("pending-client-id", pending.uuid)
+        assertEquals(listOf(confirmed), repository.streamTopicMessages.value["stream.topic"])
+        assertEquals(listOf(confirmed), repository.messagesPool.value)
+    }
+
     private fun message(uuid: String) = MessageResponse(
         uuid = uuid,
         updatedAt = "2026-09-07T12:00:00Z",
@@ -132,6 +189,7 @@ class MessageDeletionRepositoryTest {
         streamUuid = "stream",
         updatedAt = message.updatedAt,
         unreadCount = 0,
+        activeUnreadCount = 0,
         isDone = false,
         isDefault = true,
         lastMessageUuid = message.uuid,
