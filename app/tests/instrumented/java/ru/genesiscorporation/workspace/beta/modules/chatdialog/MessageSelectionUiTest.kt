@@ -35,7 +35,11 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
+import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.Espresso.pressBack
+import androidx.test.espresso.action.ViewActions
+import androidx.test.espresso.matcher.RootMatchers.isDialog
+import androidx.test.espresso.matcher.ViewMatchers.isRoot
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.CompletableDeferred
@@ -71,7 +75,8 @@ class MessageSelectionUiTest {
         compose.onNodeWithTag("cancel-message-deletion").performClick()
         compose.onNodeWithTag("message-selection-bar").assertIsDisplayed()
         compose.onNodeWithTag("delete-selected-messages").performClick()
-        pressBack()
+        // Back must target the dialog while its window is acquiring focus.
+        onView(isRoot()).inRoot(isDialog()).perform(ViewActions.pressBack())
         compose.onNodeWithText(localizedQuantity(R.plurals.messages_delete_title, 2)).assertDoesNotExist()
         compose.onNodeWithTag("message-selection-bar").assertIsDisplayed()
         pressBack()
