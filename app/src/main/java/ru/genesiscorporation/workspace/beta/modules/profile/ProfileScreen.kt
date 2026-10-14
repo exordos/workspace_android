@@ -389,6 +389,8 @@ fun Organizations(
                         }
                         Text(
                             text = serverConfig.name,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
                             fontSize = 14.sp,
                             fontFamily = InterFontFamily,
                             color = LocalWorkspaceColorsPalette.current.textHeaders,
@@ -397,6 +399,7 @@ fun Organizations(
                         if (serverConfig.id == viewModel.userViewModel.selectedServerId.collectAsState().value) {
                             Text(
                                 text = "Текущая",
+                                modifier = Modifier.padding(start = 8.dp),
                                 fontSize = 12.sp,
                                 fontFamily = InterFontFamily,
                                 color = LocalWorkspaceColorsPalette.current.indicatorGreen
@@ -404,6 +407,7 @@ fun Organizations(
                         } else if (serverConfig.needsToRelogin) {
                             Text(
                                 text = "Сессия истекла",
+                                modifier = Modifier.padding(start = 8.dp),
                                 fontSize = 12.sp,
                                 fontFamily = InterFontFamily,
                                 color = LocalWorkspaceColorsPalette.current.indicatorRed

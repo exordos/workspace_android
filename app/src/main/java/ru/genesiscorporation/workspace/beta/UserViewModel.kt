@@ -148,11 +148,13 @@ class UserViewModel(
         return true
     }
 
-    fun updateSelectedServerProjectUuid(projectUuid: String) {
-        val id = selectedServer.value?.id ?: return
-        viewModelScope.launch {
-            repo.updateServerProjectUuid(id, projectUuid)
-        }
+    suspend fun updateSelectedServerProjectUuid(
+        projectUuid: String,
+        projectName: String? = null,
+        serverId: String? = null,
+    ) {
+        val id = serverId ?: selectedServer.value?.id ?: return
+        repo.updateServerProjectUuid(id, projectUuid, projectName)
     }
 
     fun clearAll() {

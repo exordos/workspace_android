@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -19,6 +20,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.data.remote.dto.DeleteFcmTokenRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ServerSettingsRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.ProjectsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 
@@ -27,6 +29,24 @@ class ProfileViewModel(
     val userViewModel: UserViewModel,
     private val eventsRepositoryStore: EventsRepositoryStore
 ): ViewModel() {
+    init {
+        viewModelScope.launch { refreshOrganizationNames() }
+    }
+
+    private suspend fun refreshOrganizationNames() {
+        val servers = userViewModel.repo.serversFlow.first()
+        for (server in servers) {
+            val projectUuid = server.projectUuid ?: continue
+            if (server.needsToRelogin || userViewModel.getTokens(server.id) == null) continue
+            val response = client.performRequest(ProjectsRequest(), server.id)
+            if (response is ApiResult.Success) {
+                val project = response.value.firstOrNull { it.uuid == projectUuid } ?: continue
+                // Keep the cached label offline and ignore responses for a replaced project.
+                userViewModel.repo.updateServerProjectName(server.id, projectUuid, project.name)
+            }
+        }
+    }
+
     private val _queryState = MutableStateFlow<QueryState>(QueryState.Idle)
     val queryState: StateFlow<QueryState> = _queryState
 //    val repo = eventsRepositoryStore.get(client.getCurrentServerId()) ?: error("Cannot get current event repository")

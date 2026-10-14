@@ -482,10 +482,10 @@ class WorkspaceAPIClient(
                 ?: error("Could not open $uri")
         }
 
-    fun authHeaders(): List<AuthHeader> {
+    fun authHeaders(serverId: String? = null): List<AuthHeader> {
         val authHeadersList: MutableList<AuthHeader> = mutableListOf()
         val user = requireUserViewModel()
-        val accessToken = user.selectedServerId.value
+        val accessToken = (serverId ?: user.selectedServerId.value)
             ?.let(user::getTokens)
             ?.accessToken
             .orEmpty()
