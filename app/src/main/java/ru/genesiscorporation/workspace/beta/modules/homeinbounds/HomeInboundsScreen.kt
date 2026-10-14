@@ -168,7 +168,7 @@ fun StreamInboundView(
                 viewModel.client.userViewModel?.baseUrl?.value ?: "",
                 viewModel.client.authHeaders(),
                 stream.color,
-                stream.name,
+                stream.displayableName(),
                 Modifier
                     .clip(
                         RoundedCornerShape(8.dp)
@@ -177,7 +177,7 @@ fun StreamInboundView(
                     .size(40.dp)
             )
             Text(
-                text = stream.name,
+                text = stream.displayableName(),
                 color = LocalWorkspaceColorsPalette.current.textHeaders,
                 fontSize = 14.sp,
                 fontFamily = InterFontFamily,
@@ -224,7 +224,7 @@ fun StreamInboundView(
                                 onClick = {
                                     navController.navigate(
                                         HomeFlow.ChatDialog(
-                                            stream.name,
+                                            stream.displayableName(),
                                             stream.uuid,
                                             unreadTopic.name,
                                             unreadTopic.uuid,

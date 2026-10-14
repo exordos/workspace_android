@@ -107,7 +107,7 @@ fun ChatWithTopics(
                     folderSubscriptions
                 } else {
                     folderSubscriptions.filter {
-                        it.name.contains(searchQuery, ignoreCase = true)
+                        it.displayableName().contains(searchQuery, ignoreCase = true)
                     }
                 }
             }

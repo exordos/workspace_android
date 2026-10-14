@@ -152,7 +152,7 @@ fun HomeDraftsScreen(
                                                 onClick = {
                                                     navController.navigate(
                                                         HomeFlow.ChatDialog(
-                                                            stream.name,
+                                                            stream.displayableName(),
                                                             stream.uuid,
                                                             topic.name,
                                                             topic.uuid,
@@ -179,7 +179,7 @@ fun HomeDraftsScreen(
                                                     .padding(horizontal = 8.dp, vertical = 4.dp),
                                             )
                                             Text(
-                                                stream.name,
+                                                stream.displayableName(),
                                                 color = LocalWorkspaceColorsPalette.current.textHeaders,
                                                 fontSize = 14.sp,
                                                 fontWeight = FontWeight.Medium

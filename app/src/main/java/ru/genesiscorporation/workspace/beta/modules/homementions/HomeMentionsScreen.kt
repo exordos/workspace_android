@@ -146,7 +146,7 @@ fun HomeMentionsScreen(
                                             onClick = {
                                                 navController.navigate(
                                                     HomeFlow.ChatDialog(
-                                                        stream.name,
+                                                        stream.displayableName(),
                                                         stream.uuid,
                                                         "",
                                                         stream.defaultTopicUuid ?: "",

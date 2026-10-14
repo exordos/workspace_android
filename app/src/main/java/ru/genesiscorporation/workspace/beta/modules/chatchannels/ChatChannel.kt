@@ -103,7 +103,7 @@ fun ChatChannel(
                 viewModel.client.userViewModel?.baseUrl?.value ?: "",
                 viewModel.client.authHeaders(),
                 item.color,
-                item.name,
+                item.displayableName(),
                 Modifier
                     .clip(
                         RoundedCornerShape(8.dp)
@@ -120,7 +120,7 @@ fun ChatChannel(
             ) {
 
                 Text(
-                    text = item.name,
+                    text = item.displayableName(),
                     color = LocalWorkspaceColorsPalette.current.textHeaders,
                     fontSize = 14.sp,
                     fontFamily = InterFontFamily,

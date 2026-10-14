@@ -31,4 +31,9 @@ data class Stream(
     var directUser: UserResponseData? = null,
     var lastMessage: MessageResponse? = null,
     @SerialName("is_archived") val isArchived: Boolean = false
-)
+) {
+    fun displayableName(participant: UserResponseData? = directUser): String =
+        participant?.takeIf { it.uuid == directUserUuid }
+            ?.displayableName()?.trim()?.takeIf { it.isNotEmpty() }
+            ?: name
+}

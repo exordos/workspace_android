@@ -132,6 +132,7 @@ fun ChatDialogScreen(
     navController: NavHostController
 ) {
     val directUser by viewModel.directUser.collectAsStateWithLifecycle()
+    val stream by viewModel.stream.collectAsStateWithLifecycle()
     val streamTopicMessages by viewModel.streamTopicMessages.collectAsStateWithLifecycle()
     val messages = streamTopicMessages["${viewModel.chatId}.${viewModel.topicUuid}"]
         ?.distinctBy { it.uuid }
@@ -289,7 +290,11 @@ fun ChatDialogScreen(
                                 }
                             )
                         ) {
-                            val title = if (viewModel.isDirectMessages) viewModel.chatTitle else viewModel.topicName ?: viewModel.chatTitle
+                            val title = if (viewModel.isDirectMessages) {
+                                stream?.displayableName(directUser) ?: viewModel.chatTitle
+                            } else {
+                                viewModel.topicName ?: viewModel.chatTitle
+                            }
                             Text(
                                 title,
                                 color = LocalWorkspaceColorsPalette.current.textHeaders,

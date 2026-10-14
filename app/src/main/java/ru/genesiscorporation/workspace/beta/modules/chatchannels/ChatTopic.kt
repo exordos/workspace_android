@@ -81,7 +81,7 @@ fun ChatTopic(
                         viewModel.currentTopicName = item.name
                         navController.navigate(
                             ChatFlow.ChatDialog(
-                                stream.name,
+                                stream.displayableName(),
                                 stream.uuid,
                                 item.name,
                                 item.uuid,
