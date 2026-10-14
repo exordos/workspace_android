@@ -18,10 +18,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.TextUnit
 import coil3.compose.AsyncImage
-import coil3.network.NetworkHeaders
-import coil3.network.httpHeaders
-import coil3.request.ImageRequest
-import ru.genesiscorporation.workspace.beta.data.UrnParser
 import ru.genesiscorporation.workspace.beta.data.remote.AuthHeader
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
@@ -36,23 +32,11 @@ fun Avatar(
     modifier: Modifier,
     initialFontSize: TextUnit = 24.sp,
 ) {
-    val avatarUrl = UrnParser.parseUrl(avatarUrn, baseUrl)
-    if (avatarUrl != null) {
-        var imageRequest = if (avatarUrn?.contains(":image:") ?: false) {
-            val headers = NetworkHeaders.Builder()
-                .set(authHeaders.first().title, authHeaders.first().value)
-                .build()
-            ImageRequest.Builder(LocalContext.current)
-                .data(avatarUrl)
-                .httpHeaders(headers)
-                .build()
-        } else {
-            ImageRequest.Builder(LocalContext.current)
-                .data(avatarUrl)
-                .build()
-        }
+    val imageRequest = avatarImageRequest(LocalContext.current, avatarUrn, baseUrl, authHeaders)
+    if (imageRequest != null) {
         AsyncImage(
             model = imageRequest,
+            imageLoader = avatarImageLoader(LocalContext.current),
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = modifier

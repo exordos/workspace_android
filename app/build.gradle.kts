@@ -109,7 +109,8 @@ dependencies {
 }
 
 tasks.register<JavaCompile>("compileEmojiReleaseSmoke") {
-    source("tests/release/EmojiReleaseInstrumentation.java")
+    source("tests/release/EmojiReleaseInstrumentation.java",
+        "tests/instrumented/java/com/exordos/workspace/cassi/releasetest/AvatarFixtureInstrumentation.java")
     classpath = files(providers.provider { androidComponents.sdkComponents.bootClasspath.get() })
     destinationDirectory.set(layout.buildDirectory.dir("emoji-release-smoke/classes"))
     sourceCompatibility = "11"
@@ -147,6 +148,8 @@ tasks.register("buildEmojiReleaseSmoke") {
                 <uses-sdk android:minSdkVersion="30" android:targetSdkVersion="36"/>
                 <application android:testOnly="true" android:debuggable="false"/>
                 <instrumentation android:name="com.exordos.workspace.cassi.releasetest.EmojiReleaseInstrumentation"
+                    android:targetPackage="com.exordos.workspace"/>
+                <instrumentation android:name="com.exordos.workspace.cassi.releasetest.AvatarFixtureInstrumentation"
                     android:targetPackage="com.exordos.workspace"/>
             </manifest>
         """.trimIndent(), Charsets.UTF_8)
