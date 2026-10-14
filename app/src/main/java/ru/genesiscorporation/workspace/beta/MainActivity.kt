@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.CircularProgressIndicator
@@ -31,6 +32,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -41,6 +43,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -73,6 +79,7 @@ import io.ktor.client.plugins.api.*
 import io.ktor.http.HttpHeaders
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
 import ru.genesiscorporation.workspace.beta.ui.IncomingCall
+import ru.genesiscorporation.workspace.beta.ui.Avatar
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.serialization.kotlinx.json.*
@@ -288,6 +295,18 @@ fun WorkspaceApp(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val user = UserState.current
+    val selectedServerSnapshot by user.selectedServer.collectAsState()
+    val selectedServerId by user.selectedServerId.collectAsState()
+    val selectedServer = selectedServerSnapshot?.takeIf { it.id == selectedServerId }
+    val currentUserRepository = remember(selectedServer?.id) {
+        selectedServer?.let { eventsRepositoryStore.getOrCreate(it) }
+    }
+    val currentUser = key(selectedServer?.id) {
+        currentUserRepository?.currentUser?.collectAsState()?.value
+    }
+    val accessToken by user.accessToken.collectAsState()
+    val avatarAccessToken = selectedServer?.id?.let(user::getTokens)?.accessToken
+        ?.takeIf { it == accessToken }
     val currentCallMessage by viewModel.currentCallMessage.collectAsState()
     var currentDestination = rememberSaveable { mutableStateOf(0 ) }
     var showNavigation by rememberSaveable { mutableStateOf(true) }
@@ -324,10 +343,24 @@ fun WorkspaceApp(
             destinationList.forEachIndexed { index, destination ->
                 item(
                     icon = {
-                        Icon(
-                            painter = painterResource( id = destination.icon),
-                            contentDescription = destination.title
-                        )
+                        if (destination == Profile && currentUser != null && avatarAccessToken != null) {
+                            Avatar(
+                                avatarUrn = currentUser.avatar,
+                                baseUrl = selectedServer?.baseUrl.orEmpty(),
+                                authHeaders = workspaceApiClient.authHeaders(selectedServer?.id),
+                                color = null,
+                                name = currentUser.displayableName(),
+                                modifier = Modifier.size(28.dp).semantics {
+                                    contentDescription = destination.title
+                                },
+                                initialFontSize = 16.sp,
+                            )
+                        } else {
+                            Icon(
+                                painter = painterResource(id = destination.icon),
+                                contentDescription = destination.title
+                            )
+                        }
                     },
                     selected = index == currentDestination.value,
                     onClick = {

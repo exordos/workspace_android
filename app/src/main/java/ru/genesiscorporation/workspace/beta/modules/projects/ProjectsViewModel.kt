@@ -68,16 +68,19 @@ class ProjectsViewModel(
     }
 
     suspend fun refreshToken(projectUuid: String) {
+        val serverId = userViewModel.selectedServer.value?.id ?: return
+        val projectName = _projects.value.firstOrNull { it.uuid == projectUuid }?.name
         _queryState.value = QueryState.Loading
-        val response = client.performRequest(TokenRefreshRequest(userViewModel.refreshToken.value ?: "", "openid email profile project:$projectUuid"))
+        val response = client.performRequest(TokenRefreshRequest(userViewModel.getTokens(serverId)?.refreshToken ?: "", "openid email profile project:$projectUuid"), serverId)
         when(response) {
             is ApiResult.Success -> {
                 val userResponse = response.value
                 val saved = userViewModel.setTokensAndWait(
                     accessToken = userResponse.accessToken,
                     refreshToken = userResponse.refreshToken,
+                    serverId = serverId,
                 )
-                userViewModel.updateSelectedServerProjectUuid(_selectedProject.value?.uuid ?: "")
+                if (saved) userViewModel.updateSelectedServerProjectUuid(projectUuid, projectName, serverId)
                 _queryState.value = if (saved) {
                     QueryState.Success
                 } else {

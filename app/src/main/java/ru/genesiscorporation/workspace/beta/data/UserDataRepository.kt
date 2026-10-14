@@ -219,14 +219,32 @@ class ServerRepository internal constructor(
         tokensVersion.value = tokensVersion.value + 1
     }
 
-    suspend fun updateServerProjectUuid(serverId: String, projectUuid: String) {
+    suspend fun updateServerProjectUuid(serverId: String, projectUuid: String, projectName: String? = null) {
         dataStore.edit { prefs ->
             val current = prefs[SERVERS]
                 ?.let { json.decodeFromString<List<ServerConfig>>(it) }
                 .orEmpty()
             val updated = current.map { server ->
-                if (server.id == serverId) server.copy(projectUuid = projectUuid)
+                if (server.id == serverId) server.copy(
+                    projectUuid = projectUuid,
+                    name = projectName?.takeIf { it.isNotBlank() } ?: server.name,
+                )
                 else server
+            }
+            prefs[SERVERS] = json.encodeToString(updated)
+        }
+    }
+
+    suspend fun updateServerProjectName(serverId: String, projectUuid: String, projectName: String) {
+        if (projectName.isBlank()) return
+        dataStore.edit { prefs ->
+            val current = prefs[SERVERS]
+                ?.let { json.decodeFromString<List<ServerConfig>>(it) }
+                .orEmpty()
+            val updated = current.map { server ->
+                if (server.id == serverId && server.projectUuid == projectUuid) {
+                    server.copy(name = projectName)
+                } else server
             }
             prefs[SERVERS] = json.encodeToString(updated)
         }

@@ -16,6 +16,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.TextUnit
 import coil3.compose.AsyncImage
 import coil3.network.NetworkHeaders
 import coil3.network.httpHeaders
@@ -32,7 +33,8 @@ fun Avatar(
     authHeaders: List<AuthHeader>,
     color: Int?,
     name: String,
-    modifier: Modifier
+    modifier: Modifier,
+    initialFontSize: TextUnit = 24.sp,
 ) {
     val avatarUrl = UrnParser.parseUrl(avatarUrn, baseUrl)
     if (avatarUrl != null) {
@@ -69,7 +71,7 @@ fun Avatar(
         ) {
             Text(text = name.firstOrNull()?.titlecase() ?: "",
                 color = Color.White,
-                fontSize = 24.sp,
+                fontSize = initialFontSize,
                 fontFamily = InterFontFamily,
             )
         }
