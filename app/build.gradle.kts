@@ -1,3 +1,7 @@
+import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
+import java.util.zip.ZipOutputStream
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -102,4 +106,84 @@ dependencies {
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
+}
+
+tasks.register<JavaCompile>("compileEmojiReleaseSmoke") {
+    source("tests/release/EmojiReleaseInstrumentation.java")
+    classpath = files(providers.provider { androidComponents.sdkComponents.bootClasspath.get() })
+    destinationDirectory.set(layout.buildDirectory.dir("emoji-release-smoke/classes"))
+    sourceCompatibility = "11"
+    targetCompatibility = "11"
+    options.encoding = "UTF-8"
+}
+
+tasks.register("buildEmojiReleaseSmoke") {
+    val androidJar = providers.provider {
+        androidComponents.sdkComponents.bootClasspath.get().single { it.asFile.name == "android.jar" }.asFile
+    }
+    val buildTools = providers.provider {
+        androidComponents.sdkComponents.sdkDirectory.get().dir("build-tools/${android.buildToolsVersion}").asFile
+    }
+    val compileSmoke = tasks.named<JavaCompile>("compileEmojiReleaseSmoke")
+    group = "verification"
+    description = "Builds an unsigned framework-only test APK for the optimized Exordos release."
+    dependsOn(compileSmoke)
+    val output = layout.buildDirectory.file("outputs/emoji-release-smoke/emoji-release-smoke-unsigned.apk")
+    inputs.file("build.gradle.kts")
+    inputs.dir(compileSmoke.flatMap { it.destinationDirectory })
+    inputs.file(androidJar)
+    inputs.dir(buildTools)
+    outputs.file(output)
+
+    doLast {
+        val work = temporaryDir
+        work.deleteRecursively()
+        work.mkdirs()
+        val dex = work.resolve("dex").apply { mkdirs() }
+        val manifest = work.resolve("AndroidManifest.xml")
+        manifest.writeText("""
+            <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+                package="com.exordos.workspace.cassi.releasetest">
+                <uses-sdk android:minSdkVersion="30" android:targetSdkVersion="36"/>
+                <application android:testOnly="true" android:debuggable="false"/>
+                <instrumentation android:name="com.exordos.workspace.cassi.releasetest.EmojiReleaseInstrumentation"
+                    android:targetPackage="com.exordos.workspace"/>
+            </manifest>
+        """.trimIndent(), Charsets.UTF_8)
+        val tools = buildTools.get()
+        val executableSuffix = if (System.getProperty("os.name").startsWith("Windows")) ".exe" else ""
+        fun runTool(vararg arguments: String) {
+            check(ProcessBuilder(arguments.toList()).inheritIO().start().waitFor() == 0) {
+                "Release smoke build tool failed: ${arguments.first()}"
+            }
+        }
+        val classes = compileSmoke.get().destinationDirectory.get().asFile
+            .walkTopDown().filter { it.extension == "class" }.map { it.path }.sorted().toList()
+        runTool(File(System.getProperty("java.home"), "bin/java$executableSuffix").path,
+            "-cp", tools.resolve("lib/d8.jar").path, "com.android.tools.r8.D8",
+            "--lib", androidJar.get().path, "--min-api", "30", "--output", dex.path,
+            *classes.toTypedArray())
+        val linked = work.resolve("linked.apk")
+        runTool(tools.resolve("aapt2$executableSuffix").path, "link", "-I", androidJar.get().path,
+            "--manifest", manifest.path, "-o", linked.path)
+        val raw = work.resolve("raw.apk")
+        ZipFile(linked).use { original ->
+            ZipOutputStream(raw.outputStream()).use { apk ->
+                original.entries().asSequence().forEach { entry ->
+                    apk.putNextEntry(ZipEntry(entry))
+                    original.getInputStream(entry).use { it.copyTo(apk) }
+                    apk.closeEntry()
+                }
+                dex.listFiles().orEmpty().filter { it.extension == "dex" }.forEach { file ->
+                    apk.putNextEntry(ZipEntry(file.name))
+                    file.inputStream().use { it.copyTo(apk) }
+                    apk.closeEntry()
+                }
+            }
+        }
+        output.get().asFile.parentFile.mkdirs()
+        runTool(tools.resolve("zipalign$executableSuffix").path, "-f", "-P", "16", "4",
+            raw.path, output.get().asFile.path)
+        logger.lifecycle("Unsigned release smoke APK: ${output.get().asFile}")
+    }
 }

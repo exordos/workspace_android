@@ -27,5 +27,12 @@
 -keep class com.facebook.react.devsupport.** { *; }
 -keep public class com.horcrux.svg.** { *; }
 
+# JEmoji reads these classes and their fields from serializedEmojis.ser.
+# The resource's class descriptors are invisible to R8's reachability analysis.
+-keep class net.fellbaum.jemoji.Emoji { *; }
+-keep enum net.fellbaum.jemoji.EmojiGroup { *; }
+-keep enum net.fellbaum.jemoji.EmojiSubGroup { *; }
+-keep enum net.fellbaum.jemoji.Qualification { *; }
+
 # Preserve source/line references for Play vitals crash retracing.
 -keepattributes SourceFile,LineNumberTable
