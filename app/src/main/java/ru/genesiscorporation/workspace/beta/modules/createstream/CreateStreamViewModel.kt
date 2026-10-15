@@ -8,12 +8,14 @@ import ru.genesiscorporation.workspace.beta.data.crypto.*
 import java.util.UUID
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.combine
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
 import ru.genesiscorporation.workspace.beta.data.EventsRepositoryStore
 import ru.genesiscorporation.workspace.beta.data.ServerConfig
@@ -36,7 +38,9 @@ class CreateStreamViewModel(
 ): ViewModel() {
     val eventsRepository = eventsRepositoryStore.get(client.getCurrentServerId()) ?: error("Cannot get current event repository")
 
-    val users: StateFlow<List<UserResponseData>> = eventsRepository.users
+    val users: StateFlow<List<UserResponseData>> = combine(eventsRepository.users, eventsRepository.currentUser) { users, current ->
+        users.filter { it.uuid != current?.uuid }
+    }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
@@ -55,11 +59,12 @@ class CreateStreamViewModel(
         val request: AddStreamRequest,
         val keyScope: ChatKeyScope?,
         val staged: StagedChatCreation?,
+        val members: List<String>,
         var phase: CreationPhase = CreationPhase.UNCONFIRMED,
         var stream: Stream? = null,
     )
     private var creationAttempt: CreationAttempt? = null
-    private fun canEditCreation() = _createQueryState.value !is QueryState.Loading && creationAttempt == null && createdStream == null
+    fun canEditCreation() = _createQueryState.value !is QueryState.Loading && creationAttempt == null && createdStream == null
 
 
     private val _streamName = MutableStateFlow("")
@@ -74,6 +79,7 @@ class CreateStreamViewModel(
     val createQueryState: StateFlow<QueryState> = _createQueryState
 
     fun didTapOnUser(user: UserResponseData) {
+        if (!canEditCreation() || user.uuid == eventsRepository.currentUser.value?.uuid) return
         if (_selectedUserUuids.value.contains(user.uuid)) {
             _selectedUserUuids.update { it - user.uuid }
         } else {
@@ -86,19 +92,22 @@ class CreateStreamViewModel(
 
     override fun onCleared() { creationAttempt?.staged?.groupKey?.fill(0); super.onCleared() }
 
+    fun submitCreation() { viewModelScope.launch { createStream() } }
+
     suspend fun createStream() {
         if (_createQueryState.value is QueryState.Loading || _createQueryState.value is QueryState.Success || _streamName.value.isBlank()) return
         _createQueryState.value = QueryState.Loading
         try {
             val selected = client.requireUserViewModel().selectedServer.value ?: error("Нет организации")
             check(selected.id == eventsRepository.serverId) { "Организация изменилась" }
-            val user = eventsRepository.currentUser.value ?: error("Нет учётной записи")
             val useEncryption = encrypted.value
             if (useEncryption) check(!selected.projectUuid.isNullOrBlank()) { "Нет проекта" }
+            val user = eventsRepository.currentUser.value ?: error("Нет учётной записи")
             val account = if (useEncryption) requireNotNull(confirmedAccountContext(client, eventsRepository)) {
                 "Учётная запись не подтверждена"
             } else null
             val config = account?.serverConfig() ?: selected.copy()
+            check(eventsRepository.matchesServerConfiguration(config)) { "Организация изменилась. Откройте экран заново." }
             val project = config.projectUuid
             val userUuid = account?.userUuid ?: user.uuid
             val isCurrent = { if (account != null) account.isCurrent(client, eventsRepository) else client.requireUserViewModel().selectedServer.value?.let {
@@ -124,7 +133,8 @@ class CreateStreamViewModel(
                     } catch (failure: Throwable) { staged.groupKey.fill(0); throw failure }
                 }
                 CreationAttempt(config, userUuid, account,
-                    AddStreamRequest(_streamName.value.trim(), "", null, useEncryption, stage?.keyUuid, canonicalUuid), keyScope, stage)
+                    AddStreamRequest(_streamName.value.trim(), "", null, useEncryption, stage?.keyUuid, canonicalUuid), keyScope, stage,
+                    _selectedUserUuids.value.toList())
                     .also { creationAttempt = it }
             }
             check(attempt.server.id == config.id && attempt.server.baseUrl == config.baseUrl &&
@@ -173,8 +183,8 @@ class CreateStreamViewModel(
                 attempt.phase = CreationPhase.READY
             }
             check(isCurrent()) { "Учётная запись изменилась" }
-            if (_selectedUserUuids.value.isNotEmpty()) {
-                val request = AddUsersToStreamRequest(created.uuid, _selectedUserUuids.value)
+            if (attempt.members.isNotEmpty()) {
+                val request = AddUsersToStreamRequest(created.uuid, attempt.members)
                 when (val response = client.performRequest(account?.pin(request) ?: request, config.id, config)) {
                     is ApiResult.Success -> Unit
                     is ApiResult.Error -> error(response.error.errorMessage)

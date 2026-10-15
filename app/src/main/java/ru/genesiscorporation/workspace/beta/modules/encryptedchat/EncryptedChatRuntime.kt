@@ -187,9 +187,15 @@ class EncryptedChatRuntime(
             generations.incrementAndGet(), device.deviceId, device.deviceName, streamId)
         boundGeneration = boundScope.runtimeGeneration
         // Fetch participant roles explicitly. Stream role alone cannot authorize another issuer.
-        when (val response = client.performRequest(confirmed.pin(StreamBindingsRequest(streamId)), serverId, captured)) {
-            is ApiResult.Success -> { requireBound(confirmed); repo.addStreamBindings(streamId, response.value); rolesLoaded = true }
-            is ApiResult.Error -> throw EncryptedChatException(EncryptedChatFailure.UNAVAILABLE)
+        repo.beginStreamBindingsRequest(streamId).use { request ->
+            when (val response = client.performRequest(confirmed.pin(StreamBindingsRequest(streamId)), serverId, captured)) {
+                is ApiResult.Success -> {
+                    requireBound(confirmed)
+                    if (!repo.applyStreamBindingsSnapshot(request, response.value)) throw EncryptedChatException(EncryptedChatFailure.STALE)
+                    rolesLoaded = true
+                }
+                is ApiResult.Error -> throw EncryptedChatException(EncryptedChatFailure.UNAVAILABLE)
+            }
         }
         requireBound(confirmed)
         defaultTopic = repo.streams.value.firstOrNull { it.uuid == streamId }?.defaultTopicUuid?.takeIf { it.isNotBlank() }

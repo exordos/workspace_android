@@ -635,7 +635,10 @@ internal class EncryptedConversationServer : Closeable {
                 // V2 treats each object key as a role. Reject plural "members" before the retry fixture.
                 if (!validMemberRole) respondError(connection, status = 400)
                 else if (failNextInvitation) { failNextInvitation = false; respondError(connection) }
-                else respond(connection, "{}")
+                else respond(connection, Json.encodeToString(members!!.map { member ->
+                    StreamBindingResponseData(UUID.randomUUID().toString(), "member",
+                        path.substringAfter("/streams/").substringBefore('/'), member.jsonPrimitive.content)
+                }))
             }
             path == "/api/workspace/v1/messenger/streams/" -> respond(connection, Json.encodeToString(listOf(stream) + createdStreams))
             path == "/api/workspace/v1/messenger/messages/" && method == "GET" -> {

@@ -9,13 +9,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -33,21 +33,17 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
-import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import ru.genesiscorporation.workspace.beta.Chat
 import ru.genesiscorporation.workspace.beta.ChatFlow
@@ -57,6 +53,8 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.MentionTextFieldState
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
+import ru.genesiscorporation.workspace.beta.modules.users.matchesUserSearch
+import ru.genesiscorporation.workspace.beta.modules.users.UserSearchField
 import ru.genesiscorporation.workspace.beta.modules.users.UserCell
 import ru.genesiscorporation.workspace.beta.modules.users.UsersViewModel
 import ru.genesiscorporation.workspace.beta.ui.Avatar
@@ -69,20 +67,13 @@ fun CreateDirectStreamView(
     viewModel: CreateDirectStreamViewModel,
     navController: NavHostController
 ) {
-    val scope = rememberCoroutineScope()
     val users by viewModel.users.collectAsState()
     val state by viewModel.createQueryState.collectAsStateWithLifecycle()
 
     var searchQuery by remember { mutableStateOf("") }
 
     val filteredUsers = remember(searchQuery, users) {
-        if (searchQuery.isBlank()) {
-            users
-        } else {
-            users.filter {
-                it.lastName?.contains(searchQuery, ignoreCase = true) ?: false || it.firstName?.contains(searchQuery, ignoreCase = true) ?: false || it.email?.contains(searchQuery, ignoreCase = true) ?: false
-            }
-        }
+        users.filter { it.matchesUserSearch(searchQuery) }
     }
 
     LaunchedEffect(state) {
@@ -109,6 +100,7 @@ fun CreateDirectStreamView(
         }
     }
     Scaffold(
+        modifier = Modifier.imePadding(),
         topBar = {
             CenterAlignedTopAppBar(
                 title = {
@@ -146,40 +138,12 @@ fun CreateDirectStreamView(
                 modifier = Modifier
                     .fillMaxSize()
             ) {
-                Box(
-                    contentAlignment = Alignment.CenterStart,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(40.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .padding(vertical = 4.dp, horizontal = 16.dp)
-                        .background(
-                            LocalWorkspaceColorsPalette.current.searchBackground,
-                            RoundedCornerShape(8.dp)
-                        )
-                ) {
-                    BasicTextField(
-                        value = searchQuery,
-                        onValueChange = { searchQuery = it },
-                        textStyle = TextStyle(
-                            color = LocalWorkspaceColorsPalette.current.textAdditional30,
-                            fontSize = 14.sp,
-                            fontFamily = InterFontFamily,
-                        ),
-                        cursorBrush = SolidColor(LocalWorkspaceColorsPalette.current.textAdditional30),
-                        singleLine = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp),
-                        decorationBox = { innerTextField ->
-                            if (searchQuery.isEmpty()) {
-                                Text(
-                                    text = "Поиск...",
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            innerTextField()
-                        }
+                UserSearchField(searchQuery, { searchQuery = it })
+                if (state is QueryState.Error) {
+                    Text(
+                        text = (state as QueryState.Error).message,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
                     )
                 }
                 Spacer(modifier = Modifier.height(8.dp))
@@ -193,9 +157,7 @@ fun CreateDirectStreamView(
                         UserCell(
                             item,
                             {
-                                scope.launch {
-                                    viewModel.createPrivateStream(item)
-                                }
+                                viewModel.submitPrivateStream(item)
                             },
                             viewModel.client.userViewModel?.baseUrl?.collectAsState()?.value,
                             viewModel
