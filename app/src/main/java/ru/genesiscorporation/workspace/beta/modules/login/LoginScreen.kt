@@ -76,7 +76,10 @@ fun LoginScreen(viewModel: LoginViewModel, navController: NavHostController) {
                     Toast.makeText(context, current.message, Toast.LENGTH_SHORT).show()
                 }
             }
-            QueryState.Success -> navController.navigate(LoginFlow.Projects(viewModel.isFirstOrganization))
+            QueryState.Success -> {
+                viewModel.idleQueryState()
+                navController.navigate(LoginFlow.Projects(viewModel.isFirstOrganization))
+            }
             else -> Unit
         }
     }
