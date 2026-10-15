@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.core.content.FileProvider
 import ru.genesiscorporation.workspace.beta.R
+import ru.genesiscorporation.workspace.beta.data.EventsRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
@@ -13,7 +14,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageElement
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesByIdsRequest
-import ru.genesiscorporation.workspace.beta.data.remote.dto.parseCanonicalMessageUuid
+import ru.genesiscorporation.workspace.beta.data.remote.dto.parseCanonicalUuid
 import java.io.File
 import java.security.MessageDigest
 import io.ktor.http.ContentType
@@ -27,6 +28,7 @@ internal data class ExternalShareLabels(val attachment: String = "Attachment", v
 internal suspend fun materializeExternalMessages(
     sources: List<MessageResponse>,
     labels: ExternalShareLabels = ExternalShareLabels(),
+    presentMessage: suspend (MessageResponse) -> MessageResponse = { requireForwardPlaintext(it) },
     resolveQuote: suspend (String) -> MessageResponse?,
 ): ExternalShareContent {
     require(sources.isNotEmpty() && sources.size <= MAX_FORWARD_SOURCE_MESSAGES)
@@ -36,19 +38,23 @@ internal suspend fun materializeExternalMessages(
 
     suspend fun render(message: MessageResponse, visited: Set<String>, depth: Int, authorLabel: String? = null): String {
         require(depth <= 8) { "В сообщении слишком много вложенных цитат" }
+        require(message.payload.kind == "markdown") { "Сообщение недоступно для пересылки" }
         val author = authorLabel ?: message.user?.displayableName()?.trim()?.takeIf { it.isNotEmpty() } ?: message.authorUuid
         val pieces = mutableListOf<String>()
         for (element in MarkdownPayloadParser.parse(message.payload.content)) {
             when (element) {
-                is MessageElement.PlainText -> pieces += externalPlainText(element.text, labels.workspaceLink)
+                is MessageElement.PlainText -> {
+                    require(!MarkdownPayloadParser.hasInvalidAttachmentReference(element.text)) { "Неверная ссылка на вложение" }
+                    pieces += externalPlainText(element.text, labels.workspaceLink)
+                }
                 is MessageElement.Image -> {
-                    val uuid = requireNotNull(parseCanonicalMessageUuid(element.uuid)) { "Неверная ссылка на изображение" }
+                    val uuid = requireNotNull(parseCanonicalUuid(element.uuid)) { "Неверная ссылка на изображение" }
                     val name = element.fileName.ifBlank { "image" }
                     files.putIfAbsent(uuid, ExternalShareFile(uuid, name))
                     pieces += name
                 }
                 is MessageElement.File -> {
-                    val uuid = requireNotNull(parseCanonicalMessageUuid(element.uuid)) { "Неверная ссылка на файл" }
+                    val uuid = requireNotNull(parseCanonicalUuid(element.uuid)) { "Неверная ссылка на файл" }
                     files.putIfAbsent(uuid, ExternalShareFile(uuid, element.fileName.ifBlank { "attachment" }))
                     pieces += element.fileName.ifBlank { labels.attachment }
                 }
@@ -58,13 +64,13 @@ internal suspend fun materializeExternalMessages(
                         .lineSequence().joinToString("\n") { "> $it" }
                 }
                 is MessageElement.Quote -> {
-                    val uuid = requireNotNull(parseCanonicalMessageUuid(element.uuid))
+                    val uuid = requireNotNull(parseCanonicalUuid(element.uuid))
                     val quote = if (element.text.isNotEmpty()) {
                         message.copy(payload = message.payload.copy(content = element.text))
                     } else {
                         require(uuid !in visited) { "Не удалось подготовить вложенную цитату" }
                         val source = if (resolved.containsKey(uuid)) resolved[uuid] else resolveQuote(uuid).also { resolved[uuid] = it }
-                        requireNotNull(source) { "Цитируемое сообщение недоступно. Попробуйте переслать его в Workspace" }
+                        presentMessage(requireNotNull(source) { "Цитируемое сообщение недоступно. Попробуйте переслать его в Workspace" })
                     }
                     pieces += render(quote, visited + uuid, depth + 1, element.displayName).lineSequence().joinToString("\n") { "> $it" }
                 }
@@ -75,7 +81,7 @@ internal suspend fun materializeExternalMessages(
         require(characters <= 100_000 && files.size <= 32) { "Для одной пересылки выбрано слишком много данных" }
         return result
     }
-    val text = sources.joinToStringSuspend("\n\n") { render(it, setOf(it.uuid), 0) }
+    val text = sources.joinToStringSuspend("\n\n") { render(presentMessage(it), setOf(it.uuid), 0) }
     return ExternalShareContent(text, files.values.toList())
 }
 
@@ -94,11 +100,17 @@ internal suspend fun prepareExternalShareIntent(
     context: Context,
     sources: List<MessageResponse>,
     client: WorkspaceAPIClient,
+    repo: EventsRepository,
 ): Intent = withContext(Dispatchers.IO) {
+    val encryptedAccess = ForwardEncryptedAccess(context, client, repo, repo.currentUser.value?.uuid.orEmpty())
+    encryptedAccess.requireCurrent()
     val content = materializeExternalMessages(sources, ExternalShareLabels(
         context.getString(R.string.external_share_attachment), context.getString(R.string.external_share_workspace_link),
-    )) { id ->
-        (client.performRequest(MessagesByIdsRequest(listOf(id))) as? ApiResult.Success)?.value?.singleOrNull { it.uuid == id }
+    ), presentMessage = encryptedAccess::present) { id ->
+        encryptedAccess.requireCurrent()
+        (client.performRequest(MessagesByIdsRequest(listOf(id)), encryptedAccess.serverId,
+            encryptedAccess.config) as? ApiResult.Success)?.value?.singleOrNull { it.uuid == id }
+            .also { encryptedAccess.requireCurrent() }
     }
     val root = File(context.cacheDir, "message-shares").apply { mkdirs() }
     // Keep granted files long enough for the selected app to consume them.
@@ -109,13 +121,18 @@ internal suspend fun prepareExternalShareIntent(
         val uris = ArrayList<Uri>()
         val mimeTypes = mutableListOf<String>()
         content.files.forEachIndexed { index, attachment ->
-            val metadata = (client.performRequest(ForwardSourceFileRequest(attachment.uuid)) as? ApiResult.Success)?.value
+            encryptedAccess.requireCurrent()
+            val metadata = (client.performRequest(ForwardSourceFileRequest(attachment.uuid),
+                encryptedAccess.serverId, encryptedAccess.config) as? ApiResult.Success)?.value
                 ?.takeIf { it.uuid == attachment.uuid } ?: error("Cannot read original attachment metadata")
             val declaredMime = ContentType.parse(metadata.contentType).toString()
             val safeName = localAttachmentFileName(metadata.name)
             val directory = File(sessionDir, index.toString()).apply { check(mkdirs()) }
             val file = File(directory, safeName)
-            val result = client.downloadFile("/api/workspace/v1/messenger/files/${attachment.uuid}/actions/download", file)
+            encryptedAccess.requireCurrent()
+            val result = client.downloadFile("/api/workspace/v1/messenger/files/${attachment.uuid}/actions/download", file,
+                encryptedAccess.serverId, encryptedAccess.config)
+            encryptedAccess.requireCurrent()
             require(result is ApiResult.Success && file.isFile) { "Не удалось подготовить вложение: $safeName" }
             val digest = MessageDigest.getInstance("SHA-256")
             file.inputStream().use { input ->
@@ -126,6 +143,7 @@ internal suspend fun prepareExternalShareIntent(
             uris += FileProvider.getUriForFile(context, "${context.packageName}.message-share-files", file)
             mimeTypes += declaredMime
         }
+        encryptedAccess.requireCurrent()
         buildExternalShareIntent(content.text, uris, commonShareMimeType(mimeTypes), context.getString(R.string.external_share_attachments))
     } catch (failure: Throwable) {
         sessionDir.deleteRecursively()

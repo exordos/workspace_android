@@ -15,12 +15,12 @@ class UpdateDraftRequest(
     override val requiresApiKey: Boolean = true
     override val url: String = "/api/workspace/v1/messenger/drafts/${draftUuid}"
     override val data = UpdateDraftRequestData(
-        EditMessageRequestPayload("markdown", content)
+        MessageResponsePayload("markdown", content)
     )
     override val additionalHeaders: Map<String, String> = mapOf("If-Match" to """"$revision"""")
 }
 
 @Serializable
 data class UpdateDraftRequestData(
-    val payload: EditMessageRequestPayload
+    @Serializable(with = MessageBodyPayloadSerializer::class) val payload: MessageResponsePayload
 )

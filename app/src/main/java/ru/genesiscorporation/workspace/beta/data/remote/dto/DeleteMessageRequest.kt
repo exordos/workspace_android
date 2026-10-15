@@ -10,7 +10,7 @@ class DeleteMessageRequest(
     messageUuid: String,
 ) : ApiRequest<EmptyRequestData, String, ApiError> {
     private val canonicalMessageUuid = requireNotNull(
-        parseCanonicalMessageUuid(messageUuid),
+        parseCanonicalUuid(messageUuid),
     ) {
         "messageUuid must be a canonical UUID"
     }
@@ -21,7 +21,7 @@ class DeleteMessageRequest(
     override val data = EmptyRequestData()
 }
 
-internal fun parseCanonicalMessageUuid(value: String): String? {
+internal fun parseCanonicalUuid(value: String): String? {
     val trimmed = value.trim()
     val canonical = runCatching { UUID.fromString(trimmed).toString() }
         .getOrNull()

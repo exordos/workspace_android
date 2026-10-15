@@ -15,16 +15,26 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
 import androidx.compose.runtime.Composable
@@ -41,12 +51,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.Dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -59,6 +73,8 @@ import com.google.firebase.messaging.FirebaseMessaging
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeout
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
+import ru.genesiscorporation.workspace.beta.data.remote.AuthHeader
+import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import ru.genesiscorporation.workspace.beta.modules.chatchannels.ChatScreen
 import ru.genesiscorporation.workspace.beta.modules.chatchannels.ChatViewModel
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.ChatDialogScreen
@@ -190,6 +206,8 @@ private fun Intent.deeplinkOrNull(): String? = getStringExtra("deeplink")
 val LocalBottomBarVisible = staticCompositionLocalOf<(Boolean) -> Unit> {
     error("LocalBottomBarVisible not provided")
 }
+/** null releases the protected override; false hides it, true shows the protected bar. */
+val LocalProtectedBottomBarStyle = staticCompositionLocalOf<(Boolean?) -> Unit> { {} }
 
 @Composable
 fun WorkspaceApp(
@@ -307,9 +325,23 @@ fun WorkspaceApp(
     val accessToken by user.accessToken.collectAsState()
     val avatarAccessToken = selectedServer?.id?.let(user::getTokens)?.accessToken
         ?.takeIf { it == accessToken }
+    val avatarUser = currentUser?.takeIf { avatarAccessToken != null }
+    val avatarAuthHeaders = workspaceApiClient.authHeaders(selectedServer?.id)
     val currentCallMessage by viewModel.currentCallMessage.collectAsState()
     var currentDestination = rememberSaveable { mutableStateOf(0 ) }
     var showNavigation by rememberSaveable { mutableStateOf(true) }
+    var protectedBottomBarVisibility by remember { mutableStateOf<Boolean?>(null) }
+    val setProtectedBottomBarStyle: (Boolean?) -> Unit = remember { { protectedBottomBarVisibility = it } }
+    val protectedBottomBar = protectedBottomBarVisibility != null
+    val navigationVisible = protectedBottomBarVisibility ?: showNavigation
+    val selectDestination: (Int) -> Unit = { index ->
+        currentDestination.value = index
+        navController.navigate(destinationList[index].route) {
+            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+            launchSingleTop = true
+            restoreState = true
+        }
+    }
 
     LaunchedEffect(Unit) {
         eventsRepositoryStore.startAllRepos()
@@ -320,7 +352,7 @@ fun WorkspaceApp(
         FirebaseMessaging.getInstance().token
             .addOnSuccessListener { token ->
 //                eventsRepositoryStore.pushId = token
-                Log.d("FCM", "fetched token $token")
+                // Credentials must never enter logcat, including verification builds.
 //                scope.launch {
 //                    viewModel.sendToken("$token")
 //                }
@@ -332,99 +364,129 @@ fun WorkspaceApp(
 
 
     NavigationSuiteScaffold(
-        layoutType = if (showNavigation) {
+        layoutType = if (navigationVisible && !protectedBottomBar) {
             NavigationSuiteType.ShortNavigationBarCompact
         } else {
             NavigationSuiteType.None
         },
         navigationSuiteItems = {
-            if (!showNavigation) return@NavigationSuiteScaffold
+            if (!navigationVisible || protectedBottomBar) return@NavigationSuiteScaffold
 
             destinationList.forEachIndexed { index, destination ->
                 item(
                     icon = {
-                        if (destination == Profile && currentUser != null && avatarAccessToken != null) {
-                            Avatar(
-                                avatarUrn = currentUser.avatar,
-                                baseUrl = selectedServer?.baseUrl.orEmpty(),
-                                authHeaders = workspaceApiClient.authHeaders(selectedServer?.id),
-                                color = null,
-                                name = currentUser.displayableName(),
-                                modifier = Modifier.size(28.dp).semantics {
-                                    contentDescription = destination.title
-                                },
-                                initialFontSize = 16.sp,
-                            )
-                        } else {
-                            Icon(
-                                painter = painterResource(id = destination.icon),
-                                contentDescription = destination.title
-                            )
-                        }
+                        DestinationIcon(destination, avatarUser, selectedServer?.baseUrl.orEmpty(),
+                            avatarAuthHeaders, avatarSize = 28.dp, contentDescription = destination.title)
                     },
                     selected = index == currentDestination.value,
-                    onClick = {
-                        currentDestination.value = index
-                        navController.navigate(destinationList[index].route) {
-                            popUpTo(navController.graph.findStartDestination().id) {
-                                saveState = true
-                            }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
-                    }
+                    onClick = { selectDestination(index) }
                 )
             }
         }
     ) {
 
         CompositionLocalProvider(
-            LocalBottomBarVisible provides { visible -> showNavigation = visible }
+            LocalBottomBarVisible provides { visible -> showNavigation = visible },
+            LocalProtectedBottomBarStyle provides setProtectedBottomBarStyle,
         ) {
-            Box(
-                Modifier
-                    .windowInsetsPadding(
-                        WindowInsets.safeDrawing.only(
-                            WindowInsetsSides.Top + WindowInsetsSides.Horizontal
+            Column(Modifier.fillMaxSize()) {
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .windowInsetsPadding(
+                            WindowInsets.safeDrawing.only(
+                                WindowInsetsSides.Top + WindowInsetsSides.Horizontal
+                            )
                         )
-                    )
-            ) {
-                RequestNotificationPermissionIfNeeded()
-                NavHost(navController = navController, startDestination = Home.route) {
-                    composable(Home.route) {
-                        HomeNavigation(workspaceApiClient, eventsRepositoryStore)
+                ) {
+                    RequestNotificationPermissionIfNeeded()
+                    NavHost(navController = navController, startDestination = Home.route) {
+                        composable(Home.route) {
+                            HomeNavigation(workspaceApiClient, eventsRepositoryStore)
+                        }
+                        composable(Chat.route) {
+                            ChatNavigation(
+                                workspaceApiClient,
+                                eventsRepositoryStore,
+                                pendingDeepLink,
+                                onDeepLinkHandled
+                            )
+                        }
+                        composable(Calendar.route) {
+                            val calendarViewModelFactory =
+                                remember { CalendarViewModelFactory(eventsRepositoryStore) }
+                            var calendarViewModel: CalendarViewModel =
+                                viewModel(factory = calendarViewModelFactory)
+                            CalendarScreen(calendarViewModel, navController)
+                        }
+                        composable(Mail.route) {
+                            val mailViewModelFactory =
+                                remember { MailViewModelFactory(eventsRepositoryStore) }
+                            var mailViewModel: MailViewModel = viewModel(factory = mailViewModelFactory)
+                            MailScreen(mailViewModel, navController)
+                        }
+                        composable(Profile.route) {
+                            ProfileNavigation(workspaceApiClient, eventsRepositoryStore)
+                        }
                     }
-                    composable(Chat.route) {
-                        ChatNavigation(
-                            workspaceApiClient,
-                            eventsRepositoryStore,
-                            pendingDeepLink,
-                            onDeepLinkHandled
-                        )
-                    }
-                    composable(Calendar.route) {
-                        val calendarViewModelFactory =
-                            remember { CalendarViewModelFactory(eventsRepositoryStore) }
-                        var calendarViewModel: CalendarViewModel =
-                            viewModel(factory = calendarViewModelFactory)
-                        CalendarScreen(calendarViewModel, navController)
-                    }
-                    composable(Mail.route) {
-                        val mailViewModelFactory =
-                            remember { MailViewModelFactory(eventsRepositoryStore) }
-                        var mailViewModel: MailViewModel = viewModel(factory = mailViewModelFactory)
-                        MailScreen(mailViewModel, navController)
-                    }
-                    composable(Profile.route) {
-                        ProfileNavigation(workspaceApiClient, eventsRepositoryStore)
+                    val callMessage = currentCallMessage
+                    if (callMessage != null) {
+                        IncomingCall(callMessage, viewModel, context)
                     }
                 }
-                val callMessage = currentCallMessage
-                if (callMessage != null) {
-                    IncomingCall(callMessage, viewModel, context)
+                if (navigationVisible && protectedBottomBar) {
+                    Row(
+                        Modifier.fillMaxWidth()
+                            .background(Color(0xFF333333), RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
+                            .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
+                            .height(68.dp)
+                            .selectableGroup(),
+                        horizontalArrangement = Arrangement.SpaceAround,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        destinationList.forEachIndexed { index, destination ->
+                            val selected = index == currentDestination.value
+                            Box(
+                                Modifier.size(52.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (selected) Color(0xFF484848) else Color.Transparent)
+                                    .selectable(selected, role = Role.Tab, onClick = { selectDestination(index) })
+                                    .semantics { contentDescription = destination.title },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                DestinationIcon(destination, avatarUser, selectedServer?.baseUrl.orEmpty(),
+                                    avatarAuthHeaders, avatarSize = 32.dp, iconSize = 24.dp,
+                                    tint = if (selected) Color.White else Color(0xFF757575), contentDescription = null)
+                            }
+                        }
+                    }
                 }
             }
         }
+    }
+}
+
+/** Shared icon content; each navigation container retains its own layout and tab semantics. */
+@Composable
+private fun DestinationIcon(
+    destination: Destinations,
+    profile: UserResponseData?,
+    baseUrl: String,
+    authHeaders: List<AuthHeader>,
+    avatarSize: Dp,
+    iconSize: Dp = 24.dp,
+    tint: Color = LocalContentColor.current,
+    contentDescription: String?,
+) {
+    if (destination == Profile && profile != null) {
+        val avatarDescription = contentDescription
+        Avatar(profile.avatar, baseUrl, authHeaders, null, profile.displayableName(),
+            Modifier.size(avatarSize).then(if (avatarDescription != null) Modifier.semantics {
+                this.contentDescription = avatarDescription
+            } else Modifier), initialFontSize = 16.sp)
+    } else {
+        Icon(painterResource(destination.icon), contentDescription, Modifier.size(iconSize), tint = tint)
     }
 }
 
@@ -514,7 +576,8 @@ fun ChatNavigation(
 
         composable<ChatFlow.StreamInfo> {
             val args = it.toRoute<ChatFlow.StreamInfo>()
-            val streamInfoViewModelFactory = remember { StreamInfoViewModelFactory(workspaceApiClient, args.streamUuid, args.topicUuid, eventsRepositoryStore) }
+            val infoContext = LocalContext.current.applicationContext
+            val streamInfoViewModelFactory = remember { StreamInfoViewModelFactory(workspaceApiClient, args.streamUuid, args.topicUuid, eventsRepositoryStore, infoContext) }
             val streamInfoViewModel: StreamInfoViewModel = viewModel(factory = streamInfoViewModelFactory)
             StreamInfoView(streamInfoViewModel, navController)
         }
@@ -525,7 +588,8 @@ fun ChatNavigation(
             CreationBaseView(creationBaseViewModel, navController)
         }
         composable<ChatFlow.CreateStream> {
-            val createStreamViewModelFactory = remember { CreateStreamViewModelFactory(workspaceApiClient, eventsRepositoryStore) }
+            val creationContext = LocalContext.current.applicationContext
+            val createStreamViewModelFactory = remember { CreateStreamViewModelFactory(workspaceApiClient, eventsRepositoryStore, creationContext) }
             val createStreamViewModel: CreateStreamViewModel = viewModel(factory = createStreamViewModelFactory)
             CreateStreamView(createStreamViewModel, navController)
         }
@@ -626,7 +690,8 @@ fun StreamCreationNavigation(workspaceApiClient: WorkspaceAPIClient, eventsRepos
             CreationBaseView(creationBaseViewModel, navController)
         }
         composable<StreamCreationFlow.CreateStream> {
-            val createStreamViewModelFactory = remember { CreateStreamViewModelFactory(workspaceApiClient, eventsRepositoryStore) }
+            val creationContext = LocalContext.current.applicationContext
+            val createStreamViewModelFactory = remember { CreateStreamViewModelFactory(workspaceApiClient, eventsRepositoryStore, creationContext) }
             val createStreamViewModel: CreateStreamViewModel = viewModel(factory = createStreamViewModelFactory)
             CreateStreamView(createStreamViewModel, navController)
         }

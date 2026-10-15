@@ -1,0 +1,3 @@
+<resources>
+    <string name="message_request_encryption_key">Запросить ключ для этого сообщения</string>
+</resources>

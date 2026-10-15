@@ -1,0 +1,4 @@
+<resources>
+    <string name="stream_info_unavailable">Информация о чате недоступна</string>
+    <string name="stream_info_back">Назад</string>
+</resources>

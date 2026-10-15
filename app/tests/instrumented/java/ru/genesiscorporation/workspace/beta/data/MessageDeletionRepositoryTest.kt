@@ -22,6 +22,8 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageReaction
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponsePayload
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
+import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamBindingResponseData
+import ru.genesiscorporation.workspace.beta.data.remote.dto.Draft
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 
 @RunWith(AndroidJUnit4::class)
@@ -152,6 +154,37 @@ class MessageDeletionRepositoryTest {
         assertEquals("pending-client-id", pending.uuid)
         assertEquals(listOf(confirmed), repository.streamTopicMessages.value["stream.topic"])
         assertEquals(listOf(confirmed), repository.messagesPool.value)
+    }
+
+    @Test
+    fun `backend stream deletion clears its projections and leaves other streams intact`() = runBlocking {
+        val deleted = message("deleted")
+        val kept = message("kept").copy(streamUuid = "other")
+        repository.setInitialStreams(listOf(stream(deleted), stream(kept).copy(uuid = "other")))
+        repository.addStreamBindings("stream", listOf(StreamBindingResponseData("binding", "member", "stream", "user")))
+        repository.addStreamBindings("other", listOf(StreamBindingResponseData("other-binding", "member", "other", "user")))
+        repository.addStreamTopicMessages("stream", "topic", listOf(deleted))
+        repository.addStreamTopicMessages("other", "topic", listOf(kept))
+        repository.setInitialMessagesPool(listOf(deleted, kept))
+        repository.addStreamTopics("stream", listOf(topic(deleted)))
+        repository.addStreamTopics("other", listOf(topic(kept).copy(streamUuid = "other")))
+        repository.setInitialDraftsPool(listOf(Draft("draft", "stream", "topic", deleted.updatedAt, deleted.payload, 1)))
+        repository.setInitialMessageReactions(listOf(MessageReaction("reaction", "user", "smile", deleted.uuid)))
+        val signal = async(start = CoroutineStart.UNDISPATCHED) {
+            withTimeout(5_000) { repository.streamDeletedEvents.first() }
+        }
+        repository.didReceiveStreamEvent("""{"kind":"stream.deleted","uuid":"stream","source_name":"native","source":{"kind":"native"}}""", "deleted")
+        assertEquals("stream", signal.await())
+        assertEquals(listOf("other"), repository.streams.value.map { it.uuid })
+        assertEquals(setOf("other"), repository.streamBindings.value.keys)
+        assertEquals(setOf("other"), repository.streamTopics.value.keys)
+        assertEquals(listOf("other"), repository.topicsPool.value.map { it.streamUuid })
+        assertEquals(setOf("other.topic"), repository.streamTopicMessages.value.keys)
+        assertEquals(listOf(kept), repository.messagesPool.value)
+        assertTrue(repository.draftsPool.value.isEmpty())
+        assertTrue(repository.userReactions.value.isEmpty())
+        repository.removeStream("stream") // HTTP completion after the same event is harmless.
+        assertEquals(listOf(kept), repository.messagesPool.value)
     }
 
     private fun message(uuid: String) = MessageResponse(

@@ -44,8 +44,9 @@ internal fun ForwardMessagesAction(
     val chooserTitle = stringResource(R.string.messages_forward)
     val scope = rememberCoroutineScope()
     val baseUrl by userViewModel.baseUrl.collectAsStateWithLifecycle()
+    val selectedServer by userViewModel.selectedServer.collectAsStateWithLifecycle()
     val currentUser by repo.currentUser.collectAsStateWithLifecycle()
-    val owner = "$baseUrl|${currentUser?.uuid ?: userViewModel.userData?.uuid.orEmpty()}"
+    val owner = "${repo.serverId}|$baseUrl|${selectedServer?.projectUuid.orEmpty()}|${currentUser?.uuid.orEmpty()}"
     val resumed = remember(owner, sessionStore) { sessionStore.unresolved(owner) != null }
     val session = remember { ForwardShareSessions.create().also { if (resumed) it.second.value = true } }
     val internalRequested by session.second.collectAsState()
@@ -60,7 +61,7 @@ internal fun ForwardMessagesAction(
         preparing = true
         error = null
         try {
-            val external = prepareExternalShareIntent(context, sources, client)
+            val external = prepareExternalShareIntent(context, sources, client, repo)
             val internal = Intent(context, ForwardToWorkspaceActivity::class.java).apply {
                 action = Intent.ACTION_SEND
                 type = external.type

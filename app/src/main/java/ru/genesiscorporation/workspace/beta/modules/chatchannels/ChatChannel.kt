@@ -24,6 +24,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -31,6 +33,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
@@ -47,6 +50,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.formatHHmm
+import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatAvatarBadge
 import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
@@ -65,6 +69,15 @@ fun ChatChannel(
     onChatNumberToAddChange: (Stream?) -> Unit,
     onClick: () -> Unit
 ) {
+    val previewContext = LocalContext.current
+    val encryptedPreviews by viewModel.encryptedPreviews.collectAsState()
+    DisposableEffect(viewModel, item.uuid, item.encryption) {
+        if (item.encryption) {
+            viewModel.attachEncryptedPreviews(previewContext)
+            viewModel.showEncryptedPreview(item.uuid, true)
+        }
+        onDispose { if (item.encryption) viewModel.showEncryptedPreview(item.uuid, false) }
+    }
     var menuExpanded by remember { mutableStateOf(false) }
     val palette = LocalWorkspaceColorsPalette.current
     val scope = rememberCoroutineScope()
@@ -98,20 +111,20 @@ fun ChatChannel(
         ) {
             val avatarUrn = item.directUser?.avatar
             val lastMessage = item.lastMessage
-            Avatar(
-                avatarUrn,
-                viewModel.client.userViewModel?.baseUrl?.value ?: "",
-                viewModel.client.authHeaders(),
-                item.color,
-                item.displayableName(),
-                Modifier
-                    .clip(
-                        RoundedCornerShape(8.dp)
-                    )
-                    .background( if (currentlySelectedStream?.uuid == item.uuid) LocalWorkspaceColorsPalette.current.cardBackgroundBase else Color.Transparent)
-                    .padding(start = 8.dp, top = 12.dp, end = 12.dp, bottom = 12.dp)
-                    .size(40.dp)
-            )
+            val encryptedPreview = if (item.encryption && encryptedPreviews.containsKey(item.uuid)) viewModel.encryptedPreview(item.uuid)
+                ?.takeIf { it.catalogMessageUuid == lastMessage?.uuid } else null
+            Box(Modifier.padding(start = 8.dp, top = 12.dp, end = 12.dp, bottom = 12.dp).size(40.dp)) {
+                Avatar(
+                    avatarUrn,
+                    viewModel.client.userViewModel?.baseUrl?.value ?: "",
+                    viewModel.client.authHeaders(),
+                    item.color,
+                    item.displayableName(),
+                    Modifier.size(40.dp).clip(RoundedCornerShape(8.dp))
+                        .background(if (currentlySelectedStream?.uuid == item.uuid) palette.cardBackgroundBase else Color.Transparent)
+                )
+                if (item.encryption) EncryptedChatAvatarBadge(Modifier.align(Alignment.Center))
+            }
             Column(
                 modifier = Modifier
                     .weight(1f),
@@ -119,6 +132,7 @@ fun ChatChannel(
                 verticalArrangement = Arrangement.Center
             ) {
 
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
                     text = item.displayableName(),
                     color = LocalWorkspaceColorsPalette.current.textHeaders,
@@ -129,15 +143,16 @@ fun ChatChannel(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                }
                 if (lastMessage != null) {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        val lastMessageUser = lastMessage.user
-                        if (lastMessageUser != null) {
+                        val lastMessageAuthor = encryptedPreview?.authorName ?: lastMessage.user?.displayableName()
+                        if (lastMessageAuthor != null) {
                             Text(
-                                text = lastMessageUser.displayableName(),
+                                text = lastMessageAuthor,
                                 color = LocalWorkspaceColorsPalette.current.primary,
                                 fontSize = 12.sp,
                                 fontFamily = InterFontFamily,
@@ -145,8 +160,15 @@ fun ChatChannel(
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
+                        val previewDescription = when {
+                            !item.encryption -> lastMessage.description(stringResource(R.string.quote_forwarded_message))
+                            encryptedPreview != null -> lastMessage.copy(payload = ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponsePayload("markdown", encryptedPreview.text))
+                                .description(stringResource(R.string.quote_forwarded_message))
+                            lastMessage.payload.kind in setOf("key_request", "key_grant", "key_reject", "key_announced") -> lastMessage.description()
+                            else -> stringResource(R.string.encrypted_chat_locked)
+                        }
                         MarkdownText(
-                            markdown = lastMessage.description(stringResource(R.string.quote_forwarded_message)),
+                            markdown = previewDescription,
                             modifier = Modifier.weight(1f),
                             maxLines = 1,
                             style = TextStyle(
@@ -182,7 +204,7 @@ fun ChatChannel(
                 }
                 Spacer(modifier = Modifier.weight(1f))
                 if (lastMessage != null) {
-                    val instant = Instant.parse(lastMessage.createdAt)
+                    val instant = Instant.parse(encryptedPreview?.createdAt ?: lastMessage.createdAt)
                     Text(
                         text = instant.atZone(zone).format(HHMMFormatter),
                         color = LocalWorkspaceColorsPalette.current.messageTimeColor,

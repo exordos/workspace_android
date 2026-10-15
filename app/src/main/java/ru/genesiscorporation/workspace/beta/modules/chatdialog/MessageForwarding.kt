@@ -14,20 +14,20 @@ import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.SendMessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
-import ru.genesiscorporation.workspace.beta.data.remote.dto.parseCanonicalMessageUuid
+import ru.genesiscorporation.workspace.beta.data.remote.dto.parseCanonicalUuid
 
 internal const val MAX_FORWARD_SOURCE_MESSAGES = 32
 
-internal fun isCanonicalForwardUuid(value: String): Boolean = parseCanonicalMessageUuid(value) != null
+internal fun isCanonicalForwardUuid(value: String): Boolean = parseCanonicalUuid(value) != null
 
 internal fun canForwardMessage(message: MessageResponse): Boolean =
-    isCanonicalForwardUuid(message.uuid) && message.authorUuid.isNotBlank()
+    isCanonicalForwardUuid(message.uuid) && message.authorUuid.isNotBlank() && message.payload.kind == "markdown"
 
 /** Keep the supplied (conversation) order, never merge or silently discard sources. */
 internal fun buildWorkspaceForwardMarkdown(messages: List<MessageResponse>): String? {
     if (messages.isEmpty() || messages.size > MAX_FORWARD_SOURCE_MESSAGES ||
         messages.any { !canForwardMessage(it) } ||
-        messages.map { parseCanonicalMessageUuid(it.uuid) }.distinct().size != messages.size
+        messages.map { parseCanonicalUuid(it.uuid) }.distinct().size != messages.size
     ) return null
     return messages.joinToString("\n\n") { message ->
         val label = (message.user?.displayableName()?.trim()?.takeIf { it.isNotEmpty() }
@@ -76,6 +76,10 @@ internal class MessageForwarding(
     private val onConfirmed: (MessageResponse) -> Unit,
     private val newUuid: () -> String = { UUID.randomUUID().toString() },
     private val prepare: suspend (ForwardDestination) -> String = { requireNotNull(buildWorkspaceForwardMarkdown(sources)) },
+    private val verificationUuid: (String, ForwardDestination) -> String = { canonical, _ -> canonical },
+    private val verifyContent: suspend (MessageResponse, ForwardDestination, String) -> Boolean = { message, _, expected ->
+        message.payload.kind == "markdown" && message.payload.content == expected
+    },
 ) {
     private var content = requireNotNull(buildWorkspaceForwardMarkdown(sources))
     private val mutex = Mutex()
@@ -121,7 +125,7 @@ internal class MessageForwarding(
             when (val result = post(requireNotNull(requestUuid), target, content)) {
                 is ApiResult.Success -> {
                     // Deployed servers may return a different UUID; read the returned identity.
-                    acknowledgedUuid = parseCanonicalMessageUuid(result.value.uuid)
+                    acknowledgedUuid = parseCanonicalUuid(result.value.uuid)
                     if (result.value.topicUuid != target.topicUuid || acknowledgedUuid == null) {
                         markUncertain()
                     } else {
@@ -162,16 +166,24 @@ internal class MessageForwarding(
 
     private suspend fun verifyLocked() {
         val target = destination ?: return
-        val id = acknowledgedUuid ?: requestUuid ?: run { prepareAndPost(target); return }
+        val id = acknowledgedUuid ?: requestUuid?.let { verificationUuid(it, target) }
+            ?: run { prepareAndPost(target); return }
         _state.value = ForwardDeliveryState(ForwardDeliveryStatus.VERIFYING)
-        val result = read(id)
+        val result = try { read(id) }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { markUncertain(); return }
         currentCoroutineContext().ensureActive()
-        val confirmed = (result as? ApiResult.Success)?.value?.singleOrNull { message ->
-            parseCanonicalMessageUuid(message.uuid) == id &&
+        val candidate = (result as? ApiResult.Success)?.value?.singleOrNull { message ->
+            parseCanonicalUuid(message.uuid) == id &&
                 message.isOwn && message.authorUuid == currentUserUuid &&
-                message.streamUuid == target.streamUuid && message.topicUuid == target.topicUuid &&
-                message.payload.kind == "markdown" && message.payload.content == content
+                message.streamUuid == target.streamUuid && message.topicUuid == target.topicUuid
         }
+        val confirmed = if (candidate != null) {
+            val matches = try { verifyContent(candidate, target, content) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { false }
+            candidate.takeIf { matches }
+        } else null
         if (confirmed != null) {
             _state.value = ForwardDeliveryState(ForwardDeliveryStatus.COMPLETED)
             onConfirmed(confirmed)

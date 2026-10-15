@@ -106,16 +106,10 @@ class UserViewModel(
             repo.updateServer(config, tokens)
         }
     }
-    fun removeServer(serverId: String) {
-        viewModelScope.launch {
-            repo.removeServer(serverId)
-            val nextServer = servers.value.firstOrNull()
-            selectServer(nextServer?.id)
-        }
-    }
+    suspend fun removeServer(serverId: String) = repo.removeServer(serverId)
 
 
-    fun removeCurrentServer() {
+    suspend fun removeCurrentServer() {
         val currentServerUuid = selectedServerId.value ?: return
         removeServer(currentServerUuid)
     }

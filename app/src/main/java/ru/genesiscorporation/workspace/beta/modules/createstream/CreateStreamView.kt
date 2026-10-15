@@ -58,6 +58,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 import ru.genesiscorporation.workspace.beta.modules.createdirectstream.CreateDirectStreamViewModel
 import ru.genesiscorporation.workspace.beta.modules.createdirectstream.UserCell
+import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatTypeField
 import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
@@ -69,6 +70,7 @@ fun CreateStreamView(
     navController: NavHostController,
 ) {
     val streamName by viewModel.streamName.collectAsState()
+    val encrypted by viewModel.encrypted.collectAsStateWithLifecycle()
     val users by viewModel.users.collectAsState()
     val selectedUserUuids by viewModel.selectedUserUuids.collectAsState()
     val scope = rememberCoroutineScope()
@@ -180,6 +182,9 @@ fun CreateStreamView(
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp)
                 )
+            }
+            Box(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+                EncryptedChatTypeField(encrypted, viewModel::setEncrypted)
             }
             Text(
                 "Добавить участников",

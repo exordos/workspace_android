@@ -1,6 +1,7 @@
 package ru.genesiscorporation.workspace.beta.modules.profile
 
 import androidx.lifecycle.ViewModel
+import kotlinx.coroutines.CoroutineStart
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -15,6 +16,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.UserViewModel
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
+import ru.genesiscorporation.workspace.beta.data.confirmedAccountContext
 import ru.genesiscorporation.workspace.beta.data.EventsRepositoryStore
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
@@ -111,13 +113,22 @@ class ProfileViewModel(
         return eventsRepo.value?.pushId
     }
     fun logout() {
-        val token = currentPushToken()
-        if (token != null) {
-            viewModelScope.launch {
-                deleteToken("workspace:android:$token")
+        val captured = userViewModel.selectedServer.value?.copy() ?: return
+        if (userViewModel.selectedServerId.value != captured.id) return
+        val repo = eventsRepositoryStore.get(captured.id)
+        val confirmed = repo?.let { confirmedAccountContext(client, it) }
+        val pushToken = repo?.pushId
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                userViewModel.removeServer(captured.id)
+            } catch (_: Exception) {
+                _queryState.value = QueryState.Error("Не удалось удалить локальные ключи. Повторите выход.")
+                return@launch
+            }
+            if (confirmed != null && pushToken != null) {
+                client.performRequest(confirmed.pin(DeleteFcmTokenRequest("workspace:android:$pushToken")), captured.id, captured)
             }
         }
-        userViewModel.removeCurrentServer()
     }
 
     suspend fun deleteToken(token: String) {

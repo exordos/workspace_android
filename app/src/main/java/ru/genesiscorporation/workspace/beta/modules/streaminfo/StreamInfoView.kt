@@ -7,18 +7,16 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -33,7 +31,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -41,28 +38,26 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import kotlinx.coroutines.launch
-import org.jitsi.meet.sdk.JitsiMeetActivity
-import org.jitsi.meet.sdk.JitsiMeetConferenceOptions
 import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
-import ru.genesiscorporation.workspace.beta.data.remote.dto.LoginRequest
+import ru.genesiscorporation.workspace.beta.data.remote.AuthHeader
 import ru.genesiscorporation.workspace.beta.modules.share.shareWorkspaceLink
 import ru.genesiscorporation.workspace.beta.modules.share.workspaceStreamShareLink
-import ru.genesiscorporation.workspace.beta.modules.chatdialog.JitsiStyleRoomNameGenerator
-import ru.genesiscorporation.workspace.beta.modules.chatuserinfo.ChatUserInfoViewModel
-import ru.genesiscorporation.workspace.beta.modules.createdirectstream.UserCell
 import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
-import java.net.URL
 import kotlin.collections.count
 import kotlin.collections.mapNotNull
 
@@ -73,11 +68,14 @@ fun StreamInfoView(
     navController: NavHostController
 ) {
 
-    val stream by viewModel.stream.collectAsStateWithLifecycle()
+    val streamSnapshot by viewModel.stream.collectAsStateWithLifecycle()
+    if (streamSnapshot?.encryption == true || viewModel.hasMountedProtectedStream) {
+        ProtectedStreamInfoView(viewModel, navController)
+        return
+    }
     val topic by viewModel.topic.collectAsStateWithLifecycle()
     val streamBindings by viewModel.streamBindings.collectAsStateWithLifecycle()
     val users by viewModel.users.collectAsStateWithLifecycle()
-    val scope = rememberCoroutineScope()
     val context = LocalContext.current
 //    val profile = viewModel.repo.users.collectAsState().value.firstOrNull { it.userId.toString() == viewModel.userId }
 
@@ -95,7 +93,7 @@ fun StreamInfoView(
                     IconButton(onClick = { navController.popBackStack() }) {
                         Icon(
                             painter = painterResource(id = R.drawable.arrow_back),
-                            contentDescription = "Back"
+                            contentDescription = stringResource(R.string.stream_info_back)
                         )
                     }
                 },
@@ -103,6 +101,15 @@ fun StreamInfoView(
             )
         },
     ) { innerPadding ->
+        val stream = streamSnapshot
+        if (stream == null) {
+            Box(Modifier.fillMaxSize().padding(innerPadding).background(LocalWorkspaceColorsPalette.current.background),
+                contentAlignment = Alignment.Center) {
+                Text(stringResource(R.string.stream_info_unavailable), color = LocalWorkspaceColorsPalette.current.textAdditional50,
+                    fontFamily = InterFontFamily, modifier = Modifier.padding(24.dp))
+            }
+            return@Scaffold
+        }
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -213,7 +220,7 @@ fun ActionButtonsRow(
 fun NotificationButtonsRow(
     viewModel: StreamInfoViewModel
 ) {
-    val stream by viewModel.stream.collectAsStateWithLifecycle()
+    val stream = viewModel.stream.collectAsStateWithLifecycle().value ?: return
     val scope = rememberCoroutineScope()
     Column {
         Row(
@@ -317,6 +324,9 @@ fun BoundUsers(
 ) {
     val streamBindings by viewModel.streamBindings.collectAsStateWithLifecycle()
     val users by viewModel.users.collectAsStateWithLifecycle()
+    val selectedServer by viewModel.client.requireUserViewModel().selectedServer.collectAsStateWithLifecycle()
+    val baseUrl = selectedServer?.takeIf { it.id == viewModel.repo.serverId }?.baseUrl.orEmpty()
+    val authHeaders = viewModel.client.authHeaders(viewModel.repo.serverId)
     Column {
         Row(
             verticalAlignment = Alignment.Bottom
@@ -349,8 +359,9 @@ fun BoundUsers(
             ) {
                 currentBindedOnlineUsers.forEach { user ->
                     UserRow(
-                        viewModel,
                         user,
+                        baseUrl,
+                        authHeaders,
                         navController
                     )
                 }
@@ -402,18 +413,35 @@ fun TopicSummary(
     }
 }
 
+internal data class UserRowStyle(
+    val name: TextStyle = TextStyle(fontSize = 14.sp, fontFamily = InterFontFamily),
+    val subtitle: TextStyle = TextStyle(fontSize = 12.sp, fontFamily = InterFontFamily),
+    val dividerColor: Color = Color.Unspecified,
+    val height: Dp? = null,
+    val contentPadding: PaddingValues = PaddingValues(0.dp),
+    val textSpacing: Dp = 0.dp,
+    val avatarInitialFontSize: TextUnit = 24.sp,
+)
+
+/** The caller supplies the server/auth snapshot; rows never resolve a different selected account. */
 @Composable
-fun UserRow(
-    viewModel: StreamInfoViewModel,
+internal fun UserRow(
     user: UserResponseData,
-    navController: NavHostController
+    baseUrl: String,
+    authHeaders: List<AuthHeader>,
+    navController: NavHostController,
+    modifier: Modifier = Modifier,
+    style: UserRowStyle = UserRowStyle(),
+    nameLeading: (@Composable () -> Unit)? = null,
+    trailing: (@Composable () -> Unit)? = null,
 ) {
-    Column {
-        val baseUrl = viewModel.client.userViewModel?.baseUrl?.collectAsState()?.value
+    val palette = LocalWorkspaceColorsPalette.current
+    Column(modifier) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
+                .then(style.height?.let { Modifier.height(it) } ?: Modifier)
                 .clickable(onClick = {
                     navController.navigate(
                         ChatFlow.ChatUserInfo(
@@ -424,42 +452,47 @@ fun UserRow(
                         )
                     )
                 })
+                .padding(style.contentPadding)
         ) {
             Avatar(
                 user.avatar,
-                baseUrl ?: "",
-                viewModel.client.authHeaders(),
+                baseUrl,
+                authHeaders,
                 null,
                 user.displayableName(),
                 Modifier
                     .padding(end = 12.dp)
-                    .size(30.dp)
+                    .size(30.dp),
+                initialFontSize = style.avatarInitialFontSize,
             )
             Column(
                 horizontalAlignment = Alignment.Start,
-                verticalArrangement = Arrangement.Center
+                verticalArrangement = Arrangement.spacedBy(style.textSpacing, Alignment.CenterVertically),
+                modifier = Modifier.weight(1f),
             ) {
-                Text(
-                    text = user.displayableName(),
-                    color = LocalWorkspaceColorsPalette.current.textHeaders,
-                    fontSize = 14.sp,
-                    fontFamily = InterFontFamily,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    nameLeading?.invoke()
+                    Text(
+                        text = user.displayableName(),
+                        color = if (style.name.color == Color.Unspecified) palette.textHeaders else style.name.color,
+                        style = style.name,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
                 Text(
                     text = user.statusDescription(),
-                    color = LocalWorkspaceColorsPalette.current.textAdditional50,
-                    fontSize = 12.sp,
-                    fontFamily = InterFontFamily,
+                    color = if (style.subtitle.color == Color.Unspecified) palette.textAdditional50 else style.subtitle.color,
+                    style = style.subtitle,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
+            trailing?.invoke()
         }
         HorizontalDivider(
             thickness = 1.dp,
-            color = LocalWorkspaceColorsPalette.current.divider
+            color = if (style.dividerColor == Color.Unspecified) palette.divider else style.dividerColor
         )
     }
 }

@@ -1,6 +1,7 @@
 package ru.genesiscorporation.workspace.beta.data.remote.dto
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.*
 import ru.genesiscorporation.workspace.beta.data.remote.ApiError
 import ru.genesiscorporation.workspace.beta.data.remote.ApiRequest
 import ru.genesiscorporation.workspace.beta.data.remote.HTTPMethod
@@ -13,20 +14,22 @@ data class EditMessageRequest(
     override val method: HTTPMethod = HTTPMethod.PUT
     override val requiresApiKey: Boolean = true
     override val url: String = "/api/workspace/v1/messenger/messages/${messageId}"
-    override val data = EditMessageRequestData(EditMessageRequestPayload("markdown", content))
+    override val data = EditMessageRequestData(MessageResponsePayload("markdown", content))
 }
 
 @Serializable
 data class EditMessageRequestData(
-    val payload: EditMessageRequestPayload
+    @Serializable(with = MessageBodyPayloadSerializer::class) val payload: MessageResponsePayload
 )
 
-@Serializable
-data class EditMessageRequestPayload(
-    val kind: String,
-    val content: String
-)
 @Serializable
 data class EditMessageResponse(
     val uuid: String
 )
+/** Ordinary edits have always included content, even when empty; service kinds omit it. */
+internal object MessageBodyPayloadSerializer : JsonTransformingSerializer<MessageResponsePayload>(MessageResponsePayload.serializer()) {
+    override fun transformSerialize(element: JsonElement): JsonElement =
+        if (element.jsonObject["kind"]?.jsonPrimitive?.content == "markdown")
+            JsonObject(element.jsonObject + ("content" to JsonPrimitive(element.jsonObject["content"]?.jsonPrimitive?.content.orEmpty())))
+        else element
+}

@@ -175,6 +175,46 @@ class AuthenticationRefreshInstrumentedTest {
     }
 
     @Test
+    fun pinnedProtectedMutationDoesNotRetryLateUnauthorizedResponseWithReplacementCredentials() = runBlocking {
+        AuthenticationTestServer(acceptedAccessToken = "new-login-access", pauseRejectedResponse = true).use { server ->
+            saveSession(server, "old-login-access", "old-login-refresh")
+            val captured = requireNotNull(repository.getServer(serverId)).copy()
+            val authentication = ProtectedRequestAuthentication("old-login-access")
+            val pending = async(Dispatchers.IO) {
+                api.performRequest(authentication.pin(ProtectedMutationProbeRequest), serverId, captured)
+            }
+            try {
+                assertTrue(withContext(Dispatchers.IO) { server.rejectedResponseStarted.await(5, TimeUnit.SECONDS) })
+                repository.saveTokensAndClearRelogin(serverId, TokenPair("new-login-access", "new-login-refresh"))
+            } finally { server.finishRejectedResponse.countDown() }
+            assertTrue(pending.await() is ApiResult.Error)
+            assertEquals(1, server.protectedRequestCount.get())
+            assertEquals(0, server.refreshRequestCount.get())
+            assertEquals("new-login-access", repository.tokensFor(serverId)?.accessToken)
+        }
+    }
+
+    @Test
+    fun verifiedOwnerStampRecoversExpiredCredentialAndUpdatesForEqualMeResponse() = runBlocking {
+        AuthenticationTestServer(acceptedAccessToken = "fresh-access").use { server ->
+            saveSession(server, "expired-access", "stored-refresh")
+            val repo = eventsStore.getOrCreate(requireNotNull(repository.getServer(serverId)))
+            repo.loadUserInfo()
+            val first = requireNotNull(repo.verifiedOwnerAuthentication.value)
+            val own = requireNotNull(repo.currentUser.value)
+            assertEquals("owner", own.uuid)
+            assertTrue(first.authentication.matchesAccessToken("fresh-access"))
+            assertEquals(1, server.refreshRequestCount.get())
+            assertEquals(2, server.ownerRequestCount.get())
+            repo.loadUserInfo()
+            assertEquals(own, repo.currentUser.value)
+            assertTrue(requireNotNull(repo.verifiedOwnerAuthentication.value).revision > first.revision)
+            assertEquals(3, server.ownerRequestCount.get())
+            assertEquals(1, server.refreshRequestCount.get())
+        }
+    }
+
+    @Test
     fun directFileTransfersUseTheStoredAccessToken() = runBlocking {
         AuthenticationTestServer(
             acceptedAccessToken = "stored-access",
@@ -532,6 +572,12 @@ private object AuthenticationProbeRequest :
     override val data = EmptyRequestData()
 }
 
+private object ProtectedMutationProbeRequest : ApiRequest<EmptyRequestData, AuthenticationProbeResponse, ApiError> {
+    override val method = HTTPMethod.POST
+    override val url = "/protected"
+    override val data = EmptyRequestData()
+}
+
 @Serializable
 private data class AuthenticationProbeResponse(val value: String)
 
@@ -539,6 +585,7 @@ private class AuthenticationTestServer(
     private val acceptedAccessToken: String,
     simultaneousRejectedRequests: Int = 0,
     private val downloadBytes: Int = 8,
+    private val pauseRejectedResponse: Boolean = false,
 ) : AutoCloseable {
     private val server = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
     private val running = AtomicBoolean(true)
@@ -546,9 +593,12 @@ private class AuthenticationTestServer(
     private val rejectedRequests = CountDownLatch(simultaneousRejectedRequests)
     val protectedRequestCount = AtomicInteger()
     val refreshRequestCount = AtomicInteger()
+    val ownerRequestCount = AtomicInteger()
     val transferRequestCount = AtomicInteger()
     val slowTransferStarted = CountDownLatch(1)
     val finishSlowTransfer = CountDownLatch(1)
+    val rejectedResponseStarted = CountDownLatch(1)
+    val finishRejectedResponse = CountDownLatch(1)
     val baseUrl = "http://127.0.0.1:${server.localPort}"
 
     init {
@@ -588,13 +638,23 @@ private class AuthenticationTestServer(
         repeat(headers["content-length"]?.toIntOrNull() ?: 0) { reader.read() }
 
         when {
-            requestLine.startsWith("GET /protected ") -> {
+            requestLine.startsWith("GET /api/workspace/v1/messenger/me/ ") -> {
+                ownerRequestCount.incrementAndGet()
+                if (headers["authorization"] == "Bearer $acceptedAccessToken")
+                    respond(it, 200, "OK", """{"username":"cassi","uuid":"owner","status":"active","avatar":""}""")
+                else respond(it, 401, "Unauthorized", """{"msg":"Unauthorized","code":"401"}""")
+            }
+            requestLine.startsWith("GET /protected ") || requestLine.startsWith("POST /protected ") -> {
                 protectedRequestCount.incrementAndGet()
                 if (headers["authorization"] == "Bearer $acceptedAccessToken") {
                     respond(it, 200, "OK", """{"value":"ok"}""")
                 } else {
                     rejectedRequests.countDown()
                     check(rejectedRequests.await(5, TimeUnit.SECONDS))
+                    if (pauseRejectedResponse) {
+                        rejectedResponseStarted.countDown()
+                        check(finishRejectedResponse.await(5, TimeUnit.SECONDS))
+                    }
                     respond(
                         it,
                         401,

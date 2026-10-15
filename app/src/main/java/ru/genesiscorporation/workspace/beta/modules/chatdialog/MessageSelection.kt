@@ -4,7 +4,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
-import ru.genesiscorporation.workspace.beta.data.remote.dto.parseCanonicalMessageUuid
+import ru.genesiscorporation.workspace.beta.data.remote.dto.parseCanonicalUuid
 
 internal const val MAX_SELECTED_MESSAGES = 50
 
@@ -13,7 +13,7 @@ internal fun canSelectMessage(
     streamUuid: String,
     topicUuid: String,
     pendingMessageUuid: String? = null,
-): Boolean = parseCanonicalMessageUuid(message.uuid) != null &&
+): Boolean = parseCanonicalUuid(message.uuid) != null &&
     message.streamUuid == streamUuid &&
     message.topicUuid == topicUuid &&
     message.uuid != pendingMessageUuid

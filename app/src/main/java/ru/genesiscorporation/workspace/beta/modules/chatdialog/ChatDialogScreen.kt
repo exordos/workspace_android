@@ -76,6 +76,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -104,6 +105,7 @@ import coil3.network.NetworkHeaders
 import coil3.network.httpHeaders
 import coil3.request.ImageRequest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.yield
 import org.jitsi.meet.sdk.JitsiMeetActivity
 import org.jitsi.meet.sdk.JitsiMeetConferenceOptions
 import ru.genesiscorporation.workspace.beta.R
@@ -120,6 +122,13 @@ import net.fellbaum.jemoji.EmojiManager
 import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.LocalBottomBarVisible
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
+import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatLockedMessage
+import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatPresentation
+import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatRequestStatus
+import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatServiceMessage
+import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatIntroduction
+import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatBackground
+import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatLinkColor
 import ru.genesiscorporation.workspace.beta.ui.AnimatedGif
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
@@ -133,9 +142,17 @@ fun ChatDialogScreen(
 ) {
     val directUser by viewModel.directUser.collectAsStateWithLifecycle()
     val stream by viewModel.stream.collectAsStateWithLifecycle()
+    val encryptedChatState by viewModel.encryptedChatState.collectAsStateWithLifecycle()
+    val protectedCallState by viewModel.protectedCallState.collectAsStateWithLifecycle()
     val streamTopicMessages by viewModel.streamTopicMessages.collectAsStateWithLifecycle()
-    val messages = streamTopicMessages["${viewModel.chatId}.${viewModel.topicUuid}"]
-        ?.distinctBy { it.uuid }
+    val messagePool by viewModel.repo.messagesPool.collectAsStateWithLifecycle()
+    val rawTopicMessages by viewModel.repo.streamTopicMessages.collectAsStateWithLifecycle()
+    val viewer by viewModel.repo.currentUser.collectAsStateWithLifecycle()
+    val history = remember(viewModel, streamTopicMessages, messagePool, rawTopicMessages, viewer?.uuid, stream?.encryption, encryptedChatState) {
+        deriveChatHistoryPresentation(streamTopicMessages["${viewModel.chatId}.${viewModel.topicUuid}"], messagePool,
+            rawTopicMessages, viewModel.chatId, stream?.encryption == true, viewer?.uuid, encryptedChatState)
+    }
+    val messages = history.orderedMessages
     val streamBindings by viewModel.streamBindings.collectAsStateWithLifecycle()
     val users by viewModel.users.collectAsStateWithLifecycle()
     val quotedMessages by viewModel.quotedMessages.collectAsState()
@@ -162,6 +179,13 @@ fun ChatDialogScreen(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val protectedCallFailureMessage = stringResource(R.string.protected_stream_call_failed)
+    LaunchedEffect(protectedCallState.error, protectedCallFailureMessage) {
+        if (protectedCallState.error != null) {
+            snackbarHostState.showSnackbar(protectedCallFailureMessage)
+            viewModel.clearProtectedCallState()
+        }
+    }
     val notifiedKeys = remember { mutableSetOf<String>() }
 
     val messageFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
@@ -200,7 +224,7 @@ fun ChatDialogScreen(
     }
     LaunchedEffect(messages?.size) {
         if (messages != null) {
-            if (messages.isNotEmpty()) {
+            if (messages.isNotEmpty() && (!hasDoneInitialScroll || viewModel.shouldScrollToBottom)) {
                 listState.scrollToItem(messages.lastIndex)
                 hasDoneInitialScroll = true
             }
@@ -226,6 +250,40 @@ fun ChatDialogScreen(
                     isScrolling -> viewModel.disableAutoScroll()
                 }
             }
+    }
+
+    LaunchedEffect(listState, viewModel) {
+        snapshotFlow {
+            val layout = listState.layoutInfo
+            layout.visibleItemsInfo.lastOrNull()
+                ?.takeIf { it.index == layout.totalItemsCount - 1 }
+                ?.let { last ->
+                    MeasuredChatBottom(
+                        last.offset,
+                        last.size,
+                        layout.viewportEndOffset - layout.afterContentPadding,
+                        listState.isScrollInProgress,
+                    )
+                }
+        }.distinctUntilChanged().collect { bottom ->
+            // Coil and decrypted Markdown can grow after their load callback.
+            // Follow the measured item, while leaving manual history scrolling alone.
+            if (bottom == null || bottom.isScrolling || !viewModel.shouldScrollToBottom ||
+                bottom.itemOffset + bottom.itemSize <= bottom.viewportEnd
+            ) return@collect
+
+            // Layout snapshots can arrive within a measure pass. A synchronous
+            // scroll would force another measure; correct only after that frame.
+            withFrameNanos { }
+            yield()
+            if (!viewModel.shouldScrollToBottom || listState.isScrollInProgress) return@collect
+            val layout = listState.layoutInfo
+            val last = layout.visibleItemsInfo.lastOrNull()
+                ?.takeIf { it.index == layout.totalItemsCount - 1 } ?: return@collect
+            val overflow = last.offset + last.size -
+                (layout.viewportEndOffset - layout.afterContentPadding)
+            if (overflow > 0) listState.scrollBy(overflow.toFloat())
+        }
     }
 
     LaunchedEffect(listState) {
@@ -269,11 +327,12 @@ fun ChatDialogScreen(
             },
             topBar = {
                 TopAppBar(
+                    modifier = if (stream?.encryption == true) Modifier.clip(RoundedCornerShape(bottomStart = 8.dp, bottomEnd = 8.dp)) else Modifier,
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = LocalWorkspaceColorsPalette.current.background,
+                        containerColor = if (stream?.encryption == true) Color(0xFF333333) else LocalWorkspaceColorsPalette.current.background,
                         titleContentColor = LocalWorkspaceColorsPalette.current.textHeaders,
                     ),
-                    expandedHeight = 60.dp,
+                    expandedHeight = if (stream?.encryption == true) 66.dp else 60.dp,
                     windowInsets = WindowInsets(0, 0, 0, 0),
                     title = {
                         Column(
@@ -300,15 +359,24 @@ fun ChatDialogScreen(
                             } else {
                                 viewModel.topicName ?: viewModel.chatTitle
                             }
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            if (stream?.encryption == true) Box(Modifier.size(width = 3.dp, height = 16.dp)
+                                .background(Color(0xFFFFCC00), RoundedCornerShape(2.dp)))
                             Text(
                                 title,
                                 color = LocalWorkspaceColorsPalette.current.textHeaders,
-                                fontSize = 16.sp,
+                                fontSize = if (stream?.encryption == true) 14.sp else 16.sp,
                                 fontFamily = InterFontFamily,
                                 fontWeight = FontWeight.Medium,
+                                modifier = if (stream?.encryption == true) Modifier.weight(1f, fill = false) else Modifier,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
+                            if (stream?.encryption == true) {
+                                Text(stringResource(R.string.encrypted_chat_title), color = EncryptedChatLinkColor,
+                                    fontSize = 12.sp, lineHeight = 16.sp, fontFamily = InterFontFamily, maxLines = 1)
+                            }
+                            }
                             val currentStreamBindings = streamBindings[viewModel.chatId]
                             val user = directUser
                             if (currentStreamBindings != null && currentStreamBindings.count() > 0) {
@@ -326,7 +394,7 @@ fun ChatDialogScreen(
                                 Text(
                                     baseText,
                                     color = LocalWorkspaceColorsPalette.current.textAdditional30,
-                                    fontSize = 14.sp,
+                                    fontSize = if (stream?.encryption == true) 12.sp else 14.sp,
                                     fontFamily = InterFontFamily,
                                 )
                             }
@@ -344,8 +412,19 @@ fun ChatDialogScreen(
                     },
                     actions = {
                         IconButton(
-                            enabled = !selectionMode,
+                            enabled = !selectionMode && (stream?.encryption != true ||
+                                (encryptedChatState.sendingKeyUuid != null && !protectedCallState.busy)),
                             onClick = {
+                                if (stream?.encryption == true) {
+                                    scope.launch {
+                                        val roomName = viewModel.createProtectedCall()
+                                        if (roomName != null) {
+                                            val options = JitsiMeetConferenceOptions.Builder()
+                                                .setServerURL(URL(viewModel.repo.jitsiServerUrl)).setRoom(roomName).build()
+                                            JitsiMeetActivity.launch(context, options)
+                                        }
+                                    }
+                                } else {
                                 val roomName = JitsiStyleRoomNameGenerator.generate()
                                 val messageText = "${viewModel.repo.jitsiServerUrl}/${roomName}"
                                 scope.launch {
@@ -357,6 +436,7 @@ fun ChatDialogScreen(
                                     .build()
 
                                 JitsiMeetActivity.launch(context, options)
+                                }
                             },
                             colors = IconButtonDefaults.iconButtonColors(
                                 containerColor = Color.Transparent,
@@ -391,6 +471,7 @@ fun ChatDialogScreen(
             val navBarHeight = 70.dp
             Box(
                 modifier = Modifier.fillMaxSize()
+                    .background(if (stream?.encryption == true) EncryptedChatBackground else LocalWorkspaceColorsPalette.current.background)
                     .padding(innerPadding)
                     .windowInsetsPadding(
                         WindowInsets.ime
@@ -402,7 +483,7 @@ fun ChatDialogScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(LocalWorkspaceColorsPalette.current.background)
+                        .background(if (stream?.encryption == true) EncryptedChatBackground else LocalWorkspaceColorsPalette.current.background)
                 ) {
                     if (isLoading) {
                         Box(
@@ -417,10 +498,18 @@ fun ChatDialogScreen(
                                 modifier = Modifier
                                     .weight(1f)
                                     .fillMaxWidth(),
-                                contentAlignment = Alignment.Center
+                                contentAlignment = if (stream?.encryption == true) Alignment.TopCenter else Alignment.Center
                             ) {
-                                Text(
-                                    text = "Сообщений нет"
+                                if (stream?.encryption == true) EncryptedChatIntroduction(
+                                    encryptedChatState.canRotate, encryptedChatState,
+                                    history.showInitialKeyRequest,
+                                    viewModel::requestEncryptionKey,
+                                ) else Text(
+                                    text = "Сообщений нет",
+                                    color = LocalWorkspaceColorsPalette.current.textAdditional50,
+                                    fontFamily = InterFontFamily,
+                                    fontSize = 14.sp,
+                                    modifier = Modifier.padding(24.dp),
                                 )
                             }
                         } else {
@@ -432,14 +521,22 @@ fun ChatDialogScreen(
                                     .padding(start = if (selectionMode) 0.dp else 16.dp, top = 0.dp, end = 16.dp, bottom = 8.dp),
                                 verticalArrangement = Arrangement.spacedBy(
                                     space = 8.dp,
-                                    alignment = Alignment.Bottom
+                                    alignment = if (stream?.encryption == true) Alignment.Top else Alignment.Bottom
                                 )
                             ) {
-                                items(items = messages.sortedBy { Instant.parse(it.createdAt) }, key = { it.uuid }) { item ->
+                                items(items = messages, key = { it.uuid }) { item ->
+                                    if (stream?.encryption == true && item.uuid == history.firstMessageUuid) {
+                                        EncryptedChatIntroduction(
+                                            encryptedChatState.canRotate, encryptedChatState,
+                                            history.showInitialKeyRequest,
+                                            viewModel::requestEncryptionKey,
+                                        )
+                                    }
                                     ChatMessage(
                                         item,
                                         viewModel,
                                         navController,
+                                        history,
                                         {
                                             if (viewModel.shouldScrollToBottom) {
                                                 scope.launch {
@@ -456,7 +553,9 @@ fun ChatDialogScreen(
                             }
                         }
                         if (!selectionMode) {
-                            SendMessageView(viewModel)
+                            if (stream != null) {
+                                SendMessageView(viewModel, canSend = stream?.encryption != true || encryptedChatState.sendingKeyUuid != null)
+                            }
                         }
                     }
                 }
@@ -476,8 +575,16 @@ fun ChatDialogScreen(
                 },
             )
         }
+
     }
 }
+
+private data class MeasuredChatBottom(
+    val itemOffset: Int,
+    val itemSize: Int,
+    val viewportEnd: Int,
+    val isScrolling: Boolean,
+)
 
 data class UserUploadMarkdownParts(
     val caption: String,
@@ -497,16 +604,19 @@ fun String.parseUserUploadMarkdownOrNull(): UserUploadMarkdownParts? {
 }
 
 @Composable
-fun ChatMessage(
+internal fun ChatMessage(
     item: MessageResponse,
     viewModel: ChatDialogViewModel,
     navController: NavHostController,
+    history: ChatHistoryPresentation,
     onImageLoad: () -> Unit,
     onForwardMessage: ((MessageResponse) -> Unit)? = null,
 ) {
     val selectedMessageUuids by viewModel.selectedMessageUuids.collectAsStateWithLifecycle()
     val selectionMode by viewModel.isSelectionMode.collectAsStateWithLifecycle()
     val deletingSelected by viewModel.deletingSelectedMessages.collectAsStateWithLifecycle()
+    val encryptedChatState by viewModel.encryptedChatState.collectAsStateWithLifecycle()
+    val encryptedPresentations by viewModel.encryptedPresentations.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val messageFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
     Column(
@@ -562,7 +672,49 @@ fun ChatMessage(
             enabled = viewModel.canSelectMessage(item) && !deletingSelected,
             onToggle = { viewModel.toggleMessageSelection(item) },
         ) {
-            if (Patterns.WEB_URL.matcher(item.payload.content)
+            val encryptedPresentation = encryptedPresentations[item.uuid]
+            if (encryptedPresentation is EncryptedChatPresentation.Locked) {
+                val keyPending = messageKeyRequestPending(encryptedPresentation.keyUuid, encryptedChatState)
+                LockedEncryptedMessageActions(item.uuid, keyPending, onRequestKey = { viewModel.requestEncryptionKeyForMessage(item) }) {
+                    EncryptedChatLockedMessage(
+                        keyUuid = encryptedPresentation.keyUuid,
+                        status = encryptedChatState.requestStatus[encryptedPresentation.keyUuid] ?: EncryptedChatRequestStatus.IDLE,
+                        invalidCiphertext = encryptedPresentation.invalidCiphertext,
+                        showRequest = false,
+                        pending = keyPending,
+                        onRequestKey = { viewModel.requestEncryptionKeyForMessage(item) },
+                    )
+                }
+            } else if (encryptedPresentation is EncryptedChatPresentation.Service) {
+                val ownRequestKey = history.requestKey(item.streamUuid, encryptedPresentation.payload.keyUuid)
+                EncryptedChatServiceMessage(
+                    payload = encryptedPresentation.payload,
+                    authorName = item.user?.displayableName() ?: stringResource(R.string.encrypted_chat_member),
+                    requestOutcome = encryptedChatState.requests.firstOrNull { it.message.uuid == item.uuid }?.outcome,
+                    canManage = encryptedChatState.canManageKeys,
+                    pending = encryptedChatState.pending,
+                    onGrant = { viewModel.grantEncryptionRequest(item.uuid) },
+                    onReject = { viewModel.rejectEncryptionRequest(item.uuid) },
+                    canGrant = encryptedChatState.localKeys.any { it.available && it.keyUuid == encryptedPresentation.payload.keyUuid },
+                    isOwnDeviceRequest = item.authorUuid == history.viewerUuid && encryptedPresentation.payload.deviceId == history.deviceId,
+                    isRecipientDevice = encryptedChatState.deviceId != null && encryptedPresentation.payload.recipientDeviceId == encryptedChatState.deviceId,
+                    hasGenerationKey = encryptedChatState.localKeys.any { it.available && it.keyUuid == encryptedPresentation.payload.keyUuid },
+                    isOwnerAnnouncement = encryptedChatState.canRotate && item.authorUuid == history.viewerUuid,
+                    hasOwnGenerationRequest = ownRequestKey != null && ownRequestKey in history.ownGenerationRequests,
+                    requestStatus = encryptedChatState.requestStatus[encryptedPresentation.payload.keyUuid] ?: EncryptedChatRequestStatus.IDLE,
+                    onRequestKey = viewModel::requestEncryptionKey,
+                    isLatestOwnGenerationRequest = ownRequestKey != null && history.latestOwnRequestUuids[ownRequestKey] == item.uuid,
+                )
+            } else if (item.payload.kind != "markdown" && item.payload.kind in setOf("e2ee", "key_request", "key_grant", "key_reject", "key_announced")) {
+                // Never flash raw ciphertext while the scoped presentation is being prepared.
+                val keyPending = messageKeyRequestPending(item.payload.keyUuid, encryptedChatState)
+                if (item.payload.kind == "e2ee") {
+                    LockedEncryptedMessageActions(item.uuid, keyPending, onRequestKey = { viewModel.requestEncryptionKeyForMessage(item) }) {
+                        EncryptedChatLockedMessage(item.payload.keyUuid.orEmpty(), EncryptedChatRequestStatus.IDLE, false,
+                            keyPending, showRequest = false, onRequestKey = { viewModel.requestEncryptionKeyForMessage(item) })
+                    }
+                } // Opaque service envelopes wait for their scoped presentation; never render them as messages.
+            } else if (Patterns.WEB_URL.matcher(item.payload.content)
                     .matches() && item.payload.content.contains(viewModel.repo.jitsiServerUrl)
             ) {
                 CallMessageView(item, viewModel, navController, onForwardMessage)

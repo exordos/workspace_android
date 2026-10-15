@@ -2,6 +2,8 @@ package ru.genesiscorporation.workspace.beta.data.remote.dto
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import ru.genesiscorporation.workspace.beta.data.remote.ApiError
 import ru.genesiscorporation.workspace.beta.data.remote.ApiRequest
 import ru.genesiscorporation.workspace.beta.data.remote.HTTPMethod
@@ -70,7 +72,9 @@ data class MessageResponse(
     @SerialName("is_own") val isOwn: Boolean,
     var reactions: Map<String, Int>,
     var read: Boolean,
-    var user: UserResponseData? = null
+    var user: UserResponseData? = null,
+    @SerialName("project_id") val projectId: String? = null,
+    @kotlinx.serialization.Transient val originalEncryptedPayload: MessageResponsePayload? = null,
 
 ) {
     private fun parseQuotedMessages(): List<QuotedMessagePart> {
@@ -104,6 +108,14 @@ data class MessageResponse(
     }
 
     fun description(forwardedLabel: String = "Forwarded message"): String {
+        if (payload.kind != "markdown") return when (payload.kind) {
+            "e2ee" -> "Зашифрованное сообщение"
+            "key_request" -> "Запрос ключа шифрования"
+            "key_grant" -> "Ключ шифрования выдан"
+            "key_reject" -> "Запрос ключа отклонён"
+            "key_announced" -> "Ключ шифрования перевыпущен"
+            else -> "Служебное сообщение"
+        }
         val snapshotHeader = authoredQuoteHeaderRegex.find(payload.content.trim())
         if (snapshotHeader?.groupValues?.get(1)?.isNotBlank() == true) return forwardedLabel
         return asQuotedMessages().lastOrNull()?.text.orEmpty().ifBlank {
@@ -112,10 +124,18 @@ data class MessageResponse(
     }
 }
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 data class MessageResponsePayload(
     val kind: String,
-    var content: String
+    @EncodeDefault(EncodeDefault.Mode.NEVER) var content: String = "",
+    @EncodeDefault(EncodeDefault.Mode.NEVER) @SerialName("key_uuid") val keyUuid: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) @SerialName("device_id") val deviceId: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) @SerialName("device_name") val deviceName: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) @SerialName("public_key") val publicKey: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) @SerialName("request_message_uuid") val requestMessageUuid: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) @SerialName("sender_device_id") val senderDeviceId: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) @SerialName("recipient_device_id") val recipientDeviceId: String? = null,
 )
 
 data class QuotedMessagePart(

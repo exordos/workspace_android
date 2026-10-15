@@ -20,7 +20,7 @@ class AddUsersToStreamRequest(
 
 @Serializable
 data class AddUsersToStreamRequestData(
-    val members: List<String>
+    @SerialName("member") val members: List<String>
 )
 @Serializable
 class AddUsersToStreamResponseData(

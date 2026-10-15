@@ -36,6 +36,30 @@ class ExternalMessageShareTest {
         assertEquals("*/*", commonShareMimeType(listOf("image/png", "application/pdf")))
     }
 
+    @Test fun `web image and file metadata materialize UUID files with the displayed labels`() = runBlocking {
+        val source = message(FIRST,
+            "Подпись\n![Макет.png](urn:image:$FILE?name=remote.png&content_type=image%2Fpng&size=123)\n" +
+                "[План.pdf](urn:file:$SECOND?name=../../private&content_type=application%2Fpdf&size=456)", "CASSI")
+        val result = materializeExternalMessages(listOf(source)) { null }
+        assertEquals(listOf(ExternalShareFile(FILE, "Макет.png"), ExternalShareFile(SECOND, "План.pdf")), result.files)
+        assertTrue(result.text.contains("Подпись"))
+        assertTrue(result.text.contains("Макет.png"))
+        assertTrue(result.text.contains("План.pdf"))
+        assertFalse(result.text.contains("urn:"))
+        assertFalse(result.text.contains("content_type"))
+        assertFalse(result.text.contains("private"))
+    }
+
+    @Test fun `unparsed malformed attachment links cannot silently become external text`() = runBlocking {
+        for (kind in listOf("image", "file")) for (reference in listOf(
+            "", "?name=missing", "1-1-1-1-1", "$FILE/../../private?size=1", "$FILE%2F..%2Fprivate?name=bad",
+        )) {
+            val source = message(FIRST, "Before [bad](urn:$kind:$reference) after", "CASSI")
+            assertTrue("Malformed $kind attachment was dropped instead of rejecting the share",
+                runCatching { materializeExternalMessages(listOf(source)) { null } }.isFailure)
+        }
+    }
+
     @Test fun `selected quote text shares only the captured snippet without resolving its source`() = runBlocking {
         var resolutions = 0
         val source = message(FIRST, "[Quoted Author](urn:quote:$FIRST?text=Selected%20excerpt%20only)", "CASSI")

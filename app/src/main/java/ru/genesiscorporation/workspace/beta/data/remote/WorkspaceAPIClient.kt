@@ -127,7 +127,8 @@ class WorkspaceAPIClient(
                 if (request.multipartParts != null) {
                     setBody(MultiPartFormDataContent(request.multipartParts.orEmpty()))
                 } else if (RequestData::class != EmptyRequestData::class) {
-                    val bodyDict = Properties.encodeToStringMap(request.data)
+                    val bodyDict = if (request.method == HTTPMethod.GET || !request.isJson)
+                        Properties.encodeToStringMap(request.data) else emptyMap()
 
                     when (request.method) {
                         HTTPMethod.GET -> {
@@ -332,10 +333,15 @@ class WorkspaceAPIClient(
     }
 
     suspend fun downloadFile(
-        path: String, destination: File
+        path: String, destination: File,
+        serverId: String? = null,
+        serverConfig: ServerConfig? = null,
     ): ApiResult<File, ApiError> {
-
-        val activeServerConfig = requireUserViewModel().selectedServer.value
+        if (serverConfig != null && serverId != null && serverConfig.id != serverId) {
+            return ApiResult.Error(ApiError("Server configuration changed", "SERVER_CHANGED"))
+        }
+        val activeServerConfig = serverConfig ?: if (serverId != null) requireUserViewModel().getServer(serverId)
+            else requireUserViewModel().selectedServer.value
         activeServerConfig ?: return ApiResult.Error(ApiError("Internal error", "INTERNAL_ERROR"))
 
         val baseUrl = activeServerConfig.baseUrl

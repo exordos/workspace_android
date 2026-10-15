@@ -91,7 +91,8 @@ import androidx.core.content.ContextCompat
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SendMessageView(
-    viewModel: ChatDialogViewModel
+    viewModel: ChatDialogViewModel,
+    canSend: Boolean = true,
 ) {
     val scope = rememberCoroutineScope()
     val uriList by viewModel.uriList.collectAsState()
@@ -330,6 +331,7 @@ fun SendMessageView(
                 }
             }
             Button(
+                enabled = canSend,
                 onClick = {
                     scope.launch {
                         viewModel.onSendClicked(context)
