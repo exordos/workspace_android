@@ -23,6 +23,23 @@ With an Android device or emulator connected, run the instrumented tests with:
 ./gradlew :app:connectedGenesisDebugAndroidTest
 ```
 
+Use the corresponding `ExordosDebug` tasks for the Exordos package. Select the
+dedicated device with `ANDROID_SERIAL` before running a connected task.
+
+`PublicationWindowTest` exercises the signed-out entry screen. Run the full
+suite in a clean test installation or a separate Android user; do not clear
+someone's saved accounts to satisfy that precondition. HTTP and repository
+tests use isolated DataStores and unique token-store IDs.
+
+`StreamMembershipInstrumentedTest` exercises creation, invitation retries,
+membership changes and user search through the production screens and HTTP
+client with three synthetic authenticated loopback accounts. It does not
+replace acceptance against an independently deployed Workspace backend.
+Snapshot/event ordering is covered by JVM `StreamMembershipStateTest` cases;
+Android tests retain the HTTP contract, delayed-response wiring and visible UI
+checks. Membership and login tests share `WorkspaceTestAccount` and the bounded
+`LoopbackWorkspaceServer` transport under the instrumented fixtures directory.
+
 ## Optimized emoji regression
 
 Debug tests cannot detect classes removed by R8. Build the release APK with

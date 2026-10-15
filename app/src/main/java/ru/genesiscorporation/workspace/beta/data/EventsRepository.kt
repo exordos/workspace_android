@@ -89,10 +89,15 @@ class EventsRepository(
     var client: WorkspaceAPIClient
 ) {
 
+    private val originalServer = config.copy()
+    internal fun matchesServerConfiguration(server: ServerConfig): Boolean =
+        server.id == serverId && server.baseUrl == originalServer.baseUrl && server.projectUuid == originalServer.projectUuid
+
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     fun close() {
         invalidateVerifiedOwnerAuthentication()
+        membership.invalidateRequests()
         scope.cancel()
     }
 
@@ -369,7 +374,7 @@ class EventsRepository(
             _streams.update { it.filterNot { stream -> stream.uuid == streamUuid } }
             val messageIds = (_messagesPool.value + _streamTopicMessages.value.values.flatten())
                 .filter { it.streamUuid == streamUuid }.map { it.uuid }.toSet()
-            _streamBindings.update { it - streamUuid }
+            membership.removeStream(streamUuid)
             _streamTopics.update { it - streamUuid }
             _topicsPool.update { it.filterNot { topic -> topic.streamUuid == streamUuid } }
             _streamTopicMessages.update { it.filterKeys { key -> !key.startsWith("$streamUuid.") } }
@@ -440,41 +445,39 @@ class EventsRepository(
         updateTopicInTopicsPool(updatedTopic)
     }
 
-    private val _streamBindings = MutableStateFlow<Map<String, List<StreamBindingResponseData>>>(emptyMap())
-    val streamBindings: StateFlow<Map<String, List<StreamBindingResponseData>>> = _streamBindings
+    private val membership = StreamMembershipState(realtimeStateLock)
+    val streamBindings: StateFlow<Map<String, List<StreamBindingResponseData>>> = membership.bindings
 
+    internal fun beginStreamBindingsRequest(streamUuid: String) = membership.beginRequest(streamUuid)
+
+    internal fun applyStreamBindingsSnapshot(request: StreamMembershipState.Request, bindings: List<StreamBindingResponseData>): Boolean =
+        membership.replaceSnapshot(request, bindings)
+
+    internal fun applyStreamBindingsResponse(request: StreamMembershipState.Request, bindings: List<StreamBindingResponseData>): Boolean =
+        membership.mergeResponse(request, bindings)
+
+    /** Immediate authoritative setup; HTTP callers must capture a request before starting I/O. */
     fun addStreamBindings(streamUuid: String, streamBindings: List<StreamBindingResponseData>) {
-        _streamBindings.update { current ->
-            current + (streamUuid to streamBindings)
-        }
-    }
-    fun addBindingToStream(streamBinding: StreamBindingResponseData) {
-        _streamBindings.update { current ->
-            if (current[streamBinding.streamUuid] != null) {
-                val existingTopics = current[streamBinding.streamUuid].orEmpty()
-                current + (streamBinding.streamUuid to (existingTopics + streamBinding))
-            } else {
-                current
-            }
-        }
+        beginStreamBindingsRequest(streamUuid).use { applyStreamBindingsSnapshot(it, streamBindings) }
     }
 
-    fun updateStreamBindings(updatedStreamBinding: StreamBindingResponseData) {
-        _streamBindings.update { current ->
-            val streamBindings = current[updatedStreamBinding.streamUuid] ?: return@update current
-            val updatedStreamBindings = streamBindings.map { streamBinding ->
-                if (streamBinding.uuid == updatedStreamBinding.uuid) {
-                    streamBinding.copy(
-                        role = updatedStreamBinding.role
-                    )
-                } else {
-                    streamBinding
-                }
-            }
+    fun addBindingToStream(streamBinding: StreamBindingResponseData) =
+        mergeStreamBindings(streamBinding.streamUuid, listOf(streamBinding))
 
-            if (updatedStreamBindings == streamBindings) return@update current
-            current + (updatedStreamBinding.streamUuid to updatedStreamBindings)
-        }
+    fun updateStreamBindings(updatedStreamBinding: StreamBindingResponseData) =
+        mergeStreamBindings(updatedStreamBinding.streamUuid, listOf(updatedStreamBinding))
+
+    fun mergeStreamBindings(streamUuid: String, bindings: List<StreamBindingResponseData>) = synchronized(realtimeStateLock) {
+        membership.upsert(streamUuid, bindings)
+        updateOwnStreamRole(streamUuid, bindings)
+    }
+
+    private fun updateOwnStreamRole(streamUuid: String, changes: List<StreamBindingResponseData> = emptyList()) {
+        val ownBinding = (membership.bindings.value[streamUuid] ?: changes)
+            .firstOrNull { it.userUuid == _currentUser.value?.uuid } ?: return
+        _streams.update { streams -> streams.map { stream ->
+            if (stream.uuid == streamUuid) stream.copy(role = ownBinding.role) else stream
+        } }
     }
 
     private val _messagesPool = MutableStateFlow<List<MessageResponse>>(emptyList())
@@ -1014,6 +1017,10 @@ class EventsRepository(
                                             didReceiveStreamEvent(payload, action)
                                         }
 
+                                        "stream_bindings", "stream_binding" -> {
+                                            didReceiveStreamBindingEvent(payload, action)
+                                        }
+
                                         "topic" -> {
                                             didReceiveTopicEvent(payload, action)
                                         }
@@ -1046,6 +1053,25 @@ class EventsRepository(
                         invalidateRealtimeCursor()
                     }
                     Log.d("WebSocket", "Disconnected: $reason")
+                }
+            }
+        }
+    }
+
+    fun didReceiveStreamBindingEvent(payload: String, action: String) {
+        when (action) {
+            "created" -> {
+                val batch = json.decodeFromString<CreatedStreamBindingsEvent>(payload)
+                mergeStreamBindings(batch.uuid, batch.items)
+            }
+            "updated" -> updateStreamBindings(json.decodeFromString<StreamBindingResponseData>(payload))
+            "deleted" -> {
+                val deleted = json.decodeFromString<DeletedStreamBindingEvent>(payload)
+                synchronized(realtimeStateLock) {
+                    membership.removeBinding(deleted.streamUuid, deleted.uuid)
+                }
+                if (deleted.userUuid == _currentUser.value?.uuid && _streams.value.any { it.uuid == deleted.streamUuid }) {
+                    removeStream(deleted.streamUuid)
                 }
             }
         }
@@ -1376,6 +1402,16 @@ internal fun isExpiredRealtimeCursorFrame(frame: JsonObject): Boolean =
 data class PongMessage(
     val type: String,
     val ts: String
+)
+
+@Serializable
+private data class CreatedStreamBindingsEvent(val uuid: String, val items: List<StreamBindingResponseData>)
+
+@Serializable
+private data class DeletedStreamBindingEvent(
+    val uuid: String,
+    @SerialName("stream_uuid") val streamUuid: String,
+    @SerialName("user_uuid") val userUuid: String,
 )
 
 @Serializable

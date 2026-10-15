@@ -11,14 +11,15 @@ class EventsRepositoryStore(
     private val repos = mutableMapOf<String, EventsRepository>()
     @Synchronized
     fun getOrCreate(config: ServerConfig): EventsRepository {
-        return repos.getOrPut(config.id) {
-            EventsRepository(config.id, config, tokenStore, client)
+        repos[config.id]?.let { existing ->
+            if (existing.matchesServerConfiguration(config)) return existing
+            existing.close()
         }
+        return EventsRepository(config.id, config.copy(), tokenStore, client).also { repos[config.id] = it }
     }
 
     @Synchronized
     fun getOrCreateForId(serverId: String, configs: List<ServerConfig>): EventsRepository? {
-        repos[serverId]?.let { return it }
         val config = configs.find { it.id == serverId } ?: return null
         return getOrCreate(config)
     }

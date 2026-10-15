@@ -308,16 +308,16 @@ class ChatViewModel(
 
     suspend fun loadStreamBindings(stream: Stream) {
         _topicsQueryState.value = QueryState.Loading
-        val streamBindingsResponse = client.performRequest(StreamBindingsRequest(stream.uuid))
-        when(streamBindingsResponse) {
-            is ApiResult.Success -> {
-                eventsRepo.value?.addStreamBindings(stream.uuid, streamBindingsResponse.value)
-                loadTopics(stream)
-            }
-            is ApiResult.Error -> {
-                loadTopics(stream)
+        val repo = eventsRepo.value ?: return
+        val server = client.requireUserViewModel().selectedServer.value?.copy() ?: return
+        if (!repo.matchesServerConfiguration(server)) return
+        repo.beginStreamBindingsRequest(stream.uuid).use { request ->
+            when (val response = client.performRequest(StreamBindingsRequest(stream.uuid), server.id, server)) {
+                is ApiResult.Success -> repo.applyStreamBindingsSnapshot(request, response.value)
+                is ApiResult.Error -> Unit
             }
         }
+        loadTopics(stream)
     }
 
     suspend fun loadTopics(stream: Stream) {

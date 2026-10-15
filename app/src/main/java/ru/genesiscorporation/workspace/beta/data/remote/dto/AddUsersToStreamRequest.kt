@@ -9,10 +9,10 @@ import ru.genesiscorporation.workspace.beta.data.remote.HTTPMethod
 class AddUsersToStreamRequest(
     val streamUuid: String,
     val members: List<String>
-): ApiRequest<AddUsersToStreamRequestData, AddUsersToStreamResponseData, ApiError> {
+): ApiRequest<AddUsersToStreamRequestData, List<StreamBindingResponseData>, ApiError> {
     override val method: HTTPMethod = HTTPMethod.POST
     override val requiresApiKey: Boolean = true
-    override val url: String = "/api/workspace/v1/messenger/streams/${streamUuid}/actions/add_users/invoke"
+    override val url: String = "/api/workspace/v1/messenger/streams/${canonicalStreamId(streamUuid)}/actions/add_users/invoke"
     override val data = AddUsersToStreamRequestData(
         members
     )
@@ -21,7 +21,4 @@ class AddUsersToStreamRequest(
 @Serializable
 data class AddUsersToStreamRequestData(
     @SerialName("member") val members: List<String>
-)
-@Serializable
-class AddUsersToStreamResponseData(
 )

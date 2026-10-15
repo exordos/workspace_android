@@ -751,13 +751,12 @@ class ChatDialogViewModel(
     }
 
     suspend fun loadStreamBindings() {
-        val streamBindingsResponse = client.performRequest(StreamBindingsRequest(chatId))
-        when(streamBindingsResponse) {
-            is ApiResult.Success -> {
-                repo.addStreamBindings(chatId, streamBindingsResponse.value)
-            }
-            is ApiResult.Error -> {
-
+        val server = client.requireUserViewModel().selectedServer.value?.copy() ?: return
+        if (!repo.matchesServerConfiguration(server)) return
+        repo.beginStreamBindingsRequest(chatId).use { request ->
+            when (val response = client.performRequest(StreamBindingsRequest(chatId), server.id, server)) {
+                is ApiResult.Success -> repo.applyStreamBindingsSnapshot(request, response.value)
+                is ApiResult.Error -> Unit
             }
         }
     }

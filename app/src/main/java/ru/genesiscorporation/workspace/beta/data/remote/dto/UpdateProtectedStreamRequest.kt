@@ -29,7 +29,7 @@ class DeleteProtectedStreamRequest(streamUuid: String) : ApiRequest<EmptyRequest
     override val data = EmptyRequestData()
 }
 
-private fun canonicalStreamId(value: String): String {
+internal fun canonicalStreamId(value: String): String {
     require(value == value.trim()) { "Invalid stream identifier" }
     return requireNotNull(parseCanonicalUuid(value)) { "Invalid stream identifier" }
 }
