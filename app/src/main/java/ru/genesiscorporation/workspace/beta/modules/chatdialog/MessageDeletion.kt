@@ -12,7 +12,7 @@ import kotlinx.coroutines.sync.withLock
 import ru.genesiscorporation.workspace.beta.data.remote.ApiError
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
-import ru.genesiscorporation.workspace.beta.data.remote.dto.parseCanonicalMessageUuid
+import ru.genesiscorporation.workspace.beta.data.remote.dto.parseCanonicalUuid
 import ru.genesiscorporation.workspace.beta.R
 import java.util.concurrent.atomic.AtomicLong
 
@@ -29,7 +29,7 @@ internal fun canDeleteMessage(
     topicUuid: String,
     pendingMessageUuid: String? = null,
 ): Boolean = message.isOwn &&
-    parseCanonicalMessageUuid(message.uuid) != null &&
+    parseCanonicalUuid(message.uuid) != null &&
     message.streamUuid == streamUuid &&
     message.topicUuid == topicUuid &&
     message.uuid != pendingMessageUuid

@@ -106,11 +106,11 @@ class CreationBaseViewModelFactory(private val eventsRepositoryStore: EventsRepo
     }
 }
 
-class CreateStreamViewModelFactory(private val client: WorkspaceAPIClient, private val eventsRepositoryStore: EventsRepositoryStore) : ViewModelProvider.Factory {
+class CreateStreamViewModelFactory(private val client: WorkspaceAPIClient, private val eventsRepositoryStore: EventsRepositoryStore, private val context: android.content.Context? = null) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(CreateStreamViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return CreateStreamViewModel(client, eventsRepositoryStore) as T
+            return CreateStreamViewModel(client, eventsRepositoryStore, context) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
@@ -191,7 +191,7 @@ class ChatDialogViewModelFactory(private val client: WorkspaceAPIClient, private
     }
 }
 
-class StreamInfoViewModelFactory(private val client: WorkspaceAPIClient, private val streamUuid: String, private val topicUuid: String, private  val eventsRepositoryStore: EventsRepositoryStore) : ViewModelProvider.Factory {
+class StreamInfoViewModelFactory(private val client: WorkspaceAPIClient, private val streamUuid: String, private val topicUuid: String, private  val eventsRepositoryStore: EventsRepositoryStore, private val context: android.content.Context? = null) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(StreamInfoViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
@@ -199,7 +199,8 @@ class StreamInfoViewModelFactory(private val client: WorkspaceAPIClient, private
                 streamUuid,
                 topicUuid,
                 client,
-                eventsRepositoryStore
+                eventsRepositoryStore,
+                context,
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")

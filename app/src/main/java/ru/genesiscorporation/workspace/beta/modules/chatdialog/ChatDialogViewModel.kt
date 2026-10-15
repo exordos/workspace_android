@@ -13,6 +13,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.CancellationException
+import ru.genesiscorporation.workspace.beta.modules.encryptedchat.*
+import ru.genesiscorporation.workspace.beta.modules.streaminfo.ProtectedCallStarter
+import ru.genesiscorporation.workspace.beta.modules.streaminfo.currentProtectedStreamContext
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
@@ -23,6 +27,9 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
 import kotlinx.serialization.Serializable
+import ru.genesiscorporation.workspace.beta.R
+import java.util.UUID
+import java.security.MessageDigest
 import ru.genesiscorporation.workspace.beta.UserViewModel
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
 import ru.genesiscorporation.workspace.beta.data.EventsRepositoryStore
@@ -33,6 +40,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.AddMessageReactionRe
 import ru.genesiscorporation.workspace.beta.data.remote.dto.DeleteDraftRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.DeleteMessageRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Draft
+import ru.genesiscorporation.workspace.beta.data.remote.dto.parseCanonicalUuid
 import ru.genesiscorporation.workspace.beta.data.remote.dto.EditMessageRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MarkMessagesReadRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MarkMessagesReadUpToRequest
@@ -75,8 +83,63 @@ class ChatDialogViewModel(
 ): ViewModel() {
     val repo = eventsRepositoryStore.get(client.getCurrentServerId()) ?: error("Cannot get current event repository")
     
-    val streamTopicMessages: StateFlow<Map<String, List<MessageResponse>>> = repo.streamTopicMessages
-        .stateIn(
+    internal val encryptionRuntime = EncryptedChatRuntime(storage.context, client, repo, viewModelScope, chatId, topicUuid)
+    val encryptedChatState = encryptionRuntime.state
+    val encryptedPresentations = encryptionRuntime.presentations
+    private val protectedCallStarter = ProtectedCallStarter(
+        currentContext = { currentProtectedStreamContext(client, repo, chatId) },
+        serverUrl = { repo.jitsiServerUrl },
+        topicUuid = topicUuid,
+        createRoom = { JitsiStyleRoomNameGenerator.generate() + "-" + UUID.randomUUID().toString() },
+        sendEncrypted = { _, link, canonical -> encryptionRuntime.sendText(link, topicUuid, canonical) },
+    )
+    val protectedCallState = protectedCallStarter.state
+    suspend fun createProtectedCall(): String? = protectedCallStarter.createCall()
+    fun clearProtectedCallState() = protectedCallStarter.clearStatus()
+    private fun encryptionAction(block: suspend () -> Unit) { viewModelScope.launch {
+        try { block() } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { }
+    } }
+    fun requestEncryptionKey(keyUuid: String) = encryptionAction {
+        val recovery = repo.streamTopicMessages.value.values.flatten().firstOrNull {
+            it.streamUuid == chatId && it.payload.keyUuid == keyUuid && it.payload.kind == "e2ee" &&
+                (encryptedPresentations.value[it.uuid] as? EncryptedChatPresentation.Locked)?.invalidCiphertext == true
+        }
+        encryptionRuntime.requestKey(keyUuid, recovery)
+    }
+    fun requestEncryptionKeyForMessage(message: MessageResponse) = encryptionAction {
+        // Resolve the current wire snapshot by message UUID rather than using a plaintext projection.
+        val raw = (repo.streamTopicMessages.value["$chatId.$topicUuid"].orEmpty() + repo.messagesPool.value)
+            .firstOrNull { it.uuid == message.uuid && it.streamUuid == chatId && it.topicUuid == topicUuid && it.payload.kind == "e2ee" }
+            ?: return@encryptionAction
+        val target = encryptedMessageKeyTarget(raw, chatId, topicUuid, userViewModel.selectedServer.value?.projectUuid)
+            ?: return@encryptionAction
+        if (messageKeyRequestPending(target.keyUuid, encryptedChatState.value)) return@encryptionAction
+        encryptionRuntime.requestKey(target.keyUuid, target.rawMessage)
+    }
+    fun grantEncryptionRequest(uuid: String) = encryptionAction { encryptionRuntime.grantKey(uuid) }
+    fun rejectEncryptionRequest(uuid: String) = encryptionAction { encryptionRuntime.rejectKey(uuid) }
+    fun grantAllEncryptionRequests() = encryptionAction { encryptionRuntime.grantAllKeys() }
+    fun rotateEncryptionKey() = encryptionAction { encryptionRuntime.rotate() }
+    fun deleteEncryptionKeys(keys: Set<String>) = encryptionAction {
+        clearMessageSelection()
+        quoteResolver.reset()
+        _quotedMessages.value = emptyList()
+        _currentQuotedMessage.value = null
+        if (editingMessage != null) clearEditingMessage()
+        keys.forEach { encryptionRuntime.removeLocalKey(it) }
+    }
+    fun clearEncryptedError() = encryptionRuntime.clearError()
+
+    val streamTopicMessages: StateFlow<Map<String, List<MessageResponse>>> = combine(
+        repo.streamTopicMessages, encryptedPresentations,
+    ) { conversations, presentations ->
+        conversations.mapValues { (_, messages) -> messages.map { message ->
+            val presentation = presentations[message.uuid]
+            if (message.streamUuid == chatId && presentation is EncryptedChatPresentation.Text)
+                message.copy(payload = MessageResponsePayload("markdown", presentation.text), originalEncryptedPayload = message.payload.copy())
+            else message
+        } }
+    }.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = emptyMap()
@@ -120,15 +183,31 @@ class ChatDialogViewModel(
         )
 
     private var possibleMessage: MessageResponse? = null
+    private var encryptedSendIntent: Pair<String, String>? = null
+    private val uploadedAttachments = mutableMapOf<String, ru.genesiscorporation.workspace.beta.data.remote.dto.UploadFileResponseData>()
+
 
     internal val forwardSession = ForwardSessionStore()
 
     private val quoteResolver = MessageQuoteResolver(
         scope = viewModelScope,
-        request = { client.performRequest(MessagesByIdsRequest(it)) },
+        request = { ids ->
+            when (val response = client.performRequest(MessagesByIdsRequest(ids))) {
+                is ApiResult.Success -> ApiResult.Success(response.value.mapNotNull { quoted -> presentQuote(quoted) })
+                is ApiResult.Error -> response
+            }
+        },
     )
     internal val quoteStates: StateFlow<Map<String, MessageQuoteState>> = quoteResolver.states
 
+    private suspend fun presentQuote(message: MessageResponse): MessageResponse? {
+        if (message.payload.kind == "markdown") return message
+        if (message.payload.kind != "e2ee" || message.streamUuid != chatId) return null
+        return when (val text = encryptionRuntime.presentation(message)) {
+            is EncryptedChatPresentation.Text -> message.copy(payload = MessageResponsePayload("markdown", text.text), originalEncryptedPayload = message.payload.copy())
+            else -> null
+        }
+    }
     fun loadQuotedMessages(messageUuids: Collection<String>) = quoteResolver.load(messageUuids)
 
     fun retryQuotedMessage(messageUuid: String) = quoteResolver.retry(messageUuid)
@@ -175,7 +254,7 @@ class ChatDialogViewModel(
 
     init {
         viewModelScope.launch {
-            repo.streamTopicMessages.collect { conversations ->
+            streamTopicMessages.collect { conversations ->
                 conversations["$chatId.$topicUuid"]?.let(messageSelection::refreshMessages)
             }
         }
@@ -187,7 +266,20 @@ class ChatDialogViewModel(
             }
         }
         viewModelScope.launch {
-            repo.messageUpdatedEvents.collect(quoteResolver::update)
+            repo.streamDeletedEvents.collect { streamUuid ->
+                quoteResolver.reset() // Also reject late lookups for uncached cross-chat sources.
+                if (editingMessage?.streamUuid == streamUuid) clearEditingMessage()
+                _quotedMessages.value.filter { it.message.streamUuid == streamUuid }.forEach(::clearQuotingMessage)
+                selectedMessages().filter { it.streamUuid == streamUuid }.forEach { messageSelection.removeMessage(it.uuid) }
+                if (streamUuid == chatId) {
+                    mentions.setText("")
+                    _uriList.value = emptyList()
+                    uploadedAttachments.clear()
+                }
+            }
+        }
+        viewModelScope.launch {
+            repo.messageUpdatedEvents.collect { message -> presentQuote(message)?.let(quoteResolver::update) ?: quoteResolver.invalidate(message.uuid) }
         }
         viewModelScope.launch {
             var accountIdentity: Pair<String?, String?>? = null
@@ -263,6 +355,7 @@ class ChatDialogViewModel(
 
     override fun onCleared() {
         onChatClosed()
+        encryptionRuntime.close()
         super.onCleared()
     }
     var editingMessage: MessageResponse? = null
@@ -434,17 +527,28 @@ class ChatDialogViewModel(
     }
 
     suspend fun onSendClicked(context: Context) {
-        val text = mentions.text
-        val messageId = editingMessage?.uuid
-        if (messageId != null && !text.isBlank()) {
-            sendEditMessage(messageId, mentions.text)
-        } else {
-            sendMessage(context)
+        try {
+            val text = mentions.text
+            val messageId = editingMessage?.uuid
+            if (messageId != null && text.isNotBlank()) sendEditMessage(messageId, text)
+            else sendMessage(context)
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (error: Exception) {
+            if (repo.streams.value.firstOrNull { it.uuid == chatId }?.encryption == true)
+                messageDeletion.showActionError(R.string.encrypted_chat_error)
+            else throw error
         }
     }
 
     suspend fun sendMessage(context: Context) {
         val attachmentList = _uriList.value
+        val currentStream = repo.streams.value.firstOrNull { it.uuid == chatId }
+        if (currentStream == null) { messageDeletion.showActionError(R.string.chat_send_unavailable); return }
+        val encrypted = currentStream.encryption
+        if (encrypted && encryptionRuntime.readySession().state.value.sendingKeyUuid == null) {
+            messageDeletion.showActionError(R.string.encrypted_chat_error)
+            return
+        }
         var messageText = ""
         val baseText = if (quotedMessages.value.isEmpty()) {
             mentions.text
@@ -457,13 +561,17 @@ class ChatDialogViewModel(
         }
         var attachmentsSuffix = ""
         for (attachment in attachmentList) {
-            val response = client.uploadStreamFile(attachment.fileName, context, attachment.uri, chatId)
+            val attachmentKey = "${attachment.uri}:${attachment.fileName}:${attachment.type}"
+            val response = uploadedAttachments[attachmentKey]?.let { ApiResult.Success(it) }
+                ?: client.uploadStreamFile(attachment.fileName, context, attachment.uri, chatId)
             when(response) {
                 is ApiResult.Success -> {
-                    attachmentsSuffix += "[${response.value.name}](urn:${attachment.type}:${response.value.uuid})\n\n"
+                    if (encrypted) uploadedAttachments[attachmentKey] = response.value
+                    val label = escapeAttachmentLabel(response.value.name)
+                    attachmentsSuffix += "[$label](urn:${attachment.type}:${response.value.uuid})\n\n"
                 }
                 is ApiResult.Error -> {
-
+                    if (encrypted) { messageDeletion.showActionError(R.string.encrypted_chat_error); return }
                 }
             }
         }
@@ -478,6 +586,26 @@ class ChatDialogViewModel(
 
     @OptIn(ExperimentalUuidApi::class)
     suspend fun sendTextMessage(messageText: String) {
+        val currentStream = repo.streams.value.firstOrNull { it.uuid == chatId }
+        if (currentStream == null) { messageDeletion.showActionError(R.string.chat_send_unavailable); return }
+        if (currentStream.encryption) {
+            try {
+                val digest = MessageDigest.getInstance("SHA-256").digest(messageText.toByteArray()).joinToString("") { "%02x".format(it) }
+                val intent = encryptedSendIntent?.takeIf { it.first == digest }
+                    ?: (digest to UUID.randomUUID().toString()).also { encryptedSendIntent = it }
+                encryptionRuntime.sendText(messageText, canonicalUuid = intent.second)
+                encryptedSendIntent = null
+                uploadedAttachments.clear()
+                mentions.setText("")
+                _uriList.value = emptyList()
+                editingMessage = null
+                _editingMessageBackupText.value = null
+                _currentQuotedMessage.value = null
+                _quotedMessages.value = emptyList()
+                deleteCurrentTopicDraftIfNeeded()
+            } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { }
+            return
+        }
         val userId = repo.currentUser.value?.uuid
         val uuid: Uuid = Uuid.random()
         var newMessage = MessageResponse(
@@ -543,6 +671,17 @@ class ChatDialogViewModel(
     }
 
     suspend fun sendEditMessage(messageUuid: String, messageText: String) {
+        val currentStream = repo.streams.value.firstOrNull { it.uuid == chatId }
+        if (currentStream == null) { messageDeletion.showActionError(R.string.chat_send_unavailable); return }
+        if (currentStream.encryption || editingMessage?.originalEncryptedPayload != null) {
+            try {
+                encryptionRuntime.editText(messageUuid, messageText)
+                editingMessage = null
+                _editingMessageBackupText.value = null
+                mentions.setText("")
+            } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { }
+            return
+        }
         val editMessageRequest = EditMessageRequest(messageUuid, messageText)
         val response = client.performRequest(editMessageRequest)
         when(response) {
@@ -560,6 +699,28 @@ class ChatDialogViewModel(
     }
 
     init {
+        viewModelScope.launch {
+            combine(userViewModel.selectedServer, userViewModel.accessToken, repo.currentUser, repo.streams) { _, _, _, _ -> Unit }
+                .collect { protectedCallStarter.onContextChanged() }
+        }
+        viewModelScope.launch {
+            encryptedChatState.map { state -> state.localKeys.map { it.keyUuid }.toSet() to state.error }
+                .distinctUntilChanged().collect { (available, error) ->
+                    quoteResolver.reset()
+                    if (error == EncryptedChatFailure.STALE) {
+                        mentions.setText("")
+                        _uriList.value = emptyList()
+                        uploadedAttachments.clear()
+                        _currentQuotedMessage.value = null
+                    }
+                    val unavailable: (MessageResponse) -> Boolean = { message ->
+                        message.originalEncryptedPayload?.keyUuid?.let { it !in available } == true || error == EncryptedChatFailure.STALE
+                    }
+                    if (editingMessage?.let(unavailable) == true) clearEditingMessage()
+                    _quotedMessages.value.filter { unavailable(it.message) }.forEach(::clearQuotingMessage)
+                    selectedMessages().filter(unavailable).forEach { messageSelection.removeMessage(it.uuid) }
+                }
+        }
         _isLoading.value = true
         loadHistoryIfNeeded()
         viewModelScope.launch {
@@ -567,7 +728,7 @@ class ChatDialogViewModel(
                 loadStreamBindings()
             }
             val draft = drafts.value.firstOrNull { it.streamUuid == chatId && it.topicUuid == topicUuid }
-            if (draft != null) {
+            if (draft != null && repo.streams.value.firstOrNull { it.uuid == chatId }?.encryption != true) {
                 mentions.setText(draft.payload.content)
             }
         }
@@ -695,9 +856,18 @@ data class AttachedUri(
 )
 
 object MarkdownPayloadParser {
-    private val imageRegex = Regex("""!?\[((?:\\.|[^\]\\])*)\]\(urn:image:([^)]+)\)""")
-    private val fileRegex = Regex("""\[((?:\\.|[^\]\\])*)\]\(urn:file:([^)]+)\)""")
+    private val imageRegex = Regex("""!?\[((?:\\.|[^\]\\])*)\]\(urn:image:([^)]*)\)""")
+    private val fileRegex = Regex("""\[((?:\\.|[^\]\\])*)\]\(urn:file:([^)]*)\)""")
     private val quoteRegex = Regex("""\[((?:\\.|[^\]\\])*)\]\(urn:quote:([0-9a-fA-F-]{36})(?:\?text=([^\s)&#]+))?\)""")
+
+    // Web attachment URNs carry optional name/content_type/size query metadata.
+    // The download API accepts only the UUID; metadata must never become a path.
+    private fun attachmentUuid(reference: String): String? = reference.substringBefore('?')
+        .takeIf { it == it.trim() && parseCanonicalUuid(it) != null }
+
+    internal fun hasInvalidAttachmentReference(content: String): Boolean = sequenceOf(imageRegex, fileRegex)
+        .any { regex -> regex.findAll(content).any { attachmentUuid(it.groupValues[2]) == null } }
+
     fun parse(content: String): List<MessageElement> {
         val input = content.trim()
         if (input.isEmpty()) return emptyList()
@@ -730,8 +900,8 @@ object MarkdownPayloadParser {
     private fun findNextSpecial(input: String, fromIndex: Int): SpecialMatch? {
         var searchIndex = fromIndex
         while (searchIndex < input.length) {
-            val image = imageRegex.find(input, searchIndex)
-            val file = fileRegex.find(input, searchIndex)
+            val image = imageRegex.findAll(input, searchIndex).firstOrNull { attachmentUuid(it.groupValues[2]) != null }
+            val file = fileRegex.findAll(input, searchIndex).firstOrNull { attachmentUuid(it.groupValues[2]) != null }
             val quote = quoteRegex.find(input, searchIndex)
             val candidates = listOfNotNull(
                 findSnapshotQuote(input, searchIndex),
@@ -741,7 +911,7 @@ object MarkdownPayloadParser {
                         end = it.range.last + 1,
                         element = MessageElement.Image(
                             fileName = it.groupValues[1].replace(Regex("""\\(.)"""), "$1"),
-                            uuid = it.groupValues[2],
+                            uuid = requireNotNull(attachmentUuid(it.groupValues[2])),
                         ),
                     )
                 },
@@ -751,7 +921,7 @@ object MarkdownPayloadParser {
                         end = it.range.last + 1,
                         element = MessageElement.File(
                             fileName = it.groupValues[1].replace(Regex("""\\(.)"""), "$1"),
-                            uuid = it.groupValues[2],
+                            uuid = requireNotNull(attachmentUuid(it.groupValues[2])),
                         ),
                     )
                 },

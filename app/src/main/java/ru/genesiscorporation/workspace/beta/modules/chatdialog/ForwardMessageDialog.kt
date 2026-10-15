@@ -65,14 +65,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.UserViewModel
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
+import ru.genesiscorporation.workspace.beta.data.remote.ApiError
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ForwardMessageRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
+import ru.genesiscorporation.workspace.beta.data.remote.dto.SendMessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesByIdsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamsRequest
@@ -82,6 +85,9 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
+import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatException
+import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatFailure
+import ru.genesiscorporation.workspace.beta.modules.encryptedchat.encryptedMessagePlacementUuid
 
 @Composable
 internal fun ForwardMessagesDialog(
@@ -97,6 +103,7 @@ internal fun ForwardMessagesDialog(
     val scope = rememberCoroutineScope()
     val colors = LocalWorkspaceColorsPalette.current
     val baseUrl by userViewModel.baseUrl.collectAsStateWithLifecycle()
+    val selectedServer by userViewModel.selectedServer.collectAsStateWithLifecycle()
     val currentUser by repo.currentUser.collectAsStateWithLifecycle()
     val cachedTopics by repo.streamTopics.collectAsStateWithLifecycle()
     val cachedBindings by repo.streamBindings.collectAsStateWithLifecycle()
@@ -112,23 +119,60 @@ internal fun ForwardMessagesDialog(
     var selectedFolder by remember { mutableStateOf<String?>(null) }
     var destination by remember { mutableStateOf<ForwardDestination?>(null) }
     var destinationLabel by remember { mutableStateOf("") }
-    val currentUserUuid = currentUser?.uuid ?: userViewModel.userData?.uuid.orEmpty()
-    val owner = "$baseUrl|$currentUserUuid"
+    val currentUserUuid = currentUser?.uuid.orEmpty()
+    val owner = "${repo.serverId}|$baseUrl|${selectedServer?.projectUuid.orEmpty()}|$currentUserUuid"
     val forwarding = remember(sources, client, owner, sessionStore) {
         sessionStore.getOrCreate(owner) {
-        val preparation = createForwardPreparation(context, sources, client, currentUserUuid)
+        val encryptedAccess = ForwardEncryptedAccess(context, client, repo, currentUserUuid)
+        val preparation = createForwardPreparation(context, sources, client, currentUserUuid, repo, encryptedAccess)
+        val encryptedDestinations = mutableMapOf<String, Boolean>()
         MessageForwarding(
             sources = sources,
             currentUserUuid = currentUserUuid,
             post = { uuid, target, markdown ->
-                client.performRequest(ForwardMessageRequest(uuid, target.streamUuid, target.topicUuid, markdown))
+                encryptedAccess.requireCurrent()
+                val stream = repo.streams.value.firstOrNull { it.uuid == target.streamUuid }
+                    ?: streams.firstOrNull { it.uuid == target.streamUuid }
+                    ?: throw ForwardPreparationFailure(R.string.forward_destination_unavailable)
+                encryptedDestinations[target.streamUuid] = stream.encryption
+                if (stream.encryption) {
+                    try {
+                        val raw = encryptedAccess.send(target, uuid, markdown)
+                        ApiResult.Success(SendMessageResponse(raw.uuid, raw.topicUuid))
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (failure: EncryptedChatException) {
+                        when (failure.failure) {
+                            EncryptedChatFailure.MISSING_KEY -> throw ForwardPreparationFailure(R.string.encrypted_chat_key_unavailable)
+                            EncryptedChatFailure.FORBIDDEN -> throw ForwardPreparationFailure(R.string.forward_chat_forbidden)
+                            else -> ApiResult.Error(ApiError("Cannot confirm encrypted forwarding", "REQUEST_FAILED"))
+                        }
+                    }
+                } else {
+                    client.performRequest(ForwardMessageRequest(uuid, target.streamUuid, target.topicUuid, markdown),
+                        encryptedAccess.serverId, encryptedAccess.config).also { encryptedAccess.requireCurrent(uncertain = true) }
+                }
             },
-            read = { client.performRequest(MessagesByIdsRequest(listOf(it))) },
+            read = {
+                encryptedAccess.requireCurrent()
+                client.performRequest(MessagesByIdsRequest(listOf(it)), encryptedAccess.serverId, encryptedAccess.config)
+                    .also { encryptedAccess.requireCurrent() }
+            },
             onConfirmed = {
                 repo.addMessageToStreamTopic(it)
                 repo.updateMessagesPool(listOf(it))
             },
             prepare = preparation::prepare,
+            verificationUuid = { canonical, target ->
+                if (encryptedDestinations[target.streamUuid] == true) encryptedMessagePlacementUuid(target.topicUuid, canonical)
+                else canonical
+            },
+            verifyContent = { raw, target, expected ->
+                when (encryptedDestinations[target.streamUuid]) {
+                    true -> raw.payload.kind == "e2ee" && encryptedAccess.present(raw).payload.content == expected
+                    false -> raw.payload.kind == "markdown" && raw.payload.content == expected
+                    null -> false
+                }
+            },
         )
         }
     }

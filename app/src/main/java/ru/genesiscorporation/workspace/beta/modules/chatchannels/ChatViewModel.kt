@@ -1,5 +1,6 @@
 package ru.genesiscorporation.workspace.beta.modules.chatchannels
 
+import android.content.Context
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -16,12 +17,23 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.filter
 import kotlinx.serialization.Serializable
 import ru.genesiscorporation.workspace.beta.UserViewModel
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
+import ru.genesiscorporation.workspace.beta.data.ConfirmedAccountContext
+import ru.genesiscorporation.workspace.beta.data.confirmedAccountContext
 import ru.genesiscorporation.workspace.beta.data.EventsRepositoryStore
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
+import ru.genesiscorporation.workspace.beta.data.crypto.ChatKeyStorage
+import ru.genesiscorporation.workspace.beta.data.crypto.EncryptedChatKeyStore
+import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatRuntime
 import ru.genesiscorporation.workspace.beta.data.remote.dto.AddChatToFolderRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.AddFolderRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.AddStreamRequest
@@ -80,6 +92,81 @@ class ChatViewModel(
     ) { id, servers ->
         id?.let { eventsRepositoryStore.getOrCreateForId(it, servers) }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    @Volatile private var previewContext: Context? = null
+    @Volatile private var previewStorage: ChatKeyStorage? = null
+    private val previewRowCounts = mutableMapOf<String, Int>()
+    private val previewRows = MutableStateFlow<Set<String>>(emptySet())
+    private val previewAttached = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    private val previewCacheLock = Any()
+    private var previewCacheKey: List<Any?>? = null
+    private var previewCache: EncryptedPreviewSnapshot? = null
+    private val previewProjector = EncryptedChatListPreviewProjector(::previewSnapshot, {
+        previewStorage ?: EncryptedChatKeyStore(requireNotNull(previewContext)).also { previewStorage = it }
+    })
+    val encryptedPreviews: StateFlow<Map<String, EncryptedChatListPreview>> = previewProjector.previews
+    private var previewRefresh: Job? = null
+    private val previewObserver = viewModelScope.launch {
+        merge(
+            eventsRepo.flatMapLatest { repo -> if (repo == null) flowOf(Unit) else merge(
+                repo.streams.map { Unit }, repo.currentUser.map { Unit }, repo.messagesPool.map { Unit }, repo.streamBindings.map { Unit },
+                repo.streamTopicMessages.map { Unit }, repo.users.map { Unit }, repo.verifiedOwnerAuthentication.map { Unit }) },
+            userViewModel.selectedServer.map { Unit }, userViewModel.selectedServerId.map { Unit },
+            userViewModel.accessToken.map { Unit }, previewRows.map { Unit }, previewAttached,
+            EncryptedChatRuntime.localKeyChanges.filter(previewProjector::affectedBy).map { Unit },
+            ConfirmedAccountContext.invalidations.filter { previewProjector.accountChanged() }.map { Unit },
+        ).collect {
+            previewProjector.invalidate()
+            previewRefresh?.cancel()
+            if (previewContext != null && previewRows.value.isNotEmpty()) previewRefresh = launch {
+                try { previewProjector.refresh() }
+                catch (cancelled: CancellationException) { throw cancelled }
+            }
+        }
+    }
+
+    fun attachEncryptedPreviews(context: Context) {
+        if (previewContext == null) { previewContext = context.applicationContext; previewAttached.tryEmit(Unit) }
+    }
+
+    fun showEncryptedPreview(streamUuid: String, visible: Boolean) {
+        val count = (previewRowCounts[streamUuid] ?: 0) + if (visible) 1 else -1
+        if (count <= 0) previewRowCounts.remove(streamUuid) else previewRowCounts[streamUuid] = count
+        previewRows.value = previewRowCounts.keys.toSet()
+    }
+
+    fun encryptedPreview(streamUuid: String): EncryptedChatListPreview? = previewProjector.preview(streamUuid)
+
+    private fun previewSnapshot(): EncryptedPreviewSnapshot? {
+        val repo = eventsRepo.value ?: return null
+        val selected = userViewModel.selectedServer.value ?: return null
+        val own = repo.currentUser.value ?: return null
+        if (selected.id != repo.serverId || selected.id != userViewModel.selectedServerId.value || selected.needsToRelogin ||
+            selected.projectUuid.isNullOrBlank()) return null
+        val proof = repo.verifiedOwnerAuthentication.value
+        val account = confirmedAccountContext(client, repo) ?: return null
+        val pool = repo.messagesPool.value
+        val conversations = repo.streamTopicMessages.value
+        val bindings = repo.streamBindings.value
+        val users = repo.users.value
+        val currentStreams = repo.streams.value
+        val visible = previewRows.value
+        val cacheKey = listOf(repo, selected.copy(), own.uuid, proof,
+            currentStreams, pool, conversations, bindings, users, visible)
+        synchronized(previewCacheLock) {
+            if (previewCacheKey == cacheKey) return previewCache
+            val loadedConversations = conversations.values.flatten()
+            val rows = currentStreams.filter { it.uuid in visible }.mapNotNull { stream ->
+                val message = latestLoadedEncryptedPreviewMessage(stream, pool, loadedConversations)
+                val withAuthor = message?.let { it.copy(user = it.user ?: users.firstOrNull { user -> user.uuid == it.authorUuid }) }
+                val last = pool.firstOrNull { it.uuid == stream.lastMessageUuid } ?: stream.lastMessage
+                encryptedPreviewSource(stream, withAuthor, own.uuid, requireNotNull(selected.projectUuid), bindings[stream.uuid], last)
+            }.sortedBy { it.streamUuid }
+            return EncryptedPreviewSnapshot(account, rows).also { previewCacheKey = cacheKey; previewCache = it }
+        }
+    }
+
+    override fun onCleared() { previewProjector.invalidate(); previewRefresh?.cancel(); super.onCleared() }
 
     val streams: StateFlow<List<Stream>> = eventsRepo
         .flatMapLatest { repo ->

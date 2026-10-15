@@ -16,7 +16,7 @@ class CreateDraftRequest(
     override val requiresApiKey: Boolean = true
     override val url: String = "/api/workspace/v1/messenger/drafts/"
     override val data = CreateDraftRequestData(draftUuid, streamUuid, topicUuid,
-        EditMessageRequestPayload("markdown", content)
+        MessageResponsePayload("markdown", content)
     )
 }
 
@@ -25,5 +25,5 @@ data class CreateDraftRequestData(
     val uuid: String,
     @SerialName("stream_uuid") val streamUuid: String,
     @SerialName("topic_uuid")  val topicUuid: String,
-    val payload: EditMessageRequestPayload
+    @Serializable(with = MessageBodyPayloadSerializer::class) val payload: MessageResponsePayload
 )

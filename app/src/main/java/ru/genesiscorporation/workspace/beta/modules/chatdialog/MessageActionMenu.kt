@@ -1,5 +1,7 @@
 package ru.genesiscorporation.workspace.beta.modules.chatdialog
 
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -15,6 +17,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -41,6 +47,8 @@ internal fun MessageActionMenu(
     onEdit: (() -> Unit)? = null,
     onSelect: (() -> Unit)? = null,
     onForward: (() -> Unit)? = null,
+    onRequestEncryptionKey: (() -> Unit)? = null,
+    requestEncryptionKeyPending: Boolean = false,
 ) {
     DropdownMenu(
         expanded = expanded,
@@ -49,6 +57,20 @@ internal fun MessageActionMenu(
         shape = RoundedCornerShape(8.dp),
         containerColor = LocalWorkspaceColorsPalette.current.messageBackground,
     ) {
+        if (onRequestEncryptionKey != null) {
+            MessageActionMenuItem(
+                label = stringResource(R.string.message_request_encryption_key),
+                iconId = R.drawable.ic_chat_encrypted,
+                modifier = Modifier.testTag("request-message-key-action"),
+                enabled = !requestEncryptionKeyPending,
+                onClick = {
+                    onRequestEncryptionKey()
+                    onDismissRequest()
+                },
+            )
+            // A locked message has no plaintext. Its menu must never offer text actions.
+            return@DropdownMenu
+        }
         if (onReaction != null) {
             Row(
                 modifier = Modifier
@@ -169,4 +191,32 @@ internal fun MessageActionMenuItem(
         },
         onClick = onClick,
     )
+}
+
+/** Keep the ordinary bubble's real long-press entry point around the protected placeholder. */
+@Composable
+internal fun LockedEncryptedMessageActions(
+    messageUuid: String,
+    requestPending: Boolean,
+    onRequestKey: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    var expanded by remember(messageUuid) { mutableStateOf(false) }
+    Box(modifier.testTag("message-bubble-$messageUuid").combinedClickable(
+        onClick = {},
+        onLongClick = { expanded = true },
+        onLongClickLabel = stringResource(R.string.message_request_encryption_key),
+    )) {
+        content()
+        MessageActionMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            canDelete = false,
+            isDeleting = false,
+            onDelete = {},
+            onRequestEncryptionKey = onRequestKey,
+            requestEncryptionKeyPending = requestPending,
+        )
+    }
 }

@@ -1,0 +1,4 @@
+<resources>
+    <string name="stream_info_unavailable">Chat information is unavailable</string>
+    <string name="stream_info_back">Back</string>
+</resources>

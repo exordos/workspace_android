@@ -43,6 +43,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -72,6 +73,8 @@ import ru.genesiscorporation.workspace.beta.ui.EnhancedMarkdown
 import ru.genesiscorporation.workspace.beta.ui.ReferenceMessageBase
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
+import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatLock
+import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatLinkColor
 import java.io.File
 import java.time.Instant
 import java.time.LocalDateTime
@@ -188,8 +191,10 @@ fun TextMessageView(
                 Row(
                     verticalAlignment = Alignment.Bottom,
                     modifier = Modifier
+                        .testTag("message-bubble-${item.uuid}")
                         .background(
-                            if (item.isOwn)
+                            if (item.isOwn && item.originalEncryptedPayload != null) Color(0xFF47382B)
+                            else if (item.isOwn)
                                 LocalWorkspaceColorsPalette.current.messageOwnBackground
                             else LocalWorkspaceColorsPalette.current.messageBackground,
                             shape = bubbleShape
@@ -208,13 +213,23 @@ fun TextMessageView(
                             .weight(2f, fill = false)
                     ) {
                         val defaultName = if (item.isOwn) "Я" else "Собеседник"
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
                             text = item.user?.displayableName() ?: defaultName,
-                            color = if (item.isOwn) LocalWorkspaceColorsPalette.current.indicatorBlue else LocalWorkspaceColorsPalette.current.indicatorPurple,
+                            color = if (item.isOwn && item.originalEncryptedPayload != null) EncryptedChatLinkColor
+                                else if (item.isOwn) LocalWorkspaceColorsPalette.current.indicatorBlue else LocalWorkspaceColorsPalette.current.indicatorPurple,
                             fontSize = 14.sp,
                             fontFamily = InterFontFamily,
-                            fontWeight = FontWeight.Medium
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
+                        if (item.originalEncryptedPayload != null && !viewModel.isDirectMessages) {
+                            Box(Modifier.size(width = 2.dp, height = 12.dp).background(Color(0xFFFFCC00)))
+                            Text("# ${viewModel.topicName ?: viewModel.chatTitle}", color = LocalWorkspaceColorsPalette.current.textAdditional30,
+                                fontSize = 12.sp, lineHeight = 16.sp, fontFamily = InterFontFamily, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        }
                         val messageElements = budgetMessageQuotes(MarkdownPayloadParser.parse(item.payload.content), MAX_RENDERED_QUOTE_NODES)
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             messageElements.forEach { budgeted ->

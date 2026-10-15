@@ -59,6 +59,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesByIdsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.OwnUserRequest
+import ru.genesiscorporation.workspace.beta.data.remote.ProtectedRequestAuthentication
 import ru.genesiscorporation.workspace.beta.data.remote.dto.PresenceRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ServerSettingsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
@@ -91,6 +92,7 @@ class EventsRepository(
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     fun close() {
+        invalidateVerifiedOwnerAuthentication()
         scope.cancel()
     }
 
@@ -109,6 +111,16 @@ class EventsRepository(
     }
     private val openConversation = MutableStateFlow<OpenConversation?>(null)
     private var historyGeneration = 0L
+    private val streamRemovalRevisions = mutableMapOf<String, Long>()
+
+    fun streamRemovalRevision(streamUuid: String): Long = synchronized(realtimeStateLock) {
+        streamRemovalRevisions[streamUuid] ?: 0L
+    }
+
+    /** Linearize plaintext publication with removal, independently of flow collector timing. */
+    fun <T : Any> withStreamRevision(streamUuid: String, expected: Long, block: () -> T): T? = synchronized(realtimeStateLock) {
+        if (streamRemovalRevision(streamUuid) == expected) block() else null
+    }
     private val staleConversations = mutableSetOf<String>()
     private val pendingMessageUuids = MutableStateFlow<Set<String>>(emptySet())
     private val heartbeatJob: Job = scope.every30Seconds {
@@ -130,6 +142,15 @@ class EventsRepository(
 
     private val _currentUser = MutableStateFlow<UserResponseData?>(null)
     val currentUser: StateFlow<UserResponseData?> = _currentUser.asStateFlow()
+    private val _verifiedOwnerAuthentication = MutableStateFlow<VerifiedOwnerAuthentication?>(null)
+    val verifiedOwnerAuthentication: StateFlow<VerifiedOwnerAuthentication?> = _verifiedOwnerAuthentication.asStateFlow()
+    @Volatile private var ownerVerificationRevision = 0L
+    private val ownerVerificationLineage = Any()
+
+    fun invalidateVerifiedOwnerAuthentication() = synchronized(realtimeStateLock) {
+        ownerVerificationRevision++
+        _verifiedOwnerAuthentication.value = null
+    }
 
     fun updateCurrentUser(newValue: UserResponseData) {
         _currentUser.update { newValue }
@@ -150,6 +171,8 @@ class EventsRepository(
     val messageDeletedEvents = _messageDeletedEvents.asSharedFlow()
     private val _messageUpdatedEvents = MutableSharedFlow<MessageResponse>(extraBufferCapacity = 64)
     val messageUpdatedEvents = _messageUpdatedEvents.asSharedFlow()
+    private val _streamDeletedEvents = MutableSharedFlow<String>(extraBufferCapacity = 64)
+    val streamDeletedEvents = _streamDeletedEvents.asSharedFlow()
 
     fun updateCurrentlySelectedFolder(newFolder: FolderResponseData?) {
         _currentlySelectedFolder.update { newFolder }
@@ -266,6 +289,7 @@ class EventsRepository(
                 if (message.uuid == updatedMessage.uuid) {
                     message.copy(
                         payload = updatedMessage.payload,
+                        updatedAt = updatedMessage.updatedAt,
                         reactions = updatedMessage.reactions
                     )
                 } else {
@@ -334,6 +358,31 @@ class EventsRepository(
         }
         if (!_messageDeletedEvents.tryEmit(messageUuid)) {
             scope.launch { _messageDeletedEvents.emit(messageUuid) }
+        }
+    }
+
+    /** One repository belongs to one server/account projection; invalidate before removing its caches. */
+    fun removeStream(streamUuid: String) {
+        synchronized(realtimeStateLock) {
+            streamRemovalRevisions[streamUuid] = streamRemovalRevision(streamUuid) + 1
+            historyGeneration++ // An older HTTP history response must not restore a deleted conversation.
+            _streams.update { it.filterNot { stream -> stream.uuid == streamUuid } }
+            val messageIds = (_messagesPool.value + _streamTopicMessages.value.values.flatten())
+                .filter { it.streamUuid == streamUuid }.map { it.uuid }.toSet()
+            _streamBindings.update { it - streamUuid }
+            _streamTopics.update { it - streamUuid }
+            _topicsPool.update { it.filterNot { topic -> topic.streamUuid == streamUuid } }
+            _streamTopicMessages.update { it.filterKeys { key -> !key.startsWith("$streamUuid.") } }
+            _messagesPool.update { it.filterNot { message -> message.streamUuid == streamUuid } }
+            _draftsPool.update { it.filterNot { draft -> draft.streamUuid == streamUuid } }
+            _userReactions.update { it.filterNot { reaction -> reaction.messageUuid in messageIds } }
+            pendingMessageUuids.update { it - messageIds }
+            staleConversations.removeAll { it.startsWith("$streamUuid.") }
+            if (openConversation.value?.streamUuid == streamUuid) openConversation.value = null
+            if (!_streamDeletedEvents.tryEmit(streamUuid)) scope.launch { _streamDeletedEvents.emit(streamUuid) }
+            messageIds.forEach { uuid ->
+                if (!_messageDeletedEvents.tryEmit(uuid)) scope.launch { _messageDeletedEvents.emit(uuid) }
+            }
         }
     }
 
@@ -600,7 +649,17 @@ class EventsRepository(
                         activeUnreadCount = updatedStream.activeUnreadCount,
                         passiveUnreadCount = updatedStream.passiveUnreadCount,
                         notificationMode = updatedStream.notificationMode,
-                        lastMessage = message
+                        lastMessage = message,
+                        currentEncryptionKeyUuid = updatedStream.currentEncryptionKeyUuid,
+                        name = updatedStream.name,
+                        description = updatedStream.description,
+                        inviteOnly = updatedStream.inviteOnly,
+                        announce = updatedStream.announce,
+                        encryption = updatedStream.encryption,
+                        ownerUuid = updatedStream.ownerUuid,
+                        role = updatedStream.role,
+                        projectId = updatedStream.projectId,
+                        userUuid = updatedStream.userUuid,
                     )
                 } else {
                     stream
@@ -877,6 +936,8 @@ class EventsRepository(
         onConnected: () -> Unit
     ) {
         val accessToken = tokenStore.get(serverId)?.accessToken
+        val selectedServer = webSocketClient.requireUserViewModel().getServer(serverId)?.copy()
+        val ownerUuid = _currentUser.value?.uuid
         if (accessToken != null) {
             val endpoint = resolveWebSocketEndpoint(baseUrl)
             Log.d("WebSocket", "Connecting: ${endpoint.displayUrl()}")
@@ -900,6 +961,12 @@ class EventsRepository(
                     onConnected()
                     Log.d("WebSocket", "Connected: ${endpoint.displayUrl()}")
                     for (frame in incoming) {
+                        if (tokenStore.get(serverId)?.accessToken != accessToken ||
+                            webSocketClient.requireUserViewModel().getServer(serverId) != selectedServer ||
+                            _currentUser.value?.uuid != ownerUuid) {
+                            close(CloseReason(CloseReason.Codes.NORMAL, "Account context changed"))
+                            return@webSocket
+                        }
                         when (frame) {
                             is Frame.Text -> {
                                 val receivedText = frame.readText()
@@ -1063,7 +1130,7 @@ class EventsRepository(
                 updateStream(stream)
             }
             "deleted" -> {
-
+                json.decodeFromString<JsonObject>(payload)["uuid"]?.jsonPrimitive?.contentOrNull?.let(::removeStream)
             }
         }
     }
@@ -1109,10 +1176,45 @@ class EventsRepository(
 
     suspend fun loadUserInfo() {
         val webSocketClient = client ?: return
-        val response = webSocketClient.performRequest(OwnUserRequest(), serverId)
+        val userState = webSocketClient.requireUserViewModel()
+        val captured = userState.getServer(serverId)?.copy() ?: return
+        val token = userState.getTokens(serverId)?.accessToken?.takeIf { it.isNotBlank() } ?: return
+        var authentication = ProtectedRequestAuthentication(token)
+        val verificationRevision = ownerVerificationRevision
+        fun current() = ownerVerificationRevision == verificationRevision &&
+            verifiedOwnerRequestStillCurrent(captured, userState.servers.value.firstOrNull { it.id == serverId }, authentication,
+                userState.getTokens(serverId)?.accessToken)
+        if (!current()) return
+        var response = webSocketClient.performRequest(authentication.pin(OwnUserRequest()), serverId, captured)
+        // Preserve the existing one-refresh /me recovery, while recording the credential that actually verified the owner.
+        if (response is ApiResult.Error && response.error.httpStatusCode == 401) {
+            if (!current()) return
+            when (val refresh = webSocketClient.refreshSession(serverId, token)) {
+                is ApiResult.Success -> {
+                    authentication = ProtectedRequestAuthentication(refresh.value.accessToken)
+                    if (!current()) return
+                    response = webSocketClient.performRequest(authentication.pin(OwnUserRequest()), serverId, captured)
+                    if (!current()) return
+                    if (response is ApiResult.Error && response.error.httpStatusCode == 401)
+                        userState.repo.setNeedsToReloginIfTokensCurrent(serverId, refresh.value)
+                }
+                is ApiResult.Error -> response = refresh
+            }
+        }
         when(response) {
             is ApiResult.Success -> {
-                updateCurrentUser(response.value)
+                val confirmed = userState.repo.withCurrentSession(captured, authentication) {
+                    synchronized(realtimeStateLock) {
+                        if (!current()) false else {
+                            tokenStore.rememberConfirmedOwner(captured, response.value.uuid)
+                            updateCurrentUser(response.value)
+                            _verifiedOwnerAuthentication.value = VerifiedOwnerAuthentication(serverId, captured.baseUrl,
+                                response.value.uuid, authentication, ++ownerVerificationRevision, captured.copy(), ownerVerificationLineage)
+                            true
+                        }
+                    }
+                }
+                if (confirmed != true) return
                 loadMessageReactions(response.value.uuid)
             }
 
@@ -1289,3 +1391,12 @@ data class StreamEvent(
     val stream: Stream,
     @SerialName("epoch_version") val epoch_version: Int
 )
+
+/** In-memory evidence from a successful existing /me request; never persisted with message caches. */
+data class VerifiedOwnerAuthentication(val serverId: String, val baseUrl: String, val userUuid: String,
+                                       val authentication: ProtectedRequestAuthentication, val revision: Long,
+                                       val capturedServer: ServerConfig? = null, val lineage: Any = Any())
+
+internal fun verifiedOwnerRequestStillCurrent(captured: ServerConfig, current: ServerConfig?,
+                                               authentication: ProtectedRequestAuthentication, token: String?): Boolean =
+    captured == current && authentication.matchesAccessToken(token)

@@ -1,0 +1,20 @@
+{
+  "source": "workspace_ui origin/master f9232838e5230e39dd2e383231b125c2c7790a25; real createRealChatCryptoProvider",
+  "groupKey": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+  "publicKey": "QxDul9iMwfCIpVdsd6sM9cOseX89lROcbIS1QpxZZio=",
+  "privateKey": "gFeZHu+PHxrxj0qUkdFqHOMz9pXU24442nWXXER44Ps=",
+  "plaintext": "0KHQvtCy0LzQtdGB0YLQuNC80YvQuSDRh9Cw0YIg8J+RiwoqKk1hcmtkb3duKiog0Lgg0LLQu9C+0LbQtdC90LjRjw==",
+  "messageEnvelope": "GXjFWcfgWNsaWbul/q1jpITpj9JRJhJYnMrRqXQGsRLXf3uLLqjyG07kIuaDCSxziS/FMYXBnfWGsuYowdx32rbkwetZJStGc23n0p8gGMuefI/NVSQFI26Ba0YU1jbehrFwNMxeH3od/sVkwE9olrNt1Q==",
+  "grantEnvelope": "V1NDRwGVidZKTWj5EFqAhjy5RHgHq8+Qzifa11/CYQ7L4tOFH1MdzQ3liKMbikDzAKefIhEpxfFBkDdJ6phek5dE0cwAuTRTKo2jCWnITQ5DWb024w==",
+  "messageContext": {
+    "streamUuid": "chat-a",
+    "keyUuid": "generation-a"
+  },
+  "grantContext": {
+    "streamUuid": "chat-a",
+    "keyUuid": "generation-a",
+    "requestMessageUuid": "request-a",
+    "senderDeviceId": "issuer",
+    "recipientDeviceId": "requester"
+  }
+}

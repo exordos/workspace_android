@@ -10,6 +10,9 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -23,6 +26,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import ru.genesiscorporation.workspace.beta.data.remote.ProtectedRequestAuthentication
 
 private val Context.dataStore by preferencesDataStore(name = "settings")
 
@@ -94,17 +98,32 @@ class ServerRepository internal constructor(
         eventsRepositoryStore.getOrCreate(config)
         tokens?.let { saveTokens(config.id, it) }
     }
-    suspend fun removeServer(serverId: String) {
-        dataStore.edit { prefs ->
-            val current = prefs[SERVERS]
-                ?.let { json.decodeFromString<List<ServerConfig>>(it) }
-                .orEmpty()
-            prefs[SERVERS] = json.encodeToString(current.filterNot { it.id == serverId })
-        }
+    /** The explicit leave/logout path for every screen; ordinary expiry/refresh never calls it. */
+    suspend fun removeServer(serverId: String) = withContext(NonCancellable) {
         sessionMutationMutex.withLock {
-            tokenStore.clear(serverId) // always clear secrets when removing
+            eventsRepositoryStore.get(serverId)?.let { repository ->
+                repository.verifiedOwnerAuthentication.value?.let { proof ->
+                    proof.capturedServer?.takeIf { !it.projectUuid.isNullOrBlank() }?.let {
+                        ConfirmedAccountContext.revokeForLogout(it, proof)
+                    }
+                }
+                repository.invalidateVerifiedOwnerAuthentication()
+            }
+            withContext(Dispatchers.IO) { tokenStore.clear(serverId) }
+            dataStore.edit { prefs ->
+                val remaining = prefs[SERVERS]?.let { json.decodeFromString<List<ServerConfig>>(it) }
+                    .orEmpty().filterNot { it.id == serverId }
+                prefs[SERVERS] = json.encodeToString(remaining)
+                if (prefs[SELECTED_SERVER_ID] == serverId) prefs[SELECTED_SERVER_ID] = remaining.firstOrNull()?.id.orEmpty()
+            }
             tokensVersion.value = tokensVersion.value + 1
         }
+    }
+
+    /** Serialize successful identity publication with connection removal and credential replacement. */
+    internal suspend fun <T> withCurrentSession(server: ServerConfig, authentication: ProtectedRequestAuthentication,
+                                                block: () -> T): T? = sessionMutationMutex.withLock {
+        if (getServer(server.id) == server && authentication.matchesAccessToken(tokensFor(server.id)?.accessToken)) block() else null
     }
 
     suspend fun updateServer(
@@ -199,6 +218,7 @@ class ServerRepository internal constructor(
     }
 
     suspend fun setNeedsToRelogin(newValue: Boolean, serverUuid: String) {
+        if (newValue) eventsRepositoryStore.get(serverUuid)?.invalidateVerifiedOwnerAuthentication()
         dataStore.edit { prefs ->
             val current = prefs[SERVERS]
                 ?.let { json.decodeFromString<List<ServerConfig>>(it) }

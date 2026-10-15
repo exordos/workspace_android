@@ -7,11 +7,14 @@ import java.security.MessageDigest
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import ru.genesiscorporation.workspace.beta.R
+import ru.genesiscorporation.workspace.beta.data.EventsRepository
+import ru.genesiscorporation.workspace.beta.data.ServerConfig
 import ru.genesiscorporation.workspace.beta.data.remote.ApiError
 import ru.genesiscorporation.workspace.beta.data.remote.ApiRequest
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
@@ -21,18 +24,28 @@ import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ForwardFileUploadRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageElement
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponsePayload
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesByIdsRequest
+import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatPresentation
+import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatRuntime
 
 /** A recipient receives the captured text and target-scoped file copies, never a source ACL dependency. */
 internal class ForwardContentPreparation(
     private val sources: List<MessageResponse>,
     private val resolve: suspend (String) -> MessageResponse?,
     private val copyFile: suspend (String, String, String) -> String,
+    private val presentMessage: suspend (MessageResponse) -> MessageResponse = { requireForwardPlaintext(it) },
 ) {
     private val resolved = mutableMapOf<String, MessageResponse>()
     private val prepared = mutableMapOf<String, String>()
 
     suspend fun prepare(target: ForwardDestination): String {
+        val projectedSources = try {
+            sources.map { presentMessage(it) }.also {
+                // A cached snapshot still requires access to every encrypted source generation.
+                resolved.values.forEach { source -> presentMessage(source) }
+            }
+        } catch (failure: Throwable) { prepared.clear(); throw failure }
         prepared[target.streamUuid]?.let { return it }
         var nodes = 0
         suspend fun render(content: String, visited: Set<String>, depth: Int): String {
@@ -42,16 +55,17 @@ internal class ForwardContentPreparation(
                 if (++nodes > 256) throw ForwardPreparationFailure(R.string.forward_too_much_data)
                 result += when (element) {
                     is MessageElement.PlainText -> element.text
-                    is MessageElement.Image -> "![${escapeForwardFileLabel(element.fileName)}](urn:image:${copyFile(element.uuid, element.fileName, target.streamUuid)})"
-                    is MessageElement.File -> "[${escapeForwardFileLabel(element.fileName)}](urn:file:${copyFile(element.uuid, element.fileName, target.streamUuid)})"
+                    is MessageElement.Image -> "![${escapeAttachmentLabel(element.fileName)}](urn:image:${copyFile(element.uuid, element.fileName, target.streamUuid)})"
+                    is MessageElement.File -> "[${escapeAttachmentLabel(element.fileName)}](urn:file:${copyFile(element.uuid, element.fileName, target.streamUuid)})"
                     is MessageElement.SnapshotQuote -> buildForwardSnapshotBlock(element.displayName, render(element.text, visited, depth + 1))
                     is MessageElement.Quote -> {
                         if (element.text.isNotEmpty()) {
                             buildForwardSnapshotBlock(element.displayName, render(element.text, visited + element.uuid, depth + 1))
                         } else {
                             if (element.uuid in visited) throw ForwardPreparationFailure(R.string.forward_nested_quote_failed)
-                            val source = resolved[element.uuid] ?: resolve(element.uuid)?.also { resolved[element.uuid] = it }
+                            val rawSource = resolved[element.uuid] ?: resolve(element.uuid)?.also { resolved[element.uuid] = it }
                                 ?: throw ForwardPreparationFailure(R.string.forward_quoted_message_unavailable)
+                            val source = presentMessage(rawSource)
                             buildForwardSnapshotBlock(element.displayName, render(source.payload.content, visited + element.uuid, depth + 1))
                         }
                     }
@@ -61,7 +75,7 @@ internal class ForwardContentPreparation(
                 if (it.length > 100_000) throw ForwardPreparationFailure(R.string.forward_too_much_text)
             }
         }
-        val snapshots = sources.map { source ->
+        val snapshots = projectedSources.map { source ->
             source.copy(payload = source.payload.copy(content = render(source.payload.content, setOf(source.uuid), 0)))
         }
         return requireNotNull(buildWorkspaceForwardMarkdown(snapshots)).also {
@@ -170,19 +184,30 @@ internal fun createForwardPreparation(
     sources: List<MessageResponse>,
     client: WorkspaceAPIClient,
     currentUserUuid: String,
+    repo: EventsRepository,
+    encryptedAccess: ForwardEncryptedAccess = ForwardEncryptedAccess(context, client, repo, currentUserUuid),
 ): ForwardContentPreparation {
     val copies = DestinationFileCopies(
-        find = { stream, hash, name -> client.performRequest(ForwardFilesRequest(stream, hash, name)) },
+        find = { stream, hash, name ->
+            encryptedAccess.requireCurrent()
+            client.performRequest(ForwardFilesRequest(stream, hash, name), encryptedAccess.serverId, encryptedAccess.config)
+                .also { encryptedAccess.requireCurrent() }
+        },
         load = { uuid, _ ->
             withContext(Dispatchers.IO) {
-                val metadata = (client.performRequest(ForwardSourceFileRequest(uuid)) as? ApiResult.Success)?.value
+                encryptedAccess.requireCurrent()
+                val metadata = (client.performRequest(ForwardSourceFileRequest(uuid),
+                    encryptedAccess.serverId, encryptedAccess.config) as? ApiResult.Success)?.value
                     ?.takeIf { it.uuid == uuid } ?: throw ForwardPreparationFailure(R.string.forward_source_metadata_failed)
                 val contentType = runCatching { ContentType.parse(metadata.contentType).toString() }.getOrNull()
                     ?: throw ForwardPreparationFailure(R.string.forward_source_format_failed)
                 val safeName = localAttachmentFileName(metadata.name)
                 val directory = File(context.cacheDir, "message-shares/${UUID.randomUUID()}").apply { check(mkdirs()) }
                 val file = File(directory, safeName)
-                val result = client.downloadFile("/api/workspace/v1/messenger/files/$uuid/actions/download", file)
+                encryptedAccess.requireCurrent()
+                val result = client.downloadFile("/api/workspace/v1/messenger/files/$uuid/actions/download", file,
+                    encryptedAccess.serverId, encryptedAccess.config)
+                encryptedAccess.requireCurrent()
                 if (result !is ApiResult.Success) throw ForwardPreparationFailure(R.string.forward_source_download_failed)
                 val digest = MessageDigest.getInstance("SHA-256")
                 file.inputStream().use { input ->
@@ -194,24 +219,113 @@ internal fun createForwardPreparation(
                 PreparedForwardFile(file, safeName, hash, contentType)
             }
         },
-        upload = { file, stream -> uploadForwardFile(client, file, stream) },
+        upload = { file, stream ->
+            encryptedAccess.requireCurrent()
+            uploadForwardFile(client, file, stream, encryptedAccess.serverId, encryptedAccess.config)
+                .also { encryptedAccess.requireCurrent() }
+        },
         currentUserUuid = currentUserUuid,
     )
     return ForwardContentPreparation(sources,
-        resolve = { id -> (client.performRequest(MessagesByIdsRequest(listOf(id))) as? ApiResult.Success)?.value?.singleOrNull { it.uuid == id } },
+        resolve = { id ->
+            encryptedAccess.requireCurrent()
+            (client.performRequest(MessagesByIdsRequest(listOf(id)), encryptedAccess.serverId,
+                encryptedAccess.config) as? ApiResult.Success)?.value?.singleOrNull { it.uuid == id }
+                .also { encryptedAccess.requireCurrent() }
+        },
         copyFile = copies::copy,
+        presentMessage = encryptedAccess::present,
     )
 }
 
 
-private fun escapeForwardFileLabel(value: String): String = value
+internal fun escapeAttachmentLabel(value: String): String = value
     .replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
 
 
 /** Preserve status codes so an explicit rejection remains editable, while a lost upload ACK is not retried. */
-private suspend fun uploadForwardFile(client: WorkspaceAPIClient, file: PreparedForwardFile, stream: String): ApiResult<String, ApiError> {
-    return when (val response = client.performRequest(ForwardFileUploadRequest(file, stream))) {
+private suspend fun uploadForwardFile(client: WorkspaceAPIClient, file: PreparedForwardFile, stream: String,
+                                      serverId: String, config: ServerConfig): ApiResult<String, ApiError> {
+    return when (val response = client.performRequest(ForwardFileUploadRequest(file, stream), serverId, config)) {
         is ApiResult.Success -> ApiResult.Success(response.value.uuid)
         is ApiResult.Error -> response
+    }
+}
+
+/** Wire ciphertext is never meaningful text for a snapshot or an external share. */
+internal fun requireForwardPlaintext(message: MessageResponse): MessageResponse {
+    if (message.payload.kind != "markdown" || message.originalEncryptedPayload != null)
+        throw ForwardPreparationFailure(R.string.forward_quoted_message_unavailable)
+    return message
+}
+
+/** Re-authorize even an existing UI projection: deleting its key must invalidate captured previews. */
+internal suspend fun presentForwardMessage(message: MessageResponse,
+                                           decrypt: suspend (MessageResponse) -> String?): MessageResponse {
+    val encrypted = message.originalEncryptedPayload
+    if (encrypted == null && message.payload.kind == "markdown") return message
+    val payload = encrypted ?: message.payload
+    if (payload.kind != "e2ee") throw ForwardPreparationFailure(R.string.forward_quoted_message_unavailable)
+    val wire = message.copy(payload = payload.copy(), originalEncryptedPayload = null)
+    val text = decrypt(wire) ?: throw ForwardPreparationFailure(R.string.forward_quoted_message_unavailable)
+    return wire.copy(payload = MessageResponsePayload("markdown", text), originalEncryptedPayload = payload.copy())
+}
+
+/** One account boundary shared by target sends, read-back and source quote expansion. */
+internal class ForwardEncryptedAccess(
+    private val context: Context,
+    private val client: WorkspaceAPIClient,
+    private val repo: EventsRepository,
+    private val currentUserUuid: String,
+) {
+    val serverId = repo.serverId
+    private val capturedConfig = client.requireUserViewModel().selectedServer.value?.copy()
+    val config: ServerConfig get() = capturedConfig ?: throw ForwardPreparationFailure(R.string.forward_recipient_unknown)
+
+    fun requireCurrent(uncertain: Boolean = false) {
+        val selected = client.requireUserViewModel().selectedServer.value
+        val captured = capturedConfig
+        if (captured == null || selected == null || selected.id != serverId || captured.id != serverId ||
+            selected.baseUrl != captured.baseUrl || selected.projectUuid != captured.projectUuid ||
+            selected.needsToRelogin || currentUserUuid.isBlank() ||
+            repo.currentUser.value?.uuid != currentUserUuid ||
+            client.requireUserViewModel().getTokens(serverId)?.accessToken.isNullOrBlank())
+            throw ForwardPreparationFailure(R.string.forward_recipient_unknown, uncertain)
+    }
+
+    suspend fun present(message: MessageResponse): MessageResponse {
+        requireCurrent()
+        if (!config.projectUuid.isNullOrBlank() && message.projectId != null && message.projectId != config.projectUuid)
+            throw ForwardPreparationFailure(R.string.forward_quoted_message_unavailable)
+        val result = presentForwardMessage(message) { wire ->
+            withRuntime(wire.streamUuid, wire.topicUuid) { runtime ->
+                (runtime.presentation(wire) as? EncryptedChatPresentation.Text)?.text
+            }
+        }
+        requireCurrent()
+        return result
+    }
+
+    suspend fun send(target: ForwardDestination, canonicalUuid: String, markdown: String): MessageResponse {
+        requireCurrent()
+        if (repo.streams.value.none { it.uuid == target.streamUuid && it.encryption && !it.isArchived })
+            throw ForwardPreparationFailure(R.string.forward_destination_unavailable)
+        return withRuntime(target.streamUuid, target.topicUuid, mutating = true) {
+            it.sendText(markdown, target.topicUuid, canonicalUuid)
+        }
+    }
+
+    private suspend fun <T> withRuntime(streamUuid: String, topicUuid: String,
+                                        mutating: Boolean = false,
+                                        action: suspend (EncryptedChatRuntime) -> T): T = coroutineScope {
+        requireCurrent()
+        // Ordinary legacy sessions can have no selected project UUID. Encryption
+        // must still have the complete durable key scope before mounting a runtime.
+        if (config.projectUuid.isNullOrBlank())
+            throw ForwardPreparationFailure(R.string.forward_destination_unavailable)
+        if (repo.streams.value.none { it.uuid == streamUuid && it.encryption })
+            throw ForwardPreparationFailure(R.string.forward_destination_unavailable)
+        val runtime = EncryptedChatRuntime(context, client, repo, this, streamUuid, topicUuid)
+        try { action(runtime).also { requireCurrent(uncertain = mutating) } } finally { runtime.close() }
     }
 }

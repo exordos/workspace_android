@@ -46,6 +46,18 @@ class LoginViewModel(
         _queryState.value = QueryState.Idle
     }
 
+    suspend fun leaveOrganization(): Boolean {
+        _queryState.value = QueryState.Loading
+        return try {
+            userViewModel.removeCurrentServer()
+            _queryState.value = QueryState.Idle
+            true
+        } catch (_: Exception) {
+            _queryState.value = QueryState.Error("Не удалось удалить локальные ключи. Повторите выход.")
+            false
+        }
+    }
+
     suspend fun onLoginClick() {
         _queryState.value = QueryState.Loading
         val response = client.performRequest(LoginRequest(loginText.value, passwordText.value))

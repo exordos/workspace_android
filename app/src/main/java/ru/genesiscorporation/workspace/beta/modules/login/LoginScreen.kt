@@ -95,8 +95,7 @@ fun LoginScreen(viewModel: LoginViewModel, navController: NavHostController) {
             onLogin = { scope.launch { viewModel.onLoginClick() } },
             onLogout = {
                 scope.launch {
-                    viewModel.userViewModel.removeCurrentServer()
-                    navController.popBackStack()
+                    if (viewModel.leaveOrganization()) navController.popBackStack()
                 }
             },
         )

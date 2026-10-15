@@ -1,5 +1,11 @@
 package ru.genesiscorporation.workspace.beta.modules.createstream
 
+import android.content.Context
+import android.os.Build
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import ru.genesiscorporation.workspace.beta.data.crypto.*
+import java.util.UUID
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -10,6 +16,10 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
 import ru.genesiscorporation.workspace.beta.data.EventsRepositoryStore
+import ru.genesiscorporation.workspace.beta.data.ServerConfig
+import ru.genesiscorporation.workspace.beta.data.ConfirmedAccountContext
+import ru.genesiscorporation.workspace.beta.data.confirmedAccountContext
+import ru.genesiscorporation.workspace.beta.data.remote.ApiError
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.data.remote.dto.AddStreamRequest
@@ -21,7 +31,8 @@ import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 
 class CreateStreamViewModel(
     val client: WorkspaceAPIClient,
-    val eventsRepositoryStore: EventsRepositoryStore
+    val eventsRepositoryStore: EventsRepositoryStore,
+    private val applicationContext: Context? = null,
 ): ViewModel() {
     val eventsRepository = eventsRepositoryStore.get(client.getCurrentServerId()) ?: error("Cannot get current event repository")
 
@@ -33,6 +44,23 @@ class CreateStreamViewModel(
         )
 
     var createdStream: Stream? = null
+    private val _encrypted = MutableStateFlow(false)
+    val encrypted: StateFlow<Boolean> = _encrypted.asStateFlow()
+    fun setEncrypted(value: Boolean) { if (canEditCreation()) _encrypted.value = value }
+    private enum class CreationPhase { UNCONFIRMED, CREATED, READY }
+    private class CreationAttempt(
+        val server: ServerConfig,
+        val userUuid: String,
+        val account: ConfirmedAccountContext?,
+        val request: AddStreamRequest,
+        val keyScope: ChatKeyScope?,
+        val staged: StagedChatCreation?,
+        var phase: CreationPhase = CreationPhase.UNCONFIRMED,
+        var stream: Stream? = null,
+    )
+    private var creationAttempt: CreationAttempt? = null
+    private fun canEditCreation() = _createQueryState.value !is QueryState.Loading && creationAttempt == null && createdStream == null
+
 
     private val _streamName = MutableStateFlow("")
     val streamName: StateFlow<String> = _streamName
@@ -53,34 +81,114 @@ class CreateStreamViewModel(
         }
     }
     fun onStreamNameChange(newText: String) {
-        _streamName.value = newText
+        if (canEditCreation()) _streamName.value = newText
     }
 
+    override fun onCleared() { creationAttempt?.staged?.groupKey?.fill(0); super.onCleared() }
+
     suspend fun createStream() {
+        if (_createQueryState.value is QueryState.Loading || _createQueryState.value is QueryState.Success || _streamName.value.isBlank()) return
         _createQueryState.value = QueryState.Loading
-        val response = client.performRequest(AddStreamRequest(_streamName.value, "", null))
-        when(response) {
-            is ApiResult.Success -> {
-                val addUsersResponse = client.performRequest(
-                    AddUsersToStreamRequest(
-                        response.value.uuid,
-                        _selectedUserUuids.value
-                    )
-                )
-                when(addUsersResponse) {
+        try {
+            val selected = client.requireUserViewModel().selectedServer.value ?: error("Нет организации")
+            check(selected.id == eventsRepository.serverId) { "Организация изменилась" }
+            val user = eventsRepository.currentUser.value ?: error("Нет учётной записи")
+            val useEncryption = encrypted.value
+            if (useEncryption) check(!selected.projectUuid.isNullOrBlank()) { "Нет проекта" }
+            val account = if (useEncryption) requireNotNull(confirmedAccountContext(client, eventsRepository)) {
+                "Учётная запись не подтверждена"
+            } else null
+            val config = account?.serverConfig() ?: selected.copy()
+            val project = config.projectUuid
+            val userUuid = account?.userUuid ?: user.uuid
+            val isCurrent = { if (account != null) account.isCurrent(client, eventsRepository) else client.requireUserViewModel().selectedServer.value?.let {
+                it.id == config.id && it.id == eventsRepository.serverId && it.baseUrl == config.baseUrl && it.projectUuid == project && !it.needsToRelogin
+            } == true && eventsRepository.currentUser.value?.uuid == userUuid &&
+                client.requireUserViewModel().getTokens(config.id)?.accessToken?.isNotBlank() == true }
+            check(isCurrent()) { "Учётная запись изменилась" }
+            val store = if (useEncryption) withContext(Dispatchers.IO) {
+                EncryptedChatKeyStore(requireNotNull(applicationContext) { "Нет хранилища ключей" })
+            } else null
+            val attempt = creationAttempt ?: run {
+                val canonicalUuid = UUID.randomUUID().toString()
+                val keyScope = if (store == null) null else withContext(Dispatchers.IO) {
+                    check(isCurrent()) { "Учётная запись изменилась" }
+                    val owner = requireNotNull(account).owner
+                    ChatKeyScope(owner, store.ensureDeviceIdentity(owner, "${Build.MANUFACTURER} ${Build.MODEL}".take(255)).deviceId)
+                }
+                val stage = if (store == null) null else withContext(Dispatchers.IO) {
+                    val staged = StagedChatCreation(canonicalUuid, UUID.randomUUID().toString(), WorkspaceChatCrypto().createGroupKey())
+                    try {
+                        check(isCurrent() && store.writeStagedCreation(requireNotNull(keyScope), staged)) { "Не удалось сохранить ключ" }
+                        staged
+                    } catch (failure: Throwable) { staged.groupKey.fill(0); throw failure }
+                }
+                CreationAttempt(config, userUuid, account,
+                    AddStreamRequest(_streamName.value.trim(), "", null, useEncryption, stage?.keyUuid, canonicalUuid), keyScope, stage)
+                    .also { creationAttempt = it }
+            }
+            check(attempt.server.id == config.id && attempt.server.baseUrl == config.baseUrl &&
+                attempt.server.projectUuid == project && attempt.userUuid == userUuid &&
+                (attempt.account == null || account?.sameOwner(attempt.account) == true)) { "Учётная запись изменилась" }
+            check(isCurrent()) { "Учётная запись изменилась" }
+            if (attempt.phase == CreationPhase.UNCONFIRMED) {
+                when (val response = client.performRequest(account?.pin(attempt.request) ?: attempt.request, config.id, config)) {
                     is ApiResult.Success -> {
-                        val newStream = response.value
-                        createdStream = newStream
-                        _createQueryState.value = QueryState.Success
+                        check(isCurrent()) { "Учётная запись изменилась" }
+                        val stream = response.value
+                        if (useEncryption) check(stream.encryption && stream.currentEncryptionKeyUuid == attempt.staged?.keyUuid &&
+                            stream.uuid == attempt.request.canonicalUuid) { "Сервер вернул другой шифрованный чат" }
+                        check((stream.ownerUuid == null || stream.ownerUuid == userUuid) &&
+                            (project.isNullOrBlank() || stream.projectId == null || stream.projectId == project) &&
+                            (stream.userUuid == null || stream.userUuid == userUuid)) { "Сервер вернул чат другой учётной записи" }
+                        attempt.stream = stream
+                        attempt.phase = CreationPhase.CREATED
+                        createdStream = stream
                     }
                     is ApiResult.Error -> {
-                        _createQueryState.value = QueryState.Error(addUsersResponse.error.message ?: "Error")
+                        check(isCurrent()) { "Учётная запись изменилась" }
+                        if (isDefinitiveStreamCreationRejection(response.error)) {
+                            if (attempt.staged != null) withContext(Dispatchers.IO) {
+                                check(isCurrent() && requireNotNull(store).discardStagedCreation(requireNotNull(attempt.keyScope), attempt.staged.creationId)) {
+                                    "Не удалось удалить ключ отклонённого чата"
+                                }
+                            }
+                            attempt.staged?.groupKey?.fill(0)
+                            creationAttempt = null
+                            createdStream = null
+                        }
+                        error(response.error.errorMessage)
                     }
                 }
             }
-            is ApiResult.Error -> {
-                _createQueryState.value = QueryState.Error(response.error.message ?: "Error")
+            val created = requireNotNull(attempt.stream)
+            if (attempt.phase == CreationPhase.CREATED) {
+                if (store != null) withContext(Dispatchers.IO) {
+                    val stage = requireNotNull(attempt.staged)
+                    check(isCurrent() && store.finalizeCreation(requireNotNull(attempt.keyScope), stage.creationId, created.uuid)) {
+                        "Не удалось сохранить ключ созданного чата"
+                    }
+                    stage.groupKey.fill(0)
+                }
+                attempt.phase = CreationPhase.READY
             }
+            check(isCurrent()) { "Учётная запись изменилась" }
+            if (_selectedUserUuids.value.isNotEmpty()) {
+                val request = AddUsersToStreamRequest(created.uuid, _selectedUserUuids.value)
+                when (val response = client.performRequest(account?.pin(request) ?: request, config.id, config)) {
+                    is ApiResult.Success -> Unit
+                    is ApiResult.Error -> error(response.error.errorMessage)
+                }
+            }
+            check(isCurrent()) { "Учётная запись изменилась" }
+            if (eventsRepository.streams.value.none { it.uuid == created.uuid }) eventsRepository.addStream(created)
+            _createQueryState.value = QueryState.Success
+        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (error: Exception) {
+            _createQueryState.value = QueryState.Error(error.message ?: "Не удалось создать чат")
         }
     }
 }
+
+internal fun isDefinitiveStreamCreationRejection(error: ApiError): Boolean =
+    error.httpStatusCode?.let { it in 400..499 && it !in setOf(408, 409, 425) } == true

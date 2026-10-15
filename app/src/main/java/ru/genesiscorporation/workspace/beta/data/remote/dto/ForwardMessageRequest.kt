@@ -12,19 +12,19 @@ internal class ForwardMessageRequest(
     streamUuid: String,
     topicUuid: String,
     content: String,
-) : ApiRequest<ForwardMessageRequestData, SendMessageResponse, ApiError> {
+) : ApiRequest<MessageCreateData, SendMessageResponse, ApiError> {
     override val method = HTTPMethod.POST
     override val url = "/api/workspace/v1/messenger/messages/"
-    override val data = ForwardMessageRequestData(
-        uuid = requireNotNull(parseCanonicalMessageUuid(messageUuid)),
-        streamUuid = requireNotNull(parseCanonicalMessageUuid(streamUuid)),
-        topicUuid = requireNotNull(parseCanonicalMessageUuid(topicUuid)),
+    override val data = MessageCreateData(
+        uuid = requireNotNull(parseCanonicalUuid(messageUuid)),
+        streamUuid = requireNotNull(parseCanonicalUuid(streamUuid)),
+        topicUuid = requireNotNull(parseCanonicalUuid(topicUuid)),
         payload = MessageResponsePayload("markdown", content),
     )
 }
 
 @Serializable
-internal data class ForwardMessageRequestData(
+data class MessageCreateData(
     val uuid: String,
     @SerialName("stream_uuid") val streamUuid: String,
     @SerialName("topic_uuid") val topicUuid: String,

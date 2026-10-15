@@ -2,6 +2,7 @@ package ru.genesiscorporation.workspace.beta.data.remote.dto
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonNames
 import ru.genesiscorporation.workspace.beta.data.remote.ApiError
 import ru.genesiscorporation.workspace.beta.data.remote.ApiRequest
 import ru.genesiscorporation.workspace.beta.data.remote.EmptyRequestData
@@ -15,6 +16,7 @@ class StreamsRequest(): ApiRequest<EmptyRequestData, List<Stream>, ApiError> {
 }
 
 @Serializable
+@OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
 data class Stream(
     val uuid: String,
     @SerialName("unread_count") var unreadCount: Int,
@@ -30,7 +32,16 @@ data class Stream(
     @SerialName("notification_mode") var notificationMode: String,
     var directUser: UserResponseData? = null,
     var lastMessage: MessageResponse? = null,
-    @SerialName("is_archived") val isArchived: Boolean = false
+    @SerialName("is_archived") val isArchived: Boolean = false,
+    val encryption: Boolean = false,
+    @SerialName("current_encryption_key_uuid") var currentEncryptionKeyUuid: String? = null,
+    @SerialName("owner") @JsonNames("owner_uuid") val ownerUuid: String? = null,
+    @SerialName("project_id") val projectId: String? = null,
+    @SerialName("user_uuid") val userUuid: String? = null,
+    val role: String? = null,
+    val description: String = "",
+    @SerialName("invite_only") val inviteOnly: Boolean = false,
+    val announce: Boolean = false,
 ) {
     fun displayableName(participant: UserResponseData? = directUser): String =
         participant?.takeIf { it.uuid == directUserUuid }

@@ -11,7 +11,7 @@ import kotlinx.coroutines.yield
 import ru.genesiscorporation.workspace.beta.data.remote.ApiError
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
-import ru.genesiscorporation.workspace.beta.data.remote.dto.parseCanonicalMessageUuid
+import ru.genesiscorporation.workspace.beta.data.remote.dto.parseCanonicalUuid
 
 internal sealed interface MessageQuoteState {
     data object Loading : MessageQuoteState
@@ -37,7 +37,7 @@ internal class MessageQuoteResolver(
             val next = LinkedHashMap(_states.value)
             var added = false
             messageUuids.forEach { value ->
-                val uuid = parseCanonicalMessageUuid(value)
+                val uuid = parseCanonicalUuid(value)
                 when {
                     uuid == null -> next[value] = MessageQuoteState.Unavailable
                     uuid in deleted -> next[uuid] = MessageQuoteState.Unavailable
@@ -63,7 +63,7 @@ internal class MessageQuoteResolver(
     }
 
     fun retry(messageUuid: String) {
-        val uuid = parseCanonicalMessageUuid(messageUuid) ?: return
+        val uuid = parseCanonicalUuid(messageUuid) ?: return
         val retry = synchronized(lock) {
             if (_states.value[uuid] != MessageQuoteState.Error || uuid in deleted) {
                 false
@@ -76,7 +76,7 @@ internal class MessageQuoteResolver(
     }
 
     fun invalidate(messageUuid: String) {
-        val uuid = parseCanonicalMessageUuid(messageUuid) ?: return
+        val uuid = parseCanonicalUuid(messageUuid) ?: return
         synchronized(lock) {
             if (uuid !in _states.value && uuid !in pending) return
             deleted += uuid
@@ -86,7 +86,7 @@ internal class MessageQuoteResolver(
     }
 
     fun update(message: MessageResponse) {
-        val uuid = parseCanonicalMessageUuid(message.uuid) ?: return
+        val uuid = parseCanonicalUuid(message.uuid) ?: return
         synchronized(lock) {
             if (uuid !in _states.value || uuid in deleted) return
             messageVersions[uuid] = (messageVersions[uuid] ?: 0) + 1
