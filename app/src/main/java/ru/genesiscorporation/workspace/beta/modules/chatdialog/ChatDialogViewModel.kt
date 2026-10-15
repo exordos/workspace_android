@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
 import kotlinx.serialization.Serializable
 import ru.genesiscorporation.workspace.beta.UserViewModel
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
@@ -39,7 +40,6 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageElement
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageReaction
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponsePayload
-import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesByIdsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.RemoveMessageReactionRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.SendMessageRequest
@@ -236,6 +236,35 @@ class ChatDialogViewModel(
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading
+    private val conversationOwner = Any()
+    private var historyLoadJob: Job? = null
+
+    fun onChatOpened() {
+        repo.openConversation(conversationOwner, chatId, topicUuid)
+        loadHistoryIfNeeded()
+    }
+
+    fun onChatClosed() {
+        repo.closeConversation(conversationOwner)
+        historyLoadJob?.cancel()
+        historyLoadJob = null
+    }
+
+    private fun loadHistoryIfNeeded() {
+        if (historyLoadJob?.isActive == true) return
+        val key = "$chatId.$topicUuid"
+        if (repo.isConversationStale(chatId, topicUuid) || repo.streamTopicMessages.value[key].isNullOrEmpty()) {
+            _isLoading.value = true
+            historyLoadJob = viewModelScope.launch { loadLatestMessages() }
+        } else {
+            _isLoading.value = false
+        }
+    }
+
+    override fun onCleared() {
+        onChatClosed()
+        super.onCleared()
+    }
     var editingMessage: MessageResponse? = null
     private val _editingMessageBackupText = MutableStateFlow<String?>(null)
     val editingMessageBackupText: StateFlow<String?> = _editingMessageBackupText
@@ -465,8 +494,7 @@ class ChatDialogViewModel(
             false
         )
         newMessage.user = repo.currentUser.value
-        repo.updateMessagesPool(listOf(newMessage))
-        repo.addMessageToStreamTopic(newMessage)
+        repo.addPendingMessage(newMessage)
         possibleMessage = newMessage
         mentions.setText("")
         _uriList.update { emptyList() }
@@ -533,11 +561,8 @@ class ChatDialogViewModel(
 
     init {
         _isLoading.value = true
+        loadHistoryIfNeeded()
         viewModelScope.launch {
-            val key = "${chatId}.${topicUuid}"
-            if (streamTopicMessages.value[key]?.isEmpty() ?: true) {
-                loadLatestMessages()
-            }
             if (streamBindings.value[chatId]?.isEmpty() ?: true) {
                 loadStreamBindings()
             }
@@ -549,15 +574,13 @@ class ChatDialogViewModel(
     }
 
     suspend fun loadLatestMessages() {
-        val messagesRequest = MessagesRequest(chatId, topicUuid)
-        val messagesResponse = client.performRequest(messagesRequest)
+        val messagesResponse = repo.refreshConversation(chatId, topicUuid)
         when(messagesResponse) {
             is ApiResult.Success -> {
                 val lastMessage = messagesResponse.value.sortedBy { LocalDateTime.parse(it.createdAt, messageFormatter) }.lastOrNull()
                 if (lastMessage != null) {
                     markMessagesReadUpTo(lastMessage.uuid)
                 }
-                repo.addStreamTopicMessages(chatId, topicUuid ?: "", messagesResponse.value)
                 _isLoading.value = false
             }
             is ApiResult.Error -> {

@@ -5,6 +5,8 @@ import io.ktor.http.URLBuilder
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.properties.Properties
 import kotlinx.serialization.properties.encodeToStringMap
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -13,6 +15,22 @@ import ru.genesiscorporation.workspace.beta.data.remote.appendGetQueryParameters
 import ru.genesiscorporation.workspace.beta.data.remote.dto.EventsProbeRequest
 
 class RealtimeTransportPolicyTest {
+
+    @Test
+    fun `typed expired cursor frame requires snapshot recovery`() {
+        assertTrue(isExpiredRealtimeCursorFrame(Json.parseToJsonElement(
+            """{"type":"EventsCursorExpiredError","code":410,"error":"epoch_pruned","current_epoch_version":42}""",
+        ).jsonObject))
+    }
+
+    @Test
+    fun `ready frame and unrelated errors do not reset the cursor`() {
+        for (frame in listOf(
+            """{"type":"ready","epoch_version":42,"epoch_generation":"generation"}""",
+            """{"code":410,"error":"allocation_expired"}""",
+            """{"code":401,"error":"epoch_pruned"}""",
+        )) assertFalse(isExpiredRealtimeCursorFrame(Json.parseToJsonElement(frame).jsonObject))
+    }
 
     @Test
     fun `https workspace uses secure websocket`() {
