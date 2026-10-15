@@ -172,6 +172,11 @@ fun ChatDialogScreen(
     val localDensity = LocalDensity.current
     val setBottomBarVisible = LocalBottomBarVisible.current
 
+    DisposableEffect(viewModel) {
+        viewModel.onChatOpened()
+        onDispose { viewModel.onChatClosed() }
+    }
+
     DisposableEffect(Unit) {
         setBottomBarVisible(false)
         onDispose { setBottomBarVisible(true) }

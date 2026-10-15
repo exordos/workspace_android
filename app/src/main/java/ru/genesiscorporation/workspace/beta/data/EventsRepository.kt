@@ -17,7 +17,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,17 +29,22 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
+import ru.genesiscorporation.workspace.beta.data.remote.ApiError
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.data.remote.dto.DeletedMessageReaction
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Draft
@@ -49,6 +57,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageReaction
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageReactionsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesByIdsRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.OwnUserRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.PresenceRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ServerSettingsRequest
@@ -90,8 +99,18 @@ class EventsRepository(
     @Volatile
     var epochGeneration: String = ""
     private val connectionMutex = Mutex()
+    private val realtimeStateLock = Any()
     @Volatile
     private var activeSession: DefaultClientWebSocketSession? = null
+    @Volatile
+    private var messageResyncRequired = false
+    private data class OpenConversation(val owner: Any, val streamUuid: String, val topicUuid: String) {
+        val key: String get() = "$streamUuid.$topicUuid"
+    }
+    private val openConversation = MutableStateFlow<OpenConversation?>(null)
+    private var historyGeneration = 0L
+    private val staleConversations = mutableSetOf<String>()
+    private val pendingMessageUuids = MutableStateFlow<Set<String>>(emptySet())
     private val heartbeatJob: Job = scope.every30Seconds {
         val webSocketClient = client ?: return@every30Seconds
         heartbeatTask(webSocketClient)
@@ -144,6 +163,78 @@ class EventsRepository(
         _streamTopicMessages.update { current ->
             current + (key to messagesWithUser)
         }
+    }
+
+    internal fun openConversation(owner: Any, streamUuid: String, topicUuid: String) {
+        synchronized(realtimeStateLock) {
+            val conversation = OpenConversation(owner, streamUuid, topicUuid)
+            if (messageResyncRequired) staleConversations += conversation.key
+            openConversation.value = conversation
+        }
+    }
+
+    internal fun closeConversation(owner: Any) {
+        synchronized(realtimeStateLock) {
+            if (openConversation.value?.owner === owner) openConversation.value = null
+        }
+    }
+
+    internal fun isConversationStale(streamUuid: String, topicUuid: String): Boolean =
+        synchronized(realtimeStateLock) { "$streamUuid.$topicUuid" in staleConversations }
+
+    suspend fun refreshConversation(
+        streamUuid: String,
+        topicUuid: String,
+    ): ApiResult<List<MessageResponse>, ApiError> = refreshConversation(streamUuid, topicUuid, false)
+
+    private suspend fun refreshConversation(
+        streamUuid: String,
+        topicUuid: String,
+        coveredByRecoveryCursor: Boolean,
+    ): ApiResult<List<MessageResponse>, ApiError> {
+        val key = "$streamUuid.$topicUuid"
+        // Events can arrive before the first history request completes.
+        _streamTopicMessages.update { current ->
+            if (key in current) current else current + (key to emptyList())
+        }
+        val beforeRequest = _streamTopicMessages.value[key].orEmpty().map {
+            it.copy(payload = it.payload.copy(), reactions = it.reactions.toMap())
+        }
+        val (generation, canClearStale) = synchronized(realtimeStateLock) {
+            if (messageResyncRequired) staleConversations += key
+            // A normal load may precede the fresh cursor and leave an uncovered event gap.
+            historyGeneration to (!messageResyncRequired || coveredByRecoveryCursor)
+        }
+        val response = client.performRequest(MessagesRequest(streamUuid, topicUuid), serverId, config)
+        if (response is ApiResult.Success) {
+            // Check and publish atomically with cursor invalidation. An older response must
+            // not overwrite a newer recovery snapshot, even if that snapshot was empty.
+            synchronized(realtimeStateLock) {
+                if (historyGeneration != generation) {
+                    return ApiResult.Error(ApiError("History response is obsolete", "HISTORY_RESPONSE_OBSOLETE"))
+                }
+                val snapshot = response.value.map { message ->
+                    message.copy(user = users.value.firstOrNull { it.uuid == message.authorUuid })
+                }
+                _streamTopicMessages.update { current ->
+                    current + (key to mergeMessageHistorySnapshot(
+                        beforeRequest, current[key].orEmpty(), snapshot, pendingMessageUuids.value,
+                    ))
+                }
+                val refreshed = _streamTopicMessages.value[key].orEmpty().associateBy { it.uuid }
+                _messagesPool.update { current ->
+                    current.filterNot { it.uuid in refreshed } + refreshed.values
+                }
+                if (canClearStale) staleConversations -= key
+            }
+        }
+        return response
+    }
+
+    fun addPendingMessage(message: MessageResponse) {
+        pendingMessageUuids.update { it + message.uuid }
+        updateMessagesPool(listOf(message))
+        addMessageToStreamTopic(message)
     }
     fun addMessageToStreamTopic(message: MessageResponse) {
         val key = "${message.streamUuid}.${message.topicUuid}"
@@ -213,6 +304,7 @@ class EventsRepository(
                 current.map { if (it.uuid == pendingUuid) confirmed else it }
             } else current + confirmed
         }
+        pendingMessageUuids.update { it - pendingUuid }
     }
 
     fun removeMessage(messageUuid: String) {
@@ -616,13 +708,18 @@ class EventsRepository(
             }
 
             is ApiResult.Error -> {
-                if (response.error.httpStatusCode == EVENTS_CURSOR_EXPIRED_STATUS_CODE &&
-                    activeSession === probedSession &&
-                    latestEpoch == probedEpochVersion &&
-                    epochGeneration == probedEpochGeneration
-                ) {
+                val invalidated = synchronized(realtimeStateLock) {
+                    if (response.error.httpStatusCode == EVENTS_CURSOR_EXPIRED_STATUS_CODE &&
+                        activeSession === probedSession &&
+                        latestEpoch == probedEpochVersion &&
+                        epochGeneration == probedEpochGeneration
+                    ) {
+                        invalidateRealtimeCursor()
+                        true
+                    } else false
+                }
+                if (invalidated) {
                     Log.d("WebSocket", "Event cursor expired; reconnecting with a fresh cursor")
-                    clearRealtimeCursor()
                     probedSession.close(
                         CloseReason(CloseReason.Codes.NORMAL, "Event cursor expired")
                     )
@@ -688,6 +785,20 @@ class EventsRepository(
                 }
             }
 
+            // Capture the cursor before reading snapshots. Replaying from it then
+            // covers messages created while those HTTP requests are in flight.
+            if (messageResyncRequired) {
+                val failedConversation = refreshOpenConversationForRecovery()
+                if (failedConversation != null) {
+                    // Closing or switching the failed chat must not wait for its retry backoff.
+                    withTimeoutOrNull(retryDelayMillis) {
+                        openConversation.first { it != failedConversation }
+                    }
+                    retryDelayMillis = nextRetryDelayMillis(retryDelayMillis)
+                    continue
+                }
+            }
+
             var connectionEstablished = false
             try {
                 startWebsocketConnection(webSocketClient, currentBaseUrl) {
@@ -713,9 +824,51 @@ class EventsRepository(
         }
     }
 
-    private fun clearRealtimeCursor() {
+    private fun invalidateRealtimeCursor() = synchronized(realtimeStateLock) {
+        historyGeneration++
+        staleConversations += _streamTopicMessages.value.keys
+        openConversation.value?.let { staleConversations += it.key }
+        messageResyncRequired = true
         latestEpoch = 0
         epochGeneration = ""
+    }
+
+    private suspend fun refreshOpenConversationForRecovery(): OpenConversation? = coroutineScope {
+        while (true) {
+            val active = synchronized(realtimeStateLock) {
+                val current = openConversation.value
+                if (current == null || current.key !in staleConversations) {
+                    messageResyncRequired = false
+                    return@coroutineScope null
+                }
+                current
+            }
+            val reload = async { refreshConversation(active.streamUuid, active.topicUuid, true) }
+            val switched = async { openConversation.first { it != active } }
+            val response = try {
+                select {
+                    reload.onAwait { it }
+                    switched.onAwait { null }
+                }
+            } finally {
+                reload.cancelAndJoin()
+                switched.cancelAndJoin()
+            }
+            synchronized(realtimeStateLock) {
+                if (openConversation.value == active && response is ApiResult.Error) {
+                    if (response.error.httpStatusCode in setOf(403, 404)) {
+                        addStreamTopicMessages(active.streamUuid, active.topicUuid, emptyList())
+                        // Keep the stale marker: only a successful history response clears it.
+                        messageResyncRequired = false
+                        return@coroutineScope null
+                    }
+                    Log.d("WebSocket", "Failed to reload open chat history; recovery will retry")
+                    return@coroutineScope active
+                }
+            }
+        }
+        @Suppress("UNREACHABLE_CODE")
+        null
     }
 
     private suspend fun startWebsocketConnection(
@@ -742,7 +895,7 @@ class EventsRepository(
                     }
                 }
             ) {
-                activeSession = this
+                synchronized(realtimeStateLock) { activeSession = this }
                 try {
                     onConnected()
                     Log.d("WebSocket", "Connected: ${endpoint.displayUrl()}")
@@ -751,17 +904,22 @@ class EventsRepository(
                             is Frame.Text -> {
                                 val receivedText = frame.readText()
                                 val jsonObject = json.decodeFromString<JsonObject>(receivedText)
-                                if (jsonObject["type"]?.jsonPrimitive?.contentOrNull == "ready") {
-                                    epochGeneration = jsonObject["epoch_generation"]
-                                        ?.jsonPrimitive
-                                        ?.contentOrNull
-                                        ?: epochGeneration
+                                if (isExpiredRealtimeCursorFrame(jsonObject)) {
+                                    invalidateRealtimeCursor()
+                                    close(CloseReason(CloseReason.Codes.NORMAL, "Event cursor expired"))
+                                    return@webSocket
                                 }
                                 val action = jsonObject["action"]?.jsonPrimitive?.contentOrNull
                                 val newEpochVersion =
                                     jsonObject["epoch_version"]?.jsonPrimitive?.contentOrNull?.toInt()
-                                if (newEpochVersion != null) {
-                                    latestEpoch = newEpochVersion
+                                synchronized(realtimeStateLock) {
+                                    // A frame from the socket being closed must not revive an expired cursor.
+                                    if (messageResyncRequired) return@webSocket
+                                    if (jsonObject["type"]?.jsonPrimitive?.contentOrNull == "ready") {
+                                        epochGeneration = jsonObject["epoch_generation"]
+                                            ?.jsonPrimitive?.contentOrNull ?: epochGeneration
+                                    }
+                                    if (newEpochVersion != null) latestEpoch = newEpochVersion
                                 }
                                 if (jsonObject["type"]?.jsonPrimitive?.contentOrNull == "ready") {
                                     Log.d(
@@ -812,10 +970,13 @@ class EventsRepository(
                         }
                     }
                 } finally {
-                    activeSession = null
+                    synchronized(realtimeStateLock) { activeSession = null }
                     val reason = closeReason.await()
                     if (reason?.code?.toInt() == 4401) {
                         webSocketClient.refreshSession(serverId, accessToken)
+                    } else if (reason?.code?.toInt() == 4410) {
+                        // The error frame can be missing; the close code alone is sufficient.
+                        invalidateRealtimeCursor()
                     }
                     Log.d("WebSocket", "Disconnected: $reason")
                 }
@@ -1104,6 +1265,10 @@ internal fun shouldReconnectForEventsProbe(
     savedEpochVersion: Int,
     probeEpochVersions: List<Int>
 ): Boolean = probeEpochVersions.any { it > savedEpochVersion }
+
+internal fun isExpiredRealtimeCursorFrame(frame: JsonObject): Boolean =
+    frame["code"]?.jsonPrimitive?.intOrNull == EVENTS_CURSOR_EXPIRED_STATUS_CODE &&
+        frame["error"]?.jsonPrimitive?.contentOrNull == "epoch_pruned"
 
 @Serializable
 data class PongMessage(

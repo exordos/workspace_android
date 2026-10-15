@@ -100,3 +100,31 @@ Require instrumentation code `-1` and `result=PASS` when seeding. Remove the
 task's port forwards and emulator after the run. Never use this setup on a
 user's installation. Gravatar's exact unauthenticated request is checked by
 `AvatarImageRequestTest` without contacting the public service.
+
+## Chat recovery after an expired event cursor
+
+`RealtimeRecoveryInstrumentedTest` uses a loopback HTTP/WebSocket peer to exercise
+the actual event connection and message-history reload. It covers close code
+4410, the typed `epoch_pruned` error, HTTP 410 from the periodic event probe,
+a failed open-chat history request followed by retry, and replay after the snapshot
+boundary without losing or duplicating messages. Recovery refreshes only the open
+chat; inactive cached chats stay stale until opened, including non-empty caches.
+An inactive chat returning 503 must not delay recovery or subsequent live events.
+The suite also checks lazy history retries, reconnecting with no open chat, and
+closing a chat while its history request is blocked.
+It also holds an uncached chat's pre-expiry history response until after recovery
+with no chat open, then checks that the obsolete response is rejected and the
+chat stays stale until reloaded on opening. Another case overlaps an ordinary
+open-chat load with recovery: the fresh history is empty after a missed deletion,
+and the older response must not resurrect the deleted message in either cache
+or the ViewModel flow. Live delivery and reopening the fresh chat are checked too.
+The probe case waits for the normal 30-second heartbeat. Sessions and DataStores
+are isolated; no live account or backend is required.
+
+```sh
+ANDROID_SERIAL=TASK_SERIAL ./gradlew :app:connectedExordosDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.class=ru.genesiscorporation.workspace.beta.data.RealtimeRecoveryInstrumentedTest
+```
+
+`MessageHistorySnapshotTest` covers pending sends and concurrent incoming messages,
+edits, deletions and HTTP send confirmations while history is loading.
