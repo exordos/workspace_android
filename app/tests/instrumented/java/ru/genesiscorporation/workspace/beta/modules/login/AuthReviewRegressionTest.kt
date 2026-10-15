@@ -1,5 +1,13 @@
 package ru.genesiscorporation.workspace.beta.modules.login
 
+import androidx.lifecycle.viewModelScope
+import androidx.compose.ui.test.onAllNodesWithText
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import ru.genesiscorporation.workspace.beta.fixtures.LoopbackWorkspaceServer
+import ru.genesiscorporation.workspace.beta.fixtures.WorkspaceTestAccount
 import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -87,6 +95,44 @@ class AuthReviewRegressionTest {
 
     @Test
     fun projectsReturnToCredentialsWithoutOtp() = verifyReturnToCredentials(withOtp = false)
+
+    @Test fun successfulLoginCanReturnFromProjectsWithoutImmediatelyNavigatingForwardAgain(): Unit = runBlocking {
+        val server = LoopbackWorkspaceServer { request ->
+            LoopbackWorkspaceServer.Response(if (request.path.endsWith("/get_token/invoke"))
+                """{"access_token":"cassi-fixture-0","refresh_token":"cassi-fixture-refresh"}""" else "[]")
+        }
+        val owner = WorkspaceTestAccount.create(server.url)
+        val mounted = mutableStateOf(true)
+        var loginModel: LoginViewModel? = null
+        try {
+            val model = withContext(Dispatchers.Main) { LoginViewModel(owner.api, owner.user, false).also { loginModel = it } }
+            model.onLoginChange("person0")
+            model.onPasswordChange("preview")
+            compose.setContent {
+                if (mounted.value) WokspaceTheme {
+                    val navigation = rememberNavController()
+                    NavHost(navigation, startDestination = LoginFlow.Login(false)) {
+                        composable<LoginFlow.Login> { LoginScreen(model, navigation) }
+                        composable<LoginFlow.Projects> {
+                            ProjectsContent(emptyList(), null, QueryState.Success, QueryState.Idle,
+                                {}, {}, {}, { navigation.returnToCredentials() })
+                        }
+                    }
+                }
+            }
+            compose.onNodeWithText("Войти").performScrollTo().performClick()
+            compose.waitUntil(5_000) { compose.onAllNodesWithText("Вернуться к логину").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("Вернуться к логину").performScrollTo().performClick()
+            compose.onNodeWithContentDescription("Имя пользователя или email").assertIsDisplayed()
+            assertEquals(QueryState.Idle, model.queryState.value)
+        } finally {
+            compose.runOnIdle { mounted.value = false }
+            compose.waitForIdle()
+            loginModel?.viewModelScope?.cancel()
+            owner.close()
+            server.close()
+        }
+    }
 
     private fun verifyReturnToCredentials(withOtp: Boolean) {
         lateinit var navController: NavHostController
