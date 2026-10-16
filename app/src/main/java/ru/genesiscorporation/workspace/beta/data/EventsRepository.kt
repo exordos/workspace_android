@@ -427,6 +427,7 @@ class EventsRepository(
                 if (topic.uuid == updatedTopic.uuid) {
                     topic.copy(
                         unreadCount = updatedTopic.unreadCount,
+                        activeUnreadCount = updatedTopic.activeUnreadCount,
                         name = updatedTopic.name,
                         lastMessageUuid = updatedTopic.lastMessageUuid,
                         isDone = updatedTopic.isDone,
@@ -522,6 +523,7 @@ class EventsRepository(
                 if (topic.uuid == updatedTopic.uuid) {
                     topic.copy(
                         unreadCount = updatedTopic.unreadCount,
+                        activeUnreadCount = updatedTopic.activeUnreadCount,
                         name = updatedTopic.name,
                         lastMessageUuid = updatedTopic.lastMessageUuid,
                         isDone = updatedTopic.isDone,
@@ -713,6 +715,19 @@ class EventsRepository(
                     folder
                 }
             }
+        }
+        // The active tab has its own snapshot used to filter visible streams.
+        _currentlySelectedFolder.update { selected ->
+            if (selected?.uuid == updatedFolder.uuid) {
+                _folders.value.firstOrNull { it.uuid == updatedFolder.uuid }
+            } else selected
+        }
+    }
+
+    fun removeFolder(folderUuid: String) {
+        _folders.update { current -> current.filterNot { it.uuid == folderUuid } }
+        _currentlySelectedFolder.update { selected ->
+            if (selected?.uuid == folderUuid) _folders.value.firstOrNull() else selected
         }
     }
 
@@ -1127,7 +1142,7 @@ class EventsRepository(
                 updateFolder(folder)
             }
             "deleted" -> {
-
+                json.decodeFromString<JsonObject>(payload)["uuid"]?.jsonPrimitive?.contentOrNull?.let(::removeFolder)
             }
         }
     }

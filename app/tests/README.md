@@ -23,6 +23,21 @@ With an Android device or emulator connected, run the instrumented tests with:
 ./gradlew :app:connectedGenesisDebugAndroidTest
 ```
 
+## Notification indicators
+
+Run the repository regressions on a connected Android device or emulator:
+
+```sh
+./gradlew :app:connectedGenesisDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.class=ru.genesiscorporation.workspace.beta.data.NotificationIndicatorRepositoryTest
+```
+
+These cases verify that authoritative topic events update active unread in both
+topic caches, including mute/read transitions. Folder events must refresh the
+selected folder's items and counter without switching tabs, preserve unrelated
+selections, and remove deleted folders with a valid remaining selection or none.
+Repeated deletion events must be harmless and must not delete conversations.
+
 Use the corresponding `ExordosDebug` tasks for the Exordos package. Select the
 dedicated device with `ANDROID_SERIAL` before running a connected task.
 
