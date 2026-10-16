@@ -7,6 +7,8 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import javax.imageio.ImageIO
 
+apply(from = "encrypted-runtime.gradle.kts")
+
 // Host-only synthetic origins for the optimized APK. Uses the project's Gradle JDK.
 tasks.register("runAvatarFixture") {
     group = "verification"

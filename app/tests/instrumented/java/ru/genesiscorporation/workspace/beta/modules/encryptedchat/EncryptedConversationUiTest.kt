@@ -25,6 +25,9 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasScrollToIndexAction
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.isDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule as createQueuedAndroidComposeRule
@@ -59,6 +62,8 @@ import coil3.ImageLoader
 import coil3.annotation.DelicateCoilApi
 import coil3.network.ktor3.KtorNetworkFetcherFactory
 import coil3.request.CachePolicy
+import coil3.request.ImageRequest
+import coil3.request.SuccessResult
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
@@ -68,6 +73,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -119,12 +125,15 @@ import java.io.File
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.net.SocketException
 import java.net.URI
 import java.net.URLDecoder
 import java.security.MessageDigest
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** Real authenticated Android runtime, storage, HTTP and chat screen; all data stays on loopback. */
@@ -180,14 +189,16 @@ class EncryptedConversationUiTest {
         val tokens = SecureTokenStore(context)
         events = EventsRepositoryStore(tokens, api)
         preferences = ServerRepository(dataStore, tokens, events, storeScope)
-        user = UserViewModel(preferences)
-        api.attachUserViewModel(user)
         serverId = "cassi-encrypted-conversation-${UUID.randomUUID()}"
         val config = ServerConfig(serverId, fixture.url, "", "CASSI test", projectUuid = PROJECT)
         preferences.addServer(config, TokenPair("synthetic-access", "synthetic-refresh"))
-        preferences.setSelectedServerId(serverId)
-        withTimeout(5_000) { user.selectedServer.first { it?.id == serverId } }
-        withTimeout(5_000) { user.accessToken.first { it != null } }
+        user = withContext(Dispatchers.Main) { UserViewModel(preferences) }
+        api.attachUserViewModel(user)
+        withTimeout(5_000) {
+            combine(user.selectedServerId, user.selectedServer, user.accessToken) { id, selected, access ->
+                id == serverId && selected == config && access == "synthetic-access"
+            }.first { it }
+        }
         val keys = EncryptedChatKeyStore(context)
         val owner = ChatKeyOwner(fixture.url, PROJECT, OWNER)
         val identity = keys.ensureDeviceIdentity(owner)
@@ -262,6 +273,8 @@ class EncryptedConversationUiTest {
         compose.onNode(hasSetTextAction()).performClick()
         compose.onNode(hasSetTextAction()).performTextClearance()
         compose.onNode(hasSetTextAction()).performTextInput("Ответы и реакции работают")
+        // Native message actions can leave the editor focused with its IME hidden.
+        closeSoftKeyboard()
         clickComposerSendAfterImeLayout("Send edit")
         compose.waitUntil(10_000) { fixture.editedPlaintexts.contains("Ответы и реакции работают") }
         closeSoftKeyboard()
@@ -406,46 +419,105 @@ class EncryptedConversationUiTest {
         assertFalse(compose.onNodeWithTag("message-bubble-${latest.uuid}", useUnmergedTree = true).isDisplayed())
     }
 
+    @Test fun disconnectedImageResponseDoesNotPoisonSubsequentDownloads() = runBlocking {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val imageUuid = UUID.randomUUID().toString()
+        val path = "/api/workspace/v1/messenger/files/$imageUuid/actions/download/"
+        val origin = URI(fixture.url)
+        fixture.beforeImageResponse = { entered.countDown(); check(release.await(5, TimeUnit.SECONDS)) }
+        try {
+            Socket(origin.host, origin.port).use { client ->
+                client.getOutputStream().apply {
+                    write("GET $path HTTP/1.1\r\nHost: ${origin.host}\r\nConnection: close\r\n\r\n".toByteArray())
+                    flush()
+                }
+                assertTrue("The image GET reached its response boundary", entered.await(5, TimeUnit.SECONDS))
+                client.setSoLinger(true, 0) // Close the peer with RST while its response is held.
+            }
+            release.countDown()
+            compose.waitUntil(5_000) { fixture.disconnectedImageDownloads.isNotEmpty() || fixture.transportFailureTypes.isNotEmpty() }
+            assertEquals(listOf(imageUuid), fixture.disconnectedImageDownloads.map { it.first })
+            assertTrue(fixture.disconnectedImageDownloads.single().second.isNotBlank())
+            assertTrue(fixture.imageDownloads.isEmpty())
+            assertTrue(fixture.transportFailureTypes.isEmpty())
+            fixture.beforeImageResponse = null
+            val downloaded = fixtureImageLoader.execute(ImageRequest.Builder(
+                InstrumentationRegistry.getInstrumentation().targetContext,
+            ).data(fixture.url + path).build())
+            assertTrue("A fresh Coil/CIO image request must decode after the disconnect", downloaded is SuccessResult)
+            compose.waitUntil(5_000) { fixture.imageDownloads.size == 1 }
+            assertEquals(imageUuid, fixture.imageDownloads.single().uuid)
+            assertEquals(sha256(fixture.image), fixture.imageDownloads.single().sha256)
+            assertTrue(fixture.transportFailureTypes.isEmpty())
+        } finally { release.countDown(); fixture.beforeImageResponse = null }
+    }
+
     @Test fun rejectedRequestSurvivesReopeningTheConversationAndCanBeRetried() = runBlocking {
-        chat.encryptionRuntime.readySession()
-        chat.encryptionRuntime.removeLocalKey(CURRENT)
-        val request = chat.encryptionRuntime.requestKey(CURRENT)
-        val rejection = fixture.messages.single { it.uuid == request.uuid }.copy(
-            uuid = UUID.randomUUID().toString(), createdAt = "2026-10-15T10:00:12Z",
-            payload = MessageResponsePayload("key_reject", keyUuid = CURRENT,
-                requestMessageUuid = request.uuid, senderDeviceId = "synthetic-owner-device",
-                recipientDeviceId = request.payload.deviceId),
-        )
-        fixture.messages += rejection
-        chat.repo.addStreamTopicMessages(STREAM, TOPIC, fixture.messages.toList())
-        chat.encryptionRuntime.refresh(force = true)
-        assertTrue(chat.encryptedChatState.value.requestStatus[CURRENT] == EncryptedChatRequestStatus.REJECTED)
-        val previous = chat
-        chat = withContext(Dispatchers.Main) {
-            previous.onChatClosed()
-            previous.encryptionRuntime.close()
-            previous.viewModelScope.cancel()
-            ChatDialogViewModel(previous.client, user, "Команда продукта", STREAM, "Общий чат", TOPIC,
-                false, events, null, previous.storage)
-        }
-        compose.setContent {
-            WokspaceTheme(darkTheme = true, dynamicColor = false) {
-                CompositionLocalProvider(LocalBottomBarVisible provides {}) {
-                    ChatDialogScreen(chat, rememberNavController())
+        try {
+            chat.encryptionRuntime.readySession()
+            chat.encryptionRuntime.removeLocalKey(CURRENT)
+            val request = chat.encryptionRuntime.requestKey(CURRENT)
+            val rejection = fixture.messages.single { it.uuid == request.uuid }.copy(
+                uuid = UUID.randomUUID().toString(), createdAt = "2026-10-15T10:00:12Z",
+                payload = MessageResponsePayload("key_reject", keyUuid = CURRENT,
+                    requestMessageUuid = request.uuid, senderDeviceId = "synthetic-owner-device",
+                    recipientDeviceId = request.payload.deviceId),
+            )
+            fixture.messages += rejection
+            chat.repo.addStreamTopicMessages(STREAM, TOPIC, fixture.messages.toList())
+            chat.encryptionRuntime.refresh(force = true)
+            assertTrue(chat.encryptedChatState.value.requestStatus[CURRENT] == EncryptedChatRequestStatus.REJECTED)
+            val previous = chat
+            chat = withContext(Dispatchers.Main) {
+                previous.onChatClosed()
+                previous.encryptionRuntime.close()
+                previous.viewModelScope.cancel()
+                ChatDialogViewModel(previous.client, user, "Команда продукта", STREAM, "Общий чат", TOPIC,
+                    false, events, null, previous.storage)
+            }
+            compose.setContent {
+                WokspaceTheme(darkTheme = true, dynamicColor = false) {
+                    CompositionLocalProvider(LocalBottomBarVisible provides {}) {
+                        ChatDialogScreen(chat, rememberNavController())
+                    }
                 }
             }
+            compose.waitUntil(10_000) {
+                chat.encryptedChatState.value.requests.any { it.message.uuid == request.uuid && it.outcome == EncryptedChatRequestOutcome.REJECTED }
+            }
+            assertTrue(chat.encryptedChatState.value.requestStatus[CURRENT] == null)
+            val context = InstrumentationRegistry.getInstrumentation().targetContext
+            val rejectedText = context.getString(R.string.encrypted_chat_rejected_prefix)
+            // Target the actual annotated link's accessibility action, not its paragraph.
+            // Coordinate taps can miss while the reopened conversation is still mounting.
+            val retryLink = compose.onNode(
+                hasAnyAncestor(hasTestTag("encrypted-request-key-$CURRENT")) and hasClickAction(),
+                useUnmergedTree = true,
+            )
+            compose.waitUntil(5_000) {
+                compose.onNodeWithText(rejectedText, substring = true).isDisplayed() && retryLink.isDisplayed()
+            }
+            compose.onNodeWithText(rejectedText, substring = true).assertIsDisplayed()
+            assertEquals(1, compose.encryptedInlineLinkCount("encrypted-request-key-$CURRENT"))
+            val retryReply = CountDownLatch(1)
+            fixture.nextMessageResponseGate = retryReply
+            try {
+                retryLink.performClick()
+                compose.waitUntil(5_000) { fixture.sentPayloads.count { it.kind == "key_request" } == 2 }
+                // Receipt by the server is not acknowledgement by the runtime or its UI.
+                compose.onNodeWithText(context.getString(R.string.encrypted_chat_requested)).assertDoesNotExist()
+            } finally { retryReply.countDown() }
+            compose.waitUntil(5_000) {
+                chat.encryptedChatState.value.let { it.requestStatus[CURRENT] == EncryptedChatRequestStatus.REQUESTED && !it.pending } &&
+                    compose.onNodeWithText(context.getString(R.string.encrypted_chat_requested)).isDisplayed()
+            }
+            compose.onNodeWithText(context.getString(R.string.encrypted_chat_requested)).assertIsDisplayed()
+            compose.onNodeWithText(rejectedText, substring = true).assertDoesNotExist()
+        } catch (error: Throwable) {
+            runCatching { diagnostics("retry-request-failure") }.exceptionOrNull()?.let(error::addSuppressed)
+            throw error
         }
-        compose.waitUntil(10_000) {
-            chat.encryptedChatState.value.requests.any { it.message.uuid == request.uuid && it.outcome == EncryptedChatRequestOutcome.REJECTED }
-        }
-        assertTrue(chat.encryptedChatState.value.requestStatus[CURRENT] == null)
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val rejectedText = context.getString(R.string.encrypted_chat_rejected_prefix)
-        compose.onNodeWithText(rejectedText, substring = true).assertIsDisplayed()
-        compose.clickEncryptedInlineLink("encrypted-request-key-$CURRENT", context.getString(R.string.encrypted_chat_request_retry))
-        compose.waitUntil(5_000) { fixture.sentPayloads.count { it.kind == "key_request" } == 2 }
-        compose.onNodeWithText(context.getString(R.string.encrypted_chat_requested)).assertIsDisplayed()
-        compose.onNodeWithText(rejectedText, substring = true).assertDoesNotExist()
     }
 
     @Test fun protectedHeaderCallIsDisabledWhenNoSendingGenerationIsAvailable() = runBlocking {
@@ -478,27 +550,42 @@ class EncryptedConversationUiTest {
 
     private fun clickComposerSendAfterImeLayout(description: String) {
         // Native IME animation can move the button after Compose has become idle.
-        // Observe the actual window and stable button coordinates before one touch.
+        // Sending is valid with either a shown or dismissed keyboard; require the
+        // native window, IME state and button coordinates to settle before one touch.
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val decor = compose.activity.window.decorView
         var previous: androidx.compose.ui.geometry.Rect? = null
+        var previousWindow: Rect? = null
+        var previousIme: Boolean? = null
         var stableSince = 0L
-        compose.waitUntil(5_000) {
-            var imeVisible = false
-            val visibleWindow = Rect()
-            instrumentation.runOnMainSync {
-                imeVisible = ViewCompat.getRootWindowInsets(decor)?.isVisible(WindowInsetsCompat.Type.ime()) == true
-                decor.getWindowVisibleDisplayFrame(visibleWindow)
+        var windowFocused = false
+        var imeVisible = false
+        var reachable = false
+        val visibleWindow = Rect()
+        try {
+            compose.waitUntil(5_000) {
+                instrumentation.runOnMainSync {
+                    windowFocused = decor.hasWindowFocus()
+                    imeVisible = ViewCompat.getRootWindowInsets(decor)?.isVisible(WindowInsetsCompat.Type.ime()) == true
+                    decor.getWindowVisibleDisplayFrame(visibleWindow)
+                }
+                val bounds = compose.onNodeWithContentDescription(description).fetchSemanticsNode().boundsInWindow
+                val now = SystemClock.uptimeMillis()
+                reachable = bounds.left >= visibleWindow.left && bounds.right <= visibleWindow.right &&
+                    bounds.top >= visibleWindow.top && bounds.bottom <= visibleWindow.bottom
+                if (!windowFocused || !reachable || bounds != previous ||
+                    visibleWindow != previousWindow || imeVisible != previousIme) {
+                    previous = bounds
+                    previousWindow = Rect(visibleWindow)
+                    previousIme = imeVisible
+                    stableSince = now
+                    false
+                } else now - stableSince >= 200
             }
-            val bounds = compose.onNodeWithContentDescription(description).fetchSemanticsNode().boundsInWindow
-            val now = SystemClock.uptimeMillis()
-            val reachable = bounds.left >= visibleWindow.left && bounds.right <= visibleWindow.right &&
-                bounds.top >= visibleWindow.top && bounds.bottom <= visibleWindow.bottom
-            if (!imeVisible || !reachable || bounds != previous) {
-                previous = bounds
-                stableSince = now
-                false
-            } else now - stableSince >= 200
+        } catch (failure: Throwable) {
+            failure.addSuppressed(AssertionError("Native composer layout: windowFocused=$windowFocused; " +
+                "imeVisible=$imeVisible; reachable=$reachable; button=$previous; visibleWindow=$visibleWindow"))
+            throw failure
         }
         compose.onNodeWithContentDescription(description).assertIsDisplayed().assertIsEnabled().performClick()
     }
@@ -532,8 +619,9 @@ class EncryptedConversationUiTest {
         val hierarchy = buildString {
             val encryption = chat.encryptedChatState.value
             appendLine("hasCurrentKey=${encryption.hasCurrentKey}; hasSendingKey=${encryption.sendingKeyUuid != null}; pending=${encryption.pending}; presentationCount=${chat.encryptedPresentations.value.size}; error=${encryption.error}")
+            appendLine("requestStatus=${encryption.requestStatus}; requestOutcomes=${encryption.requests.map { it.outcome }}")
             appendLine("composerLength=${chat.mentions.text.length}; postedBodyCount=${fixture.sentBodies.size}; acceptedPayloadCount=${fixture.sentPayloads.size}; rejectedPayloadKinds=${fixture.rejectedPayloadKinds}; actionError=${chat.actionError.value?.resourceId}")
-            appendLine("fixtureTransportFailureTypes=${fixture.transportFailureTypes}")
+            appendLine("fixtureTransportFailureTypes=${fixture.transportFailureTypes}; disconnectedImages=${fixture.disconnectedImageDownloads.size}")
             appendLine("hostSoftInputMode=${compose.activity.window.attributes.softInputMode}")
             appendLine("shouldScrollToBottom=${chat.shouldScrollToBottom}")
             appendLine("uploadedImageUuid=${fixture.uploadedImageUuid}; imageDownloads=${fixture.imageDownloads}")
@@ -631,6 +719,7 @@ internal class EncryptedConversationServer : Closeable {
     val sentBodies = CopyOnWriteArrayList<String>()
     val rejectedPayloadKinds = CopyOnWriteArrayList<String>()
     val transportFailureTypes = CopyOnWriteArrayList<String>()
+    val disconnectedImageDownloads = CopyOnWriteArrayList<Pair<String, String>>()
     val reactions = CopyOnWriteArrayList<String>()
     val imageDownloads = CopyOnWriteArrayList<EncryptedFixtureImageDownload>()
     @Volatile var uploadedImageUuid: String? = null
@@ -641,6 +730,8 @@ internal class EncryptedConversationServer : Closeable {
     @Volatile var nextCreationStatus: Int? = null
     @Volatile var dropNextCreationResponse = false
     @Volatile var nextMessageStatus: Int? = null
+    @Volatile var nextMessageResponseGate: CountDownLatch? = null
+    @Volatile var beforeImageResponse: (() -> Unit)? = null
     @Volatile var invitationAttempts = 0
     @Volatile var uploads = 0
     private val files = java.util.concurrent.ConcurrentHashMap<String, Pair<String, ByteArray>>()
@@ -763,6 +854,10 @@ internal class EncryptedConversationServer : Closeable {
                 val created = message(encryptedMessagePlacementUuid(TOPIC, canonical), payload, requestingUser)
                 if (payload.kind == "key_announced") stream.currentEncryptionKeyUuid = payload.keyUuid
                 messages += created
+                nextMessageResponseGate?.let { gate ->
+                    nextMessageResponseGate = null
+                    check(gate.await(5, TimeUnit.SECONDS)) { "Expected release of the synthetic message response" }
+                }
                 respond(connection, Json.encodeToString(created))
             }
             path.startsWith("/api/workspace/v1/messenger/messages/") && method == "PUT" -> {
@@ -789,10 +884,22 @@ internal class EncryptedConversationServer : Closeable {
             path.startsWith("/api/workspace/v1/messenger/files/") -> {
                 val uuid = path.substringAfter("/api/workspace/v1/messenger/files/").substringBefore('/')
                 val file = files[uuid] ?: ("Макет.png" to image)
+                beforeImageResponse?.invoke()
+                try {
+                    respondBytes(connection, file.second, if (file.first.endsWith("png")) "image/png" else "text/plain")
+                } catch (disconnected: SocketException) {
+                    // Lazy image consumers can leave/recompose after their complete GET.
+                    // Keep their response-write disconnects observable without treating
+                    // them as malformed requests or failures of message/API responses.
+                    val reason = disconnected.message
+                    val peerClosed = reason in listOf("Broken pipe", "Connection reset", "Connection reset by peer")
+                    if (method != "GET" || !file.first.endsWith("png") || !peerClosed) throw disconnected
+                    disconnectedImageDownloads += uuid to requireNotNull(reason)
+                    return
+                }
                 if (file.first.endsWith("png")) imageDownloads += EncryptedFixtureImageDownload(uuid,
                     headers["authorization"] == "Bearer synthetic-access",
                     MessageDigest.getInstance("SHA-256").digest(file.second).joinToString("") { "%02x".format(it) })
-                respondBytes(connection, file.second, if (file.first.endsWith("png")) "image/png" else "text/plain")
             }
             path == "/api/workspace/v1/messenger/message_reactions/" && method == "GET" -> respond(connection, "[]")
             path == "/api/workspace/v1/messenger/message_reactions/" -> {
