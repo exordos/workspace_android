@@ -1,5 +1,9 @@
 # Tests
 
+See the [project test strategy](../../docs/testing.md) for architecture boundaries,
+the regression map and release-quality gates, and the
+[development guide](../../docs/development.md) for SDK/build prerequisites.
+
 All app tests live in this directory:
 
 - `unit/`: local JVM tests, mapped to Gradle's `test` source set.
@@ -10,6 +14,7 @@ All app tests live in this directory:
 Keep Java and Kotlin package paths under each directory's `java/` folder.
 The source set mappings are defined in `app/build.gradle.kts`; Gradle task names
 are unchanged.
+`app/src/test` and `app/src/androidTest` are not configured source roots.
 
 From the repository root, run the JVM tests with:
 
@@ -45,6 +50,27 @@ dedicated device with `ANDROID_SERIAL` before running a connected task.
 suite in a clean test installation or a separate Android user; do not clear
 someone's saved accounts to satisfy that precondition. HTTP and repository
 tests use isolated DataStores and unique token-store IDs.
+
+## General request contracts
+
+`WorkspaceRequestHttpContractTest` reuses `WorkspaceTestAccount` and
+`LoopbackWorkspaceServer` with synthetic sessions. It verifies the production
+Ktor pipeline for login/OTP and refresh credential boundaries, Unicode draft
+bodies, quoted `If-Match`, revision conflicts, distinct read/read-up-to actions,
+notification overrides, topic completion, configuration mismatches and plain
+server errors. It never contacts a deployed Workspace.
+
+```sh
+ANDROID_SERIAL=TASK_SERIAL ./gradlew :app:connectedExordosDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.class=ru.genesiscorporation.workspace.beta.data.remote.WorkspaceRequestHttpContractTest
+```
+
+JVM regressions `SessionRequestContractTest`, `DraftRequestContractTest`,
+`RequestQuerySerializationTest` and `ResponseErrorTest` cover wire encoding
+and error boundaries without Android. `WorkspaceShareTest` belongs under
+`unit/java/`, so Gradle discovers the web-link regressions alongside the other
+tests. `MessageTimeFormattingTest` fixes the clock and zones; its temporary
+default timezone is always restored.
 
 `StreamMembershipInstrumentedTest` exercises creation, invitation retries,
 membership changes and user search through the production screens and HTTP
