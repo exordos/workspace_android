@@ -66,11 +66,16 @@ internal fun deriveChatHistoryPresentation(
         if (viewerUuid.isNullOrBlank() || deviceId.isNullOrBlank()) null
         else OwnGenerationRequestKey(streamUuid, generation, viewerUuid, deviceId)
     }
+    val visibleCurrentRequest = ordered.orEmpty().any { it.uuid == latest[currentRequest]?.second }
+    val visibleCurrentAnnouncement = ordered.orEmpty().any {
+        it.payload.kind == "key_announced" && it.payload.keyUuid == encryption.currentKeyUuid
+    }
     return ChatHistoryPresentation(
         orderedMessages = ordered,
         firstMessageUuid = ordered?.firstOrNull()?.uuid,
-        showInitialKeyRequest = encrypted && currentRequest != null && currentRequest !in ownRequests &&
-            ordered.orEmpty().none { it.payload.kind == "key_announced" && it.payload.keyUuid == encryption.currentKeyUuid },
+        // A request in another topic cannot provide an action/status row in this conversation.
+        showInitialKeyRequest = encrypted && currentRequest != null && !visibleCurrentRequest &&
+            (!visibleCurrentAnnouncement || currentRequest in ownRequests),
         latestOwnRequestUuids = latest.mapValues { it.value.second },
         ownGenerationRequests = ownRequests,
         viewerUuid = viewerUuid,

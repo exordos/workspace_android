@@ -94,6 +94,14 @@ internal class ChatKeyStorageImpl(private val records: ChatSecretRecords) : Chat
         true
     }
 
+    override fun listPendingRequestKeyUuids(scope: ChatKeyScope, streamUuid: String): List<String> = read(scope.owner) { state ->
+        validScope(scope)
+        require(streamUuid.isNotBlank())
+        state.requests.values.map { Json.decodeFromString(ListSerializer(String.serializer()), it.addressId) }
+            .filter { it.size == 3 && it[0] == scope.deviceId && it[1] == streamUuid }
+            .map { it[2] }.distinct().sorted()
+    }
+
     override fun listPendingRequests(address: ChatKeyAddress): List<PendingChatKeyRequest> = read(address.scope.owner) {
         it.requests.values.filter { record -> record.addressId == address.keyId() }.map(RequestRecord::toDomain)
             .sortedBy { request -> request.createdAt }

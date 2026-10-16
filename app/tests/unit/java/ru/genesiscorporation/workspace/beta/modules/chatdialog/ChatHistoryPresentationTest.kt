@@ -33,7 +33,7 @@ class ChatHistoryPresentationTest {
         val group = result.requestKey("stream", "generation")!!
         assertEquals("c", result.latestOwnRequestUuids[group])
         assertEquals(setOf(group), result.ownGenerationRequests)
-        assertFalse(result.showInitialKeyRequest)
+        assertTrue(result.showInitialKeyRequest)
     }
 
     @Test fun `request grouping isolates stream generation viewer and device`() {
@@ -68,13 +68,22 @@ class ChatHistoryPresentationTest {
         assertFalse(derive(emptyList(), encryption = state.copy(deviceId = null)).showInitialKeyRequest)
     }
 
-    @Test fun `resolved session request suppresses duplicate introduction even if its history is not loaded`() {
+    @Test fun `request outside the visible topic keeps an entry in the introduction`() {
         val request = EncryptedChatKeyRequest(EncryptedChatWireMessage("request", "project", "stream", "viewer",
             EncryptedChatPayload("key_request", "generation", deviceId = "device")), EncryptedChatRequestOutcome.GRANTED)
         val result = derive(emptyList(), encryption = state.copy(requests = listOf(request)))
-        assertFalse(result.showInitialKeyRequest)
+        assertTrue(result.showInitialKeyRequest)
         assertTrue(result.requestKey("stream", "generation") in result.ownGenerationRequests)
         assertTrue(result.latestOwnRequestUuids.isEmpty())
+        assertTrue(derive(listOf(message("announcement", kind = "key_announced")),
+            encryption = state.copy(requests = listOf(request))).showInitialKeyRequest)
+    }
+
+    @Test fun `request on another owner device does not hide this devices request`() {
+        val otherDevice = message("owner-first-device", kind = "key_request", device = "first-device")
+        val result = derive(listOf(otherDevice), encryption = state.copy(canManageKeys = true, canRotate = true))
+        assertTrue(result.showInitialKeyRequest)
+        assertTrue(result.ownGenerationRequests.isEmpty())
     }
 
     @Test fun `new history and generation snapshots replace previously derived request decisions`() {
@@ -83,6 +92,7 @@ class ChatHistoryPresentationTest {
         val before = derive(listOf(oldRequest))
         val after = derive(listOf(oldRequest), histories = mapOf("another-topic" to listOf(newerRequest)))
         assertEquals("old", before.latestOwnRequestUuids[before.requestKey("stream", "generation")])
+        assertFalse(before.showInitialKeyRequest)
         assertEquals("new", after.latestOwnRequestUuids[after.requestKey("stream", "generation")])
         assertTrue(derive(listOf(oldRequest), encryption = state.copy(currentKeyUuid = "rotated")).showInitialKeyRequest)
         assertTrue(derive(emptyList()).ownGenerationRequests.isEmpty())

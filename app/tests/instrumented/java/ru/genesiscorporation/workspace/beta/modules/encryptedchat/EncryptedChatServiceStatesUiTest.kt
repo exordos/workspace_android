@@ -28,6 +28,38 @@ import ru.genesiscorporation.workspace.beta.ui.theme.WokspaceTheme
 class EncryptedChatServiceStatesUiTest {
     @get:Rule val compose = createComposeRule()
 
+    @Test fun grantedHistoryWithoutLocalKeyAndNullStatusOffersNewRequest() {
+        var requested = 0
+        compose.setContent {
+            WokspaceTheme(darkTheme = true, dynamicColor = false) {
+                EncryptedChatServiceMessage(request(), "Касандра", EncryptedChatRequestOutcome.GRANTED,
+                    true, false, {}, {}, isOwnDeviceRequest = true, hasGenerationKey = false,
+                    requestStatus = null, onRequestKey = { requested++ })
+            }
+        }
+        compose.onNodeWithTag(REQUEST_TAG).assertIsDisplayed()
+        compose.clickEncryptedInlineLink(REQUEST_TAG, resource(R.string.encrypted_chat_request_inline))
+        compose.runOnIdle { assertEquals(1, requested) }
+        compose.onNodeWithTag(STATUS_TAG).assertDoesNotExist()
+    }
+
+    @Test fun ownerCanRequestAgainAfterDeletingAPreviouslyGrantedKey() {
+        var status by mutableStateOf(EncryptedChatRequestStatus.IDLE)
+        var requested = 0
+        compose.setContent {
+            WokspaceTheme(darkTheme = true, dynamicColor = false) {
+                EncryptedChatServiceMessage(request(), "Касандра", EncryptedChatRequestOutcome.GRANTED,
+                    true, false, {}, {}, isOwnDeviceRequest = true, hasGenerationKey = false,
+                    requestStatus = status, onRequestKey = { requested++; status = EncryptedChatRequestStatus.REQUESTED })
+            }
+        }
+        compose.onNodeWithTag(REQUEST_TAG).assertIsDisplayed()
+        compose.clickEncryptedInlineLink(REQUEST_TAG, resource(R.string.encrypted_chat_request_inline))
+        compose.runOnIdle { assertEquals(1, requested) }
+        compose.onNodeWithTag(REQUEST_TAG).assertDoesNotExist()
+        compose.onNodeWithText(resource(R.string.encrypted_chat_requested)).assertIsDisplayed()
+    }
+
     @Test fun ownDeviceRequestWaitsWhileAnotherDeviceOfTheSameUserCanBeManaged() {
         var ownDevice by mutableStateOf(true)
         var outcome by mutableStateOf(EncryptedChatRequestOutcome.PENDING)
@@ -39,7 +71,7 @@ class EncryptedChatServiceStatesUiTest {
                     EncryptedChatServiceMessage(request(), "Касандра", outcome, true, false,
                         onGrant = { grants++; outcome = EncryptedChatRequestOutcome.GRANTED },
                         onReject = { rejects++; outcome = EncryptedChatRequestOutcome.REJECTED },
-                        isOwnDeviceRequest = ownDevice)
+                        isOwnDeviceRequest = ownDevice, requestStatus = EncryptedChatRequestStatus.REQUESTED)
                 }
             }
         }
@@ -105,12 +137,15 @@ class EncryptedChatServiceStatesUiTest {
                 Column(Modifier.padding(16.dp)) {
                     EncryptedChatServiceMessage(request(), "Касандра", outcome, false, false, {}, {},
                         isOwnDeviceRequest = true, isLatestOwnGenerationRequest = !replacementExists,
+                        requestStatus = null,
                         onRequestKey = { requested += it; replacementExists = true })
                     if (replacementExists) EncryptedChatServiceMessage(request(), "Касандра", EncryptedChatRequestOutcome.PENDING,
-                        false, false, {}, {}, isOwnDeviceRequest = true, isLatestOwnGenerationRequest = true)
+                        false, false, {}, {}, isOwnDeviceRequest = true, isLatestOwnGenerationRequest = true,
+                        requestStatus = EncryptedChatRequestStatus.REQUESTED)
                 }
             }
         }
+        compose.onNodeWithText(resource(R.string.encrypted_chat_rejected_prefix), substring = true).assertIsDisplayed()
         assertEquals(1, compose.encryptedInlineLinkCount(REQUEST_TAG))
         compose.clickEncryptedInlineLink(REQUEST_TAG, resource(R.string.encrypted_chat_request_retry))
         compose.runOnIdle { assertEquals(listOf(KEY), requested) }
@@ -130,7 +165,7 @@ class EncryptedChatServiceStatesUiTest {
             WokspaceTheme(darkTheme = true, dynamicColor = false) {
                 Column(Modifier.padding(16.dp)) {
                     if (ownRequestPresent) EncryptedChatServiceMessage(request(), "Касандра", EncryptedChatRequestOutcome.GRANTED,
-                        false, false, {}, {}, isOwnDeviceRequest = true)
+                        false, false, {}, {}, isOwnDeviceRequest = true, hasGenerationKey = true)
                     EncryptedChatServiceMessage(EncryptedChatPayload("key_grant", KEY), "Владелец", null,
                         false, false, {}, {}, isRecipientDevice = recipientDevice, hasOwnGenerationRequest = ownRequestPresent,
                         hasGenerationKey = true, requestStatus = EncryptedChatRequestStatus.RECEIVED)

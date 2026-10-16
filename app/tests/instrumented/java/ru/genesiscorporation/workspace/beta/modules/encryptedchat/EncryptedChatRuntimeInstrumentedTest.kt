@@ -103,7 +103,7 @@ class EncryptedChatRuntimeInstrumentedTest {
 
     @Test fun twoAuthenticatedRuntimesRequestGrantRejectRotateAndDeleteWithoutPlaintextCache() = runBlocking {
         val ownerRuntime = owner.runtime()
-        val memberRuntime = member.runtime()
+        var memberRuntime = member.runtime()
         ownerRuntime.readySession()
         memberRuntime.readySession()
         assertFalse(memberRuntime.state.value.hasCurrentKey)
@@ -140,6 +140,12 @@ class EncryptedChatRuntimeInstrumentedTest {
         member.sync()
         memberRuntime.await { it.requestStatus[CURRENT] == EncryptedChatRequestStatus.REJECTED }
         assertNull(keys.readChatKey(member.address(CURRENT)))
+        memberRuntime.close()
+        memberRuntime = member.runtime()
+        memberRuntime.refresh(force = true)
+        assertNull(memberRuntime.state.value.requestStatus[CURRENT])
+        assertEquals(EncryptedChatRequestOutcome.REJECTED,
+            memberRuntime.state.value.requests.single { it.message.uuid == rejectedRequest.uuid }.outcome)
 
         val repeatedRequest = memberRuntime.requestKey(CURRENT)
         assertNotEquals(rejectedRequest.uuid, repeatedRequest.uuid)
@@ -190,6 +196,107 @@ class EncryptedChatRuntimeInstrumentedTest {
         assertEquals(setOf("e2ee", "key_request", "key_grant", "key_reject", "key_announced"),
             backend.sentPayloads.map { it.kind }.toSet())
         assertTrue(backend.editedPlaintexts.contains(editedText))
+    }
+
+    @Test fun pendingHistoricalRequestSurvivesRuntimeReopenAndReplayWithRealStorageAndHttp() = runBlocking {
+        val issuer = owner.runtime()
+        val receiver = member.runtime()
+        issuer.readySession()
+        receiver.readySession()
+        val request = receiver.requestKey(CURRENT)
+        issuer.rotate()
+        member.sync()
+        receiver.close()
+        val reopened = member.runtime()
+        reopened.refresh(force = true)
+        assertFalse(reopened.state.value.hasCurrentKey)
+        assertNull(EncryptedChatKeyStore(context).readChatKey(member.address(CURRENT)))
+        assertEquals(EncryptedChatRequestStatus.REQUESTED, reopened.state.value.requestStatus[CURRENT])
+        val posts = backend.sentBodies.size
+        assertEquals(request.uuid, reopened.requestKey(CURRENT).uuid)
+        assertEquals(posts, backend.sentBodies.size)
+        owner.sync()
+        issuer.refresh(force = true)
+        issuer.grantKey(request.uuid)
+        member.sync()
+        reopened.refresh(force = true)
+        assertArrayEquals(backend.groupKey, EncryptedChatKeyStore(context).readChatKey(member.address(CURRENT)))
+        val revision = reopened.state.value.keyRevision
+        member.sync()
+        reopened.refresh(force = true)
+        assertEquals(revision, reopened.state.value.keyRevision)
+        reopened.removeLocalKey(CURRENT)
+        member.sync()
+        reopened.refresh(force = true)
+        assertNull(keys.readChatKey(member.address(CURRENT)))
+        assertNull(reopened.state.value.requestStatus[CURRENT])
+        val replacement = reopened.requestKey(CURRENT)
+        assertNotEquals(request.uuid, replacement.uuid)
+        owner.sync()
+        issuer.refresh(force = true)
+        issuer.grantKey(replacement.uuid)
+        member.sync()
+        reopened.refresh(force = true)
+        assertArrayEquals(backend.groupKey, keys.readChatKey(member.address(CURRENT)))
+    }
+
+    @Test fun forgedAndMisboundGrantsCannotCompleteARealPendingRequest() = runBlocking {
+        val issuer = owner.runtime()
+        val receiver = member.runtime()
+        issuer.readySession()
+        receiver.readySession()
+        val request = receiver.requestKey(CURRENT)
+        owner.sync()
+        issuer.refresh(force = true)
+        issuer.grantKey(request.uuid)
+        val valid = backend.messages.last { it.payload.kind == "key_grant" }
+        val originalPool = member.repo.messagesPool.value.toList()
+        val altered = listOf(
+            valid.copy(authorUuid = member.userUuid),
+            valid.copy(streamUuid = UUID.randomUUID().toString()),
+            valid.copy(projectId = UUID.randomUUID().toString()),
+            valid.copy(payload = valid.payload.copy(keyUuid = UUID.randomUUID().toString())),
+            valid.copy(payload = valid.payload.copy(recipientDeviceId = "other-device")),
+            valid.copy(payload = valid.payload.copy(senderDeviceId = "forged-sender")),
+            valid.copy(payload = valid.payload.copy(requestMessageUuid = UUID.randomUUID().toString())),
+            valid.copy(payload = valid.payload.copy(content = WorkspaceChatCrypto.toBase64(ByteArray(85)))),
+        )
+        altered.forEach { bad ->
+            member.repo.setInitialMessagesPool(originalPool + bad.copy(uuid = UUID.randomUUID().toString()))
+            val failure = runCatching { receiver.refresh(force = true) }.exceptionOrNull()
+            if (failure != null) assertTrue(failure is EncryptedChatException && failure.failure == EncryptedChatFailure.INVALID_MESSAGE)
+            assertNull(keys.readChatKey(member.address(CURRENT)))
+            assertEquals(EncryptedChatRequestStatus.REQUESTED, receiver.state.value.requestStatus[CURRENT])
+            member.repo.setInitialMessagesPool(originalPool)
+            receiver.refresh(force = true)
+        }
+        member.sync()
+        receiver.refresh(force = true)
+        assertArrayEquals(backend.groupKey, keys.readChatKey(member.address(CURRENT)))
+    }
+
+    @Test fun failedHistoricalRequestRetainsItsCanonicalIdentityAndSecretAcrossReopen() = runBlocking {
+        val receiver = member.runtime()
+        receiver.readySession()
+        backend.nextMessageStatus = 503
+        val historical = UUID.randomUUID().toString()
+        val failure = runCatching { receiver.requestKey(historical) }.exceptionOrNull()
+        assertTrue(failure is EncryptedChatException && failure.failure == EncryptedChatFailure.SEND_FAILED)
+        val pending = EncryptedChatKeyStore(context).listPendingRequests(member.address(historical)).single()
+        assertNull(pending.requestMessageUuid)
+        val first = backend.sentBodies.last()
+        receiver.close()
+        val reopened = member.runtime()
+        reopened.refresh(force = true)
+        assertNull(reopened.state.value.requestStatus[historical])
+        val request = reopened.requestKey(historical)
+        assertEquals(first, backend.sentBodies.last())
+        val rebound = EncryptedChatKeyStore(context).listPendingRequests(member.address(historical)).single()
+        assertEquals(pending.localRequestId, rebound.localRequestId)
+        assertArrayEquals(pending.keyPair.privateKey, rebound.keyPair.privateKey)
+        assertEquals(request.uuid, rebound.requestMessageUuid)
+        assertEquals(EncryptedChatRequestStatus.REQUESTED, reopened.state.value.requestStatus[historical])
+        reopened.removeLocalKey(historical)
     }
 
     @Test fun replacementCredentialDeniesMountedAndNewRuntimeUntilMeThenSameOwnerRefreshRestores() = runBlocking {

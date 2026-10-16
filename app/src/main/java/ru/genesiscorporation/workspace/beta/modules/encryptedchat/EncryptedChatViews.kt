@@ -185,7 +185,7 @@ fun EncryptedChatServiceMessage(payload: EncryptedChatPayload, authorName: Strin
     onGrant: () -> Unit, onReject: () -> Unit, canGrant: Boolean = canManage,
     isOwnDeviceRequest: Boolean = false, isRecipientDevice: Boolean = false,
     hasGenerationKey: Boolean = false, isOwnerAnnouncement: Boolean = false,
-    hasOwnGenerationRequest: Boolean = false, requestStatus: EncryptedChatRequestStatus = EncryptedChatRequestStatus.IDLE,
+    hasOwnGenerationRequest: Boolean = false, requestStatus: EncryptedChatRequestStatus? = null,
     onRequestKey: (String) -> Unit = {},
     isLatestOwnGenerationRequest: Boolean = true,
 ) {
@@ -197,7 +197,11 @@ fun EncryptedChatServiceMessage(payload: EncryptedChatPayload, authorName: Strin
         "key_request" -> {
             if (isOwnDeviceRequest) {
                 if (!isLatestOwnGenerationRequest) return
-                val status = when (requestOutcome) {
+                // A historical grant does not mean this device still has the key or request secret.
+                val status = if (!hasGenerationKey) requestStatus ?: when (requestOutcome) {
+                    EncryptedChatRequestOutcome.REJECTED -> EncryptedChatRequestStatus.REJECTED
+                    else -> EncryptedChatRequestStatus.IDLE
+                } else when (requestOutcome) {
                     EncryptedChatRequestOutcome.GRANTED -> EncryptedChatRequestStatus.RECEIVED
                     EncryptedChatRequestOutcome.REJECTED -> EncryptedChatRequestStatus.REJECTED
                     else -> EncryptedChatRequestStatus.REQUESTED
@@ -230,7 +234,7 @@ fun EncryptedChatServiceMessage(payload: EncryptedChatPayload, authorName: Strin
             EncryptedServiceText(AnnotatedString(stringResource(if (isOwnerAnnouncement && hasGenerationKey)
                 R.string.encrypted_chat_new_owner_key else R.string.encrypted_chat_security_key_changed)))
             if (!hasGenerationKey && !hasOwnGenerationRequest) {
-                EncryptedChatRequestAccess(payload.keyUuid, requestStatus, pending, onRequestKey)
+                EncryptedChatRequestAccess(payload.keyUuid, requestStatus ?: EncryptedChatRequestStatus.IDLE, pending, onRequestKey)
             }
         }
     }

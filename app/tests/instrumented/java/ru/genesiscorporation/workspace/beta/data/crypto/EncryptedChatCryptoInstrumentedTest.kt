@@ -43,10 +43,15 @@ class EncryptedChatCryptoInstrumentedTest {
             val pair = WorkspaceChatCrypto().createRequestKeyPair()
             assertTrue(store.writeChatKey(address, key, forSending = true))
             assertTrue(store.writePendingRequest(address, PendingChatKeyRequest("cassi-request", null, pair, 100)))
+            val historical = address.copy(keyUuid = "historical")
+            assertTrue(store.writePendingRequest(historical, PendingChatKeyRequest("historical-request", "historical-message", pair, 101)))
             val reopened = EncryptedChatKeyStore(context, preferencesName, masterAlias)
             assertEquals(identity, reopened.readDeviceIdentity(owner))
             assertArrayEquals(key, reopened.readChatKey(address))
             assertArrayEquals(pair.privateKey, reopened.listPendingRequests(address).single().keyPair.privateKey)
+            assertNull(reopened.readChatKey(historical))
+            assertEquals(setOf(address.keyUuid, historical.keyUuid), reopened.listPendingRequestKeyUuids(address.scope, address.streamUuid).toSet())
+            assertTrue(reopened.listPendingRequestKeyUuids(address.scope.copy(deviceId = "other-device"), address.streamUuid).isEmpty())
             val xml = File(context.applicationInfo.dataDir, "shared_prefs/$preferencesName.xml").readText()
             listOf(owner.serverUrl, owner.userUuid, identity.deviceId, "CASSI fixture Android",
                 WorkspaceChatCrypto.toBase64(key), WorkspaceChatCrypto.toBase64(pair.privateKey)).forEach {
@@ -55,6 +60,9 @@ class EncryptedChatCryptoInstrumentedTest {
             assertTrue(reopened.removeChatKey(address))
             assertNull(store.readChatKey(address))
             assertTrue(store.listPendingRequests(address).isEmpty())
+            assertEquals(listOf(historical.keyUuid), store.listPendingRequestKeyUuids(address.scope, address.streamUuid))
+            assertTrue(reopened.removeChatKey(historical))
+            assertTrue(store.listPendingRequestKeyUuids(address.scope, address.streamUuid).isEmpty())
         } finally {
             context.deleteSharedPreferences(preferencesName)
             KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.deleteEntry(masterAlias)
