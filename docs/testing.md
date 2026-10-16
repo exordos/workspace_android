@@ -59,6 +59,8 @@ revoked membership, a partial batch, an unexpected payload, or cancellation.
    clear a user's saved accounts.
 4. Inspect XML/HTML reports and actual test/failure/skip counts. `UP-TO-DATE`,
    `NO-SOURCE`, and successful compilation do not prove that a test ran.
+   Rotation checks wait for the software keyboard and require the submit button
+   to remain reachable after the window and IME finish resizing.
 5. Run lint and `git diff --check`. Run the optimized smoke test for R8-sensitive
    changes; a debug runtime cannot detect a serializer removed by R8.
 
