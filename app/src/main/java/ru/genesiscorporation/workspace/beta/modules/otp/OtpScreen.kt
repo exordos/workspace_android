@@ -59,8 +59,8 @@ fun OtpScreen(viewModel: OtpViewModel, navController: NavHostController) {
     val colors = authColors()
 
     LaunchedEffect(state) {
-        when (state) {
-            is QueryState.Error -> Toast.makeText(context, "Код введён неверно", Toast.LENGTH_SHORT).show()
+        when (val current = state) {
+            is QueryState.Error -> Toast.makeText(context, current.message, Toast.LENGTH_SHORT).show()
             QueryState.Success -> navController.navigate(LoginFlow.Projects(viewModel.isFirstOrganization))
             else -> Unit
         }

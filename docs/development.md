@@ -16,10 +16,12 @@ The repository's Gradle files define the required versions:
 1. Install JDK 21 and the Android SDK platform matching the compile SDK. Configure
    the SDK through a local `local.properties` (`sdk.dir=...`) or Android SDK
    environment variables. Use Android Studio with support for the project's AGP.
-2. Obtain the app's Firebase configuration from the project maintainer and place
-   it in `app/google-services.json`. To build both flavors, the configuration must
-   include both application IDs. Keep credentials out of source code,
-   documentation, and test fixtures.
+2. Download `google-services.json` from the existing Firebase project's
+   **Project settings > General > Your apps**, selecting the Android app whose
+   package matches the required flavor. Place it in `app/google-services.json`;
+   building both flavors requires both application IDs in that file. Obtain
+   access from the project maintainer if needed. Keep the downloaded configuration
+   out of Git, documentation, logs, and test fixtures.
 3. Check for `gradle/wrapper/gradle-wrapper.jar`: the current `.gitignore` excludes
    `*.jar`, and the JAR is absent from Git. Restore it from a trusted wrapper, or
    use an installed Gradle 9.2.1 to run
@@ -32,6 +34,20 @@ The repository's Gradle files define the required versions:
 Prepare local SDK, Firebase, and wrapper files separately in each new worktree.
 Do not commit `local.properties` or the Firebase configuration. `app/.gitignore`
 contains the module's local exclusions.
+
+The Google services plugin also supports variant-specific configuration, such as
+`app/src/exordosRelease/google-services.json`. Release validation checks the
+actual file and matching Android client selected by that plugin, including the
+project number, Firebase app ID and API-key format. Missing/malformed configuration
+or placeholder values that violate these formats fail before packaging, with no
+configuration values in the error.
+Debug builds can still use a maintainer-provided synthetic configuration for
+isolated UI tests; it does not establish Firebase registration or push delivery.
+
+Before publication, verify that the correctly configured app obtains an FCM
+registration token on a dedicated device and receives a test notification.
+Format validation alone cannot detect a revoked key, API restrictions, or a
+server-side delivery problem. Never log or attach registration tokens.
 
 ## Commands
 

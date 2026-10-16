@@ -24,7 +24,7 @@ This map describes covered contracts; it does not establish full line coverage.
 | Contract / risk | Checks |
 | --- | --- |
 | HTTP status, refresh/relogin, credential replacement | `AuthenticationReloginPolicyTest`, `ProtectedRequestAuthenticationTest`, `AuthenticationRefreshInstrumentedTest` |
-| Incomplete/extended errors, login/OTP/refresh JSON, query lists, percent encoding | `ResponseErrorTest`, `SessionRequestContractTest`, `RequestQuerySerializationTest`, `WorkspaceRequestHttpContractTest` |
+| Incomplete/extended errors, Throwable message, blank-message fallback and JSON round-trip, login/OTP/refresh JSON, query lists, percent encoding | `ApiErrorTest`, `ResponseErrorTest`, `SessionRequestContractTest`, `RequestQuerySerializationTest`, `WorkspaceRequestHttpContractTest` |
 | Draft revision / If-Match, read/read-up-to, notification/done actions over real HTTP | `DraftRequestContractTest`, `WorkspaceRequestHttpContractTest` |
 | Confirmed account owner, server/project changes | `ConfirmedAccountContextTest`, `VerifiedOwnerAuthenticationTest`, `ServerConfigCompatibilityTest` |
 | Event URL, cursor, retries, missed events, stale history | `RealtimeTransportPolicyTest`, `RealtimeRecoveryInstrumentedTest`, `MessageHistorySnapshotTest` |
@@ -39,7 +39,8 @@ This map describes covered contracts; it does not establish full line coverage.
 | Avatar origins/redirects and credential minimization | `AvatarOriginTest`, `AvatarImageRequestTest`, `AvatarRedirectPolicyTest` |
 | Encryption, key requests/grants/rotation, deletion, stale runtime | `WorkspaceChatCryptoTest`, `ChatKeyStorageTest`, `EncryptedChat*Test`, `EncryptedConversationUiTest`, interop verifier |
 | Protected stream, settings, notifications, call action | `ProtectedStream*Test`, `StreamInfoAvailabilityUiTest` |
-| Login, OTP, navigation, layout | `AuthenticationUiTest`, `AuthReviewRegressionTest`, `ProfileNavigationUiTest`, `PublicationWindowTest` |
+| Login/OTP server-error and empty/whitespace fallback Toasts, navigation, layout | `AuthenticationErrorUiTest`, `AuthenticationUiTest`, `AuthReviewRegressionTest`, `ProfileNavigationUiTest`, `PublicationWindowTest` |
+| Firebase release configuration, token/payload log privacy and notification content | `verifyFirebaseReleaseConfig`, `FirebaseTokenLoggingTest`; opt-in `FirebaseRegistrationSmokeTest` and dedicated notification acceptance |
 
 When extending this map, identify the failure scenario: lost acknowledgement,
 account replacement during a request, an empty fresh snapshot after deletion,
