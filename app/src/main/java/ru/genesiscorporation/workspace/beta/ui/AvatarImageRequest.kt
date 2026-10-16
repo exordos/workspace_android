@@ -7,7 +7,7 @@ import coil3.network.NetworkHeaders
 import coil3.network.httpHeaders
 import coil3.network.ktor3.KtorNetworkFetcherFactory
 import coil3.request.ImageRequest
-import io.ktor.client.HttpClient
+import ru.genesiscorporation.workspace.beta.data.remote.workspaceHttpClient
 import io.ktor.client.plugins.api.SendingRequest
 import io.ktor.client.plugins.api.createClientPlugin
 import io.ktor.util.AttributeKey
@@ -45,7 +45,7 @@ internal fun createAvatarImageLoader(context: Context): ImageLoader =
     SingletonImageLoader.get(context).newBuilder()
         .components {
             add(KtorNetworkFetcherFactory(httpClient = {
-                HttpClient { install(avatarCredentialBoundary) }
+                workspaceHttpClient { install(avatarCredentialBoundary) }
             }))
         }
         .build()

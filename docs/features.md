@@ -8,6 +8,7 @@ is tracked separately. Source paths refer to the main Kotlin package
 | --- | --- | --- |
 | Organizations and login | Add a Workspace address, login/password, OTP, project selection, multiple connections, switching, relogin, and logout | `modules/chooseserver`, `login`, `otp`, `projects`, `profile`; `data/UserDataRepository.kt` |
 | Session refresh | Refresh on 401, coalesce concurrent refreshes, reject late responses from another login | `data/remote/WorkspaceAPIClient.kt`, `ProtectedRequestAuthentication.kt` |
+| Transport security | HTTPS/WSS for remote API, realtime and avatars, including redirects; exact loopback exceptions for local development | `data/remote/WorkspaceHttpClient.kt` |
 | Conversation catalog | Channels and direct conversations, name/last message, unread badges, search, unread-first ordering | `modules/chatchannels`, `creationbase` |
 | Channels and members | Create channels/direct conversations, select and add members, view channel information; protected settings and roles | `modules/createstream`, `createdirectstream`, `adduserstostream`, `streaminfo` |
 | Topics | List, create, open conversations, mark done, set notification modes | `modules/topics`, `ui/CreateTopic.kt`, notification/done DTOs |
