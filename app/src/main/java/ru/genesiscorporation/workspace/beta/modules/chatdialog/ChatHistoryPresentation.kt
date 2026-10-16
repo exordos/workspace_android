@@ -82,3 +82,15 @@ internal fun deriveChatHistoryPresentation(
         deviceId = deviceId,
     )
 }
+
+/** Keep the selected unread anchor stable while read events and decryption update the rows. */
+internal fun initialChatMessageIndex(
+    messages: List<MessageResponse>,
+    firstUnreadMessageUuid: String?,
+    isEligibleUnread: (MessageResponse) -> Boolean = { !it.read },
+): Int {
+    if (firstUnreadMessageUuid == null) return messages.lastIndex
+    return messages.indexOfFirst { it.uuid == firstUnreadMessageUuid }.takeIf { it >= 0 }
+        ?: messages.indexOfFirst(isEligibleUnread).takeIf { it >= 0 }
+        ?: messages.lastIndex
+}

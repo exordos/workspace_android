@@ -3,11 +3,13 @@ package ru.genesiscorporation.workspace.beta.modules.homeinbounds
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import ru.genesiscorporation.workspace.beta.data.EventsRepository
+import ru.genesiscorporation.workspace.beta.HomeFlow
 import ru.genesiscorporation.workspace.beta.data.EventsRepositoryStore
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
@@ -17,88 +19,79 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
+import java.time.Instant
+
+internal val Stream.hasInboxUnread: Boolean
+    get() = activeUnreadCount > 0
+
+internal val TopicsResponseData.hasInboxUnread: Boolean
+    get() = notificationMode != "mute" && activeUnreadCount > 0
+
+internal fun firstInboxUnread(messages: List<MessageResponse>, stream: Stream, topic: TopicsResponseData): MessageResponse? =
+    messages.asSequence().filter {
+        it.streamUuid == stream.uuid && it.topicUuid == topic.uuid &&
+            it.isActiveUnread(stream.notificationMode, topic.notificationMode)
+    }.minWithOrNull(compareBy<MessageResponse> { Instant.parse(it.createdAt) }.thenBy { it.uuid })
 
 class HomeInboundsViewModel(
     val client: WorkspaceAPIClient,
     val eventsRepositoryStore: EventsRepositoryStore
 ): ViewModel() {
     val eventsRepository = eventsRepositoryStore.get(client.getCurrentServerId()) ?: error("Cannot get current event repository")
-
-    val streams: StateFlow<List<Stream>> = eventsRepository.streams
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = eventsRepository.streams.value
-        )
-
-    val streamTopics: StateFlow<Map<String, List<TopicsResponseData>>> = eventsRepository.streamTopics
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = eventsRepository.streamTopics.value
-        )
+    val streams = eventsRepository.streams
+    val streamTopics = eventsRepository.streamTopics
 
     private val _topicsQueryState = MutableStateFlow<QueryState>(QueryState.Idle)
     val topicsQueryState: StateFlow<QueryState> = _topicsQueryState
 
     init {
-        loadTopicsIfNeeded()
+        viewModelScope.launch {
+            streams.map { all -> all.filter { it.hasInboxUnread } }.distinctUntilChanged().conflate().collect {
+                loadTopics(it)
+            }
+        }
     }
 
     fun loadTopicsIfNeeded() {
-        val unreadStreams = streams.value.filter { it.activeUnreadCount > 0 }
-        val streamWithLoadedTopicsUuids = streamTopics.value.keys
-        val unreadStreamsToLoadTopics = unreadStreams.filter { !streamWithLoadedTopicsUuids.contains(it.uuid) }
-        if (unreadStreamsToLoadTopics.count() > 0) {
-            viewModelScope.launch {
-                loadTopics(unreadStreamsToLoadTopics)
-            }
-        } else {
-            _topicsQueryState.value = QueryState.Success
-        }
+        viewModelScope.launch { loadTopics(streams.value.filter { it.hasInboxUnread }) }
     }
 
     suspend fun loadTopics(streams: List<Stream>) {
-        _topicsQueryState.value = QueryState.Loading
-        val streamUuids = streams.map { it.uuid }
-        val response = client.performRequest(TopicsRequest(streamUuids))
-        when(response) {
+        if (_topicsQueryState.value != QueryState.Success) _topicsQueryState.value = QueryState.Loading
+        if (streams.isEmpty()) {
+            _topicsQueryState.value = QueryState.Success
+            return
+        }
+        when (val response = client.performRequest(TopicsRequest(streams.map { it.uuid }))) {
             is ApiResult.Success -> {
-                for (streamUuid in streamUuids) {
-                    val topics = response.value.filter { it.streamUuid == streamUuid }
-                    val messageIds = topics.mapNotNull { it.lastMessageUuid }
-                    if (!messageIds.isEmpty()) {
-                        val messagesResponse = client.performRequest(MessagesByIdsRequest(messageIds))
-                        when (messagesResponse) {
-                            is ApiResult.Success -> {
-                                eventsRepository.updateMessagesPool(messagesResponse.value)
-                                val topicsWithMessages = topics.map { topic ->
-                                    var updatedTopic = topic
-                                    updatedTopic.lastMessage = poolMessage(topic.lastMessageUuid)
-                                    updatedTopic
-                                }
-                                eventsRepository.addStreamTopics(streamUuid, topicsWithMessages)
-                                _topicsQueryState.value = QueryState.Success
-                            }
-
-                            is ApiResult.Error -> {
-                                eventsRepository.addStreamTopics(streamUuid, topics)
-                                _topicsQueryState.value = QueryState.Success
-                            }
-                        }
-                    } else {
-                        eventsRepository.addStreamTopics(streamUuid, topics)
-                        _topicsQueryState.value = QueryState.Success
+                val messageIds = response.value.mapNotNull { it.lastMessageUuid }.distinct()
+                if (messageIds.isNotEmpty()) {
+                    when (val messages = client.performRequest(MessagesByIdsRequest(messageIds))) {
+                        is ApiResult.Success -> eventsRepository.updateMessagesPool(messages.value)
+                        is ApiResult.Error -> Unit
                     }
                 }
+                streams.forEach { stream ->
+                    val cachedTopics = streamTopics.value[stream.uuid].orEmpty().associateBy { it.uuid }
+                    val topics = response.value.filter { it.streamUuid == stream.uuid }.map { topic ->
+                        topic.copy(lastMessage = eventsRepository.poolMessage(topic.lastMessageUuid)
+                            ?: cachedTopics[topic.uuid]?.lastMessage?.takeIf { it.uuid == topic.lastMessageUuid })
+                    }
+                    eventsRepository.addStreamTopics(stream.uuid, topics)
+                }
+                _topicsQueryState.value = QueryState.Success
             }
-            is ApiResult.Error -> {
-                _topicsQueryState.value = QueryState.Error("")
-            }
+            is ApiResult.Error -> _topicsQueryState.value = QueryState.Error("")
         }
     }
 
-    fun poolMessage(uuid: String?): MessageResponse? {
-        return eventsRepository.messagesPool.value.firstOrNull { it.uuid == uuid }
+    suspend fun unreadDestination(stream: Stream, topic: TopicsResponseData): HomeFlow.ChatDialog? {
+        val messages = when (val response = eventsRepository.refreshConversation(stream.uuid, topic.uuid)) {
+            is ApiResult.Success -> response.value.filter { it.streamUuid == stream.uuid }
+            is ApiResult.Error -> return null
+        }
+        val first = firstInboxUnread(messages, stream, topic)
+        return HomeFlow.ChatDialog(stream.displayableName(), stream.uuid, topic.name,
+            topic.uuid, stream.isPrivate, null, first?.uuid)
     }
 }

@@ -35,4 +35,5 @@
     <string name="messages_forward">Переслать</string>
     <string name="messages_forward_limit">Для пересылки выберите не больше %d сообщений</string>
     <string name="forward_members_online">%1$s, %2$d в сети</string>
+    <string name="inbox_open_failed">Не удалось открыть непрочитанное сообщение. Попробуйте ещё раз.</string>
 </resources>
