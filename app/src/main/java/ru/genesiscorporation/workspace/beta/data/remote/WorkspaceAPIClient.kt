@@ -266,9 +266,11 @@ class WorkspaceAPIClient(
                     ApiResult.Error(error)
                 }
             }  else {
-                val json = Json { ignoreUnknownKeys = true }
                 val responseString: String = httpResponse.body()
-                val error = ApiError(responseString, "${httpResponse.status.value}")
+                val error = responseError(
+                    responseBody = responseString,
+                    statusCode = httpResponse.status.value,
+                )
 
                 ApiResult.Error(error)
             }
