@@ -133,6 +133,28 @@ class EncryptedChatUiTest {
         compose.runOnIdle { assertEquals(2, requests) }
     }
 
+    @Test fun anyRoleWithoutKeysCanRequestFromTheEmptyLocalKeysPage() {
+        var state by mutableStateOf(ownerState().copy(hasCurrentKey = false, sendingKeyUuid = null, localKeys = emptyList()))
+        val requested = mutableListOf<String>()
+        compose.setContent {
+            WokspaceTheme(darkTheme = true, dynamicColor = false) {
+                EncryptedChatKeysScreen(state, users(), {}, { requested += it
+                    state = state.copy(requestStatus = mapOf(CURRENT to EncryptedChatRequestStatus.REQUESTED))
+                }, {}, {}, {}, {}, {}, initialLocalKeysVisible = true)
+            }
+        }
+        listOf(true to true, true to false, false to false).forEachIndexed { index, (manage, rotate) ->
+            compose.runOnIdle { state = state.copy(canManageKeys = manage, canRotate = rotate, requestStatus = emptyMap()) }
+            compose.onNodeWithText(resource(R.string.encrypted_chat_no_local_keys)).assertIsDisplayed()
+            compose.onNodeWithTag("encrypted-request-key-$CURRENT").performScrollTo().assertIsDisplayed()
+            compose.clickEncryptedInlineLink("encrypted-request-key-$CURRENT", resource(R.string.encrypted_chat_request_inline))
+            compose.runOnIdle { assertEquals(List(index + 1) { CURRENT }, requested) }
+            compose.onNodeWithTag("encrypted-request-key-$CURRENT").assertDoesNotExist()
+            compose.onNodeWithTag("encrypted-request-status-$CURRENT").assertIsDisplayed()
+        }
+        capture("owner-local-keys-requested")
+    }
+
     @Test fun protectedChatTypeAndDecryptedSyntheticContentRenderWithServiceStates() {
         val crypto = WorkspaceChatCrypto()
         val key = crypto.createGroupKey()

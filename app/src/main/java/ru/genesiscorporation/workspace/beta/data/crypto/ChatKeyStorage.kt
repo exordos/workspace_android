@@ -71,6 +71,7 @@ interface ChatKeyStorage {
     fun writeChatKey(address: ChatKeyAddress, groupKey: ByteArray, forSending: Boolean = false,
                      expectedDeletionRevision: Long? = null, onlyIfPresent: Boolean = false): Boolean
     fun removeChatKey(address: ChatKeyAddress): Boolean
+    fun listPendingRequestKeyUuids(scope: ChatKeyScope, streamUuid: String): List<String>
     fun listPendingRequests(address: ChatKeyAddress): List<PendingChatKeyRequest>
     fun writePendingRequest(address: ChatKeyAddress, request: PendingChatKeyRequest): Boolean
     fun bindPendingRequest(address: ChatKeyAddress, localRequestId: String, requestMessageUuid: String): Boolean

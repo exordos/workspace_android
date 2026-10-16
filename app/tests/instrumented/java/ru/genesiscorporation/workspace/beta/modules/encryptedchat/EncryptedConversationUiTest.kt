@@ -349,6 +349,48 @@ class EncryptedConversationUiTest {
         }
     }
 
+    @Test fun rejectedRequestSurvivesReopeningTheConversationAndCanBeRetried() = runBlocking {
+        chat.encryptionRuntime.readySession()
+        chat.encryptionRuntime.removeLocalKey(CURRENT)
+        val request = chat.encryptionRuntime.requestKey(CURRENT)
+        val rejection = fixture.messages.single { it.uuid == request.uuid }.copy(
+            uuid = UUID.randomUUID().toString(), createdAt = "2026-10-15T10:00:12Z",
+            payload = MessageResponsePayload("key_reject", keyUuid = CURRENT,
+                requestMessageUuid = request.uuid, senderDeviceId = "synthetic-owner-device",
+                recipientDeviceId = request.payload.deviceId),
+        )
+        fixture.messages += rejection
+        chat.repo.addStreamTopicMessages(STREAM, TOPIC, fixture.messages.toList())
+        chat.encryptionRuntime.refresh(force = true)
+        assertTrue(chat.encryptedChatState.value.requestStatus[CURRENT] == EncryptedChatRequestStatus.REJECTED)
+        val previous = chat
+        chat = withContext(Dispatchers.Main) {
+            previous.onChatClosed()
+            previous.encryptionRuntime.close()
+            previous.viewModelScope.cancel()
+            ChatDialogViewModel(previous.client, user, "Команда продукта", STREAM, "Общий чат", TOPIC,
+                false, events, null, previous.storage)
+        }
+        compose.setContent {
+            WokspaceTheme(darkTheme = true, dynamicColor = false) {
+                CompositionLocalProvider(LocalBottomBarVisible provides {}) {
+                    ChatDialogScreen(chat, rememberNavController())
+                }
+            }
+        }
+        compose.waitUntil(10_000) {
+            chat.encryptedChatState.value.requests.any { it.message.uuid == request.uuid && it.outcome == EncryptedChatRequestOutcome.REJECTED }
+        }
+        assertTrue(chat.encryptedChatState.value.requestStatus[CURRENT] == null)
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val rejectedText = context.getString(R.string.encrypted_chat_rejected_prefix)
+        compose.onNodeWithText(rejectedText, substring = true).assertIsDisplayed()
+        compose.clickEncryptedInlineLink("encrypted-request-key-$CURRENT", context.getString(R.string.encrypted_chat_request_retry))
+        compose.waitUntil(5_000) { fixture.sentPayloads.count { it.kind == "key_request" } == 2 }
+        compose.onNodeWithText(context.getString(R.string.encrypted_chat_requested)).assertIsDisplayed()
+        compose.onNodeWithText(rejectedText, substring = true).assertDoesNotExist()
+    }
+
     @Test fun protectedHeaderCallIsDisabledWhenNoSendingGenerationIsAvailable() = runBlocking {
         compose.setContent {
             WokspaceTheme(darkTheme = true, dynamicColor = false) {
@@ -541,6 +583,7 @@ internal class EncryptedConversationServer : Closeable {
     @Volatile var failNextInvitation = false
     @Volatile var nextCreationStatus: Int? = null
     @Volatile var dropNextCreationResponse = false
+    @Volatile var nextMessageStatus: Int? = null
     @Volatile var invitationAttempts = 0
     @Volatile var uploads = 0
     private val files = java.util.concurrent.ConcurrentHashMap<String, Pair<String, ByteArray>>()
@@ -649,6 +692,7 @@ internal class EncryptedConversationServer : Closeable {
             }
             path == "/api/workspace/v1/messenger/messages/" && method == "POST" -> {
                 sentBodies += body
+                nextMessageStatus?.let { status -> nextMessageStatus = null; respondError(connection, status); return }
                 val request = Json.parseToJsonElement(body).jsonObject
                 val payloadObject = request.getValue("payload").jsonObject
                 if (!acceptPayload(connection, payloadObject)) return

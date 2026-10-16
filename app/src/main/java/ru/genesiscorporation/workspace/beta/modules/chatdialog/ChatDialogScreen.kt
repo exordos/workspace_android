@@ -701,7 +701,7 @@ internal fun ChatMessage(
                     hasGenerationKey = encryptedChatState.localKeys.any { it.available && it.keyUuid == encryptedPresentation.payload.keyUuid },
                     isOwnerAnnouncement = encryptedChatState.canRotate && item.authorUuid == history.viewerUuid,
                     hasOwnGenerationRequest = ownRequestKey != null && ownRequestKey in history.ownGenerationRequests,
-                    requestStatus = encryptedChatState.requestStatus[encryptedPresentation.payload.keyUuid] ?: EncryptedChatRequestStatus.IDLE,
+                    requestStatus = encryptedChatState.requestStatus[encryptedPresentation.payload.keyUuid],
                     onRequestKey = viewModel::requestEncryptionKey,
                     isLatestOwnGenerationRequest = ownRequestKey != null && history.latestOwnRequestUuids[ownRequestKey] == item.uuid,
                 )

@@ -15,6 +15,85 @@ class EncryptedChatSessionTest {
     private val crypto = WorkspaceChatCrypto()
     private val scope = EncryptedChatScope("https://workspace.example", "project", "reader", 1, "android", "Android", "stream")
 
+    @Test fun `reopened session restores a pending historical generation without a local key or history`() = runBlocking {
+        val f = Fixture()
+        val request = f.session.requestKey("historical")
+        assertNull(f.storage.readChatKey(f.address("historical")))
+        f.session.close()
+        f.session = f.newSession()
+        f.session.load()
+        assertEquals(EncryptedChatRequestStatus.REQUESTED, f.session.state.value.requestStatus["historical"])
+        f.session.ingest(listOf(request))
+        assertEquals(EncryptedChatRequestStatus.REQUESTED, f.session.state.value.requestStatus["historical"])
+        assertEquals(request.uuid, f.session.requestKey("historical").uuid)
+        assertEquals(1, f.sent.size)
+    }
+
+    @Test fun `generation identifier from another stream cannot make the owner issue its key`() = runBlocking {
+        val f = Fixture(user = "owner")
+        f.storage.writeChatKey(f.address("generation").copy(streamUuid = "another-stream"), crypto.createGroupKey())
+        val pair = crypto.createRequestKeyPair()
+        val request = f.wire("remote-request", "reader", EncryptedChatPayload("key_request", "generation",
+            deviceId = "remote-device", deviceName = "Android", publicKey = WorkspaceChatCrypto.toBase64(pair.publicKey)))
+        f.session.ingest(listOf(request))
+        expectFailure(EncryptedChatFailure.MISSING_KEY) { f.session.grantKey(request.uuid) }
+        assertTrue(f.sent.isEmpty())
+    }
+
+    @Test fun `second owner device requests and receives a key from the first owner device`() = runBlocking {
+        val first = Fixture(user = "owner", device = "first-owner-device")
+        val second = Fixture(user = "owner", device = "second-owner-device")
+        val key = crypto.createGroupKey()
+        first.storage.writeChatKey(first.address("generation"), key, forSending = true)
+        second.session.load()
+        assertTrue(second.session.state.value.canManageKeys)
+        assertFalse(second.session.state.value.hasCurrentKey)
+        val request = second.session.requestKey()
+        assertEquals(first.scope.userId, request.authorId)
+        assertNotEquals(first.scope.deviceId, request.payload.deviceId)
+        first.session.ingest(listOf(request))
+        val grant = first.session.grantKey(request.uuid)
+        second.session.ingest(listOf(grant))
+        assertArrayEquals(key, second.storage.readChatKey(second.address("generation")))
+        assertTrue(second.session.state.value.hasCurrentKey)
+        assertEquals(EncryptedChatRequestStatus.RECEIVED, second.session.state.value.requestStatus["generation"])
+        second.session.removeLocalKey("generation")
+        assertNull(second.session.state.value.requestStatus["generation"])
+        val replacement = second.session.requestKey()
+        assertNotEquals(request.uuid, replacement.uuid)
+        first.session.ingest(listOf(replacement))
+        second.session.ingest(listOf(first.session.grantKey(replacement.uuid)))
+        assertArrayEquals(key, second.storage.readChatKey(second.address("generation")))
+        key.fill(0)
+    }
+
+    @Test fun `deletion in another panel clears received and pending statuses in the mounted session`() = runBlocking {
+        listOf(false, true).forEach { granted ->
+            val f = Fixture(user = "owner")
+            val request = f.session.requestKey()
+            if (granted) f.session.ingest(listOf(f.grant(request, crypto.createGroupKey())))
+            val other = f.newSession()
+            other.removeLocalKey("generation")
+            f.session.load()
+            assertFalse(f.session.state.value.hasCurrentKey)
+            assertNull(f.session.state.value.requestStatus["generation"])
+            assertNotEquals(request.uuid, f.session.requestKey().uuid)
+        }
+    }
+
+    @Test fun `replacement requested in another panel updates the mounted session without a duplicate send`() = runBlocking {
+        val f = Fixture(user = "owner")
+        val request = f.session.requestKey()
+        f.session.ingest(listOf(f.grant(request, crypto.createGroupKey())))
+        val other = f.newSession()
+        other.removeLocalKey("generation")
+        val replacement = other.requestKey()
+        f.session.load()
+        assertEquals(EncryptedChatRequestStatus.REQUESTED, f.session.state.value.requestStatus["generation"])
+        assertEquals(replacement.uuid, f.session.requestKey().uuid)
+        assertEquals(2, f.sent.size)
+    }
+
     @Test fun `history uses its generation and plaintext never replaces wire content`() = runBlocking {
         val f = Fixture()
         val oldKey = crypto.createGroupKey()
@@ -292,8 +371,8 @@ class EncryptedChatSessionTest {
         catch (error: EncryptedChatException) { assertEquals(failure, error.failure) }
     }
 
-    private inner class Fixture(user: String = "reader") {
-        val scope = this@EncryptedChatSessionTest.scope.copy(userId = user)
+    private inner class Fixture(user: String = "reader", device: String = "android") {
+        val scope = this@EncryptedChatSessionTest.scope.copy(userId = user, deviceId = device)
         val keyScope = ChatKeyScope(ChatKeyOwner(scope.server, scope.projectId, scope.userId), scope.deviceId)
         val storage = MemoryChatStorage()
         var access = EncryptedChatAccess(scope, "generation", "owner", mapOf("administrator" to "administrator"))
@@ -376,6 +455,9 @@ private class MemoryChatStorage : ChatKeyStorage {
         revisions[address] = readChatKeyDeletionRevision(address) + 1
         return true
     }
+    override fun listPendingRequestKeyUuids(scope: ChatKeyScope, streamUuid: String) = pending.keys.filter {
+        it.scope == scope && it.streamUuid == streamUuid && pending[it]?.isNotEmpty() == true
+    }.map { it.keyUuid }.distinct().sorted()
     override fun listPendingRequests(address: ChatKeyAddress) = pending[address]?.values?.map(::copyPending) ?: emptyList()
     override fun writePendingRequest(address: ChatKeyAddress, request: PendingChatKeyRequest): Boolean {
         pending.getOrPut(address) { linkedMapOf() }[request.localRequestId] = copyPending(request)

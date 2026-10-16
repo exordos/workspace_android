@@ -13,6 +13,38 @@ class ChatKeyStorageTest {
     private val address = ChatKeyAddress(scope, "chat-a", "generation-a")
     private val key = ByteArray(32) { it.toByte() }
 
+    @Test fun pendingGenerationsSurviveReopenWithoutKeysAndStayInsideTheirExactScope() {
+        val historical = address.copy(keyUuid = "historical")
+        val others = listOf(
+            historical.copy(scope = scope.copy(deviceId = "other-device")),
+            historical.copy(streamUuid = "other-stream"),
+            historical.copy(scope = scope.copy(owner = owner.copy(userUuid = "other-user"))),
+            historical.copy(scope = scope.copy(owner = owner.copy(projectUuid = "other-project"))),
+            historical.copy(scope = scope.copy(owner = owner.copy(serverUrl = "https://other.example.test"))),
+        )
+        store.writePendingRequest(historical, pending("historical"))
+        others.forEach { store.writePendingRequest(it, pending("other")) }
+        val reopened = ChatKeyStorageImpl(records)
+        assertTrue(reopened.listChatKeys(scope, address.streamUuid).isEmpty())
+        assertEquals(listOf("historical"), reopened.listPendingRequestKeyUuids(scope, address.streamUuid))
+        assertTrue(reopened.removeChatKey(historical))
+        assertTrue(store.listPendingRequestKeyUuids(scope, address.streamUuid).isEmpty())
+        others.forEach { assertEquals(listOf("historical"), store.listPendingRequestKeyUuids(it.scope, it.streamUuid)) }
+    }
+
+    @Test fun delimiterAndTraversalLikeGenerationNamesRemainOpaqueStorageValues() {
+        val generation = "../generation\",\"other-device\",\"other-stream"
+        val unusual = address.copy(keyUuid = generation)
+        store.writePendingRequest(unusual, pending("request"))
+        store.writeChatKey(unusual, key)
+        val reopened = ChatKeyStorageImpl(records)
+        assertEquals(listOf(generation), reopened.listPendingRequestKeyUuids(scope, address.streamUuid))
+        assertTrue(reopened.listPendingRequestKeyUuids(scope.copy(deviceId = "other-device"), "other-stream").isEmpty())
+        assertNull(reopened.readChatKey(address))
+        assertArrayEquals(key, reopened.readChatKey(unusual))
+        assertEquals(setOf("[\"https://workspace.example.test\",\"project-a\",\"user-a\"]"), records.keys)
+    }
+
     @Test fun explicitLogoutPurgesEverySecretAndReceiptOnlyForItsOwnerAndFencesLateWriters() {
         val identity = store.ensureDeviceIdentity(owner)
         val others = listOf(owner.copy(userUuid = "other-owner"), owner.copy(projectUuid = "other-project"),
@@ -223,6 +255,7 @@ class ChatKeyStorageTest {
 
     private class MemoryRecords : ChatSecretRecords {
         private val data = mutableMapOf<String, String>()
+        val keys: Set<String> get() = data.keys.toSet()
         var rejectWrites = false
         override fun read(key: String): String? = data[key]
         override fun write(key: String, value: String): Boolean {

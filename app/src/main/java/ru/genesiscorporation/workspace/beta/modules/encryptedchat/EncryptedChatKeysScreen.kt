@@ -230,20 +230,22 @@ fun EncryptedChatKeysScreen(
                     }
                 }
                 item {
-                    if (!state.hasCurrentKey && state.currentKeyUuid != null) {
-                        Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
-                            EncryptedChatRequestAccess(state.currentKeyUuid,
-                                state.requestStatus[state.currentKeyUuid] ?: EncryptedChatRequestStatus.IDLE, state.pending, onRequestKey)
-                        }
-                    }
-                    if (state.error != null) KeyText(stringResource(R.string.encrypted_chat_error), Color(0xFFFF4545),
-                        Modifier.padding(horizontal = 20.dp, vertical = 8.dp).testTag("encrypted-key-error"))
                     if (showLocalActionsEntry) {
                         TextButton(onClick = { localKeysVisible = true }, modifier = Modifier.fillMaxWidth().padding(top = 24.dp).testTag("encrypted-local-keys")) {
                             KeyText(stringResource(R.string.encrypted_chat_more_key_actions), KeySecondary)
                         }
                     }
                 }
+            }
+            item {
+                if (!state.hasCurrentKey && state.currentKeyUuid != null) {
+                    Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
+                        EncryptedChatRequestAccess(state.currentKeyUuid,
+                            state.requestStatus[state.currentKeyUuid] ?: EncryptedChatRequestStatus.IDLE, state.pending, onRequestKey)
+                    }
+                }
+                if (state.error != null) KeyText(stringResource(R.string.encrypted_chat_error), Color(0xFFFF4545),
+                    Modifier.padding(horizontal = 20.dp, vertical = 8.dp).testTag("encrypted-key-error"))
             }
         }
     }

@@ -144,13 +144,16 @@ class EncryptedChatSession(
             sendingKeyUuid = previous?.first
             previous?.second?.fill(0)
         }
-        val generations = storage.listChatKeys(keyScope, scope.streamId).map { it.keyUuid } + current.currentKeyUuid
+        val localGenerations = storage.listChatKeys(keyScope, scope.streamId).map { it.keyUuid }
+        val generations = (localGenerations + current.currentKeyUuid + requestStatuses.keys +
+            storage.listPendingRequestKeyUuids(keyScope, scope.streamId)).distinct()
         generations.forEach { keyUuid ->
             val pending = storage.listPendingRequests(address(keyUuid))
             val delivered = pending.any { it.requestMessageUuid != null && it.requestMessageUuid != it.localRequestId }
-            if (delivered && requestStatuses[keyUuid] == null)
+            if (delivered)
                 requestStatuses[keyUuid] = EncryptedChatRequestStatus.REQUESTED
-            else if (!delivered && pending.isNotEmpty() && requestStatuses[keyUuid] == EncryptedChatRequestStatus.REQUESTED)
+            else if ((!delivered && requestStatuses[keyUuid] == EncryptedChatRequestStatus.REQUESTED) ||
+                (keyUuid !in localGenerations && requestStatuses[keyUuid] == EncryptedChatRequestStatus.RECEIVED))
                 requestStatuses.remove(keyUuid)
         }
     }
