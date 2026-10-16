@@ -25,6 +25,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasScrollToIndexAction
+import androidx.compose.ui.test.isDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule as createQueuedAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -32,6 +33,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
@@ -221,7 +223,7 @@ class EncryptedConversationUiTest {
         Unit
     }
 
-    @Test fun fullConversationRetainsComposerAttachmentsReplyEditSelectionAndReactions() = runBlocking {
+    private fun showConversation() {
         // Match MainActivity and WorkspaceApp. The default test Activity can pan its
         // entire window above the screen instead of dispatching the production IME insets.
         compose.activityRule.scenario.onActivity { activity ->
@@ -237,6 +239,10 @@ class EncryptedConversationUiTest {
                 }
             }
         }
+    }
+
+    @Test fun fullConversationRetainsComposerAttachmentsReplyEditSelectionAndReactions() = runBlocking {
+        showConversation()
         try {
         compose.waitUntil(15_000) { chat.encryptedChatState.value.hasCurrentKey && chat.encryptedPresentations.value.size >= 4 }
         waitForText("Макеты готовы, можно обсуждать.")
@@ -293,6 +299,7 @@ class EncryptedConversationUiTest {
         compose.onNodeWithTag("forward-selected-messages").assertIsDisplayed()
         capture("09-encrypted-chat-selection")
         compose.onNodeWithTag("cancel-message-selection").performClick()
+        capture("09b-encrypted-chat-selection-cancelled")
         openMessageActions(latest.uuid)
         compose.onNodeWithText("👍").performClick()
         compose.waitUntil(5_000) { fixture.reactions.isNotEmpty() }
@@ -347,6 +354,56 @@ class EncryptedConversationUiTest {
             runCatching { diagnostics("full-chat-failure") }
             throw failure
         }
+    }
+
+    @Test fun cancellingSelectionFollowsLatestMessageButPreservesManualHistory() = runBlocking {
+        val history = (1..14).map { index ->
+            fixture.incomingEncryptedMessage(("Сообщение $index: " + "Длинная строка меняет переносы при выделении. ".repeat(4)).trimEnd())
+        }
+        withContext(Dispatchers.Main) { chat.repo.addStreamTopicMessages(STREAM, TOPIC, fixture.messages.toList()) }
+        showConversation()
+        compose.waitUntil(10_000) { chat.encryptedPresentations.value[history.last().uuid] is EncryptedChatPresentation.Text }
+        val latestText = (chat.encryptedPresentations.value.getValue(history.last().uuid) as EncryptedChatPresentation.Text).text
+        waitForText(latestText)
+        val photo = File(directory, "Selection.png").apply { writeBytes(fixture.image) }
+        withContext(Dispatchers.Main) { chat.addUri(Uri.fromFile(photo), photo.name, "image") }
+        compose.onNodeWithContentDescription("Send").performClick()
+        compose.waitUntil(10_000) { fixture.sentPlaintexts.any { "urn:image:" in it } && chat.uriList.value.isEmpty() }
+        compose.waitUntil(10_000) {
+            chat.streamTopicMessages.value["$STREAM.$TOPIC"].orEmpty().lastOrNull()?.let {
+                it.originalEncryptedPayload != null && "urn:image:" in it.payload.content
+            } == true
+        }
+        val messages = chat.streamTopicMessages.value["$STREAM.$TOPIC"].orEmpty()
+        val latest = messages.last()
+        // Establish the bottom precondition once, before exercising cancellation.
+        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(messages.lastIndex)
+        captureRenderedFixtureImage("selection-regression-before")
+        repeat(2) {
+            compose.onNodeWithTag("message-bubble-${latest.uuid}", useUnmergedTree = true).assertIsDisplayed()
+            openMessageActions(latest.uuid)
+            compose.onNodeWithTag("select-message-action").performClick()
+            compose.onNodeWithTag("cancel-message-selection").performClick()
+            // Observe the result without issuing a scroll or reopening the keyboard.
+            compose.waitUntil(5_000) {
+                compose.onNodeWithTag("message-bubble-${latest.uuid}", useUnmergedTree = true).isDisplayed()
+            }
+            compose.onNodeWithTag("message-bubble-${latest.uuid}", useUnmergedTree = true).assertIsDisplayed()
+            captureRenderedFixtureImage("selection-regression-cancelled-$it")
+            assertTrue(chat.shouldScrollToBottom)
+        }
+        compose.onNode(hasScrollToIndexAction()).performTouchInput { swipeDown() }
+        compose.waitUntil(5_000) { !chat.shouldScrollToBottom }
+        val anchor = history.dropLast(1).filter { message ->
+            compose.onNodeWithTag("message-bubble-${message.uuid}", useUnmergedTree = true).isDisplayed()
+        }.dropLast(1).last()
+        assertFalse(compose.onNodeWithTag("message-bubble-${latest.uuid}", useUnmergedTree = true).isDisplayed())
+        openMessageActions(anchor.uuid)
+        compose.onNodeWithTag("select-message-action").performClick()
+        compose.onNodeWithTag("cancel-message-selection").performClick()
+        compose.onNodeWithTag("message-bubble-${anchor.uuid}", useUnmergedTree = true).assertIsDisplayed()
+        assertFalse(chat.shouldScrollToBottom)
+        assertFalse(compose.onNodeWithTag("message-bubble-${latest.uuid}", useUnmergedTree = true).isDisplayed())
     }
 
     @Test fun rejectedRequestSurvivesReopeningTheConversationAndCanBeRetried() = runBlocking {
@@ -603,7 +660,10 @@ internal class EncryptedConversationServer : Closeable {
                 val incoming = try { socket.accept() } catch (_: java.net.SocketException) { break }
                 workers.execute {
                     runCatching { incoming.use(::handle) }
-                        .onFailure { transportFailureTypes += it.javaClass.simpleName }
+                        .onFailure {
+                            transportFailureTypes += it.javaClass.simpleName
+                            android.util.Log.w("CassiEncryptedUiTest", "Synthetic HTTP fixture failure", it)
+                        }
                 }
             }
         }
@@ -720,7 +780,8 @@ internal class EncryptedConversationServer : Closeable {
             path == "/api/workspace/v1/messenger/files/" && method == "POST" -> {
                 uploads++
                 val uuid = UUID.randomUUID().toString()
-                val name = if (uploads == 2) "Макет.png" else "План.txt"
+                val name = Regex("filename=\"?([^\";\\r\\n]+)").find(body)?.groupValues?.get(1)
+                    ?: error("Synthetic upload is missing its filename")
                 files[uuid] = name to if (name.endsWith("png")) image else "Synthetic document".toByteArray()
                 if (name.endsWith("png")) uploadedImageUuid = uuid
                 respond(connection, """{"uuid":"$uuid","name":"$name"}""")

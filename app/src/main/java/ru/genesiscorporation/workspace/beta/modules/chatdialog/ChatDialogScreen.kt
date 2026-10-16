@@ -256,9 +256,10 @@ fun ChatDialogScreen(
         snapshotFlow {
             val layout = listState.layoutInfo
             layout.visibleItemsInfo.lastOrNull()
-                ?.takeIf { it.index == layout.totalItemsCount - 1 }
                 ?.let { last ->
                     MeasuredChatBottom(
+                        last.index,
+                        layout.totalItemsCount,
                         last.offset,
                         last.size,
                         layout.viewportEndOffset - layout.afterContentPadding,
@@ -266,10 +267,12 @@ fun ChatDialogScreen(
                     )
                 }
         }.distinctUntilChanged().collect { bottom ->
-            // Coil and decrypted Markdown can grow after their load callback.
-            // Follow the measured item, while leaving manual history scrolling alone.
+            // Selection, Coil and decrypted Markdown can move the final item
+            // entirely outside the viewport. Preserve following through that
+            // remeasurement, while leaving manual history scrolling alone.
             if (bottom == null || bottom.isScrolling || !viewModel.shouldScrollToBottom ||
-                bottom.itemOffset + bottom.itemSize <= bottom.viewportEnd
+                (bottom.itemIndex == bottom.itemCount - 1 &&
+                    bottom.itemOffset + bottom.itemSize <= bottom.viewportEnd)
             ) return@collect
 
             // Layout snapshots can arrive within a measure pass. A synchronous
@@ -278,8 +281,11 @@ fun ChatDialogScreen(
             yield()
             if (!viewModel.shouldScrollToBottom || listState.isScrollInProgress) return@collect
             val layout = listState.layoutInfo
-            val last = layout.visibleItemsInfo.lastOrNull()
-                ?.takeIf { it.index == layout.totalItemsCount - 1 } ?: return@collect
+            val last = layout.visibleItemsInfo.lastOrNull() ?: return@collect
+            if (last.index < layout.totalItemsCount - 1) {
+                listState.scrollToItem(layout.totalItemsCount - 1)
+                return@collect
+            }
             val overflow = last.offset + last.size -
                 (layout.viewportEndOffset - layout.afterContentPadding)
             if (overflow > 0) listState.scrollBy(overflow.toFloat())
@@ -580,6 +586,8 @@ fun ChatDialogScreen(
 }
 
 private data class MeasuredChatBottom(
+    val itemIndex: Int,
+    val itemCount: Int,
     val itemOffset: Int,
     val itemSize: Int,
     val viewportEnd: Int,
