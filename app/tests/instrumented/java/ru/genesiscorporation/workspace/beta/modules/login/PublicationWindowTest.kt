@@ -4,6 +4,7 @@ import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.isDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -11,6 +12,8 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextReplacement
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -28,6 +31,10 @@ class PublicationWindowTest {
         val fixture = "https://example.org"
         compose.onNodeWithContentDescription("Адрес организации")
             .performClick().performTextReplacement(fixture)
+        compose.waitUntil(10_000) {
+            ViewCompat.getRootWindowInsets(compose.activity.window.decorView)
+                ?.isVisible(WindowInsetsCompat.Type.ime()) == true
+        }
         try {
             compose.activityRule.scenario.onActivity {
                 it.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
@@ -36,7 +43,7 @@ class PublicationWindowTest {
                 compose.activity.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
             }
             compose.onNodeWithContentDescription("Адрес организации").assertTextContains(fixture)
-            compose.onNodeWithText("Войти").performScrollTo().assertIsDisplayed()
+            assertSubmitReachable()
             compose.activityRule.scenario.onActivity {
                 it.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
             }
@@ -44,11 +51,18 @@ class PublicationWindowTest {
                 compose.activity.resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
             }
             compose.onNodeWithContentDescription("Адрес организации").assertTextContains(fixture)
-            compose.onNodeWithText("Войти").performScrollTo().assertIsDisplayed()
+            assertSubmitReachable()
         } finally {
             compose.activityRule.scenario.onActivity {
                 it.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             }
         }
+    }
+
+    private fun assertSubmitReachable() {
+        val button = compose.onNodeWithText("Войти")
+        // Configuration changes precede the final window and IME layout.
+        compose.waitUntil(10_000) { button.performScrollTo().isDisplayed() }
+        button.assertIsDisplayed()
     }
 }
