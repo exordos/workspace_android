@@ -39,7 +39,7 @@ This map describes covered contracts; it does not establish full line coverage.
 | Avatar origins/redirects and credential minimization | `AvatarOriginTest`, `AvatarImageRequestTest`, `AvatarRedirectPolicyTest` |
 | Encryption, key requests/grants/rotation, deletion, stale runtime | `WorkspaceChatCryptoTest`, `ChatKeyStorageTest`, `EncryptedChat*Test`, `EncryptedConversationUiTest`, interop verifier |
 | Protected stream, settings, notifications, call action | `ProtectedStream*Test`, `StreamInfoAvailabilityUiTest` |
-| Login/OTP server-error and empty/whitespace fallback Toasts, navigation, layout | `AuthenticationErrorUiTest`, `AuthenticationUiTest`, `AuthReviewRegressionTest`, `ProfileNavigationUiTest`, `PublicationWindowTest` |
+| Login/OTP server-error and empty/whitespace fallback Toasts, repeated identical failures, navigation, layout | `AuthenticationErrorUiTest`, `AuthenticationUiTest`, `AuthReviewRegressionTest`, `ProfileNavigationUiTest`, `PublicationWindowTest` |
 | Firebase release configuration, token/payload log privacy and notification content | `verifyFirebaseReleaseConfig`, `FirebaseTokenLoggingTest`; opt-in `FirebaseRegistrationSmokeTest` and dedicated notification acceptance |
 
 When extending this map, identify the failure scenario: lost acknowledgement,
@@ -97,3 +97,7 @@ percentages, and Console recommendations remain `NOT RUN`; compliance has not
 been established. Before publication, recheck the source, exact release artifact,
 and Console. Store individual run results in the external archive rather than
 turning them into a permanent product contract.
+
+FCM ID parsing, cancellation and independent notification intents are covered by
+`NotificationMessageIdTest`, `FirebaseNotificationsTest` and the optimized
+`FirebaseNotificationReleaseInstrumentation` driver; see [test commands](../app/tests/README.md#fcm-notification-regressions).

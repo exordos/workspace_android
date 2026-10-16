@@ -60,7 +60,10 @@ fun OtpScreen(viewModel: OtpViewModel, navController: NavHostController) {
 
     LaunchedEffect(state) {
         when (val current = state) {
-            is QueryState.Error -> Toast.makeText(context, current.message, Toast.LENGTH_SHORT).show()
+            is QueryState.Error -> {
+                Toast.makeText(context, current.message, Toast.LENGTH_SHORT).show()
+                viewModel.idleQueryState()
+            }
             QueryState.Success -> navController.navigate(LoginFlow.Projects(viewModel.isFirstOrganization))
             else -> Unit
         }

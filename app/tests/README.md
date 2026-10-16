@@ -82,6 +82,42 @@ Android tests retain the HTTP contract, delayed-response wiring and visible UI
 checks. Membership and login tests share `WorkspaceTestAccount` and the bounded
 `LoopbackWorkspaceServer` transport under the instrumented fixtures directory.
 
+`AuthenticationErrorUiTest` also repeats identical login/OTP failures in one
+mounted form. It deliberately coalesces the Loading frame and requires a real
+system Toast for each response.
+
+## FCM notification regressions
+
+`NotificationMessageIdTest` covers decimal producer IDs, malformed values and
+notification-key compatibility. `FirebaseNotificationsTest` posts synthetic
+callbacks into Android's real notification registry: private/stream payloads,
+missing or malformed IDs, Int/Long overflow, mixed removal lists, updates and
+cancellation isolation. It sends both older and newer PendingIntents and checks
+their delivered `MainActivity` extras. No real Firebase configuration is needed.
+The app currently retains the deeplink without resolving a chat; these tests
+establish activity delivery, not completed chat navigation or remote FCM delivery.
+
+```sh
+ANDROID_SERIAL=TASK_SERIAL ./gradlew :app:connectedExordosDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.class=ru.genesiscorporation.workspace.beta.data.FirebaseNotificationsTest
+```
+
+The existing `:app:buildEmojiReleaseSmoke` task also builds the framework-only
+`FirebaseNotificationReleaseInstrumentation` driver. Sign the driver and the
+optimized Exordos APK with the same test certificate. Use a clean dedicated
+emulator, grant `android.permission.POST_NOTIFICATIONS`, and run:
+
+```sh
+adb -s TASK_SERIAL shell am instrument -w \
+  com.exordos.workspace.cassi.releasetest/.FirebaseNotificationReleaseInstrumentation
+```
+
+Require `result=PASS` and instrumentation code `-1`. This driver delivers
+synthetic broadcasts through the APK's actual FCM receiver and service, checks
+invalid/large IDs and independent update/cancel behavior, then sends both
+notification intents to the real activity. It requires a non-debuggable target,
+uses no account or live Firebase credentials, and adds no production keep rules.
+
 ## Firebase release configuration regression
 
 ```sh

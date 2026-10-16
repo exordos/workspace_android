@@ -24,6 +24,10 @@ class OtpViewModel(
     private val _otpText = MutableStateFlow("")
     val otpText: StateFlow<String> = _otpText
 
+    fun idleQueryState() {
+        _queryState.value = QueryState.Idle
+    }
+
     fun onOtpTextChange(newText: String) {
         if (newText.length <= 6) {
             _otpText.value = newText
