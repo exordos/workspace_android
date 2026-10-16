@@ -12,7 +12,10 @@ data class ApiError(
     val errorMessage: String,
     val code: String,
     val httpStatusCode: Int? = code.toIntOrNull(),
-) : Throwable()
+) : Throwable() {
+    override val message: String
+        get() = errorMessage.ifBlank { "Произошла ошибка, повторите позднее" }
+}
 
 interface ApiRequest<RequestData, Response, ResponseError> {
     val url: String

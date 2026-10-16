@@ -9,7 +9,8 @@ All app tests live in this directory:
 - `unit/`: local JVM tests, mapped to Gradle's `test` source set.
 - `instrumented/`: tests and fixtures that run on Android, mapped to the
   `androidTest` source set. Its manifest belongs to the test APK.
-- `host/`: local server fixtures run by Gradle, outside the Android source sets.
+- `host/`: local server fixtures and build regressions run by Gradle, outside the Android source sets.
+- `live/`: opt-in Android checks that require a real Firebase configuration and service access.
 
 Keep Java and Kotlin package paths under each directory's `java/` folder.
 The source set mappings are defined in `app/build.gradle.kts`; Gradle task names
@@ -80,6 +81,36 @@ Snapshot/event ordering is covered by JVM `StreamMembershipStateTest` cases;
 Android tests retain the HTTP contract, delayed-response wiring and visible UI
 checks. Membership and login tests share `WorkspaceTestAccount` and the bounded
 `LoopbackWorkspaceServer` transport under the instrumented fixtures directory.
+
+## Firebase release configuration regression
+
+```sh
+./gradlew --no-daemon -p app/tests/host verifyFirebaseReleaseConfig
+```
+
+This copies the production build script into a temporary Android project and
+executes its actual Google services tasks offline. It checks both flavors,
+placeholder/missing/malformed configuration, app/project consistency, matching
+client selection, variant-file precedence, the first API key and redacted errors.
+All values are synthetic; no Firebase account or registration token is used.
+The debug configuration path remains usable for isolated UI tests. Downloaded
+production configuration must stay outside Git. Live FCM registration and
+notification delivery are separate acceptance checks in the development guide.
+
+The live SDK regression is kept out of offline suites. With a real local Firebase
+configuration and Google Play services on a dedicated installation, run:
+
+```sh
+ANDROID_SERIAL=TASK_SERIAL ./gradlew :app:connectedExordosDebugAndroidTest \
+  -PfirebaseLiveSmoke=true \
+  -Pandroid.testInstrumentationRunnerArguments.class=ru.genesiscorporation.workspace.beta.data.FirebaseRegistrationSmokeTest
+```
+
+It obtains an actual FCM token without printing it. `FirebaseTokenLoggingTest`
+checks that the refresh callback, notification body/sender and private/stream
+chat payloads do not enter logcat. It also checks that synthetic chat notifications
+retain their expected title and body, then cancels only its own notifications.
+On Android 13+, it grants notification permission to the dedicated test installation.
 
 ## Optimized emoji regression
 

@@ -14,6 +14,7 @@ class ResponseErrorTest {
         )
 
         assertEquals(ApiError("Sign in again", "SESSION_EXPIRED", 401), error)
+        assertEquals("Sign in again", error.message)
         assertTrue(shouldRequireReloginAfterRefresh(error))
     }
 
@@ -30,6 +31,7 @@ class ResponseErrorTest {
         val error = responseError("""{"msg":"Первая строка\n\"вторая\"","code":"VALIDATION_ERROR"}""", 422)
 
         assertEquals("Первая строка\n\"вторая\"", error.errorMessage)
+        assertEquals(error.errorMessage, error.message)
         assertEquals("VALIDATION_ERROR", error.code)
         assertEquals(422, error.httpStatusCode)
         assertFalse(shouldRequireReloginAfterRefresh(error))

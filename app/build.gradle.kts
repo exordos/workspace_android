@@ -1,3 +1,5 @@
+import com.google.gms.googleservices.GoogleServicesTask
+import com.google.gson.JsonParser
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
@@ -60,6 +62,39 @@ android {
     sourceSets {
         getByName("test").setRoot("tests/unit")
         getByName("androidTest").setRoot("tests/instrumented")
+        if (providers.gradleProperty("firebaseLiveSmoke").orNull == "true") {
+            getByName("androidTest").kotlin.srcDir("tests/live/java")
+        }
+    }
+}
+
+// Validate the exact file/client selected by the Google services plugin before packaging.
+tasks.withType<GoogleServicesTask>().configureEach {
+    if (name.endsWith("ReleaseGoogleServices")) {
+        doFirst {
+            val invalid = "Release requires a valid Firebase Android configuration for ${applicationId.get()}. " +
+                "Download google-services.json from Firebase Console; see docs/development.md."
+            val valid = runCatching {
+                val config = googleServicesJsonFiles.get().first { it.isFile }
+                val json = JsonParser.parseString(config.readText()).asJsonObject
+                val project = json.getAsJsonObject("project_info")
+                val number = project.get("project_number").asString
+                val client = json.getAsJsonArray("client").first {
+                    it.asJsonObject.getAsJsonObject("client_info")
+                        .getAsJsonObject("android_client_info").get("package_name").asString == applicationId.get()
+                }.asJsonObject
+                val appId = client.getAsJsonObject("client_info").get("mobilesdk_app_id").asString
+                val apiKey = client.getAsJsonArray("api_key").firstNotNullOf {
+                    it.asJsonObject.get("current_key")?.takeUnless { key -> key.isJsonNull }?.asString
+                }
+                number.matches(Regex("[0-9]+")) &&
+                    project.get("project_id").asString.isNotBlank() &&
+                    appId.matches(Regex("1:$number:android:[0-9a-f]+")) &&
+                    apiKey.matches(Regex("A[\\w-]{38}"))
+            }.getOrDefault(false)
+            // Do not include parser exceptions or configuration values in build output.
+            if (!valid) throw GradleException(invalid)
+        }
     }
 }
 

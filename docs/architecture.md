@@ -97,7 +97,11 @@ The result is `ApiResult.Success` or `ApiResult.Error(ApiError)`. The error mode
 keeps the backend code, message, and actual HTTP status separate. Initial responses
 and retries after refresh use `responseError`: structured `msg`/`code` fields are
 preserved, while unrecognized bodies retain their raw text and HTTP status code.
-`ResponseErrorTest` and `WorkspaceRequestHttpContractTest` cover these boundaries.
+`ApiError.message` exposes `errorMessage` through the `Throwable` contract even
+after JSON decoding; blank text uses a readable fallback for consumers such as
+the login and OTP Toasts. The raw `errorMessage` and serialized fields stay unchanged.
+`ApiErrorTest`, `ResponseErrorTest`, `WorkspaceRequestHttpContractTest` and
+`AuthenticationErrorUiTest` cover these boundaries.
 
 IAM login and refresh use
 `/api/core/v1/iam/clients/default/actions/get_token/invoke` without a Bearer header.

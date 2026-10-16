@@ -17,11 +17,7 @@ import ru.genesiscorporation.workspace.beta.R
 
 class MyFirebaseMessagingService: FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
-        Log.d(TAG, "From: ${message.from}")
-
         // Check if message contains a data payload.
-
-
         if (message.data.isNotEmpty() && message.data["kind"] != null) {
             val dataKind = "${message.data["kind"]}"
             when(dataKind) {
@@ -45,7 +41,6 @@ class MyFirebaseMessagingService: FirebaseMessagingService() {
 
                         showNotification(message.data["workspace_message_id"]?.toInt() ?: 0, "${message.data["sender_full_name"]}", "${
                             message.data["content"]}", deepLink)
-                        Log.d(TAG, "Message data payload: ${message.data}")
                     }
                 }
                 "stream_chat_message" -> {
@@ -59,7 +54,6 @@ class MyFirebaseMessagingService: FirebaseMessagingService() {
                             body,
                             deepLink
                         )
-                        Log.d(TAG, "Message data payload: ${message.data}")
                     }
                 }
                 else -> {
@@ -68,13 +62,6 @@ class MyFirebaseMessagingService: FirebaseMessagingService() {
             }
         }
 
-        // Check if message contains a notification payload.
-        message.notification?.let {
-            Log.d(TAG, "Message Notification Body: ${it.body}")
-        }
-
-        // Also if you intend on generating your own notifications as a result of a received FCM
-        // message, here is where that should be initiated. See sendNotification method below.
     }
 
     @SuppressLint("ServiceCast")
@@ -122,7 +109,7 @@ class MyFirebaseMessagingService: FirebaseMessagingService() {
         super.onNewToken(token)
         // handle token refresh
         FCMTokenHolder.token = token
-        Log.d(TAG, "New token: ${token}")
+        Log.d(TAG, "FCM registration token refreshed")
     }
 
     fun cancelNotification(notificationId: Int) {
