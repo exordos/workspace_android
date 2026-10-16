@@ -17,6 +17,7 @@ import ru.genesiscorporation.workspace.beta.R
 
 class MyFirebaseMessagingService: FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
+
         // Check if message contains a data payload.
         if (message.data.isNotEmpty() && message.data["kind"] != null) {
             val dataKind = "${message.data["kind"]}"
@@ -24,14 +25,15 @@ class MyFirebaseMessagingService: FirebaseMessagingService() {
                 "remove_notification_message" -> {
                     val messageIds = message.data["message_ids"]
                     if (messageIds != null) {
-                        val messageIdsList: List<Int> = messageIds.split(',')
-                            .map { it.trim().toInt() }
+                        val messageIdsList = messageIds.split(',')
+                            .mapNotNull(NotificationMessageId::parse)
                         for (messageId in messageIdsList) {
                             cancelNotification(messageId)
                         }
                     }
                 }
                 "private_chat_message" -> {
+                    val notificationId = NotificationMessageId.parse(message.data["workspace_message_id"]) ?: return
                     if (message.data["sender_full_name"] != null && message.data["content"] != null) {
                         var deepLink: String? = null
                         val userId = message.data["sender_id"]
@@ -39,17 +41,18 @@ class MyFirebaseMessagingService: FirebaseMessagingService() {
                             deepLink = "dialog/${userId}"
                         }
 
-                        showNotification(message.data["workspace_message_id"]?.toInt() ?: 0, "${message.data["sender_full_name"]}", "${
+                        showNotification(notificationId, "${message.data["sender_full_name"]}", "${
                             message.data["content"]}", deepLink)
                     }
                 }
                 "stream_chat_message" -> {
+                    val notificationId = NotificationMessageId.parse(message.data["workspace_message_id"]) ?: return
                     if (message.data["sender_full_name"] != null && message.data["content"] != null && message.data["stream"] != null && message.data["topic"] != null) {
                         var deepLink: String? = "stream/${message.data["stream"]}/${message.data["topic"]}"
                         val title = "${message.data["stream"]} -> ${message.data["topic"]}"
                         val body = "${message.data["sender_full_name"]}: ${message.data["content"]}"
                         showNotification(
-                            message.data["workspace_message_id"]?.toInt() ?: 0,
+                            notificationId,
                             title,
                             body,
                             deepLink
@@ -66,7 +69,7 @@ class MyFirebaseMessagingService: FirebaseMessagingService() {
 
     @SuppressLint("ServiceCast")
     private fun showNotification(
-        notificationId: Int,
+        notificationId: NotificationMessageId,
         title: String,
         body: String,
         deepLink: String?
@@ -75,6 +78,7 @@ class MyFirebaseMessagingService: FirebaseMessagingService() {
         // Intent opened when user taps notification
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            identifier = notificationId.identity
             putExtra("deeplink", deepLink)
         }
         val pendingIntent = PendingIntent.getActivity(
@@ -103,7 +107,7 @@ class MyFirebaseMessagingService: FirebaseMessagingService() {
             .setContentIntent(pendingIntent)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .build()
-        notificationManager.notify(notificationId, notification)
+        notificationManager.notify(notificationId.tag, notificationId.androidId, notification)
     }
     override fun onNewToken(token: String) {
         super.onNewToken(token)
@@ -112,10 +116,10 @@ class MyFirebaseMessagingService: FirebaseMessagingService() {
         Log.d(TAG, "FCM registration token refreshed")
     }
 
-    fun cancelNotification(notificationId: Int) {
+    private fun cancelNotification(notificationId: NotificationMessageId) {
         val notificationManager =
             getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.cancel(notificationId)
+        notificationManager.cancel(notificationId.tag, notificationId.androidId)
     }
 }
 

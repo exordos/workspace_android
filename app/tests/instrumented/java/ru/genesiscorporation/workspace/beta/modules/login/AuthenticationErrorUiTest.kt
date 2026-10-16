@@ -29,6 +29,7 @@ import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 import ru.genesiscorporation.workspace.beta.modules.otp.OtpScreen
 import ru.genesiscorporation.workspace.beta.modules.otp.OtpViewModel
 import ru.genesiscorporation.workspace.beta.ui.theme.WokspaceTheme
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 /** Check the actual system Toast, including the HTTP -> ViewModel -> screen path. */
@@ -58,9 +59,13 @@ class AuthenticationErrorUiTest {
         """{"msg":"  \t\n","code":"LOGIN_FAILED"}""", fallback,
     )
 
-    private fun checkLoginError(body: String, message: String): Unit = runBlocking {
+    @Test
+    fun loginDisplaysEveryRepeatedFallbackError() = checkLoginError("", fallback, attempts = 2)
+
+    private fun checkLoginError(body: String, message: String, attempts: Int = 1): Unit = runBlocking {
         val request = AtomicReference<LoopbackWorkspaceServer.Request>()
-        val server = errorPeer(body, 400, request)
+        val requests = AtomicInteger()
+        val server = errorPeer(body, 400, request, requests)
         val owner = WorkspaceTestAccount.create(server.url)
         val mounted = mutableStateOf(true)
         val model = withContext(Dispatchers.Main) { LoginViewModel(owner.api, owner.user, false) }
@@ -72,12 +77,24 @@ class AuthenticationErrorUiTest {
             }
             val button = compose.onNodeWithText("Войти").performScrollTo()
 
-            assertToast(message, { model.queryState.value is QueryState.Error }) { button.performClick() }
+            repeat(attempts) { attempt ->
+                if (attempts > 1) compose.mainClock.autoAdvance = false
+                assertToast(message, { requests.get() > attempt && model.queryState.value !is QueryState.Loading }) {
+                    button.performClick()
+                    if (attempts > 1) {
+                        // Fast HTTP replies can finish before Compose renders Loading.
+                        compose.waitUntil(5_000) { requests.get() > attempt && model.queryState.value is QueryState.Error }
+                        compose.mainClock.advanceTimeBy(32)
+                        compose.mainClock.autoAdvance = true
+                    }
+                }
+            }
 
-            assertEquals(QueryState.Error(message), model.queryState.value)
+            assertEquals(QueryState.Idle, model.queryState.value)
             assertNull(requireNotNull(request.get()).headers["x-otp"])
             assertNull(requireNotNull(request.get()).headers["authorization"])
         } finally {
+            compose.mainClock.autoAdvance = true
             compose.runOnIdle { mounted.value = false }
             compose.waitForIdle()
             model.viewModelScope.cancel()
@@ -107,9 +124,13 @@ class AuthenticationErrorUiTest {
         """{"msg":"  \t\n","code":"OTP_REJECTED"}""", fallback,
     )
 
-    private fun checkOtpError(body: String, message: String): Unit = runBlocking {
+    @Test
+    fun otpDisplaysEveryRepeatedFallbackError() = checkOtpError("", fallback, attempts = 2)
+
+    private fun checkOtpError(body: String, message: String, attempts: Int = 1): Unit = runBlocking {
         val request = AtomicReference<LoopbackWorkspaceServer.Request>()
-        val server = errorPeer(body, 401, request)
+        val requests = AtomicInteger()
+        val server = errorPeer(body, 401, request, requests)
         val owner = WorkspaceTestAccount.create(server.url)
         val mounted = mutableStateOf(true)
         val model = withContext(Dispatchers.Main) {
@@ -120,14 +141,25 @@ class AuthenticationErrorUiTest {
                 if (mounted.value) WokspaceTheme { OtpScreen(model, rememberNavController()) }
             }
 
-            assertToast(message, { model.queryState.value is QueryState.Error }) {
-                compose.onNodeWithContentDescription("6-значный код").performTextReplacement("123456")
+            repeat(attempts) { attempt ->
+                if (attempts > 1) compose.mainClock.autoAdvance = false
+                assertToast(message, { requests.get() > attempt && model.queryState.value !is QueryState.Loading }) {
+                    val field = compose.onNodeWithContentDescription("6-значный код")
+                    field.performTextReplacement("")
+                    field.performTextReplacement("123456")
+                    if (attempts > 1) {
+                        compose.waitUntil(5_000) { requests.get() > attempt && model.queryState.value is QueryState.Error }
+                        compose.mainClock.advanceTimeBy(32)
+                        compose.mainClock.autoAdvance = true
+                    }
+                }
             }
 
-            assertEquals(QueryState.Error(message), model.queryState.value)
+            assertEquals(QueryState.Idle, model.queryState.value)
             assertEquals("123456", requireNotNull(request.get()).headers["x-otp"])
             assertNull(requireNotNull(request.get()).headers["authorization"])
         } finally {
+            compose.mainClock.autoAdvance = true
             compose.runOnIdle { mounted.value = false }
             compose.waitForIdle()
             model.viewModelScope.cancel()
@@ -140,9 +172,11 @@ class AuthenticationErrorUiTest {
         body: String,
         status: Int,
         request: AtomicReference<LoopbackWorkspaceServer.Request>,
+        requests: AtomicInteger,
     ) = LoopbackWorkspaceServer { incoming ->
         if (incoming.path.endsWith("/get_token/invoke")) {
             request.set(incoming)
+            requests.incrementAndGet()
             LoopbackWorkspaceServer.Response(body, status)
         } else LoopbackWorkspaceServer.Response("[]")
     }

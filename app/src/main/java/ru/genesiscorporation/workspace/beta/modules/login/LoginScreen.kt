@@ -74,6 +74,7 @@ fun LoginScreen(viewModel: LoginViewModel, navController: NavHostController) {
                     navController.navigate(LoginFlow.Otp(login, password, viewModel.isFirstOrganization))
                 } else {
                     Toast.makeText(context, current.message, Toast.LENGTH_SHORT).show()
+                    viewModel.idleQueryState()
                 }
             }
             QueryState.Success -> {

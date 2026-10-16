@@ -100,6 +100,8 @@ preserved, while unrecognized bodies retain their raw text and HTTP status code.
 `ApiError.message` exposes `errorMessage` through the `Throwable` contract even
 after JSON decoding; blank text uses a readable fallback for consumers such as
 the login and OTP Toasts. The raw `errorMessage` and serialized fields stay unchanged.
+The screens consume a displayed error by returning to Idle, so identical fast
+responses still produce a new Toast when the intermediate Loading frame is skipped.
 `ApiErrorTest`, `ResponseErrorTest`, `WorkspaceRequestHttpContractTest` and
 `AuthenticationErrorUiTest` cover these boundaries.
 
@@ -166,6 +168,17 @@ contact and channel links from the exact origin and UUID. These are web links;
 the manifest's launcher does not declare a general VIEW handler.
 
 The FCM service lives in `data/MyFirebaseMessagingService.kt`; notification
-intents pass `deeplink` to `MainActivity`. Calls launch the Jitsi SDK from a chat
+intents pass `deeplink` to `MainActivity`. The bouncer's `BaseChatMessage` emits
+non-negative decimal `workspace_message_id` values; `RemoveNotificationMessage`
+emits a comma-separated `message_ids` list. `NotificationMessageId` rejects
+missing or malformed values and canonicalizes leading zeros. Small IDs retain
+the old untagged Android notification key; wider integers use a full decimal
+tag without truncation or hashing. Each removal is validated independently.
+The same canonical identity distinguishes immutable activity PendingIntents,
+so updating one message changes only its own extras. The current UI retains
+the delivered deeplink but does not yet resolve it to a chat; legacy numeric
+sender IDs also need a defined mapping to Workspace UUIDs.
+
+Calls launch the Jitsi SDK from a chat
 or channel information screen. This separate integration requires provider and
 device-permission checks.
