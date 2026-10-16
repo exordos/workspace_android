@@ -83,6 +83,12 @@ state do not provide such a queue.
 
 ## HTTP and authentication
 
+The API/realtime and avatar clients use `workspaceHttpClient`. Its sending hook
+requires HTTPS/WSS for remote hosts, including redirect targets. Plain HTTP/WS
+is limited to the exact loopback hosts `localhost`, `127.0.0.1`, and `::1` for
+local development. A blocked request never reaches the engine, and its error
+does not include the URL or credentials.
+
 `data/remote/APIClient.kt` defines `ApiRequest<RequestData, Response, Error>`:
 relative URL, HTTP method, body, credential requirement, additional headers, and
 multipart data. The production transport is in `WorkspaceAPIClient.kt`.

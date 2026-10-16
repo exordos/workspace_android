@@ -37,6 +37,7 @@ This map describes covered contracts; it does not establish full line coverage.
 | Message time, unit boundaries, Russian declension, timezone/DST | `MessageTimeFormattingTest` |
 | Mention composer and emoji | `ComposerMentionTest`, `EmojiReactionTest`, optimized emoji driver |
 | Avatar origins/redirects and credential minimization | `AvatarOriginTest`, `AvatarImageRequestTest`, `AvatarRedirectPolicyTest` |
+| Remote TLS enforcement before transport, redirect/downgrade rejection, exact loopback exceptions and private error text | `WorkspaceTransportPolicyTest`, `WorkspaceTransportTest` |
 | Encryption, key requests/grants/rotation, deletion, stale runtime | `WorkspaceChatCryptoTest`, `ChatKeyStorageTest`, `EncryptedChat*Test`, `EncryptedConversationUiTest`, interop verifier |
 | Protected stream, settings, notifications, call action | `ProtectedStream*Test`, `StreamInfoAvailabilityUiTest` |
 | Login/OTP server-error and empty/whitespace fallback Toasts, repeated identical failures, navigation, layout | `AuthenticationErrorUiTest`, `AuthenticationUiTest`, `AuthReviewRegressionTest`, `ProfileNavigationUiTest`, `PublicationWindowTest` |

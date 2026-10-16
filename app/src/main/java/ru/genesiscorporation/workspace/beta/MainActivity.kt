@@ -70,7 +70,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import com.google.firebase.messaging.FirebaseMessaging
-import io.ktor.client.HttpClient
+import ru.genesiscorporation.workspace.beta.data.remote.workspaceHttpClient
 import io.ktor.client.plugins.HttpTimeout
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.data.remote.AuthHeader
@@ -151,7 +151,7 @@ class WorkspaceApplication : Application() {
         private set
     override fun onCreate() {
         super.onCreate()
-        val httpClient = HttpClient {
+        val httpClient = workspaceHttpClient {
             install(WebSockets)
             install(HttpTimeout) {
                 connectTimeoutMillis = 30_000

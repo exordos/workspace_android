@@ -69,7 +69,7 @@ class AvatarRedirectPolicyTest {
 }
 
 @OptIn(InternalAPI::class)
-private class RedirectEngine(private val location: String) : HttpClientEngineBase("cassi-avatar-redirect") {
+internal class RedirectEngine(private val location: String) : HttpClientEngineBase("cassi-avatar-redirect") {
     override val config = HttpClientEngineConfig()
     val requests = mutableListOf<HttpRequestData>()
     override suspend fun execute(data: HttpRequestData): HttpResponseData {
