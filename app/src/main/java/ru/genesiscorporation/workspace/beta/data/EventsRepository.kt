@@ -295,6 +295,7 @@ class EventsRepository(
                     message.copy(
                         payload = updatedMessage.payload,
                         updatedAt = updatedMessage.updatedAt,
+                        mentioned = updatedMessage.mentioned,
                         reactions = updatedMessage.reactions
                     )
                 } else {

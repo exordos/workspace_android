@@ -160,3 +160,27 @@ ANDROID_SERIAL=TASK_SERIAL ./gradlew :app:connectedExordosDebugAndroidTest \
 
 `MessageHistorySnapshotTest` covers pending sends and concurrent incoming messages,
 edits, deletions and HTTP send confirmations while history is loading.
+
+## Inbox topics and unread navigation
+
+`InboxUnreadTest` covers the notification policy for all three stream modes and
+all four topic modes, active counters, mention selection and stable unread
+anchors. Topic overrides (`follow` and `unmute`) take precedence over the stream.
+
+`InboxInstrumentedTest` uses the actual inbox, navigation and chat screens with
+isolated loopback accounts. It checks empty topic caches, late stream snapshots,
+per-topic counters, hidden muted/read/passive topics, live counter changes,
+first-unread navigation and a first unread mention after earlier passive unread.
+During a delayed topic response, 24 counter updates must leave the current
+request running and produce just one pending refresh with the latest counter.
+It also renders the actual Chats topic preview before and after Inbox refreshes:
+matching cached previews survive message-fetch errors, new previews are loaded,
+and a changed last-message UUID cannot retain an older preview.
+The encrypted case verifies locked messages on a device without the key. Opening
+an inbox topic must neither jump to the newest message nor mark the whole history
+read; new messages must preserve the selected unread position.
+
+```sh
+ANDROID_SERIAL=TASK_SERIAL ./gradlew :app:connectedExordosDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.class=ru.genesiscorporation.workspace.beta.modules.homeinbounds.InboxInstrumentedTest
+```

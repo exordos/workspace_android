@@ -74,9 +74,22 @@ data class MessageResponse(
     var read: Boolean,
     var user: UserResponseData? = null,
     @SerialName("project_id") val projectId: String? = null,
+    val mentioned: Boolean = false,
     @kotlinx.serialization.Transient val originalEncryptedPayload: MessageResponsePayload? = null,
 
 ) {
+    /** Match the server's active-unread policy, including explicit topic overrides. */
+    fun isActiveUnread(streamMode: String, topicMode: String): Boolean = !read && when (topicMode) {
+        "mute" -> false
+        "follow" -> true
+        "unmute" -> mentioned
+        else -> when (streamMode) {
+            "all_messages" -> true
+            "mentions_only" -> mentioned
+            else -> false
+        }
+    }
+
     private fun parseQuotedMessages(): List<QuotedMessagePart> {
         return quoteBlockRegex.findAll(payload.content.trim())
             .map { match ->

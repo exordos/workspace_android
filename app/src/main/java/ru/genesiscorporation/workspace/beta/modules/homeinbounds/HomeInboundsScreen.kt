@@ -1,14 +1,11 @@
 package ru.genesiscorporation.workspace.beta.modules.homeinbounds
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -18,19 +15,20 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -38,6 +36,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.testTag
+import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
@@ -46,21 +47,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
-import dev.jeziellago.compose.markdowntext.MarkdownText
 import kotlinx.coroutines.launch
-import ru.genesiscorporation.workspace.beta.ChatFlow
-import ru.genesiscorporation.workspace.beta.HomeFlow
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
-import ru.genesiscorporation.workspace.beta.modules.creationbase.CreationBaseViewModel
 import ru.genesiscorporation.workspace.beta.ui.AnimatedGif
 import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.FullScreenError
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -72,8 +67,22 @@ fun HomeInboundsScreen(
     val streamTopics by viewModel.streamTopics.collectAsStateWithLifecycle()
     val topicsQueryState by viewModel.topicsQueryState.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
-    val dateFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
+    val snackbar = remember { SnackbarHostState() }
+    var opening by remember { mutableStateOf(false) }
+    val openFailed = stringResource(R.string.inbox_open_failed)
+    fun open(stream: Stream, topic: TopicsResponseData) {
+        if (opening) return
+        opening = true
+        scope.launch {
+            try {
+                val destination = viewModel.unreadDestination(stream, topic)
+                if (destination != null) navController.navigate(destination)
+                else snackbar.showSnackbar(openFailed)
+            } finally { opening = false }
+        }
+    }
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
                 title = {
@@ -130,11 +139,11 @@ fun HomeInboundsScreen(
                         modifier = Modifier
                             .fillMaxSize()
                     ) {
-                        val unreadStreams = streams.filter { it.unreadCount > 0 }
+                        val unreadStreams = streams.filter { it.hasInboxUnread && streamTopics[it.uuid].orEmpty().any { topic -> topic.hasInboxUnread } }
                         items(
-                            items = unreadStreams
+                            items = unreadStreams, key = { it.uuid }
                         ) { item ->
-                            StreamInboundView(item, viewModel, navController)
+                            StreamInboundView(item, viewModel, streamTopics[item.uuid].orEmpty()) { topic -> open(item, topic) }
                         }
                     }
                 }
@@ -149,9 +158,9 @@ fun HomeInboundsScreen(
 fun StreamInboundView(
     stream: Stream,
     viewModel: HomeInboundsViewModel,
-    navController: NavHostController
+    topics: List<TopicsResponseData>,
+    onOpen: (TopicsResponseData) -> Unit
 ) {
-    val streamTopics by viewModel.streamTopics.collectAsStateWithLifecycle()
     Column(
         verticalArrangement = Arrangement.spacedBy(4.dp),
         modifier = Modifier
@@ -187,11 +196,9 @@ fun StreamInboundView(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f)
             )
-            val unreadCount =
-                if (stream.activeUnreadCount > 0) stream.activeUnreadCount else stream.passiveUnreadCount
-            if (stream.unreadCount > 0) {
-                val backgroundColor =
-                    if (stream.activeUnreadCount > 0) LocalWorkspaceColorsPalette.current.noticeBase else LocalWorkspaceColorsPalette.current.noticeDisable
+            val unreadCount = topics.filter { it.hasInboxUnread }.sumOf { it.activeUnreadCount }
+            if (unreadCount > 0) {
+                val backgroundColor = LocalWorkspaceColorsPalette.current.noticeBase
                 Text(
                     text = "${unreadCount}",
                     color = LocalWorkspaceColorsPalette.current.noticeOnBadge,
@@ -206,71 +213,57 @@ fun StreamInboundView(
                 )
             }
         }
-        val unreadTopics = streamTopics[stream.uuid]?.filter { it.activeUnreadCount > 0 }
-        if (unreadTopics != null) {
-            for (unreadTopic in unreadTopics) {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+        val unreadTopics = topics.filter { it.hasInboxUnread }
+        for (unreadTopic in unreadTopics) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                HorizontalDivider(
+                    thickness = 1.dp,
+                    color = LocalWorkspaceColorsPalette.current.divider
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("inbox-topic-${unreadTopic.uuid}")
+                        .clickable { onOpen(unreadTopic) }
                 ) {
-                    HorizontalDivider(
-                        thickness = 1.dp,
-                        color = LocalWorkspaceColorsPalette.current.divider
-                    )
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
+                    Box(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable(
-                                onClick = {
-                                    navController.navigate(
-                                        HomeFlow.ChatDialog(
-                                            stream.displayableName(),
-                                            stream.uuid,
-                                            unreadTopic.name,
-                                            unreadTopic.uuid,
-                                            stream.isPrivate,
-                                            null
-                                        )
-                                    )
-                                }
-                            )
-                        ,
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .padding(horizontal = 12.dp)
-                                .width(3.dp)
-                                .height(47.dp)
-                                .background(Color(0xFF000000 or unreadTopic.color.toLong()))
-                        )
+                            .padding(horizontal = 12.dp)
+                            .width(3.dp)
+                            .height(47.dp)
+                            .background(Color(0xFF000000 or unreadTopic.color.toLong()))
+                    )
+                    Text(
+                        text = unreadTopic.name,
+                        color = LocalWorkspaceColorsPalette.current.textHeaders,
+                        fontSize = 14.sp,
+                        fontFamily = InterFontFamily,
+                        lineHeight = 20.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(end = 8.dp)
+                            .weight(1f),
+                        style = TextStyle(textDecoration = if (unreadTopic.isDone) TextDecoration.LineThrough else TextDecoration.None)
+                    )
+
+                    if (unreadTopic.activeUnreadCount > 0) {
                         Text(
-                            text = unreadTopic.name,
-                            color = LocalWorkspaceColorsPalette.current.textHeaders,
+                            text = "${unreadTopic.activeUnreadCount}",
+                            color = LocalWorkspaceColorsPalette.current.noticeOnBadge,
                             fontSize = 14.sp,
                             fontFamily = InterFontFamily,
-                            lineHeight = 20.sp,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(end = 8.dp)
-                                .weight(1f),
-                            style = TextStyle(textDecoration = if (unreadTopic.isDone) TextDecoration.LineThrough else TextDecoration.None)
+                            modifier = Modifier
+                                .testTag("inbox-count-${unreadTopic.uuid}")
+                                .background(
+                                    color = LocalWorkspaceColorsPalette.current.noticeBase,
+                                    shape = RoundedCornerShape(100.dp)
+                                )
+                                .padding(horizontal = 8.dp)
                         )
-
-                        if (unreadTopic.unreadCount > 0) {
-                            Text(
-                                text = "${unreadTopic.unreadCount}",
-                                color = LocalWorkspaceColorsPalette.current.noticeOnBadge,
-                                fontSize = 14.sp,
-                                fontFamily = InterFontFamily,
-                                modifier = Modifier
-                                    .background(
-                                        color = if (unreadTopic.notificationMode == "mute") LocalWorkspaceColorsPalette.current.noticeDisable else LocalWorkspaceColorsPalette.current.noticeBase,
-                                        shape = RoundedCornerShape(100.dp)
-                                    )
-                                    .padding(horizontal = 8.dp)
-                            )
-                        }
                     }
                 }
             }

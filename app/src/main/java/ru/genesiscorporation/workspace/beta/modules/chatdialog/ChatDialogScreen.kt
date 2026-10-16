@@ -78,6 +78,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -222,24 +223,28 @@ fun ChatDialogScreen(
             }
         }
     }
-    LaunchedEffect(messages?.size) {
-        if (messages != null) {
-            if (messages.isNotEmpty() && (!hasDoneInitialScroll || viewModel.shouldScrollToBottom)) {
-                listState.scrollToItem(messages.lastIndex)
-                hasDoneInitialScroll = true
+    val openingUnread = viewModel.firstUnreadMessageUuid != null
+    LaunchedEffect(messages?.size, openingUnread && isLoading) {
+        if (openingUnread && isLoading) return@LaunchedEffect
+        if (!messages.isNullOrEmpty() && (!hasDoneInitialScroll || viewModel.shouldScrollToBottom)) {
+            val index = if (!hasDoneInitialScroll) viewModel.initialMessageIndex(messages) else messages.lastIndex
+            listState.scrollToItem(index)
+            if (openingUnread && !hasDoneInitialScroll) {
+                if (index == messages.lastIndex) viewModel.enableAutoScroll()
+                else viewModel.disableAutoScroll()
             }
+            hasDoneInitialScroll = true
         }
     }
 
     LaunchedEffect(messages?.lastOrNull()) {
-        if (messages != null) {
-            if (messages.isNotEmpty() && viewModel.shouldScrollToBottom) {
-                listState.scrollToItem(messages.lastIndex)
-            }
+        if ((!openingUnread || hasDoneInitialScroll) && !messages.isNullOrEmpty() && viewModel.shouldScrollToBottom) {
+            listState.scrollToItem(messages.lastIndex)
         }
     }
 
-    LaunchedEffect(listState) {
+    LaunchedEffect(listState, openingUnread && hasDoneInitialScroll) {
+        if (openingUnread && !hasDoneInitialScroll) return@LaunchedEffect
         snapshotFlow {
             listState.isScrollInProgress to !listState.canScrollForward
         }
@@ -292,7 +297,8 @@ fun ChatDialogScreen(
         }
     }
 
-    LaunchedEffect(listState) {
+    LaunchedEffect(listState, openingUnread && hasDoneInitialScroll) {
+        if (openingUnread && !hasDoneInitialScroll) return@LaunchedEffect
         snapshotFlow { listState.layoutInfo.visibleItemsInfo }
             .collect { visibleItemsInfo ->
                 val visibleKeysNow: Set<String> =
@@ -628,7 +634,8 @@ internal fun ChatMessage(
     val scope = rememberCoroutineScope()
     val messageFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
     Column(
-        horizontalAlignment = Alignment.CenterHorizontally
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.testTag("chat-message-${item.uuid}"),
     ) {
         val previousMessage = viewModel.previousMessageByUuid(item.uuid)
         if (previousMessage != null) {

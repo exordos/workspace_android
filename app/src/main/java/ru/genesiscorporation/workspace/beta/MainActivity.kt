@@ -526,7 +526,7 @@ fun HomeNavigation(
                 client = workspaceApiClient,
             )
             Log.d("RepoCheck", "chatnav repo instance = ${System.identityHashCode(eventsRepositoryStore)}")
-            val chatDialogViewModelFactory = remember { ChatDialogViewModelFactory(workspaceApiClient, user, args.title, args.chatId, args.topicName, args.topicUuid, args.isDirectMessages, eventsRepositoryStore, args.userId, storage) }
+            val chatDialogViewModelFactory = remember { ChatDialogViewModelFactory(workspaceApiClient, user, args.title, args.chatId, args.topicName, args.topicUuid, args.isDirectMessages, eventsRepositoryStore, args.userId, storage, args.firstUnreadMessageUuid) }
             val chatDialogViewModel: ChatDialogViewModel = viewModel(factory = chatDialogViewModelFactory)
             ChatDialogScreen(chatDialogViewModel, navController)
         }

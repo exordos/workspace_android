@@ -1,5 +1,6 @@
 package ru.genesiscorporation.workspace.beta.modules.home
 
+import ru.genesiscorporation.workspace.beta.modules.homeinbounds.hasInboxUnread
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -120,7 +121,7 @@ fun HomeScreenContent(
                         .padding(innerPadding)
                         .padding(horizontal = 12.dp)
                 ) {
-                    val streamsUnreadCount = streams.map { it.unreadCount }.sum()
+                    val streamsUnreadCount = streams.filter { it.hasInboxUnread }.sumOf { it.activeUnreadCount }
                     val streamsUnreadCountString = if (streamsUnreadCount > 0) "$streamsUnreadCount" else null
                     HomeMenuElement("Входящие", R.drawable.ic_home_inbounds, streamsUnreadCountString) {
                         navController.navigate(HomeFlow.HomeInbounds)

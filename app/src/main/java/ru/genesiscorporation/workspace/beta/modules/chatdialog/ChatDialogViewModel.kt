@@ -79,7 +79,8 @@ class ChatDialogViewModel(
     val isDirectMessages: Boolean,
     val eventsRepositoryStore: EventsRepositoryStore,
     val userId: Int?,
-    val storage: AttachmentStorage
+    val storage: AttachmentStorage,
+    val firstUnreadMessageUuid: String? = null,
 ): ViewModel() {
     val repo = eventsRepositoryStore.get(client.getCurrentServerId()) ?: error("Cannot get current event repository")
     
@@ -326,7 +327,7 @@ class ChatDialogViewModel(
 
     var user: UserResponseData? = null
 
-    private val _isLoading = MutableStateFlow(false)
+    private val _isLoading = MutableStateFlow(firstUnreadMessageUuid != null)
     val isLoading: StateFlow<Boolean> = _isLoading
     private val conversationOwner = Any()
     private var historyLoadJob: Job? = null
@@ -345,7 +346,9 @@ class ChatDialogViewModel(
     private fun loadHistoryIfNeeded() {
         if (historyLoadJob?.isActive == true) return
         val key = "$chatId.$topicUuid"
-        if (repo.isConversationStale(chatId, topicUuid) || repo.streamTopicMessages.value[key].isNullOrEmpty()) {
+        val cached = repo.streamTopicMessages.value[key].orEmpty()
+        val missingAnchor = firstUnreadMessageUuid != null && cached.none { it.uuid == firstUnreadMessageUuid }
+        if (missingAnchor || repo.isConversationStale(chatId, topicUuid) || cached.isEmpty()) {
             _isLoading.value = true
             historyLoadJob = viewModelScope.launch { loadLatestMessages() }
         } else {
@@ -381,7 +384,14 @@ class ChatDialogViewModel(
     private val _uriList = MutableStateFlow<List<AttachedUri>>(emptyList())
     val uriList: StateFlow<List<AttachedUri>> = _uriList
 
-    var shouldScrollToBottom: Boolean = true
+    fun initialMessageIndex(messages: List<MessageResponse>): Int =
+        initialChatMessageIndex(messages, firstUnreadMessageUuid) { message ->
+            val streamMode = repo.streams.value.firstOrNull { it.uuid == chatId }?.notificationMode ?: "all_messages"
+            val topicMode = repo.streamTopics.value[chatId]?.firstOrNull { it.uuid == topicUuid }?.notificationMode ?: "default"
+            message.isActiveUnread(streamMode, topicMode)
+        }
+
+    var shouldScrollToBottom: Boolean = firstUnreadMessageUuid == null
 
     val messageFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
 
@@ -739,7 +749,7 @@ class ChatDialogViewModel(
         when(messagesResponse) {
             is ApiResult.Success -> {
                 val lastMessage = messagesResponse.value.sortedBy { LocalDateTime.parse(it.createdAt, messageFormatter) }.lastOrNull()
-                if (lastMessage != null) {
+                if (lastMessage != null && firstUnreadMessageUuid == null) {
                     markMessagesReadUpTo(lastMessage.uuid)
                 }
                 _isLoading.value = false
