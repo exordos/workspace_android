@@ -54,6 +54,7 @@ class ProfileNavigationUiTest {
     private lateinit var events: EventsRepositoryStore
     private lateinit var user: UserViewModel
     private lateinit var api: WorkspaceAPIClient
+    private lateinit var workspace: WorkspaceViewModel
     private lateinit var http: HttpClient
     private lateinit var id: String
 
@@ -76,6 +77,7 @@ class ProfileNavigationUiTest {
         repository = ServerRepository(store, tokens, events, scope)
         user = UserViewModel(repository)
         api.attachUserViewModel(user)
+        workspace = WorkspaceViewModel(api, events)
         id = "cassi-profile-${UUID.randomUUID()}"
         repository.addServer(ServerConfig(id, server.url, "", "Exordos Workspace", projectUuid = "project"), TokenPair("fixture-access", "fixture-refresh"))
         repository.setSelectedServerId(id)
@@ -87,6 +89,7 @@ class ProfileNavigationUiTest {
         repository.removeServer(id)
         events.clear()
         user.viewModelScope.cancel()
+        workspace.viewModelScope.cancel()
         scope.cancel()
         http.close()
         server.close()
@@ -98,7 +101,7 @@ class ProfileNavigationUiTest {
         compose.setContent {
             WokspaceTheme(darkTheme = false, dynamicColor = false) {
                 CompositionLocalProvider(UserState provides user) {
-                    WorkspaceApp(WorkspaceViewModel(api, events), api, events, null, {})
+                    WorkspaceApp(workspace, api, events, null, {})
                 }
             }
         }
@@ -113,7 +116,7 @@ class ProfileNavigationUiTest {
         compose.setContent {
             WokspaceTheme(darkTheme = false, dynamicColor = false) {
                 CompositionLocalProvider(UserState provides user) {
-                    WorkspaceApp(WorkspaceViewModel(api, events), api, events, null, {})
+                    WorkspaceApp(workspace, api, events, null, {})
                 }
             }
         }
