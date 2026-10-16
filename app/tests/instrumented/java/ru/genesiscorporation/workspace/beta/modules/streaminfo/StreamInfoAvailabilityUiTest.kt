@@ -40,7 +40,9 @@ import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -297,17 +299,29 @@ class StreamInfoAvailabilityUiTest {
         val tokens = SecureTokenStore(context)
         val events = EventsRepositoryStore(tokens, api)
         val preferences = ServerRepository(dataStore, tokens, events, scope)
-        val user = UserViewModel(preferences)
-        api.attachUserViewModel(user)
         val serverId = "cassi-stream-info-${UUID.randomUUID()}"
+        var user: UserViewModel? = null
         var info: StreamInfoViewModel? = null
         try {
             val config = ServerConfig(serverId, peer.url, "", "CASSI test", projectUuid = PROJECT)
-            preferences.addServer(config, TokenPair("synthetic-access", "synthetic-refresh"))
-            preferences.setSelectedServerId(serverId)
-            withTimeout(5_000) { user.selectedServer.first { it?.id == serverId } }
-            withTimeout(5_000) { user.selectedServerId.first { it == serverId } }
-            withTimeout(5_000) { user.accessToken.first { !it.isNullOrBlank() } }
+            val expectedAccess = "synthetic-access"
+            preferences.addServer(config, TokenPair(expectedAccess, "synthetic-refresh"))
+            // Start Main-bound state collectors only after the complete account is saved.
+            val readyUser = withContext(Dispatchers.Main) { UserViewModel(preferences) }
+            user = readyUser
+            api.attachUserViewModel(readyUser)
+            try {
+                withTimeout(5_000) {
+                    combine(readyUser.selectedServerId, readyUser.selectedServer, readyUser.accessToken) { id, selected, access ->
+                        id == serverId && selected == config && access == expectedAccess
+                    }.first { it }
+                }
+            } catch (timeout: TimeoutCancellationException) {
+                throw AssertionError("Fixture account is not coherent; selectedIdMatches=${readyUser.selectedServerId.value == serverId}; " +
+                    "selectedConfigMatches=${readyUser.selectedServer.value == config}; " +
+                    "accessMatches=${readyUser.accessToken.value == expectedAccess}; " +
+                    "storedAccessMatches=${preferences.tokensFor(serverId)?.accessToken == expectedAccess}", timeout)
+            }
             val repo = events.getOrCreate(config)
             repo.updateCurrentUser(peer.viewer)
             repo.loadUserInfo()
@@ -323,7 +337,7 @@ class StreamInfoAvailabilityUiTest {
             info?.viewModelScope?.cancel()
             preferences.removeServer(serverId)
             events.clear()
-            user.viewModelScope.cancel()
+            user?.viewModelScope?.cancel()
             scope.cancel()
             http.close()
             peer.close()

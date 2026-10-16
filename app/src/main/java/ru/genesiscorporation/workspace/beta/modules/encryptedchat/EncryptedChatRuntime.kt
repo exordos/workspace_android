@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -53,6 +54,7 @@ class EncryptedChatRuntime(
     private val streamRevision = repo.streamRemovalRevision(streamId)
     private val initMutex = Mutex()
     private val refreshMutex = Mutex()
+    private val bindingLock = Any()
     private val mutableState = MutableStateFlow(EncryptedChatSessionState())
     val state: StateFlow<EncryptedChatSessionState> = mutableState.asStateFlow()
     private val mutablePresentations = MutableStateFlow<Map<String, EncryptedChatPresentation>>(emptyMap())
@@ -80,7 +82,7 @@ class EncryptedChatRuntime(
             ConfirmedAccountContext.invalidations.map { Unit },
         ).collect {
             if (closed || !isProtectedRuntime()) return@collect
-            if (!boundCurrent() || session?.isCurrent() == false) invalidate()
+            invalidateIfStale()
             if (repo.streams.value.firstOrNull { it.uuid == streamId }?.encryption != true) return@collect
             try { refresh() }
             catch (cancelled: CancellationException) { throw cancelled }
@@ -105,7 +107,7 @@ class EncryptedChatRuntime(
         merge(user.selectedServer.map { Unit }, user.selectedServerId.map { Unit }, user.accessToken.map { Unit },
             repo.currentUser.map { Unit }, repo.verifiedOwnerAuthentication.map { Unit },
             ConfirmedAccountContext.invalidations.map { Unit }, repo.streams.map { Unit }, repo.streamBindings.map { Unit }).collect {
-            if (!closed && isProtectedRuntime() && (!boundCurrent() || session?.isCurrent() == false)) invalidate()
+            if (!closed && isProtectedRuntime()) invalidateIfStale()
         }
     }
 
@@ -126,28 +128,51 @@ class EncryptedChatRuntime(
         if (!boundCurrent(expected)) throw EncryptedChatException(EncryptedChatFailure.STALE)
     }
 
-    private fun invalidate() {
+    private inline fun <T> withBinding(expected: ConfirmedAccountContext, block: () -> T): T = synchronized(bindingLock) {
+        if (closed || account !== expected) throw EncryptedChatException(EncryptedChatFailure.STALE)
+        block()
+    }
+
+    private fun invalidateIfStale(): Boolean {
+        val observedAccount = account
+        val observedSession = session
+        // Live checks take repository/token locks; never hold bindingLock around them.
+        if (boundCurrent(observedAccount) && observedSession?.isCurrent() != false) return false
+        val previous = synchronized(bindingLock) {
+            // An initial/delayed observer must not revoke a binding installed after its snapshot.
+            if (account === observedAccount && session === observedSession) invalidate() else null
+        }
+        previous?.close()
+        return true
+    }
+
+    /** Called with bindingLock held. Close the detached session outside the lock. */
+    private fun invalidate(): EncryptedChatSession? {
         val previous = session
         session = null
         account = null
         boundGeneration = null
         sessionStateJob?.cancel()
         sessionStateJob = null
-        previous?.close()
         mutablePresentations.value = emptyMap()
         preparedSends.clear()
         rawSignature = null
         presentationRevision = -1
         rolesLoaded = false
         mutableState.value = EncryptedChatSessionState(error = EncryptedChatFailure.STALE)
+        return previous
     }
 
-    fun close() { closed = true; invalidate(); observer.cancel(); keyObserver.cancel(); identityObserver.cancel() }
+    fun close() {
+        val previous = synchronized(bindingLock) { closed = true; invalidate() }
+        previous?.close()
+        observer.cancel(); keyObserver.cancel(); identityObserver.cancel()
+    }
     fun clearError() { mutableState.value = mutableState.value.copy(error = null) }
 
     private fun report(error: Exception) {
         val reason = (error as? EncryptedChatException)?.failure ?: EncryptedChatFailure.UNAVAILABLE
-        if (!boundCurrent() || session?.isCurrent() == false) { invalidate(); return }
+        if (invalidateIfStale()) return
         mutableState.value = mutableState.value.copy(pending = false, error = reason)
     }
 
@@ -170,11 +195,13 @@ class EncryptedChatRuntime(
         if (closed || repo.streams.value.none { it.uuid == streamId && it.encryption }) throw EncryptedChatException(EncryptedChatFailure.STALE)
         val confirmed = confirmedAccountContext(client, repo)
             ?: throw EncryptedChatException(EncryptedChatFailure.STALE)
-        if (mountedAccount?.sameOwner(confirmed) == false) throw EncryptedChatException(EncryptedChatFailure.STALE)
-        mountedAccount = mountedAccount ?: confirmed
-        account = confirmed
+        synchronized(bindingLock) {
+            if (closed || mountedAccount?.sameOwner(confirmed) == false) throw EncryptedChatException(EncryptedChatFailure.STALE)
+            mountedAccount = mountedAccount ?: confirmed
+            account = confirmed
+            ownerUuid = confirmed.userUuid
+        }
         val captured = confirmed.serverConfig()
-        ownerUuid = confirmed.userUuid
         requireBound(confirmed)
         val keyStore = withContext(Dispatchers.IO) { EncryptedChatKeyStore(appContext) }
         requireBound(confirmed)
@@ -185,7 +212,7 @@ class EncryptedChatRuntime(
         requireBound(confirmed)
         val boundScope = EncryptedChatScope(confirmed.baseUrl, confirmed.projectUuid, confirmed.userUuid,
             generations.incrementAndGet(), device.deviceId, device.deviceName, streamId)
-        boundGeneration = boundScope.runtimeGeneration
+        withBinding(confirmed) { boundGeneration = boundScope.runtimeGeneration }
         // Fetch participant roles explicitly. Stream role alone cannot authorize another issuer.
         repo.beginStreamBindingsRequest(streamId).use { request ->
             when (val response = client.performRequest(confirmed.pin(StreamBindingsRequest(streamId)), serverId, captured)) {
@@ -223,22 +250,25 @@ class EncryptedChatRuntime(
             })
         created.load()
         requireBound(confirmed)
-        session = created
-        sessionStateJob = coroutineScope.launch {
-            var knownKeyRevision = created.state.value.keyRevision
-            created.state.collect { updated ->
-                if (session !== created) return@collect
-                if (!boundCurrent(confirmed)) { invalidate(); return@collect }
-                mutableState.value = updated
-                if (updated.keyRevision != knownKeyRevision) {
-                    knownKeyRevision = updated.keyRevision
-                    mutablePresentations.value = emptyMap()
-                    presentationRevision = -1
-                    keyChanges.emit(KeyChange(this@EncryptedChatRuntime, created.scope))
-                    coroutineScope.launch { try { refresh(force = true) } catch (error: Exception) { if (error is CancellationException) throw error; report(error) } }
+        val stateJob = withBinding(confirmed) {
+            session = created
+            coroutineScope.launch(start = CoroutineStart.LAZY) {
+                var knownKeyRevision = created.state.value.keyRevision
+                created.state.collect { updated ->
+                    if (session !== created) return@collect
+                    if (!boundCurrent(confirmed)) { invalidateIfStale(); return@collect }
+                    mutableState.value = updated
+                    if (updated.keyRevision != knownKeyRevision) {
+                        knownKeyRevision = updated.keyRevision
+                        mutablePresentations.value = emptyMap()
+                        presentationRevision = -1
+                        keyChanges.emit(KeyChange(this@EncryptedChatRuntime, created.scope))
+                        coroutineScope.launch { try { refresh(force = true) } catch (error: Exception) { if (error is CancellationException) throw error; report(error) } }
+                    }
                 }
-            }
+            }.also { sessionStateJob = it }
         }
+        stateJob.start()
         // Service messages can live in the default topic while the user is viewing another topic.
         when (val history = client.performRequest(confirmed.pin(MessagesRequest(streamId, null)), serverId, captured)) {
             is ApiResult.Success -> { requireBound(confirmed); repo.updateMessagesPool(history.value.filter { it.streamUuid == streamId }) }

@@ -12,6 +12,8 @@ import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.async
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -60,7 +62,10 @@ import ru.genesiscorporation.workspace.beta.modules.createstream.CreateStreamVie
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.CoroutineContext
 
 /** Production runtime + authenticated HTTP + Android Keystore. Synthetic loopback accounts only. */
@@ -299,6 +304,52 @@ class EncryptedChatRuntimeInstrumentedTest {
         reopened.removeLocalKey(historical)
     }
 
+    @Test fun initialObserverCannotInvalidateANewerAccountBinding() = runBlocking {
+        val observerThread = AtomicReference<Thread>()
+        val initializerThread = AtomicReference<Thread>()
+        val observerExecutor = Executors.newSingleThreadExecutor { task ->
+            Thread(task, "cassi-runtime-observer").also { observerThread.set(it) }
+        }
+        val releaseObserver = CountDownLatch(1)
+        observerExecutor.execute { releaseObserver.await() }
+        val observerDispatcher = observerExecutor.asCoroutineDispatcher()
+        val initializerDispatcher = Executors.newSingleThreadExecutor { task ->
+            Thread(task, "cassi-runtime-initializer").also { initializerThread.set(it) }
+        }.asCoroutineDispatcher()
+        val observers = CoroutineScope(SupervisorJob() + observerDispatcher)
+        val initializer = CoroutineScope(SupervisorJob() + initializerDispatcher)
+        val runtime = EncryptedChatRuntime(context, owner.api, owner.repo, observers, STREAM, TOPIC)
+        try {
+            lateinit var opening: Deferred<EncryptedChatSession>
+            owner.repo.withStreamRevision(STREAM, owner.repo.streamRemovalRevision(STREAM)) {
+                // The initial observer captures a null account and stops in boundCurrent.
+                // Initialization then publishes its binding before waiting on the same monitor.
+                releaseObserver.countDown()
+                awaitMonitorBlock(observerThread)
+                opening = initializer.async { runtime.readySession() }
+                awaitMonitorBlock(initializerThread)
+            }
+            val session = withTimeout(10_000) { opening.await() }
+            withContext(observerDispatcher) { } // Let the delayed invalidation finish too.
+            assertTrue(session.isCurrent())
+            assertSame(session, runtime.readySession())
+            assertTrue(runtime.presentation(currentEncryptedMessage()) is EncryptedChatPresentation.Text)
+        } finally {
+            releaseObserver.countDown()
+            runtime.close()
+            observers.cancel()
+            initializer.cancel()
+            observerDispatcher.close()
+            initializerDispatcher.close()
+        }
+    }
+
+    private fun awaitMonitorBlock(thread: AtomicReference<Thread>) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        while (thread.get()?.state != Thread.State.BLOCKED && System.nanoTime() < deadline) Thread.yield()
+        assertEquals("Worker reached the held monitor", Thread.State.BLOCKED, thread.get()?.state)
+    }
+
     @Test fun replacementCredentialDeniesMountedAndNewRuntimeUntilMeThenSameOwnerRefreshRestores() = runBlocking {
         val mounted = owner.runtime()
         val oldSession = mounted.readySession()
@@ -433,14 +484,22 @@ class EncryptedChatRuntimeInstrumentedTest {
                 assertNull(events.getOrCreate(account.config).verifiedOwnerAuthentication.value)
             }
             try {
-                withTimeout(5_000) { user.selectedServer.first { it?.id == account.config.id && it.needsToRelogin } }
+                withTimeout(5_000) {
+                    combine(user.selectedServerId, user.selectedServer, user.accessToken) { id, selected, access ->
+                        id == account.config.id && selected?.id == id && selected.needsToRelogin && access == "synthetic-access"
+                    }.first { it }
+                }
                 // Even replacement credentials cannot invent an owner; only the persisted /me association is erased.
                 preferences.saveTokens(account.config.id, TokenPair("unconfirmed-replacement", "synthetic-refresh"))
                 val login = LoginViewModel(account.api, user, false)
                 assertTrue(login.leaveOrganization())
-                withTimeout(5_000) { user.selectedServer.first { it?.id == other.id } }
                 assertNull(preferences.getServer(account.config.id))
                 assertNull(preferences.tokensFor(account.config.id))
+                withTimeout(5_000) {
+                    combine(user.selectedServerId, user.selectedServer, user.accessToken) { id, selected, access ->
+                        id == other.id && selected?.id == id && access == "synthetic-member"
+                    }.first { it }
+                }
                 assertNull(keys.readDeviceIdentity(account.keyScope.owner))
                 assertTrue(keys.listPendingRequests(pending).isEmpty())
                 assertTrue(keys.listStagedCreations(account.keyScope).isEmpty())
@@ -491,15 +550,23 @@ class EncryptedChatRuntimeInstrumentedTest {
                 val result = worker.async {
                     runCatching { if (refresh) runtime.refresh(true) else runtime.presentation(currentEncryptedMessage()) }
                 }
-                work.next() // Dispatch ingest (refresh) or decrypt (presentation) to IO.
-                if (refresh) repeat(backend.messages.size) { work.next() } // Final decrypt has finished on IO.
+                fun dispatchToIo() {
+                    // Keep the live-check monitor until withContext has actually suspended.
+                    // A fast IO result can otherwise complete inline without a queued resumption.
+                    work.next { continuation ->
+                        owner.repo.withStreamRevision(STREAM, owner.repo.streamRemovalRevision(STREAM)) { continuation.run() }
+                    }
+                }
+                dispatchToIo() // Dispatch ingest (refresh) or decrypt (presentation) to IO.
+                if (refresh) repeat(backend.messages.size) { dispatchToIo() }
+                val decrypted = work.take() // Final IO result exists, but its caller has not resumed.
                 val revision = owner.repo.streamRemovalRevision(STREAM)
                 owner.repo.removeStream(STREAM)
                 assertEquals(revision + 1, owner.repo.streamRemovalRevision(STREAM))
                 // No observer has run. Reject even if an older projection is restored before resumption.
                 owner.repo.setInitialStreams(listOf(backend.stream.copy(userUuid = owner.userUuid)))
                 owner.sync()
-                work.next()
+                decrypted.run()
                 val error = withTimeout(5_000) { result.await() }.exceptionOrNull()
                 assertTrue(error is EncryptedChatException && error.failure == EncryptedChatFailure.STALE)
                 assertTrue(runtime.presentations.value.isEmpty())
@@ -510,7 +577,10 @@ class EncryptedChatRuntimeInstrumentedTest {
     private class QueuedDispatcher : CoroutineDispatcher() {
         private val tasks = LinkedBlockingQueue<Runnable>()
         override fun dispatch(context: CoroutineContext, block: Runnable) { tasks.add(block) }
-        fun next() { checkNotNull(tasks.poll(5, TimeUnit.SECONDS)) { "Expected a suspended result" }.run() }
+        fun take(): Runnable = checkNotNull(tasks.poll(5, TimeUnit.SECONDS)) { "Expected a suspended result" }
+        fun next(run: (Runnable) -> Unit = { it.run() }) {
+            run(take())
+        }
     }
 
     @Test fun ordinaryMountedChatRetainsComposerQuotesAndSelectionAcrossProofAndCredentialUpdates() = runBlocking {

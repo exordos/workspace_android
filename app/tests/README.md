@@ -184,3 +184,56 @@ read; new messages must preserve the selected unread position.
 ANDROID_SERIAL=TASK_SERIAL ./gradlew :app:connectedExordosDebugAndroidTest \
   -Pandroid.testInstrumentationRunnerArguments.class=ru.genesiscorporation.workspace.beta.modules.homeinbounds.InboxInstrumentedTest
 ```
+
+## Encrypted runtime binding and reopen
+
+`EncryptedChatRuntimeInstrumentedTest#initialObserverCannotInvalidateANewerAccountBinding`
+holds the repository monitor while an initial observer captures its empty binding
+and another thread starts a session. The delayed observer must preserve the newer
+binding. The existing runtime cases still reject revoked credentials, changed
+owners and deleted streams; invalidation must remain independent of network work.
+The removal test holds the repository monitor while dispatching each IO step so
+that a fast inline completion cannot skip its queued resumption boundary.
+The conversation retry test waits for the rendered inline link's accessibility
+action, including when rejection history appears during a refresh. Pointer-range
+actions remain covered by the service-state UI tests. The retry test holds
+the retry response until the server has received the request, then waits for the
+runtime's acknowledgement before asserting the waiting UI. Account-switch cases
+wait for the selected ID, selected configuration and credential flows together.
+Conversation and stream-info fixtures save the complete account before creating
+their Main-bound `UserViewModel`, then require a matching ID/configuration/token
+snapshot. Stream-info timeout diagnostics expose only readiness booleans.
+
+`disconnectedImageResponseDoesNotPoisonSubsequentDownloads` holds an image GET
+response while its client closes with TCP RST, then decodes a fresh request through
+Coil/CIO. The peer retains recognized broken-pipe/reset reasons separately and
+records successful downloads after writing the body; malformed requests,
+non-image responses and other transport errors still fail the checks.
+The conversation test retains authenticated image-hash and rendered-pixel checks.
+Its edit path deliberately hides the IME before sending. The helper accepts
+either shown or dismissed keyboard state, requiring stable IME visibility,
+native window and reachable button coordinates for 200 ms within 5 seconds.
+It retains the actual send action; failures report window focus, IME visibility
+and button reachability.
+
+For the optimized APK, reuse the dedicated-emulator seed and signing procedure
+under **Avatar credential boundary**, then run the encrypted host fixture:
+
+```sh
+./gradlew --no-daemon -p app/tests/host runEncryptedRuntimeFixture \
+  -PencryptedRuntimeArtifacts=/absolute/artifacts
+adb -s TASK_SERIAL reverse tcp:19557 tcp:19567
+```
+
+Open **Encrypted runtime fixture** in the optimized app. The host starts in `fail`
+mode: the failed key-request POST must leave the conversation's retry link available.
+Restart the app, write
+`reject` to `/absolute/artifacts/runtime-mode.txt`, and retry. The second entry in
+`runtime-attempts.jsonl` must have `matches_first_request=true`, proving the failed
+request retained its exact canonical identity and public payload across restart.
+Reopen the conversation to load the synthetic rejection. Set the mode to `pending`
+and press its retry link; expect a new request, then the waiting state after a
+further process restart without an additional POST. Repeat navigation and rotation.
+The fixture keeps only synthetic wire records in memory and logs request equality
+booleans, never local private key material. Stop the host and remove the task's
+port forward and emulator after testing.
