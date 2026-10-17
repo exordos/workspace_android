@@ -65,6 +65,16 @@ requested separately. Manual bulk issuance processes current pending requests. A
 excluded from this implementation. A locked message offers a context-menu request for that
 message's exact generation; it must not substitute the current generation.
 
+Unavailable message bodies use two blurred decorative rows inside the ordinary message bubble,
+matching the web client. The shared Android shell keeps the author, avatar, time, colors
+and incoming/outgoing alignment; only the body is replaced. Placeholder width is capped
+at 60% of the viewport (480 dp maximum), bounded by the space inside the bubble.
+Android 12 and newer use the platform blur; Android 11 uses a soft geometry fallback.
+Only geometry is drawn: neither ciphertext nor hidden plaintext enters the placeholder.
+Its accessible label remains "Encrypted message". Invalid ciphertext retains a readable
+decryption error, and the context menu still requests the message's exact key generation.
+Once the local key becomes available, the regular decrypted message replaces the placeholder.
+
 List previews read only existing local keys for the exact message generation. Missing keys,
 unconfirmed membership or a changed credential snapshot keep an opaque placeholder. A successful
 existing `/me` load supplies the in-memory owner proof; no preview-specific network request is made.
@@ -84,6 +94,11 @@ The interop fixtures are synthetic, including published RFC test material, and c
 live credentials. `verify-web-interop.mjs` runs the unchanged web crypto provider against
 Android-produced vectors. Device tests exercise the actual JCA provider and Keystore,
 complete mobile chat interactions and account-scoped runtime flows against loopback fixtures.
+`EncryptedMessagePlaceholderUiTest` checks the rendered soft edges in both themes and
+narrow windows, the accessible label, error state and long-press key request.
+`EncryptedConversationUiTest` also checks the complete locked bubble (author, time and
+incoming/outgoing placement) and its locked-to-readable transition using real
+local key storage, scoped decryption and the production chat screen.
 
 A debug suite does not establish release/R8 correctness or production Android vitals.
 Release checks and stand acceptance are recorded separately in the task's artifact report.

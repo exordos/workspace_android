@@ -1,6 +1,8 @@
 package ru.genesiscorporation.workspace.beta.modules.encryptedchat
 
+import android.os.Build
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -8,11 +10,19 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -149,11 +159,47 @@ fun EncryptedChatRequestAccess(keyUuid: String, status: EncryptedChatRequestStat
 @Composable
 fun EncryptedChatLockedMessage(keyUuid: String, status: EncryptedChatRequestStatus,
     invalidCiphertext: Boolean, pending: Boolean, showRequest: Boolean = true, onRequestKey: (String) -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp).testTag("encrypted-locked-message"),
+    Column(Modifier.padding(vertical = if (showRequest) 8.dp else 0.dp).testTag("encrypted-locked-message"),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        EncryptedServiceText(AnnotatedString(stringResource(if (invalidCiphertext)
-            R.string.encrypted_chat_cannot_decrypt else R.string.encrypted_chat_locked)))
+        if (invalidCiphertext) {
+            EncryptedServiceText(AnnotatedString(stringResource(R.string.encrypted_chat_cannot_decrypt)))
+        } else {
+            EncryptedMessagePlaceholder()
+        }
         if (showRequest) EncryptedChatRequestAccess(keyUuid, status, pending, onRequestKey)
+    }
+}
+
+/** Only decorative geometry is drawn; unavailable message text never enters this component. */
+@Composable
+private fun EncryptedMessagePlaceholder() {
+    val label = stringResource(R.string.encrypted_chat_locked)
+    val color = LocalWorkspaceColorsPalette.current.textAdditional50
+    val nativeBlur = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+    val viewportWidth = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp() }
+    BoxWithConstraints {
+        Canvas(Modifier.width(minOf(maxWidth, viewportWidth * 0.6f, 480.dp)).height(36.dp)
+            .then(if (nativeBlur) Modifier.blur(6.dp) else Modifier)
+            .testTag("encrypted-message-placeholder").semantics { contentDescription = label }) {
+            val inset = 6.dp.toPx()
+            val rowHeight = 8.dp.toPx()
+            // Android 11 ignores Modifier.blur; translucent outlines approximate the same soft rows.
+            // Both paths draw fixed geometry, without decoding text or allocating message bitmaps.
+            for (row in 0..1) {
+                val fraction = if (row == 0) 0.92f else 0.65f
+                val rowWidth = (size.width - 2 * inset).coerceAtLeast(0f) * fraction
+                val top = 6.dp.toPx() + row * 16.dp.toPx()
+                for (layer in (if (nativeBlur) 1 else 12) downTo 1) {
+                    val spread = (layer - 1) * 0.5.dp.toPx()
+                    drawRoundRect(
+                        color = color.copy(alpha = if (nativeBlur) 0.35f else 0.035f),
+                        topLeft = Offset(inset - spread, top - spread),
+                        size = Size(rowWidth + 2 * spread, rowHeight + 2 * spread),
+                        cornerRadius = CornerRadius(rowHeight / 2 + spread),
+                    )
+                }
+            }
+        }
     }
 }
 
