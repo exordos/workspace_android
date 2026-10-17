@@ -45,9 +45,9 @@ val EncryptedChatBackground = Color(0xFF1B1B1D)
 val EncryptedChatServiceColor = Color(0xFF707070)
 
 @Composable
-fun EncryptedChatLock(modifier: Modifier = Modifier, contentDescription: String? = null) {
+fun EncryptedChatLock(modifier: Modifier = Modifier, contentDescription: String? = null, tint: Color = EncryptedChatAccent) {
     Icon(painterResource(R.drawable.ic_chat_encrypted), contentDescription,
-        modifier.size(18.dp), tint = EncryptedChatAccent)
+        modifier.size(18.dp), tint = tint)
 }
 
 /** The design places the dark lock on the channel avatar, not beside its title. */

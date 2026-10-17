@@ -301,6 +301,58 @@ class EncryptedConversationUiTest {
         return counts.keys.maxOf { ColorUtils.calculateContrast(it, background) }
     }
 
+    @Test fun protectedHeaderUsesThemeLockBeforeTitle() = runBlocking {
+        useLongTopicTitle()
+        var dark by mutableStateOf(false)
+        showConversation { dark }
+        compose.waitUntil(10_000) { chat.encryptedChatState.value.sendingKeyUuid != null }
+        listOf(false, true).forEach { theme ->
+            compose.runOnIdle { dark = theme }
+            val lock = compose.onNodeWithTag("conversation-protected-lock", useUnmergedTree = true).assertIsDisplayed()
+            val title = compose.onNodeWithTag("conversation-title", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            assertTrue("The protected lock must precede the title", lock.fetchSemanticsNode().boundsInRoot.right <= title.left)
+            compose.onNodeWithTag("conversation-protected-label", useUnmergedTree = true).assertDoesNotExist()
+            val pixels = lock.captureToImage().toPixelMap()
+            val accent = (if (theme) DarkWorkspaceColorsPalette else LightWorkspaceColorsPalette).protectedChatHeaderAccent.toArgb()
+            var accentPixels = 0
+            for (y in 0 until pixels.height) for (x in 0 until pixels.width) {
+                if (pixels[x, y].toArgb() == accent) accentPixels++
+            }
+            assertTrue("The visible lock must use the active theme accent", accentPixels > 8)
+            assertTrue("The protected lock must remain readable", renderedContrast("conversation-protected-lock") >= 3.0)
+        }
+    }
+
+    @Test fun composerAttachmentStaysNearLeadingEdgeWithKeyboard() = runBlocking {
+        showConversation { false }
+        compose.waitUntil(10_000) { chat.encryptedChatState.value.sendingKeyUuid != null }
+        val density = compose.activity.resources.displayMetrics.density
+        val failures = mutableListOf<String>()
+        fun checkAttachment() {
+            val composer = compose.onNodeWithTag("message-composer").fetchSemanticsNode().boundsInRoot
+            val attach = compose.onNodeWithTag("message-composer-attach").assertIsDisplayed().fetchSemanticsNode()
+            val inset = (attach.boundsInRoot.left - composer.left) / density
+            if (inset > 4.5f) failures += "Attachment control starts $inset dp from the leading edge (>4)"
+            assertTrue("The attachment target must remain at least 48 dp wide", attach.touchBoundsInRoot.width >= 48 * density - 1)
+            assertTrue("The attachment target must remain at least 48 dp high", attach.touchBoundsInRoot.height >= 48 * density - 1)
+        }
+        checkAttachment()
+        compose.onNodeWithTag("message-composer-input").performClick().performTextInput("Файл")
+        compose.waitUntil(10_000) {
+            var visible = false
+            InstrumentationRegistry.getInstrumentation().runOnMainSync {
+                visible = ViewCompat.getRootWindowInsets(compose.activity.window.decorView)
+                    ?.isVisible(WindowInsetsCompat.Type.ime()) == true
+            }
+            visible
+        }
+        checkAttachment()
+        capture("attachment-leading-keyboard")
+        compose.onNodeWithTag("message-composer-attach").performClick()
+        compose.onNodeWithText("Add file").assertIsDisplayed()
+        assertTrue(failures.joinToString("; "), failures.isEmpty())
+    }
+
     @Test fun conversationChromeKeepsReadableTextAndActionsAcrossThemeChanges() = runBlocking {
         useLongTopicTitle()
         var dark by mutableStateOf(false)
@@ -311,16 +363,10 @@ class EncryptedConversationUiTest {
             compose.runOnIdle { dark = theme }
             compose.waitForIdle()
             capture(if (theme) "chrome-dark" else "chrome-light")
-            listOf("conversation-title", "conversation-subtitle", "conversation-protected-label").forEach {
+            listOf("conversation-title", "conversation-subtitle").forEach {
                 val contrast = renderedContrast(it)
                 if (contrast < 4.5) failures += "$it in dark=$theme has contrast $contrast < 4.5"
             }
-            val marker = compose.onNodeWithTag("conversation-protected-marker", useUnmergedTree = true).captureToImage().toPixelMap()
-            val expectedMarker = (if (theme) DarkWorkspaceColorsPalette else LightWorkspaceColorsPalette).protectedChatHeaderAccent
-            assertEquals("The protected marker must use the current theme accent", expectedMarker.toArgb(),
-                marker[marker.width / 2, marker.height / 2].toArgb())
-            val markerContrast = renderedContrast("conversation-protected-marker")
-            if (markerContrast < 3.0) failures += "Protected marker in dark=$theme has contrast $markerContrast < 3.0"
             listOf("conversation-back-action", "conversation-call-action", "conversation-more-action", "message-composer-attach", "message-composer-send").forEach {
                 compose.onNodeWithTag(it).assertIsEnabled()
                 val contrast = renderedContrast(it)
@@ -337,7 +383,7 @@ class EncryptedConversationUiTest {
         capture("chrome-large-text")
         val header = compose.onNodeWithTag("conversation-header").fetchSemanticsNode().boundsInRoot
         assertTrue("The header must grow to fit large text", header.height > 60 * compose.activity.resources.displayMetrics.density)
-        listOf("conversation-title", "conversation-subtitle", "conversation-protected-label").forEach { tag ->
+        listOf("conversation-title", "conversation-subtitle").forEach { tag ->
             val node = compose.onNodeWithTag(tag, useUnmergedTree = true).assertIsDisplayed()
             val layouts = mutableListOf<TextLayoutResult>()
             node.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }

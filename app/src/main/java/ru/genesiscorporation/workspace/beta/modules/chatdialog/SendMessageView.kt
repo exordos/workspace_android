@@ -281,7 +281,7 @@ fun SendMessageView(
                 .fillMaxWidth()
                 .testTag("message-composer")
                 .background(LocalWorkspaceColorsPalette.current.surface)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .padding(start = 4.dp, top = 8.dp, end = 12.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
@@ -296,7 +296,7 @@ fun SendMessageView(
                         LocalWorkspaceColorsPalette.current.background,
                         RoundedCornerShape(8.dp)
                     )
-                    .padding(horizontal = 8.dp)
+                    .padding(end = 8.dp)
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically

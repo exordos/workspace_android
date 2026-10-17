@@ -128,6 +128,7 @@ import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatR
 import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatServiceMessage
 import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatIntroduction
 import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatBackground
+import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatLock
 import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatLinkColor
 import ru.genesiscorporation.workspace.beta.ui.AnimatedGif
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
@@ -373,23 +374,23 @@ fun ChatDialogScreen(
                                 viewModel.topicName ?: viewModel.chatTitle
                             }
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            if (stream?.encryption == true) Box(Modifier.testTag("conversation-protected-marker").size(width = 3.dp, height = 16.dp)
-                                .background(LocalWorkspaceColorsPalette.current.protectedChatHeaderAccent, RoundedCornerShape(2.dp)))
-                            Text(
-                                title,
-                                color = LocalWorkspaceColorsPalette.current.textHeaders,
-                                fontSize = if (stream?.encryption == true) 14.sp else 16.sp,
-                                fontFamily = InterFontFamily,
-                                fontWeight = FontWeight.Medium,
-                                modifier = if (stream?.encryption == true) Modifier.testTag("conversation-title").weight(1f, fill = false) else Modifier.testTag("conversation-title"),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            if (stream?.encryption == true) {
-                                Text(stringResource(R.string.encrypted_chat_title), color = LocalWorkspaceColorsPalette.current.protectedChatHeaderAccent,
-                                    fontSize = 12.sp, lineHeight = 16.sp, fontFamily = InterFontFamily, maxLines = 1,
-                                    modifier = Modifier.testTag("conversation-protected-label"))
-                            }
+                                if (stream?.encryption == true) {
+                                    EncryptedChatLock(
+                                        modifier = Modifier.testTag("conversation-protected-lock"),
+                                        contentDescription = stringResource(R.string.encrypted_chat_title),
+                                        tint = LocalWorkspaceColorsPalette.current.protectedChatHeaderAccent,
+                                    )
+                                }
+                                Text(
+                                    title,
+                                    color = LocalWorkspaceColorsPalette.current.textHeaders,
+                                    fontSize = if (stream?.encryption == true) 14.sp else 16.sp,
+                                    fontFamily = InterFontFamily,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = if (stream?.encryption == true) Modifier.testTag("conversation-title").weight(1f, fill = false) else Modifier.testTag("conversation-title"),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
                             val currentStreamBindings = streamBindings[viewModel.chatId]
                             val user = directUser
