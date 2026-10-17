@@ -128,3 +128,5 @@ tasks.register("runAvatarFixture") {
         }
     }
 }
+
+apply(from = "navigation.gradle.kts")

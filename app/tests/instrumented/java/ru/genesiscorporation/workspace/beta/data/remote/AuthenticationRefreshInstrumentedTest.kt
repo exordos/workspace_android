@@ -195,6 +195,57 @@ class AuthenticationRefreshInstrumentedTest {
     }
 
     @Test
+    fun recoverablePinnedQueryRefreshesWithoutReplayingTheCapturedOperation() = runBlocking {
+        AuthenticationTestServer(acceptedAccessToken = "fresh-access").use { server ->
+            saveSession(server, "expired-access", "stored-refresh")
+            val captured = requireNotNull(repository.getServer(serverId)).copy()
+            val result = api.performRequest(ProtectedRequestAuthentication("expired-access")
+                .recoverSession(AuthenticationProbeRequest), serverId, captured)
+            assertTrue(result is ApiResult.Error)
+            assertEquals("AUTHENTICATION_CHANGED", (result as ApiResult.Error).error.code)
+            assertEquals(1, server.protectedRequestCount.get())
+            assertEquals(1, server.refreshRequestCount.get())
+            assertEquals("fresh-access", repository.tokensFor(serverId)?.accessToken)
+        }
+    }
+
+    @Test
+    fun concurrentRecoverablePinnedQueriesShareRefreshWithoutReplayingEitherOperation() = runBlocking {
+        AuthenticationTestServer(acceptedAccessToken = "fresh-access", simultaneousRejectedRequests = 2).use { server ->
+            saveSession(server, "expired-access", "stored-refresh")
+            val captured = requireNotNull(repository.getServer(serverId)).copy()
+            val authentication = ProtectedRequestAuthentication("expired-access")
+            val results = List(2) { async(Dispatchers.IO) {
+                api.performRequest(authentication.recoverSession(AuthenticationProbeRequest), serverId, captured)
+            } }.awaitAll()
+            assertTrue(results.all { it is ApiResult.Error })
+            assertEquals(2, server.protectedRequestCount.get())
+            assertEquals(1, server.refreshRequestCount.get())
+            assertEquals("fresh-access", repository.tokensFor(serverId)?.accessToken)
+        }
+    }
+
+    @Test
+    fun recoverablePinnedQueryCannotRefreshOrReplayAfterReplacementLogin() = runBlocking {
+        AuthenticationTestServer(acceptedAccessToken = "new-login-access", pauseRejectedResponse = true).use { server ->
+            saveSession(server, "old-login-access", "old-login-refresh")
+            val captured = requireNotNull(repository.getServer(serverId)).copy()
+            val pending = async(Dispatchers.IO) {
+                api.performRequest(ProtectedRequestAuthentication("old-login-access")
+                    .recoverSession(AuthenticationProbeRequest), serverId, captured)
+            }
+            try {
+                assertTrue(withContext(Dispatchers.IO) { server.rejectedResponseStarted.await(5, TimeUnit.SECONDS) })
+                repository.saveTokensAndClearRelogin(serverId, TokenPair("new-login-access", "new-login-refresh"))
+            } finally { server.finishRejectedResponse.countDown() }
+            assertTrue(pending.await() is ApiResult.Error)
+            assertEquals(1, server.protectedRequestCount.get())
+            assertEquals(0, server.refreshRequestCount.get())
+            assertEquals("new-login-access", repository.tokensFor(serverId)?.accessToken)
+        }
+    }
+
+    @Test
     fun verifiedOwnerStampRecoversExpiredCredentialAndUpdatesForEqualMeResponse() = runBlocking {
         AuthenticationTestServer(acceptedAccessToken = "fresh-access").use { server ->
             saveSession(server, "expired-access", "stored-refresh")

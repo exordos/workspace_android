@@ -19,6 +19,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.test.platform.app.InstrumentationRegistry
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
+import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.serialization.kotlinx.json.json
@@ -57,12 +58,13 @@ class WorkspaceTestAccount private constructor(
     }
 
     companion object {
-        suspend fun create(url: String, index: Int = 0): WorkspaceTestAccount {
+        suspend fun create(url: String, index: Int = 0, enableWebSockets: Boolean = false): WorkspaceTestAccount {
             val context = InstrumentationRegistry.getInstrumentation().targetContext
             val directory = File(context.cacheDir, "cassi-account-${UUID.randomUUID()}").apply { mkdirs() }
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
             val store = PreferenceDataStoreFactory.create(scope = scope) { File(directory, "settings.preferences_pb") }
             val http = HttpClient(CIO) {
+                if (enableWebSockets) install(WebSockets)
                 install(HttpTimeout) { requestTimeoutMillis = 8_000 }
                 install(ContentNegotiation) { json() }
             }

@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.serialization.Serializable
 import ru.genesiscorporation.workspace.beta.UserViewModel
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
+import ru.genesiscorporation.workspace.beta.data.readTopicSnapshot
 import ru.genesiscorporation.workspace.beta.data.ConfirmedAccountContext
 import ru.genesiscorporation.workspace.beta.data.confirmedAccountContext
 import ru.genesiscorporation.workspace.beta.data.EventsRepositoryStore
@@ -240,6 +241,7 @@ class ChatViewModel(
             initialValue = QueryState.Idle,
         )
 
+    private val topicQueryGeneration = java.util.concurrent.atomic.AtomicLong()
     private val _topicsQueryState = MutableStateFlow<QueryState>(QueryState.Idle)
     val topicsQueryState: StateFlow<QueryState> = _topicsQueryState
 
@@ -321,38 +323,18 @@ class ChatViewModel(
     }
 
     suspend fun loadTopics(stream: Stream) {
+        val generation = topicQueryGeneration.incrementAndGet()
         _topicsQueryState.value = QueryState.Loading
-        val response = client.performRequest(TopicsRequest(listOf(stream.uuid)))
-        when(response) {
+        val repository = eventsRepo.value ?: return
+        val scoped = client.readTopicSnapshot(repository, TopicsRequest(listOf(stream.uuid)))
+        if (generation != topicQueryGeneration.get()) return
+        if (scoped.stale) { _topicsQueryState.value = QueryState.Idle; return }
+        when (val response = scoped.result) {
             is ApiResult.Success -> {
-                val messageIds = response.value.mapNotNull { it.lastMessageUuid }
-                if (!messageIds.isEmpty()) {
-                    val messagesResponse = client.performRequest(MessagesByIdsRequest(messageIds))
-                    when (messagesResponse) {
-                        is ApiResult.Success -> {
-                            eventsRepo.value?.updateMessagesPool(messagesResponse.value)
-                            val topicsWithMessages = response.value.map { topic ->
-                                var updatedTopic = topic
-                                updatedTopic.lastMessage = poolMessage(topic.lastMessageUuid)
-                                updatedTopic
-                            }
-                            eventsRepo.value?.addStreamTopics(stream.uuid, topicsWithMessages)
-                            _topicsQueryState.value = QueryState.Success
-                        }
-
-                        is ApiResult.Error -> {
-                            eventsRepo.value?.addStreamTopics(stream.uuid, response.value)
-                            _topicsQueryState.value = QueryState.Success
-                        }
-                    }
-                } else {
-                    eventsRepo.value?.addStreamTopics(stream.uuid, response.value)
+                if (repository.publishTopicSnapshot(scoped.scope, mapOf(stream.uuid to response.value.topics), response.value.messages))
                     _topicsQueryState.value = QueryState.Success
-                }
             }
-            is ApiResult.Error -> {
-                _topicsQueryState.value = QueryState.Error("")
-            }
+            is ApiResult.Error -> _topicsQueryState.value = QueryState.Error("")
         }
     }
 

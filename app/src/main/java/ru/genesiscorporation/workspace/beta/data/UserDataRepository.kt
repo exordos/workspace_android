@@ -157,6 +157,11 @@ class ServerRepository internal constructor(
             setNeedsToRelogin(false, serverId)
         }
 
+    fun verifyLogin(server: ServerConfig, reloadWorkspace: Boolean = false) {
+        val repository = eventsRepositoryStore.getOrCreate(server)
+        if (reloadWorkspace) repository.loadServerSettings() else repository.verifyAfterLogin()
+    }
+
     suspend fun saveRefreshedTokensIfCurrent(
         serverId: String,
         expectedRefreshToken: String,
@@ -235,6 +240,8 @@ class ServerRepository internal constructor(
     }
 
     private fun saveTokensLocked(serverId: String, tokens: TokenPair) {
+        // Explicit login replacement revokes in-flight owner/cache scopes, including reused tokens.
+        eventsRepositoryStore.get(serverId)?.invalidateVerifiedOwnerAuthentication()
         tokenStore.save(serverId, tokens)
         tokensVersion.value = tokensVersion.value + 1
     }

@@ -108,3 +108,15 @@ turning them into a permanent product contract.
 FCM ID parsing, cancellation and independent notification intents are covered by
 `NotificationMessageIdTest`, `FirebaseNotificationsTest` and the optimized
 `FirebaseNotificationReleaseInstrumentation` driver; see [test commands](../app/tests/README.md#fcm-notification-regressions).
+
+Mentions navigation is covered by `MentionNavigationInstrumentedTest`: the real
+row must open the selected message's topic through decoded navigation arguments,
+with matching history and topic metadata. Missing metadata uses the existing
+authenticated topic request; failed or mismatched lookups must not open the
+stream's default history. Account changes must clear old rows and discard delayed
+results. A retained screen must reload for a newly verified user on the same saved
+server, including after Activity resume and on explicit reload.
+Delayed HTTP 401 responses must not replay an operation under another account;
+both mention requests and metadata requests retain their verified credential.
+See the
+[test commands and optimized fixture](../app/tests/README.md#mentions-topic-navigation).

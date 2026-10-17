@@ -69,6 +69,8 @@ fun HomeMentionsScreen(
 
     val messagesQueryState by viewModel.messagesQueryState.collectAsStateWithLifecycle()
     val streams by viewModel.streams.collectAsStateWithLifecycle()
+    val topics by viewModel.topicsPool.collectAsStateWithLifecycle()
+    val topicLookupLoading by viewModel.topicLookupLoading.collectAsStateWithLifecycle()
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val dateFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
@@ -139,17 +141,20 @@ fun HomeMentionsScreen(
                         ) { item ->
 
                             val stream = streams.firstOrNull { it.uuid == item.streamUuid }
+                            val topic = topics.firstOrNull { it.uuid == item.topicUuid && it.streamUuid == item.streamUuid }
                             if (stream != null) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth()
                                         .clickable(
+                                            enabled = topic != null,
                                             onClick = {
+                                                if (topic == null || !viewModel.isCurrentAccount()) return@clickable
                                                 navController.navigate(
                                                     HomeFlow.ChatDialog(
                                                         stream.displayableName(),
                                                         stream.uuid,
-                                                        "",
-                                                        stream.defaultTopicUuid ?: "",
+                                                        topic.name,
+                                                        item.topicUuid,
                                                         stream.isPrivate,
                                                         null
                                                     )
@@ -196,6 +201,16 @@ fun HomeMentionsScreen(
                                                 navController = navController,
                                                 viewModel = null
                                             )
+                                            if (topic == null) {
+                                                Button(
+                                                    onClick = { scope.launch { viewModel.retryMissingTopics() } },
+                                                    enabled = !topicLookupLoading,
+                                                    colors = ButtonDefaults.buttonColors(
+                                                        containerColor = LocalWorkspaceColorsPalette.current.primary,
+                                                        contentColor = LocalWorkspaceColorsPalette.current.onPrimary
+                                                    )
+                                                ) { Text(stringResource(R.string.mentions_topic_retry)) }
+                                            }
                                         }
                                         Spacer(modifier = Modifier.widthIn(min = 20.dp))
                                         val instant = Instant.parse(item.createdAt)

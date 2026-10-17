@@ -89,7 +89,10 @@ does not establish a signed or published release.
 - Capture the account context before asynchronous work. For a late response,
   check the account, configuration, token, and required revision. Do not retry a
   protected mutation using credentials from a login that replaced the captured
-  session.
+  session. For account-scoped reads that need expiry recovery, use
+  `ProtectedRequestAuthentication.recoverSession`: it opts into the same shared
+  refresh path without replaying the captured operation. Re-verify the owner and
+  start a fresh query after the credential changes; bound recovery attempts.
 - Reconcile HTTP responses with realtime events. Test both orderings, repeated
   delivery, cancellation, partial failures, and an empty fresh snapshot.
 - Use `viewModelScope` and lifecycle-aware flows; close jobs, sockets, clients,

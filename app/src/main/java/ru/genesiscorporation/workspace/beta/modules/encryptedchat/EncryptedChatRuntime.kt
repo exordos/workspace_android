@@ -62,7 +62,7 @@ class EncryptedChatRuntime(
     @Volatile private var closed = false
     @Volatile private var account: ConfirmedAccountContext? = null
     private var mountedAccount: ConfirmedAccountContext? = null
-    @Volatile private var protectedStreamKnown = repo.streams.value.any { it.uuid == streamId && it.encryption }
+    @Volatile private var protectedStreamKnown = repo.isKnownProtectedStream(streamId)
     @Volatile private var boundGeneration: Long? = null
     private var ownerUuid: String? = null
     @Volatile private var session: EncryptedChatSession? = null
@@ -228,11 +228,12 @@ class EncryptedChatRuntime(
         defaultTopic = repo.streams.value.firstOrNull { it.uuid == streamId }?.defaultTopicUuid?.takeIf { it.isNotBlank() }
             ?: repo.streamTopics.value[streamId]?.firstOrNull { it.isDefault }?.uuid
         if (defaultTopic == null) {
+            val topicScope = repo.captureTopicCacheScope()
             when (val response = client.performRequest(confirmed.pin(TopicsRequest(listOf(streamId))), serverId, captured)) {
                 is ApiResult.Success -> {
                     requireBound(confirmed)
                     val topics = response.value.filter { it.streamUuid == streamId }
-                    repo.addStreamTopics(streamId, topics)
+                    if (!repo.addStreamTopics(streamId, topics, topicScope)) throw EncryptedChatException(EncryptedChatFailure.STALE)
                     defaultTopic = topics.firstOrNull { it.isDefault }?.uuid
                 }
                 is ApiResult.Error -> throw EncryptedChatException(EncryptedChatFailure.UNAVAILABLE)
