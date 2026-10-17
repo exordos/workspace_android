@@ -370,3 +370,41 @@ the themed invalid-ciphertext error, then repeat after process recreation and
 rotation. The optional host port permits
 independent runs; its default and the existing request/retry modes are unchanged.
 Neither the key nor real account data belongs in the exported payload file.
+
+## Conversation type through navigation
+
+`ChatTopicNavigationInstrumentedTest` clicks the production `ChatTopic` row or
+`HomeInboundsScreen`, `HomeDraftsScreen` or `HomeMentionsScreen` entry and opens
+`ChatDialogScreen` using decoded navigation arguments. It checks the decoded conversation type and incoming avatar for
+private groups with `direct_user_uuid=null` and public groups on all four entry
+points; direct and self conversations retain their counterpart header and omit
+group avatars. Chats, Inbox and Drafts also assert the topic header, and their
+encrypted private-group cases retain the topic marker. Mentions keeps its
+existing topic-resolution behavior, tracked separately in
+[#92](https://github.com/exordos/workspace_android/issues/92); this classification
+regression does not establish correct mention-topic selection. Do not replace this with a dialog
+constructed using an already-correct conversation-type boolean.
+
+```sh
+ANDROID_SERIAL=TASK_SERIAL ./gradlew :app:connectedExordosDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.class=ru.genesiscorporation.workspace.beta.modules.chatchannels.ChatTopicNavigationInstrumentedTest
+```
+
+For optimized APK acceptance, use the existing dedicated-emulator synthetic
+session and framework-driver procedure under **Avatar credential boundary**,
+then start the Kotlin host fixture:
+
+```sh
+./gradlew --no-daemon -p app/tests/host runNavigationFixture \
+  -PnavigationArtifacts=/absolute/artifacts -PnavigationPort=19590
+adb -s TASK_SERIAL reverse tcp:19557 tcp:19590
+```
+
+Install the optimized APK as a same-certificate update. Open every fixture
+conversation through Chats and Inbox. Private/public groups must show `Topic 1`
+and `Topic 2`, respectively, with the incoming `A` avatar. Direct and self chats
+must show `Alice` and `Viewer`, without a group avatar. The encrypted private group
+must show `Topic 5`, its incoming avatar and `# Topic 5` marker. Repeat after process
+restart, rotation and a theme change. Keep screenshots and run logs outside the
+service repository. Stop the fixture, remove the task port forward and delete
+only the dedicated emulator after testing.

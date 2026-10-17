@@ -107,3 +107,8 @@ turning them into a permanent product contract.
 FCM ID parsing, cancellation and independent notification intents are covered by
 `NotificationMessageIdTest`, `FirebaseNotificationsTest` and the optimized
 `FirebaseNotificationReleaseInstrumentation` driver; see [test commands](../app/tests/README.md#fcm-notification-regressions).
+
+`ChatTopicNavigationInstrumentedTest` covers conversation classification at the
+production Chats, Inbox, Drafts and Mentions navigation boundaries: private groups
+with a null `direct_user_uuid`, public groups, direct/self chats and encrypted private-group
+avatars/topic markers. Privacy alone must not select direct-chat presentation.

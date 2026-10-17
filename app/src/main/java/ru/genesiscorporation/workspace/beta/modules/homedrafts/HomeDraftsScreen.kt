@@ -156,7 +156,7 @@ fun HomeDraftsScreen(
                                                             stream.uuid,
                                                             topic.name,
                                                             topic.uuid,
-                                                            stream.isPrivate,
+                                                            !stream.directUserUuid.isNullOrBlank(),
                                                             null
                                                         )
                                                     )

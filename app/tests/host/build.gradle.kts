@@ -8,6 +8,7 @@ import java.util.concurrent.Executors
 import javax.imageio.ImageIO
 
 apply(from = "encrypted-runtime.gradle.kts")
+apply(from = "navigation.gradle.kts")
 apply(from = "firebase-config.gradle.kts")
 
 // Host-only synthetic origins for the optimized APK. Uses the project's Gradle JDK.

@@ -92,6 +92,6 @@ class HomeInboundsViewModel(
         }
         val first = firstInboxUnread(messages, stream, topic)
         return HomeFlow.ChatDialog(stream.displayableName(), stream.uuid, topic.name,
-            topic.uuid, stream.isPrivate, null, first?.uuid)
+            topic.uuid, !stream.directUserUuid.isNullOrBlank(), null, first?.uuid)
     }
 }

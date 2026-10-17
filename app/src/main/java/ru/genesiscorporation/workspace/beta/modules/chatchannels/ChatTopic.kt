@@ -85,7 +85,7 @@ fun ChatTopic(
                                 stream.uuid,
                                 item.name,
                                 item.uuid,
-                                stream.isPrivate,
+                                !stream.directUserUuid.isNullOrBlank(),
                                 null
                             )
                         )

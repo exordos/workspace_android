@@ -150,7 +150,7 @@ fun HomeMentionsScreen(
                                                         stream.uuid,
                                                         "",
                                                         stream.defaultTopicUuid ?: "",
-                                                        stream.isPrivate,
+                                                        !stream.directUserUuid.isNullOrBlank(),
                                                         null
                                                     )
                                                 )
