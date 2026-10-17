@@ -18,8 +18,19 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsEnabled
@@ -54,6 +65,7 @@ import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
 import androidx.test.espresso.matcher.ViewMatchers.withText
 import org.hamcrest.Matchers.allOf
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.core.graphics.ColorUtils
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.viewModelScope
@@ -120,6 +132,8 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.AttachmentStorage
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.ChatDialogScreen
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.ChatDialogViewModel
+import ru.genesiscorporation.workspace.beta.ui.theme.DarkWorkspaceColorsPalette
+import ru.genesiscorporation.workspace.beta.ui.theme.LightWorkspaceColorsPalette
 import ru.genesiscorporation.workspace.beta.ui.theme.WokspaceTheme
 import java.io.ByteArrayOutputStream
 import java.io.Closeable
@@ -240,7 +254,7 @@ class EncryptedConversationUiTest {
         Unit
     }
 
-    private fun showConversation() {
+    private fun showConversation(fontScale: Float? = null, darkTheme: () -> Boolean = { true }) {
         // Match MainActivity and WorkspaceApp. The default test Activity can pan its
         // entire window above the screen instead of dispatching the production IME insets.
         compose.activityRule.scenario.onActivity { activity ->
@@ -248,14 +262,179 @@ class EncryptedConversationUiTest {
             activity.window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         }
         compose.setContent {
-            WokspaceTheme(darkTheme = true, dynamicColor = false) {
-                CompositionLocalProvider(LocalBottomBarVisible provides {}) {
+            WokspaceTheme(darkTheme = darkTheme(), dynamicColor = false) {
+                val density = LocalDensity.current
+                CompositionLocalProvider(
+                    LocalDensity provides Density(density.density, fontScale ?: density.fontScale),
+                    LocalBottomBarVisible provides {},
+                ) {
                     Box(Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))) {
                     ChatDialogScreen(chat, rememberNavController())
                     }
                 }
             }
         }
+    }
+
+    private suspend fun useLongTopicTitle() {
+        val title = "Очень длинное название темы для обсуждения интерфейса и доступности рабочего чата"
+        val previous = chat
+        chat = withContext(Dispatchers.Main) {
+            previous.onChatClosed()
+            previous.encryptionRuntime.close()
+            previous.viewModelScope.cancel()
+            ChatDialogViewModel(previous.client, user, "Команда продукта", STREAM, title, TOPIC,
+                false, events, null, previous.storage)
+        }
+    }
+
+    /** Measures actual rendered foreground/background pixels, including the enclosing surface. */
+    private fun renderedContrast(tag: String): Double {
+        val pixels = compose.onNodeWithTag(tag, useUnmergedTree = true).captureToImage().toPixelMap()
+        val counts = HashMap<Int, Int>()
+        for (y in 0 until pixels.height) for (x in 0 until pixels.width) {
+            val color = pixels[x, y].toArgb()
+            counts[color] = (counts[color] ?: 0) + 1
+        }
+        val background = counts.maxBy { it.value }.key
+        assertEquals("The captured surface must be opaque", 255, Color.alpha(background))
+        return counts.keys.maxOf { ColorUtils.calculateContrast(it, background) }
+    }
+
+    @Test fun protectedHeaderUsesThemeLockBeforeTitle() = runBlocking {
+        useLongTopicTitle()
+        var dark by mutableStateOf(false)
+        showConversation { dark }
+        compose.waitUntil(10_000) { chat.encryptedChatState.value.sendingKeyUuid != null }
+        listOf(false, true).forEach { theme ->
+            compose.runOnIdle { dark = theme }
+            val lock = compose.onNodeWithTag("conversation-protected-lock", useUnmergedTree = true).assertIsDisplayed()
+            val title = compose.onNodeWithTag("conversation-title", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            assertTrue("The protected lock must precede the title", lock.fetchSemanticsNode().boundsInRoot.right <= title.left)
+            compose.onNodeWithTag("conversation-protected-label", useUnmergedTree = true).assertDoesNotExist()
+            val pixels = lock.captureToImage().toPixelMap()
+            val accent = (if (theme) DarkWorkspaceColorsPalette else LightWorkspaceColorsPalette).protectedChatHeaderAccent.toArgb()
+            var accentPixels = 0
+            for (y in 0 until pixels.height) for (x in 0 until pixels.width) {
+                if (pixels[x, y].toArgb() == accent) accentPixels++
+            }
+            assertTrue("The visible lock must use the active theme accent", accentPixels > 8)
+            assertTrue("The protected lock must remain readable", renderedContrast("conversation-protected-lock") >= 3.0)
+        }
+    }
+
+    @Test fun composerAttachmentStaysNearLeadingEdgeWithKeyboard() = runBlocking {
+        showConversation { false }
+        compose.waitUntil(10_000) { chat.encryptedChatState.value.sendingKeyUuid != null }
+        val density = compose.activity.resources.displayMetrics.density
+        val failures = mutableListOf<String>()
+        fun checkAttachment() {
+            val composer = compose.onNodeWithTag("message-composer").fetchSemanticsNode().boundsInRoot
+            val attach = compose.onNodeWithTag("message-composer-attach").assertIsDisplayed().fetchSemanticsNode()
+            val inset = (attach.boundsInRoot.left - composer.left) / density
+            if (inset > 4.5f) failures += "Attachment control starts $inset dp from the leading edge (>4)"
+            assertTrue("The attachment target must remain at least 48 dp wide", attach.touchBoundsInRoot.width >= 48 * density - 1)
+            assertTrue("The attachment target must remain at least 48 dp high", attach.touchBoundsInRoot.height >= 48 * density - 1)
+        }
+        checkAttachment()
+        compose.onNodeWithTag("message-composer-input").performClick().performTextInput("Файл")
+        compose.waitUntil(10_000) {
+            var visible = false
+            InstrumentationRegistry.getInstrumentation().runOnMainSync {
+                visible = ViewCompat.getRootWindowInsets(compose.activity.window.decorView)
+                    ?.isVisible(WindowInsetsCompat.Type.ime()) == true
+            }
+            visible
+        }
+        checkAttachment()
+        capture("attachment-leading-keyboard")
+        compose.onNodeWithTag("message-composer-attach").performClick()
+        compose.onNodeWithText("Add file").assertIsDisplayed()
+        assertTrue(failures.joinToString("; "), failures.isEmpty())
+    }
+
+    @Test fun conversationChromeKeepsReadableTextAndActionsAcrossThemeChanges() = runBlocking {
+        useLongTopicTitle()
+        var dark by mutableStateOf(false)
+        showConversation { dark }
+        compose.waitUntil(10_000) { chat.encryptedChatState.value.sendingKeyUuid != null }
+        val failures = mutableListOf<String>()
+        listOf(false, true).forEach { theme ->
+            compose.runOnIdle { dark = theme }
+            compose.waitForIdle()
+            capture(if (theme) "chrome-dark" else "chrome-light")
+            listOf("conversation-title", "conversation-subtitle").forEach {
+                val contrast = renderedContrast(it)
+                if (contrast < 4.5) failures += "$it in dark=$theme has contrast $contrast < 4.5"
+            }
+            listOf("conversation-back-action", "conversation-call-action", "conversation-more-action", "message-composer-attach", "message-composer-send").forEach {
+                compose.onNodeWithTag(it).assertIsEnabled()
+                val contrast = renderedContrast(it)
+                if (contrast < 3.0) failures += "$it in dark=$theme has contrast $contrast < 3.0"
+            }
+        }
+        assertTrue(failures.joinToString("; "), failures.isEmpty())
+    }
+
+    @Test fun conversationHeaderDoesNotClipTextAtLargeAccessibilityFontScale() = runBlocking {
+        useLongTopicTitle()
+        showConversation(fontScale = 2f)
+        compose.waitUntil(10_000) { chat.encryptedChatState.value.sendingKeyUuid != null }
+        capture("chrome-large-text")
+        val header = compose.onNodeWithTag("conversation-header").fetchSemanticsNode().boundsInRoot
+        assertTrue("The header must grow to fit large text", header.height > 60 * compose.activity.resources.displayMetrics.density)
+        listOf("conversation-title", "conversation-subtitle").forEach { tag ->
+            val node = compose.onNodeWithTag(tag, useUnmergedTree = true).assertIsDisplayed()
+            val layouts = mutableListOf<TextLayoutResult>()
+            node.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            assertEquals("$tag must stay on one line", 1, layouts.single().lineCount)
+            assertTrue("$tag is vertically clipped at 200% font scale",
+                node.fetchSemanticsNode().boundsInRoot.height + 1 >= layouts.single().getLineBottom(0))
+        }
+    }
+
+    @Test fun conversationChromeStaysCompactWithLongTitleAndRealKeyboard() = runBlocking {
+        useLongTopicTitle()
+        showConversation { false }
+        compose.waitUntil(10_000) { chat.encryptedChatState.value.sendingKeyUuid != null }
+        val density = compose.activity.resources.displayMetrics.density
+        val failures = mutableListOf<String>()
+        fun checkChrome() {
+            val header = compose.onNodeWithTag("conversation-header").fetchSemanticsNode().boundsInRoot
+            val composer = compose.onNodeWithTag("message-composer").fetchSemanticsNode().boundsInRoot
+            if (header.height > 64 * density + 1) failures += "Header is ${header.height / density} dp (>64)"
+            if (composer.height > 64 * density + 1) failures += "Single-line composer is ${composer.height / density} dp (>64)"
+            val layouts = mutableListOf<TextLayoutResult>()
+            compose.onNodeWithTag("conversation-title", useUnmergedTree = true)
+                .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            assertEquals(1, layouts.single().lineCount)
+            listOf("conversation-back-action", "conversation-call-action", "message-composer-attach", "message-composer-send").forEach { tag ->
+                val bounds = compose.onNodeWithTag(tag).assertIsDisplayed().fetchSemanticsNode().touchBoundsInRoot
+                if (bounds.width < 48 * density - 1 || bounds.height < 48 * density - 1)
+                    failures += "$tag has a touch target smaller than 48 dp"
+            }
+        }
+        checkChrome()
+        compose.onNodeWithTag("message-composer-input").performClick().performTextInput("Готово")
+        compose.waitUntil(10_000) {
+            var visible = false
+            InstrumentationRegistry.getInstrumentation().runOnMainSync {
+                visible = ViewCompat.getRootWindowInsets(compose.activity.window.decorView)
+                    ?.isVisible(WindowInsetsCompat.Type.ime()) == true
+            }
+            visible
+        }
+        checkChrome()
+        capture("chrome-light-keyboard")
+        clickComposerSendAfterImeLayout("Send")
+        compose.waitUntil(10_000) { fixture.sentPlaintexts.contains("Готово") }
+        compose.waitUntil(10_000) { chat.mentions.text.isEmpty() }
+        assertTrue(failures.joinToString("; "), failures.isEmpty())
+        compose.onNodeWithTag("message-composer-input").performTextInput("Первая строка\nВторая строка")
+        compose.onNodeWithTag("message-composer-attach").assertIsDisplayed()
+        capture("chrome-light-multiline-keyboard")
+        clickComposerSendAfterImeLayout("Send")
+        compose.waitUntil(10_000) { fixture.sentPlaintexts.contains("Первая строка\nВторая строка") }
     }
 
     @Test fun missingKeyShowsBlurUntilTheRealConversationCanDecryptAgain() = runBlocking {

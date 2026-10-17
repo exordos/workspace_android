@@ -39,6 +39,7 @@ data class WorkspaceColorsPalette(
     val indicatorBlue: Color = Color.Unspecified,
     val indicatorGrey: Color = Color.Unspecified,
     val chatHeaderBackground: Color = Color.Unspecified,
+    val protectedChatHeaderAccent: Color = Color.Unspecified,
     val divider: Color = Color.Unspecified,
     val messageOwnSelectedBg: Color = Color.Unspecified,
     val syntaxHighlight: Color = Color.Unspecified
@@ -78,6 +79,7 @@ val LightWorkspaceColorsPalette = WorkspaceColorsPalette(
     indicatorBlue = Color(color = 0xFF4B98E6),
     indicatorGrey = Color(color = 0xFF484848),
     chatHeaderBackground = Color(color = 0xFFEAF5FF),
+    protectedChatHeaderAccent = Color(color = 0xFFA04B00),
     divider = Color(color = 0xFFC5CED8),
     messageOwnSelectedBg = Color(color = 0xFFA2D0FE),
     syntaxHighlight = Color(color = 0xFFC5CED8)
@@ -117,6 +119,7 @@ val DarkWorkspaceColorsPalette = WorkspaceColorsPalette(
     indicatorBlue = Color(color = 0xFF51ABFF),
     indicatorGrey = Color(color = 0xFF484848),
     chatHeaderBackground = Color(color = 0xFF282A32),
+    protectedChatHeaderAccent = Color(color = 0xFFFF8900),
     divider = Color(color = 0xFF323234),
     messageOwnSelectedBg = Color(color = 0xFF2C3747),
     syntaxHighlight = Color(color = 0xFF707070)
