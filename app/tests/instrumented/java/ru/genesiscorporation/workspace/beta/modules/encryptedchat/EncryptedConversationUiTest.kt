@@ -1,6 +1,7 @@
 package ru.genesiscorporation.workspace.beta.modules.encryptedchat
 
 import android.graphics.Bitmap
+import android.widget.TextView
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -25,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.graphics.PixelMap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.semantics.SemanticsActions
@@ -389,6 +391,93 @@ class EncryptedConversationUiTest {
         capture("chrome-light-multiline-keyboard")
         clickComposerSendAfterImeLayout("Send")
         compose.waitUntil(10_000) { fixture.sentPlaintexts.contains("Первая строка\nВторая строка") }
+    }
+
+    @Test fun decryptedMessageBodiesRemainReadableAcrossLiveThemeChanges() {
+        var darkTheme by mutableStateOf(false)
+        showConversation(darkTheme = { darkTheme })
+        val bodies = listOf("Доступ к защищённому чату получен.", "Макеты готовы, можно обсуждать.")
+        listOf(false, true, false).forEachIndexed { index, dark ->
+            compose.runOnIdle { darkTheme = dark }
+            bodies.forEach(::waitForText)
+            capture("protected-body-$index-${if (dark) "dark" else "light"}")
+            bodies.forEachIndexed { bodyIndex, text ->
+                val bounds = visibleNativeTextBounds(text)
+                var foreground = 0
+                onView(allOf(withText(text), isCompletelyDisplayed())).check { view, failure ->
+                    if (failure != null) throw failure
+                    foreground = (view as TextView).currentTextColor
+                }
+                val screenshot = checkNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot())
+                try {
+                    val pixels = IntArray(bounds.width() * bounds.height())
+                    screenshot.getPixels(pixels, 0, bounds.width(), bounds.left, bounds.top, bounds.width(), bounds.height())
+                    val background = pixels.asSequence().groupingBy { it }.eachCount().maxBy { it.value }.key
+                    // Inspect the actual AndroidView glyphs and the bubble visible behind it.
+                    // Palette-only assertions miss a stale native view after a theme change.
+                    fun near(a: Int, b: Int) = kotlin.math.abs(Color.red(a) - Color.red(b)) <= 2 &&
+                        kotlin.math.abs(Color.green(a) - Color.green(b)) <= 2 &&
+                        kotlin.math.abs(Color.blue(a) - Color.blue(b)) <= 2
+                    assertTrue("The body foreground must be rendered", pixels.count { near(it, foreground) } > 20)
+                    val contrast = ColorUtils.calculateContrast(foreground, background)
+                    android.util.Log.i("CassiProtectedPalette", "dark=$dark own=${bodyIndex == 0} foreground=${Integer.toHexString(foreground)} background=${Integer.toHexString(background)} contrast=$contrast")
+                    assertTrue("Rendered protected body contrast must be >= 4.5:1 (dark=$dark, actual=$contrast)", contrast >= 4.5)
+                    val palette = if (dark) DarkWorkspaceColorsPalette else LightWorkspaceColorsPalette
+                    assertEquals(palette.textHeaders.toArgb(), foreground)
+                    assertBubblePalette(fixture.messages[bodyIndex + 1], dark)
+                } finally { screenshot.recycle() }
+            }
+        }
+    }
+
+    @Test fun lockedMessageBubblesFollowThePaletteAcrossLiveThemeChanges() = runBlocking {
+        chat.encryptionRuntime.readySession()
+        chat.encryptionRuntime.removeLocalKey(CURRENT)
+        var darkTheme by mutableStateOf(false)
+        showConversation(darkTheme = { darkTheme })
+        compose.waitUntil(10_000) {
+            compose.onAllNodes(hasTestTag("encrypted-message-placeholder"), useUnmergedTree = true)
+                .fetchSemanticsNodes().size == fixture.messages.size
+        }
+        listOf(false, true, false).forEachIndexed { index, dark ->
+            compose.runOnIdle { darkTheme = dark }
+            fixture.messages.forEach { assertBubblePalette(it, dark) }
+            capture("protected-locked-$index-${if (dark) "dark" else "light"}")
+        }
+    }
+
+    private fun assertBubblePalette(message: MessageResponse, dark: Boolean) {
+        val palette = if (dark) DarkWorkspaceColorsPalette else LightWorkspaceColorsPalette
+        val image = compose.onNodeWithTag("message-bubble-${message.uuid}", useUnmergedTree = true)
+            .captureToImage().toPixelMap()
+        val background = if (message.isOwn) palette.messageOwnBackground else palette.messageBackground
+        assertEquals("The bubble background must follow the selected theme", background.toArgb(), image[image.width / 2, 1].toArgb())
+        val author = if (message.isOwn) palette.textHeaders else palette.indicatorPurple
+        fun colorCount(pixels: PixelMap, color: androidx.compose.ui.graphics.Color): Int {
+            val expected = color.toArgb()
+            return (0 until pixels.height).sumOf { y -> (0 until pixels.width).count { x ->
+                val actual = pixels[x, y].toArgb()
+                kotlin.math.abs(Color.red(actual) - Color.red(expected)) <= 2 &&
+                    kotlin.math.abs(Color.green(actual) - Color.green(expected)) <= 2 &&
+                    kotlin.math.abs(Color.blue(actual) - Color.blue(expected)) <= 2
+            } }
+        }
+        val authorName = (if (message.isOwn) fixture.owner else fixture.participant).displayableName()
+        val authorNode = compose.onNode(hasText(authorName) and
+            hasAnyAncestor(hasTestTag("message-bubble-${message.uuid}")), useUnmergedTree = true).assertIsDisplayed()
+        val layouts = mutableListOf<TextLayoutResult>()
+        authorNode.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        val renderedAuthor = layouts.single().layoutInput.style.color
+        assertEquals("The author must use its theme color", author, renderedAuthor)
+        assertTrue("The author's own glyphs must render its theme color",
+            colorCount(authorNode.captureToImage().toPixelMap(), author) > 20)
+        if (message.isOwn) {
+            val authorContrast = ColorUtils.calculateContrast(renderedAuthor.toArgb(), background.toArgb())
+            assertTrue("The rendered own author needs >= 4.5:1 contrast (actual=$authorContrast)", authorContrast >= 4.5)
+        }
+        assertTrue("The protected-topic marker must use the theme accent", colorCount(image, palette.protectedChatHeaderAccent) > 10)
+        val markerContrast = ColorUtils.calculateContrast(palette.protectedChatHeaderAccent.toArgb(), background.toArgb())
+        assertTrue("The rendered protected marker needs >= 3:1 contrast (actual=$markerContrast)", markerContrast >= 3.0)
     }
 
     @Test fun missingKeyShowsBlurUntilTheRealConversationCanDecryptAgain() = runBlocking {

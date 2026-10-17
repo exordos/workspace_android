@@ -40,7 +40,18 @@ tasks.register("runEncryptedRuntimeFixture") {
             return ByteBuffer.wrap(digest).let { UUID(it.long, it.long).toString() }
         }
         val messages = CopyOnWriteArrayList<Map<String, Any?>>()
-        messages += message(UUID.randomUUID().toString(), mapOf("kind" to "e2ee", "content" to "opaque-history", "key_uuid" to key), owner, 0)
+        val payloadPath = providers.gradleProperty("encryptedRuntimePayloads").orNull
+        val historicalKey = if (payloadPath == null) key else "77777777-7777-4777-8777-777777777777"
+        messages += message(UUID.randomUUID().toString(), mapOf("kind" to "e2ee", "content" to "opaque-history", "key_uuid" to historicalKey), owner, 0)
+        payloadPath?.let { path ->
+            val payloads = JsonSlurper().parse(file(path)) as List<*>
+            check(payloads.size == 2)
+            payloads.forEachIndexed { index, payload ->
+                check(payload is Map<*, *> && payload["kind"] == "e2ee" && payload["key_uuid"] == key)
+                messages += message(UUID.randomUUID().toString(), payload, if (index == 0) viewer else owner, index + 1)
+            }
+            messages += message(UUID.randomUUID().toString(), mapOf("kind" to "e2ee", "content" to "invalid-ciphertext", "key_uuid" to key), viewer, 3)
+        }
         val lock = Any()
         var firstBody: String? = null
         var attempts = 0
@@ -48,7 +59,8 @@ tasks.register("runEncryptedRuntimeFixture") {
             isDaemon = true
             contextClassLoader = JsonOutput::class.java.classLoader
         } }
-        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 19567), 0)
+        val port = providers.gradleProperty("encryptedRuntimePort").orNull?.toInt() ?: 19567
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", port), 0)
         server.executor = executor
         server.createContext("/") { exchange ->
             try {

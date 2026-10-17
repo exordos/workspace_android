@@ -22,6 +22,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.captureToImage
@@ -45,6 +48,8 @@ import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.modules.chatdialog.LockedEncryptedMessageActions
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import ru.genesiscorporation.workspace.beta.ui.theme.WokspaceTheme
+import ru.genesiscorporation.workspace.beta.ui.theme.LightWorkspaceColorsPalette
+import ru.genesiscorporation.workspace.beta.ui.theme.DarkWorkspaceColorsPalette
 
 @RunWith(AndroidJUnit4::class)
 class EncryptedMessagePlaceholderUiTest {
@@ -100,14 +105,22 @@ class EncryptedMessagePlaceholderUiTest {
     }
 
     @Test fun invalidCiphertextKeepsItsReadableErrorInsteadOfTheBlur() {
+        var dark by mutableStateOf(false)
         compose.setContent {
-            WokspaceTheme(darkTheme = true, dynamicColor = false) {
+            WokspaceTheme(darkTheme = dark, dynamicColor = false) {
                 EncryptedChatLockedMessage("synthetic-key", EncryptedChatRequestStatus.IDLE,
                     true, false, showRequest = false, onRequestKey = {})
             }
         }
-        compose.onNodeWithText(resource(R.string.encrypted_chat_cannot_decrypt)).assertIsDisplayed()
-        compose.onNodeWithTag("encrypted-message-placeholder").assertDoesNotExist()
+        listOf(false, true, false).forEach { theme ->
+            compose.runOnIdle { dark = theme }
+            val error = compose.onNodeWithText(resource(R.string.encrypted_chat_cannot_decrypt)).assertIsDisplayed()
+            compose.onNodeWithTag("encrypted-message-placeholder").assertDoesNotExist()
+            val layouts = mutableListOf<TextLayoutResult>()
+            error.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            val palette = if (theme) DarkWorkspaceColorsPalette else LightWorkspaceColorsPalette
+            assertEquals("The invalid body must use the theme text color", palette.textHeaders, layouts.single().layoutInput.style.color)
+        }
     }
 
     private fun resource(id: Int) = InstrumentationRegistry.getInstrumentation().targetContext.getString(id)

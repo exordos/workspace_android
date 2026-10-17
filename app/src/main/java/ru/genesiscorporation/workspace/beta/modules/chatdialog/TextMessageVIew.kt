@@ -77,7 +77,6 @@ import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatL
 import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatPresentation
 import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatRequestStatus
 import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatLock
-import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatLinkColor
 import java.io.File
 import java.time.Instant
 import java.time.LocalDateTime
@@ -199,8 +198,7 @@ fun TextMessageView(
                         modifier = Modifier
                             .then(if (lockedPresentation == null) Modifier.testTag("message-bubble-${item.uuid}") else Modifier)
                             .background(
-                                if (item.isOwn && encrypted) Color(0xFF47382B)
-                                else if (item.isOwn)
+                                if (item.isOwn)
                                     LocalWorkspaceColorsPalette.current.messageOwnBackground
                                 else LocalWorkspaceColorsPalette.current.messageBackground,
                                 shape = bubbleShape
@@ -220,7 +218,7 @@ fun TextMessageView(
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text(
                                     text = item.user?.displayableName() ?: defaultName,
-                                    color = if (item.isOwn && encrypted) EncryptedChatLinkColor
+                                    color = if (item.isOwn && encrypted) LocalWorkspaceColorsPalette.current.textHeaders
                                         else if (item.isOwn) LocalWorkspaceColorsPalette.current.indicatorBlue else LocalWorkspaceColorsPalette.current.indicatorPurple,
                                     fontSize = 14.sp,
                                     fontFamily = InterFontFamily,
@@ -229,7 +227,7 @@ fun TextMessageView(
                                     overflow = TextOverflow.Ellipsis,
                                 )
                                 if (encrypted && !viewModel.isDirectMessages) {
-                                    Box(Modifier.size(width = 2.dp, height = 12.dp).background(Color(0xFFFFCC00)))
+                                    Box(Modifier.size(width = 2.dp, height = 12.dp).background(LocalWorkspaceColorsPalette.current.protectedChatHeaderAccent))
                                     Text("# ${viewModel.topicName ?: viewModel.chatTitle}", color = LocalWorkspaceColorsPalette.current.textAdditional30,
                                         fontSize = 12.sp, lineHeight = 16.sp, fontFamily = InterFontFamily, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }
