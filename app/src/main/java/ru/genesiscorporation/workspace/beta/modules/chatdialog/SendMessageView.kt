@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.exclude
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -35,6 +34,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.NavigationBarDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -53,6 +54,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
@@ -277,9 +279,9 @@ fun SendMessageView(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .defaultMinSize(minHeight = 60.dp)
+                .testTag("message-composer")
                 .background(LocalWorkspaceColorsPalette.current.surface)
-                .padding(12.dp),
+                .padding(start = 4.dp, top = 8.dp, end = 12.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
@@ -288,13 +290,13 @@ fun SendMessageView(
                     .padding(end = 12.dp)
                     .weight(1f)
                     .fillMaxWidth()
-                    .heightIn(min = 40.dp)
+                    .heightIn(min = 48.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .background(
                         LocalWorkspaceColorsPalette.current.background,
                         RoundedCornerShape(8.dp)
                     )
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .padding(end = 8.dp)
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically
@@ -321,8 +323,9 @@ fun SendMessageView(
                         cursorBrush = SolidColor(LocalWorkspaceColorsPalette.current.textHeaders),
                         maxLines = 4,
                         modifier = Modifier
+                            .testTag("message-composer-input")
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp)
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
                             .focusRequester(editorFocusRequester),
                         visualTransformation = MentionVisualTransformation(SpanStyle(color = Color(0xFF1565C0))),
                         decorationBox =
@@ -337,7 +340,7 @@ fun SendMessageView(
                         viewModel.onSendClicked(context)
                     }
                 },
-                modifier = Modifier.size(46.dp),
+                modifier = Modifier.testTag("message-composer-send").size(48.dp),
                 shape = RoundedCornerShape(12.dp),
                 contentPadding = PaddingValues(0.dp),
                 colors = ButtonDefaults.buttonColors(
@@ -348,12 +351,14 @@ fun SendMessageView(
                 if (viewModel.editingMessage == null) {
                     Icon(
                         painter = painterResource(id = R.drawable.send),
-                        contentDescription = "Send"
+                        contentDescription = "Send",
+                        modifier = Modifier.size(24.dp)
                     )
                 } else {
                     Icon(
                         painter = painterResource(id = R.drawable.ic_check),
-                        contentDescription = "Send edit"
+                        contentDescription = "Send edit",
+                        modifier = Modifier.size(24.dp)
                     )
                 }
             }
@@ -418,18 +423,18 @@ fun AttachButton(
         }
     }
     Box {
-        Button(
+        IconButton(
             onClick = { menuExpanded = true },
-            modifier = Modifier.size(32.dp),
-            contentPadding = PaddingValues(0.dp),
-            colors = ButtonDefaults.buttonColors(
+            modifier = Modifier.testTag("message-composer-attach").size(48.dp),
+            colors = IconButtonDefaults.iconButtonColors(
                 containerColor = Color.Transparent,
-                contentColor = LocalWorkspaceColorsPalette.current.iconBase
+                contentColor = LocalWorkspaceColorsPalette.current.textHeaders
             )
         ) {
             Icon(
                 painter = painterResource(id = R.drawable.attach_file),
-                contentDescription = "Attach file"
+                contentDescription = "Attach file",
+                modifier = Modifier.size(24.dp)
             )
         }
         DropdownMenu(
