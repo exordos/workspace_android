@@ -122,8 +122,8 @@ private fun AnnotatedString.Builder.encryptedLink(tag: String, label: String, en
 }
 
 @Composable
-private fun EncryptedServiceText(text: AnnotatedString, modifier: Modifier = Modifier) {
-    Text(text, modifier.fillMaxWidth(), color = EncryptedChatServiceColor,
+private fun EncryptedServiceText(text: AnnotatedString, modifier: Modifier = Modifier, color: Color = EncryptedChatServiceColor) {
+    Text(text, modifier.fillMaxWidth(), color = color,
         fontFamily = InterFontFamily, fontSize = 14.sp, lineHeight = 17.sp,
         letterSpacing = 0.sp, fontWeight = FontWeight.Normal, textAlign = TextAlign.Center)
 }
@@ -162,7 +162,8 @@ fun EncryptedChatLockedMessage(keyUuid: String, status: EncryptedChatRequestStat
     Column(Modifier.padding(vertical = if (showRequest) 8.dp else 0.dp).testTag("encrypted-locked-message"),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (invalidCiphertext) {
-            EncryptedServiceText(AnnotatedString(stringResource(R.string.encrypted_chat_cannot_decrypt)))
+            EncryptedServiceText(AnnotatedString(stringResource(R.string.encrypted_chat_cannot_decrypt)),
+                color = LocalWorkspaceColorsPalette.current.textHeaders)
         } else {
             EncryptedMessagePlaceholder()
         }
