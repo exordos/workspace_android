@@ -40,6 +40,7 @@ This map describes covered contracts; it does not establish full line coverage.
 | Remote TLS enforcement before transport, redirect/downgrade rejection, exact loopback exceptions and private error text | `WorkspaceTransportPolicyTest`, `WorkspaceTransportTest` |
 | Encryption, key requests/grants/rotation, deletion, stale runtime | `WorkspaceChatCryptoTest`, `ChatKeyStorageTest`, `EncryptedChat*Test`, `EncryptedConversationUiTest`, interop verifier |
 | Blurred encrypted bodies in normal bubbles, author/time/alignment, accessibility, narrow windows/themes, key-menu guard and unlock transition | `EncryptedMessagePlaceholderUiTest`, `EncryptedConversationUiTest` |
+| Compact conversation chrome, rendered text/icon/marker contrast in both themes, long titles, 200% font scaling, touch targets and sending with the real keyboard | `EncryptedConversationUiTest.conversationChrome*`, `conversationHeaderDoesNotClipTextAtLargeAccessibilityFontScale` |
 | Protected stream, settings, notifications, call action | `ProtectedStream*Test`, `StreamInfoAvailabilityUiTest` |
 | Login/OTP server-error and empty/whitespace fallback Toasts, repeated identical failures, navigation, layout | `AuthenticationErrorUiTest`, `AuthenticationUiTest`, `AuthReviewRegressionTest`, `ProfileNavigationUiTest`, `PublicationWindowTest` |
 | Firebase release configuration, token/payload log privacy and notification content | `verifyFirebaseReleaseConfig`, `FirebaseTokenLoggingTest`; opt-in `FirebaseRegistrationSmokeTest` and dedicated notification acceptance |

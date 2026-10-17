@@ -338,12 +338,14 @@ fun ChatDialogScreen(
             },
             topBar = {
                 TopAppBar(
-                    modifier = if (stream?.encryption == true) Modifier.clip(RoundedCornerShape(bottomStart = 8.dp, bottomEnd = 8.dp)) else Modifier,
+                    modifier = if (stream?.encryption == true) Modifier.testTag("conversation-header").clip(RoundedCornerShape(bottomStart = 8.dp, bottomEnd = 8.dp)) else Modifier.testTag("conversation-header"),
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = if (stream?.encryption == true) Color(0xFF333333) else LocalWorkspaceColorsPalette.current.background,
+                        containerColor = if (stream?.encryption == true) LocalWorkspaceColorsPalette.current.messageBackground else LocalWorkspaceColorsPalette.current.background,
+                        navigationIconContentColor = LocalWorkspaceColorsPalette.current.textHeaders,
+                        actionIconContentColor = LocalWorkspaceColorsPalette.current.textHeaders,
                         titleContentColor = LocalWorkspaceColorsPalette.current.textHeaders,
                     ),
-                    expandedHeight = if (stream?.encryption == true) 66.dp else 60.dp,
+                    expandedHeight = 60.dp,
                     windowInsets = WindowInsets(0, 0, 0, 0),
                     title = {
                         Column(
@@ -371,21 +373,22 @@ fun ChatDialogScreen(
                                 viewModel.topicName ?: viewModel.chatTitle
                             }
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            if (stream?.encryption == true) Box(Modifier.size(width = 3.dp, height = 16.dp)
-                                .background(Color(0xFFFFCC00), RoundedCornerShape(2.dp)))
+                            if (stream?.encryption == true) Box(Modifier.testTag("conversation-protected-marker").size(width = 3.dp, height = 16.dp)
+                                .background(LocalWorkspaceColorsPalette.current.protectedChatHeaderAccent, RoundedCornerShape(2.dp)))
                             Text(
                                 title,
                                 color = LocalWorkspaceColorsPalette.current.textHeaders,
                                 fontSize = if (stream?.encryption == true) 14.sp else 16.sp,
                                 fontFamily = InterFontFamily,
                                 fontWeight = FontWeight.Medium,
-                                modifier = if (stream?.encryption == true) Modifier.weight(1f, fill = false) else Modifier,
+                                modifier = if (stream?.encryption == true) Modifier.testTag("conversation-title").weight(1f, fill = false) else Modifier.testTag("conversation-title"),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                             if (stream?.encryption == true) {
-                                Text(stringResource(R.string.encrypted_chat_title), color = EncryptedChatLinkColor,
-                                    fontSize = 12.sp, lineHeight = 16.sp, fontFamily = InterFontFamily, maxLines = 1)
+                                Text(stringResource(R.string.encrypted_chat_title), color = LocalWorkspaceColorsPalette.current.protectedChatHeaderAccent,
+                                    fontSize = 12.sp, lineHeight = 16.sp, fontFamily = InterFontFamily, maxLines = 1,
+                                    modifier = Modifier.testTag("conversation-protected-label"))
                             }
                             }
                             val currentStreamBindings = streamBindings[viewModel.chatId]
@@ -404,7 +407,10 @@ fun ChatDialogScreen(
                                 }
                                 Text(
                                     baseText,
-                                    color = LocalWorkspaceColorsPalette.current.textAdditional30,
+                                    modifier = Modifier.testTag("conversation-subtitle"),
+                                    color = LocalWorkspaceColorsPalette.current.textHeaders.copy(alpha = 0.7f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                     fontSize = if (stream?.encryption == true) 12.sp else 14.sp,
                                     fontFamily = InterFontFamily,
                                 )
@@ -412,17 +418,19 @@ fun ChatDialogScreen(
                         }
                     },
                     navigationIcon = {
-                        IconButton(onClick = {
+                        IconButton(modifier = Modifier.testTag("conversation-back-action").size(48.dp), onClick = {
                             if (selectionMode) viewModel.clearMessageSelection() else navController.popBackStack()
                         }) {
                             Icon(
                                 painter = painterResource(id = R.drawable.arrow_back),
-                                contentDescription = "Back"
+                                contentDescription = "Back",
+                                modifier = Modifier.size(24.dp)
                             )
                         }
                     },
                     actions = {
                         IconButton(
+                            modifier = Modifier.testTag("conversation-call-action").size(48.dp),
                             enabled = !selectionMode && (stream?.encryption != true ||
                                 (encryptedChatState.sendingKeyUuid != null && !protectedCallState.busy)),
                             onClick = {
@@ -451,27 +459,30 @@ fun ChatDialogScreen(
                             },
                             colors = IconButtonDefaults.iconButtonColors(
                                 containerColor = Color.Transparent,
-                                contentColor = LocalWorkspaceColorsPalette.current.iconBase
+                                contentColor = LocalWorkspaceColorsPalette.current.textHeaders
                             )
                         ) {
                             Icon(
                                 painter = painterResource(id = R.drawable.call),
-                                contentDescription = "Call"
+                                contentDescription = "Call",
+                                modifier = Modifier.size(24.dp)
                             )
                         }
                         IconButton(
+                            modifier = Modifier.testTag("conversation-more-action").size(48.dp),
                             enabled = !selectionMode,
                             onClick = {
                                 navController.navigate(ChatFlow.StreamInfo(viewModel.chatId, viewModel.topicUuid))
                             },
                             colors = IconButtonDefaults.iconButtonColors(
                                 containerColor = Color.Transparent,
-                                contentColor = LocalWorkspaceColorsPalette.current.iconBase
+                                contentColor = LocalWorkspaceColorsPalette.current.textHeaders
                             )
                         ) {
                             Icon(
                                 painter = painterResource(id = R.drawable.ic_more_vertical),
-                                contentDescription = "More"
+                                contentDescription = "More",
+                                modifier = Modifier.size(24.dp)
                             )
                         }
                     }
