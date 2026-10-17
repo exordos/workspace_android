@@ -32,6 +32,7 @@ This map describes covered contracts; it does not establish full line coverage.
 | Active unread, topic overrides, first unread message, folders | `InboxUnreadTest`, `InboxInstrumentedTest`, `NotificationIndicatorRepositoryTest` |
 | Markdown, URNs, links, snapshots, bounded quotes | `UrnParserTest`, `MarkdownAttachmentUrnParsingTest`, `ForwardedQuoteParsingTest`, `MessageQuote*Test`, `ChatHistoryPresentationTest` |
 | Sending/forwarding/deletion/selection, partial failures | `MessageDeletion*Test`, `DeleteMessage*Test`, `MessageSelection*Test`, `MessageForwardingTest`, `Forward*Test`, `EncryptedMessageForwardingTest` |
+| Uncertain-forward cancel/reopen/Back cycles, verification and explicit abandon, dialog-window focus | `ForwardMessagesUiTest` |
 | External sharing, grants, attachments, safe filenames | `ExternalMessageShareTest`, `ExternalShareGrantTest`, `AttachmentFileNameTest`, `WorkspaceFileUploadTest` |
 | Web-link origin/UUID/port/IPv6 handling, device-locale independence | `WorkspaceShareTest` |
 | Message time, unit boundaries, Russian declension, timezone/DST | `MessageTimeFormattingTest` |

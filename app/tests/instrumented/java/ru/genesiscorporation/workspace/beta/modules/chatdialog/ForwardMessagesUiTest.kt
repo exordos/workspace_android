@@ -20,7 +20,10 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.core.content.FileProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.espresso.Espresso.pressBack
+import androidx.test.espresso.Espresso.onView
+import androidx.test.espresso.action.ViewActions
+import androidx.test.espresso.matcher.RootMatchers.isDialog
+import androidx.test.espresso.matcher.ViewMatchers.isRoot
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.*
 import org.junit.Rule
@@ -51,7 +54,8 @@ class ForwardMessagesUiTest {
         compose.runOnIdle { assertEquals(0, abandoned); assertEquals(0, verified) }
         compose.onNodeWithTag("forward-abandon").performClick()
         compose.onNodeWithTag("forward-abandon-confirm").assertIsDisplayed()
-        pressBack()
+        // Target the dialog while its window is acquiring focus.
+        onView(isRoot()).inRoot(isDialog()).perform(ViewActions.pressBack())
         compose.onNodeWithTag("forward-abandon-confirm").assertDoesNotExist()
         compose.runOnIdle { assertEquals(0, abandoned) }
         compose.onNodeWithTag("forward-verify").performClick()
@@ -77,6 +81,33 @@ class ForwardMessagesUiTest {
         compose.runOnIdle { snapshot = false }
         compose.onNodeWithText(marker).assertDoesNotExist()
         compose.onNodeWithText("Alice").assertIsDisplayed()
+    }
+
+    @Test fun repeatedCancelAndBackKeepAnUncertainForwardVerifiable() {
+        var abandoned = 0
+        var verified = 0
+        compose.setContent {
+            WokspaceTheme(darkTheme = true, dynamicColor = false) {
+                Column { ForwardUncertainActions(onVerify = { verified++ }, onAbandon = { abandoned++ }) }
+            }
+        }
+        repeat(10) { attempt ->
+            compose.onNodeWithTag("forward-abandon").performClick()
+            compose.onNodeWithTag("forward-abandon-cancel").performClick()
+            compose.onNodeWithTag("forward-abandon-confirm").assertDoesNotExist()
+            compose.runOnIdle { assertEquals(0, abandoned); assertEquals(attempt, verified) }
+            compose.onNodeWithTag("forward-abandon").performClick()
+            compose.onNodeWithTag("forward-abandon-confirm").assertIsDisplayed()
+            onView(isRoot()).inRoot(isDialog()).perform(ViewActions.pressBack())
+            compose.onNodeWithTag("forward-abandon-confirm").assertDoesNotExist()
+            compose.runOnIdle { assertEquals(0, abandoned); assertEquals(attempt, verified) }
+            compose.onNodeWithTag("forward-verify").performClick()
+            compose.runOnIdle { assertEquals(0, abandoned); assertEquals(attempt + 1, verified) }
+        }
+        compose.onNodeWithTag("forward-abandon").performClick()
+        compose.onNodeWithTag("forward-abandon-confirm").performClick()
+        compose.onNodeWithTag("forward-abandon-confirm").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(1, abandoned); assertEquals(10, verified) }
     }
 
     @Test fun recipientSearchFoldersAndTopicChoiceUseActualSelections() {
