@@ -5,6 +5,11 @@ import android.app.Instrumentation;
 import android.content.pm.ApplicationInfo;
 import android.os.Build;
 import android.os.Bundle;
+import org.json.JSONArray;
+import org.json.JSONObject;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.util.List;
@@ -92,6 +97,7 @@ public final class AvatarFixtureInstrumentation extends Instrumentation {
                     .invoke(repository, "cassi-avatar-57-fixture");
             require(saved != null && "cassi-avatar-57-access".equals(
                     saved.getClass().getMethod("getAccessToken").invoke(saved)), "Synthetic token verification failed");
+            if ("true".equals(arguments.getString("seedProtectedBodies"))) seedProtectedBodies();
             result.putString("result", "PASS: synthetic avatar session saved");
             finish(Activity.RESULT_OK, result);
         } catch (Throwable failure) {
@@ -100,5 +106,44 @@ public final class AvatarFixtureInstrumentation extends Instrumentation {
             if (failure.getCause() != null) result.putString("cause", failure.getCause().toString());
             finish(Activity.RESULT_CANCELED, result);
         }
+    }
+
+    /** Uses the production crypto and secure store; exports ciphertext only for the host peer. */
+    private void seedProtectedBodies() throws Exception {
+        String prefix = "ru.genesiscorporation.workspace.beta.data.crypto.";
+        String stream = "00000000-0000-4000-8000-000000000069";
+        String key = "00000000-0000-4000-8002-000000000069";
+        Class<?> ownerClass = loader.loadClass(prefix + "ChatKeyOwner");
+        Class<?> scopeClass = loader.loadClass(prefix + "ChatKeyScope");
+        Class<?> addressClass = loader.loadClass(prefix + "ChatKeyAddress");
+        Object owner = ownerClass.getConstructor(String.class, String.class, String.class).newInstance(
+                "http://127.0.0.1:19557", "project", "00000000-0000-4000-8000-000000000057");
+        Object store = loader.loadClass(prefix + "EncryptedChatKeyStore")
+                .getConstructor(android.content.Context.class).newInstance(getTargetContext());
+        Object identity = store.getClass().getMethod("ensureDeviceIdentity", ownerClass, String.class)
+                .invoke(store, owner, "CASSI fixture");
+        Object scope = scopeClass.getConstructor(ownerClass, String.class).newInstance(owner,
+                identity.getClass().getMethod("getDeviceId").invoke(identity));
+        Object address = addressClass.getConstructor(scopeClass, String.class, String.class).newInstance(scope, stream, key);
+        Object crypto = loader.loadClass(prefix + "WorkspaceChatCrypto").getConstructor().newInstance();
+        byte[] groupKey = (byte[]) crypto.getClass().getMethod("createGroupKey").invoke(crypto);
+        try {
+            require(Boolean.TRUE.equals(store.getClass().getMethod("writeChatKey", addressClass,
+                    byte[].class, boolean.class, Long.class, boolean.class)
+                    .invoke(store, address, groupKey, true, null, false)), "Synthetic chat key persistence failed");
+            Class<?> contextClass = loader.loadClass(prefix + "ChatMessageContext");
+            Object context = contextClass.getConstructor(String.class, String.class).newInstance(stream, key);
+            JSONArray payloads = new JSONArray();
+            for (String text : new String[] {"Protected outgoing message", "Protected incoming message"}) {
+                byte[] encrypted = (byte[]) crypto.getClass().getMethod("encryptMessage", byte[].class,
+                        byte[].class, contextClass).invoke(crypto, groupKey, text.getBytes(StandardCharsets.UTF_8), context);
+                payloads.put(new JSONObject().put("kind", "e2ee").put("key_uuid", key)
+                        .put("content", android.util.Base64.encodeToString(encrypted, android.util.Base64.NO_WRAP)));
+            }
+            File output = new File(getTargetContext().getExternalFilesDir(null), "protected-body-payloads.json");
+            try (FileOutputStream file = new FileOutputStream(output)) {
+                file.write(payloads.toString().getBytes(StandardCharsets.UTF_8));
+            }
+        } finally { java.util.Arrays.fill(groupKey, (byte) 0); }
     }
 }

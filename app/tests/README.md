@@ -330,3 +330,43 @@ further process restart without an additional POST. Repeat navigation and rotati
 The fixture keeps only synthetic wire records in memory and logs request equality
 booleans, never local private key material. Stop the host and remove the task's
 port forward and emulator after testing.
+
+## Protected message palette and body contrast
+
+`EncryptedConversationUiTest#decryptedMessageBodiesRemainReadableAcrossLiveThemeChanges`
+uses the real authenticated chat and native Markdown `TextView`. It requires
+rendered glyphs and at least 4.5:1 body/background contrast for incoming and
+outgoing decrypted messages in light/dark/light mode without remounting the chat.
+The existing missing-key case checks the normal bubble, author, time, alignment,
+blur and transition back to the decrypted body.
+`lockedMessageBubblesFollowThePaletteAcrossLiveThemeChanges` checks incoming and
+outgoing locked bubbles in the same theme sequence. Both cases sample actual
+bubble, author and topic-marker pixels against the selected workspace palette.
+The own author's `Text` is captured separately from the body, with a 4.5:1
+contrast minimum; the protected-topic marker must reach 3:1 on its bubble.
+The invalid-ciphertext placeholder case also checks its rendered error text
+against the palette during light/dark/light changes.
+
+For an optimized APK, reuse the **Avatar credential boundary** seed/sign/update
+procedure and `runEncryptedRuntimeFixture`. On a clean dedicated emulator, add
+`-e seedProtectedBodies true` to the seed invocation. The driver saves a key in
+the production secure store and exports only synthetic encrypted bodies:
+
+```sh
+adb -s TASK_SERIAL pull \
+  /sdcard/Android/data/com.exordos.workspace/files/protected-body-payloads.json \
+  /absolute/artifacts/protected-body-payloads.json
+./gradlew --no-daemon -p app/tests/host runEncryptedRuntimeFixture \
+  -PencryptedRuntimeArtifacts=/absolute/artifacts \
+  -PencryptedRuntimePayloads=/absolute/artifacts/protected-body-payloads.json \
+  -PencryptedRuntimePort=19577
+adb -s TASK_SERIAL reverse tcp:19557 tcp:19577
+```
+
+Install the same-certificate optimized APK as an update. Open **Encrypted runtime
+fixture** and verify both protected bodies, then change the system light/dark
+mode while the conversation remains open. Check the historical locked body and
+the themed invalid-ciphertext error, then repeat after process recreation and
+rotation. The optional host port permits
+independent runs; its default and the existing request/retry modes are unchanged.
+Neither the key nor real account data belongs in the exported payload file.
