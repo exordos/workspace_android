@@ -123,7 +123,6 @@ import net.fellbaum.jemoji.EmojiManager
 import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.LocalBottomBarVisible
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
-import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatLockedMessage
 import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatPresentation
 import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatRequestStatus
 import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatServiceMessage
@@ -689,17 +688,8 @@ internal fun ChatMessage(
         ) {
             val encryptedPresentation = encryptedPresentations[item.uuid]
             if (encryptedPresentation is EncryptedChatPresentation.Locked) {
-                val keyPending = messageKeyRequestPending(encryptedPresentation.keyUuid, encryptedChatState)
-                LockedEncryptedMessageActions(item.uuid, keyPending, onRequestKey = { viewModel.requestEncryptionKeyForMessage(item) }) {
-                    EncryptedChatLockedMessage(
-                        keyUuid = encryptedPresentation.keyUuid,
-                        status = encryptedChatState.requestStatus[encryptedPresentation.keyUuid] ?: EncryptedChatRequestStatus.IDLE,
-                        invalidCiphertext = encryptedPresentation.invalidCiphertext,
-                        showRequest = false,
-                        pending = keyPending,
-                        onRequestKey = { viewModel.requestEncryptionKeyForMessage(item) },
-                    )
-                }
+                TextMessageView(item, viewModel, navController, onImageLoad, onForwardMessage,
+                    lockedPresentation = encryptedPresentation)
             } else if (encryptedPresentation is EncryptedChatPresentation.Service) {
                 val ownRequestKey = history.requestKey(item.streamUuid, encryptedPresentation.payload.keyUuid)
                 EncryptedChatServiceMessage(
@@ -722,12 +712,9 @@ internal fun ChatMessage(
                 )
             } else if (item.payload.kind != "markdown" && item.payload.kind in setOf("e2ee", "key_request", "key_grant", "key_reject", "key_announced")) {
                 // Never flash raw ciphertext while the scoped presentation is being prepared.
-                val keyPending = messageKeyRequestPending(item.payload.keyUuid, encryptedChatState)
                 if (item.payload.kind == "e2ee") {
-                    LockedEncryptedMessageActions(item.uuid, keyPending, onRequestKey = { viewModel.requestEncryptionKeyForMessage(item) }) {
-                        EncryptedChatLockedMessage(item.payload.keyUuid.orEmpty(), EncryptedChatRequestStatus.IDLE, false,
-                            keyPending, showRequest = false, onRequestKey = { viewModel.requestEncryptionKeyForMessage(item) })
-                    }
+                    TextMessageView(item, viewModel, navController, onImageLoad, onForwardMessage,
+                        lockedPresentation = EncryptedChatPresentation.Locked(item.payload.keyUuid.orEmpty()))
                 } // Opaque service envelopes wait for their scoped presentation; never render them as messages.
             } else if (Patterns.WEB_URL.matcher(item.payload.content)
                     .matches() && item.payload.content.contains(viewModel.repo.jitsiServerUrl)

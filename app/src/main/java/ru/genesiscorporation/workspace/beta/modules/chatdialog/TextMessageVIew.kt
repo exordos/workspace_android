@@ -73,6 +73,9 @@ import ru.genesiscorporation.workspace.beta.ui.EnhancedMarkdown
 import ru.genesiscorporation.workspace.beta.ui.ReferenceMessageBase
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
+import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatLockedMessage
+import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatPresentation
+import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatRequestStatus
 import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatLock
 import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatLinkColor
 import java.io.File
@@ -89,7 +92,9 @@ fun TextMessageView(
     navController: NavHostController,
     onImageLoad: () -> Unit,
     onForwardMessage: ((MessageResponse) -> Unit)? = null,
+    lockedPresentation: EncryptedChatPresentation.Locked? = null,
 ) {
+    val encrypted = lockedPresentation != null || item.originalEncryptedPayload != null
     val quotedMessages by viewModel.quotedMessages.collectAsState()
     val deletingMessageUuids by viewModel.deletingMessageUuids.collectAsStateWithLifecycle()
     val zone = ZoneId.systemDefault()
@@ -188,168 +193,180 @@ fun TextMessageView(
         }
         Column {
             Box {
-                Row(
-                    verticalAlignment = Alignment.Bottom,
-                    modifier = Modifier
-                        .testTag("message-bubble-${item.uuid}")
-                        .background(
-                            if (item.isOwn && item.originalEncryptedPayload != null) Color(0xFF47382B)
-                            else if (item.isOwn)
-                                LocalWorkspaceColorsPalette.current.messageOwnBackground
-                            else LocalWorkspaceColorsPalette.current.messageBackground,
-                            shape = bubbleShape
-                        )
-                        .combinedClickable(
-                            onClick = {},
-                            onLongClick = {
-                                menuExpanded = true
-                            }
-                        )
-                        .padding(10.dp)
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.Start,
+                val bubbleContent: @Composable () -> Unit = {
+                    Row(
+                        verticalAlignment = Alignment.Bottom,
                         modifier = Modifier
-                            .weight(2f, fill = false)
+                            .then(if (lockedPresentation == null) Modifier.testTag("message-bubble-${item.uuid}") else Modifier)
+                            .background(
+                                if (item.isOwn && encrypted) Color(0xFF47382B)
+                                else if (item.isOwn)
+                                    LocalWorkspaceColorsPalette.current.messageOwnBackground
+                                else LocalWorkspaceColorsPalette.current.messageBackground,
+                                shape = bubbleShape
+                            )
+                            .then(if (lockedPresentation == null) Modifier.combinedClickable(
+                                onClick = {},
+                                onLongClick = { menuExpanded = true },
+                            ) else Modifier)
+                            .padding(10.dp)
                     ) {
-                        val defaultName = if (item.isOwn) "Я" else "Собеседник"
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(
-                            text = item.user?.displayableName() ?: defaultName,
-                            color = if (item.isOwn && item.originalEncryptedPayload != null) EncryptedChatLinkColor
-                                else if (item.isOwn) LocalWorkspaceColorsPalette.current.indicatorBlue else LocalWorkspaceColorsPalette.current.indicatorPurple,
-                            fontSize = 14.sp,
-                            fontFamily = InterFontFamily,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        if (item.originalEncryptedPayload != null && !viewModel.isDirectMessages) {
-                            Box(Modifier.size(width = 2.dp, height = 12.dp).background(Color(0xFFFFCC00)))
-                            Text("# ${viewModel.topicName ?: viewModel.chatTitle}", color = LocalWorkspaceColorsPalette.current.textAdditional30,
-                                fontSize = 12.sp, lineHeight = 16.sp, fontFamily = InterFontFamily, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                        }
-                        val messageElements = budgetMessageQuotes(MarkdownPayloadParser.parse(item.payload.content), MAX_RENDERED_QUOTE_NODES)
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            messageElements.forEach { budgeted ->
-                                when (val element = budgeted.element) {
-                                    is MessageElement.Image -> {
-                                        val baseUrl by viewModel.userViewModel.baseUrl.collectAsStateWithLifecycle(
-                                            initialValue = ""
-                                        )
-                                        val authHeaders = viewModel.client.authHeaders()
-                                        val headers = NetworkHeaders.Builder()
-                                            .set(authHeaders.first().title, authHeaders.first().value)
-                                            .build()
-                                        val imageUrl = "$baseUrl/api/workspace/v1/messenger/files/${element.uuid}/actions/download"
-                                        if (imageUrl != null) {
-                                            val imageRequest = ImageRequest.Builder(LocalContext.current)
-                                                .data(imageUrl)
-                                                .httpHeaders(headers)
-                                                .build()
-                                            AsyncImage(
-                                                model = imageRequest,
-                                                contentDescription = null,
-                                                modifier = Modifier.combinedClickable(
-                                                    onClick = { showFullscreen = true },
-                                                    onLongClick = { menuExpanded = true },
-                                                ),
-                                                onState = { state ->
-                                                    when (state) {
-                                                        is AsyncImagePainter.State.Success -> {
-                                                            onImageLoad()
-                                                        }
+                        Column(
+                            horizontalAlignment = Alignment.Start,
+                            modifier = Modifier
+                                .weight(2f, fill = false)
+                        ) {
+                            val defaultName = if (item.isOwn) "Я" else "Собеседник"
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = item.user?.displayableName() ?: defaultName,
+                                    color = if (item.isOwn && encrypted) EncryptedChatLinkColor
+                                        else if (item.isOwn) LocalWorkspaceColorsPalette.current.indicatorBlue else LocalWorkspaceColorsPalette.current.indicatorPurple,
+                                    fontSize = 14.sp,
+                                    fontFamily = InterFontFamily,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                if (encrypted && !viewModel.isDirectMessages) {
+                                    Box(Modifier.size(width = 2.dp, height = 12.dp).background(Color(0xFFFFCC00)))
+                                    Text("# ${viewModel.topicName ?: viewModel.chatTitle}", color = LocalWorkspaceColorsPalette.current.textAdditional30,
+                                        fontSize = 12.sp, lineHeight = 16.sp, fontFamily = InterFontFamily, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
+                            if (lockedPresentation != null) {
+                                EncryptedChatLockedMessage(lockedPresentation.keyUuid, EncryptedChatRequestStatus.IDLE,
+                                    lockedPresentation.invalidCiphertext, false, showRequest = false, onRequestKey = {})
+                            } else {
+                                val messageElements = budgetMessageQuotes(MarkdownPayloadParser.parse(item.payload.content), MAX_RENDERED_QUOTE_NODES)
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    messageElements.forEach { budgeted ->
+                                        when (val element = budgeted.element) {
+                                            is MessageElement.Image -> {
+                                                val baseUrl by viewModel.userViewModel.baseUrl.collectAsStateWithLifecycle(
+                                                    initialValue = ""
+                                                )
+                                                val authHeaders = viewModel.client.authHeaders()
+                                                val headers = NetworkHeaders.Builder()
+                                                    .set(authHeaders.first().title, authHeaders.first().value)
+                                                    .build()
+                                                val imageUrl = "$baseUrl/api/workspace/v1/messenger/files/${element.uuid}/actions/download"
+                                                if (imageUrl != null) {
+                                                    val imageRequest = ImageRequest.Builder(LocalContext.current)
+                                                        .data(imageUrl)
+                                                        .httpHeaders(headers)
+                                                        .build()
+                                                    AsyncImage(
+                                                        model = imageRequest,
+                                                        contentDescription = null,
+                                                        modifier = Modifier.combinedClickable(
+                                                            onClick = { showFullscreen = true },
+                                                            onLongClick = { menuExpanded = true },
+                                                        ),
+                                                        onState = { state ->
+                                                            when (state) {
+                                                                is AsyncImagePainter.State.Success -> {
+                                                                    onImageLoad()
+                                                                }
 
-                                                        else -> Unit
+                                                                else -> Unit
+                                                            }
+                                                        }
+                                                    )
+                                                    if (showFullscreen) {
+                                                        FullscreenZoomableImage(
+                                                            model = imageRequest,
+                                                            contentDescription = null,
+                                                            onDismiss = { showFullscreen = false },
+                                                        )
                                                     }
                                                 }
-                                            )
-                                            if (showFullscreen) {
-                                                FullscreenZoomableImage(
-                                                    model = imageRequest,
-                                                    contentDescription = null,
-                                                    onDismiss = { showFullscreen = false },
-                                                )
                                             }
+
+                                            is MessageElement.File -> FileAttachmentRow(
+                                                element = element,
+                                                viewModel = viewModel,
+                                                onOpenFile = {  },
+                                            )
+
+                                            is MessageElement.Quote -> QuotedMessagePartView(
+                                                element.uuid,
+                                                item.isOwn,
+                                                viewModel,
+                                                navController,
+                                                displayName = element.displayName,
+                                                quoteNodeBudget = budgeted.quoteBudget,
+                                                selectedText = element.text.takeIf { it.isNotEmpty() },
+                                            )
+
+                                            is MessageElement.SnapshotQuote -> SnapshotQuoteView(
+                                                element, item.isOwn, viewModel, navController, budgeted.quoteBudget,
+                                            )
+
+                                            is MessageElement.PlainText -> EnhancedMarkdown(
+                                                markdown = element.text,
+                                                style = TextStyle(
+                                                    color = LocalWorkspaceColorsPalette.current.textHeaders,
+                                                    fontSize = 14.sp,
+                                                    fontFamily = InterFontFamily,
+                                                ),
+                                                navController = navController,
+                                                viewModel = viewModel
+                                            )
                                         }
                                     }
-
-                                    is MessageElement.File -> FileAttachmentRow(
-                                        element = element,
-                                        viewModel = viewModel,
-                                        onOpenFile = {  },
-                                    )
-
-                                    is MessageElement.Quote -> QuotedMessagePartView(
-                                        element.uuid,
-                                        item.isOwn,
-                                        viewModel,
-                                        navController,
-                                        displayName = element.displayName,
-                                        quoteNodeBudget = budgeted.quoteBudget,
-                                        selectedText = element.text.takeIf { it.isNotEmpty() },
-                                    )
-
-                                    is MessageElement.SnapshotQuote -> SnapshotQuoteView(
-                                        element, item.isOwn, viewModel, navController, budgeted.quoteBudget,
-                                    )
-
-                                    is MessageElement.PlainText -> EnhancedMarkdown(
-                                        markdown = element.text,
-                                        style = TextStyle(
-                                            color = LocalWorkspaceColorsPalette.current.textHeaders,
-                                            fontSize = 14.sp,
-                                            fontFamily = InterFontFamily,
-                                        ),
-                                        navController = navController,
-                                        viewModel = viewModel
-                                    )
                                 }
                             }
                         }
+                        Spacer(modifier = Modifier.widthIn(min = 20.dp))
+                        val instant = Instant.parse(item.createdAt)
+                        Text(
+                            text = instant.atZone(zone).format(hhmmFormatter),
+                            color = LocalWorkspaceColorsPalette.current.messageTimeColor,
+                            fontSize = 14.sp,
+                            fontFamily = InterFontFamily,
+                        )
                     }
-                    Spacer(modifier = Modifier.widthIn(min = 20.dp))
-                    val instant = Instant.parse(item.createdAt)
-                    Text(
-                        text = instant.atZone(zone).format(hhmmFormatter),
-                        color = LocalWorkspaceColorsPalette.current.messageTimeColor,
-                        fontSize = 14.sp,
-                        fontFamily = InterFontFamily,
-                    )
                 }
-                MessageDeletionControls(
-                    messageUuid = item.uuid,
-                    canDelete = viewModel.canDeleteMessage(item),
-                    isDeleting = item.uuid in deletingMessageUuids,
-                    onDelete = { viewModel.deleteMessage(item) },
-                ) { requestDelete ->
-                    MessageActionMenu(
-                        expanded = menuExpanded,
-                        onDismissRequest = { menuExpanded = false },
+                if (lockedPresentation != null) {
+                    val state by viewModel.encryptedChatState.collectAsStateWithLifecycle()
+                    LockedEncryptedMessageActions(item.uuid, messageKeyRequestPending(lockedPresentation.keyUuid, state),
+                        onRequestKey = { viewModel.requestEncryptionKeyForMessage(item) }) { bubbleContent() }
+                } else {
+                    bubbleContent()
+                    MessageDeletionControls(
+                        messageUuid = item.uuid,
                         canDelete = viewModel.canDeleteMessage(item),
                         isDeleting = item.uuid in deletingMessageUuids,
-                        onDelete = {
-                            menuExpanded = false
-                            requestDelete()
-                        },
-                        onReaction = { emoji ->
-                            scope.launch { viewModel.onReactionTap(item.uuid, emoji) }
-                        },
-                        onReply = { viewModel.onQuoteMessageClicked(item) },
-                        onAddQuote = if (quotedMessages.isNotEmpty()) {
-                            { viewModel.onAddQuoteMessageClicked(item) }
-                        } else null,
-                        onForward = if (viewModel.canSelectMessage(item) && onForwardMessage != null) {
-                            { onForwardMessage(item) }
-                        } else null,
-                        onSelect = if (viewModel.canSelectMessage(item)) {
-                            { viewModel.startMessageSelection(item) }
-                        } else null,
-                        onEdit = if (item.isOwn) {
-                            { viewModel.onEditMessageClicked(item) }
-                        } else null,
-                    )
+                        onDelete = { viewModel.deleteMessage(item) },
+                    ) { requestDelete ->
+                        MessageActionMenu(
+                            expanded = menuExpanded,
+                            onDismissRequest = { menuExpanded = false },
+                            canDelete = viewModel.canDeleteMessage(item),
+                            isDeleting = item.uuid in deletingMessageUuids,
+                            onDelete = {
+                                menuExpanded = false
+                                requestDelete()
+                            },
+                            onReaction = { emoji ->
+                                scope.launch { viewModel.onReactionTap(item.uuid, emoji) }
+                            },
+                            onReply = { viewModel.onQuoteMessageClicked(item) },
+                            onAddQuote = if (quotedMessages.isNotEmpty()) {
+                                { viewModel.onAddQuoteMessageClicked(item) }
+                            } else null,
+                            onForward = if (viewModel.canSelectMessage(item) && onForwardMessage != null) {
+                                { onForwardMessage(item) }
+                            } else null,
+                            onSelect = if (viewModel.canSelectMessage(item)) {
+                                { viewModel.startMessageSelection(item) }
+                            } else null,
+                            onEdit = if (item.isOwn) {
+                                { viewModel.onEditMessageClicked(item) }
+                            } else null,
+                        )
+                    }
                 }
             }
             if (!item.reactions.isEmpty()) {

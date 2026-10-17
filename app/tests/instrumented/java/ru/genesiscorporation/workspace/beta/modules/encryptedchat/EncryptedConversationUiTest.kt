@@ -21,12 +21,14 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.isDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -46,6 +48,7 @@ import androidx.compose.ui.test.swipeUp
 import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.Espresso.closeSoftKeyboard
 import androidx.test.espresso.assertion.ViewAssertions.matches
+import androidx.test.espresso.assertion.ViewAssertions.doesNotExist
 import androidx.test.espresso.matcher.ViewMatchers.isCompletelyDisplayed
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
 import androidx.test.espresso.matcher.ViewMatchers.withText
@@ -129,6 +132,9 @@ import java.net.SocketException
 import java.net.URI
 import java.net.URLDecoder
 import java.security.MessageDigest
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.CopyOnWriteArrayList
@@ -250,6 +256,51 @@ class EncryptedConversationUiTest {
                 }
             }
         }
+    }
+
+    @Test fun missingKeyShowsBlurUntilTheRealConversationCanDecryptAgain() = runBlocking {
+        val text = "Макеты готовы, можно обсуждать."
+        val placeholder = hasTestTag("encrypted-message-placeholder") and
+            hasAnyAncestor(hasTestTag("chat-message-${fixture.messages[2].uuid}"))
+        chat.encryptionRuntime.readySession()
+        chat.encryptionRuntime.removeLocalKey(CURRENT)
+        showConversation()
+        compose.waitUntil(10_000) {
+            compose.onAllNodes(placeholder, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNode(placeholder, useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText(InstrumentationRegistry.getInstrumentation().targetContext
+            .getString(R.string.encrypted_chat_locked)).assertDoesNotExist()
+        onView(withText(text)).check(doesNotExist())
+        // A protected body belongs to the ordinary message shell, as in web.
+        // Checking only the blur missed centered, anonymous placeholders with no bubble or time.
+        val bubbles = fixture.messages.take(4).map { message ->
+            val row = hasTestTag("chat-message-${message.uuid}")
+            val author = if (message.isOwn) fixture.owner else fixture.participant
+            compose.onNode(hasText(author.displayableName()) and hasAnyAncestor(row), useUnmergedTree = true)
+                .assertIsDisplayed()
+            val time = Instant.parse(message.createdAt).atZone(ZoneId.systemDefault())
+                .format(DateTimeFormatter.ofPattern("HH:mm"))
+            compose.onNode(hasText(time) and hasAnyAncestor(row), useUnmergedTree = true).assertIsDisplayed()
+            compose.onNodeWithTag("message-bubble-${message.uuid}", useUnmergedTree = true)
+                .fetchSemanticsNode().boundsInRoot
+        }
+        assertTrue("Incoming bubbles must stay left of outgoing bubbles", bubbles[2].left < bubbles[1].left)
+        assertTrue("Outgoing bubbles must stay right of incoming bubbles", bubbles[1].right > bubbles[2].right)
+        capture("revision-locked-conversation-bubbles")
+        openMessageActions(fixture.messages[2].uuid)
+        compose.onNodeWithTag("request-message-key-action").assertIsDisplayed()
+        compose.onNodeWithText("Ответить").assertDoesNotExist()
+        compose.onNodeWithText("Изменить").assertDoesNotExist()
+        compose.onNodeWithTag("forward-message-action").assertDoesNotExist()
+        androidx.test.espresso.Espresso.pressBack()
+
+        assertTrue(EncryptedChatKeyStore(InstrumentationRegistry.getInstrumentation().targetContext)
+            .writeChatKey(address, fixture.groupKey, forSending = true))
+        chat.encryptionRuntime.refresh(force = true)
+        waitForText(text)
+        compose.onAllNodes(placeholder, useUnmergedTree = true).assertCountEquals(0)
+        capture("revision-unlocked-conversation-bubbles")
     }
 
     @Test fun fullConversationRetainsComposerAttachmentsReplyEditSelectionAndReactions() = runBlocking {
