@@ -97,6 +97,7 @@ class EventsRepository(
 
     fun close() {
         invalidateVerifiedOwnerAuthentication()
+        synchronized(realtimeStateLock) { suspendedAccountSnapshot = null }
         membership.invalidateRequests()
         scope.cancel()
     }
@@ -107,6 +108,24 @@ class EventsRepository(
     var epochGeneration: String = ""
     private val connectionMutex = Mutex()
     private val realtimeStateLock = Any()
+    private val accountDirectoryMutex = Mutex()
+    private class DirectoryReadChanges {
+        val streams = mutableMapOf<String, Stream?>()
+        val users = mutableMapOf<String, UserResponseData?>()
+    }
+    private var directoryReadChanges: DirectoryReadChanges? = null
+
+    /** Replay only entities touched while this HTTP snapshot was in flight, including deletions. */
+    private fun <T : Any> reconcileDirectory(snapshot: List<T>, current: List<T>, changed: Map<String, T?>, id: (T) -> String): List<T> {
+        val merged = snapshot.associateBy(id).toMutableMap()
+        val live = current.associateBy(id)
+        changed.forEach { (uuid, event) ->
+            if (event == null) merged.remove(uuid)
+            else if (uuid in merged || uuid in live) merged[uuid] = live[uuid] ?: event
+        }
+        return merged.values.toList()
+    }
+
     @Volatile
     private var activeSession: DefaultClientWebSocketSession? = null
     @Volatile
@@ -151,10 +170,130 @@ class EventsRepository(
     val verifiedOwnerAuthentication: StateFlow<VerifiedOwnerAuthentication?> = _verifiedOwnerAuthentication.asStateFlow()
     @Volatile private var ownerVerificationRevision = 0L
     private val ownerVerificationLineage = Any()
+    // A repeated proof for the same owner preserves valid cached metadata.
+    private var topicsPoolOwnerUuid: String? = null
+    private var topicCacheGeneration = 0L
+    private var accountDirectoryScope: TopicCacheScope? = null
+
+    /** Inaccessible to consumers until /me confirms the same owner again. */
+    private data class SuspendedAccountSnapshot(
+        val ownerUuid: String,
+        val streams: List<Stream>, val users: List<UserResponseData>,
+        val folders: List<FolderResponseData>, val selectedFolder: FolderResponseData?,
+        val messages: List<MessageResponse>, val history: Map<String, List<MessageResponse>>,
+        val drafts: List<Draft>, val reactions: List<MessageReaction>,
+        val topics: List<TopicsResponseData>, val streamTopics: Map<String, List<TopicsResponseData>>,
+        val bindings: Map<String, List<StreamBindingResponseData>>, val queryState: QueryState,
+    )
+    private var suspendedAccountSnapshot: SuspendedAccountSnapshot? = null
 
     fun invalidateVerifiedOwnerAuthentication() = synchronized(realtimeStateLock) {
+        if (suspendedAccountSnapshot == null) topicsPoolOwnerUuid?.let { owner ->
+            suspendedAccountSnapshot = SuspendedAccountSnapshot(owner, _streams.value, _users.value,
+                _folders.value, _currentlySelectedFolder.value, _messagesPool.value, _streamTopicMessages.value,
+                _draftsPool.value, _userReactions.value, _topicsPool.value, _streamTopics.value,
+                streamBindings.value, _streamsQueryState.value)
+        }
         ownerVerificationRevision++
+        topicCacheGeneration++
+        // Credential replacement is not proof that these account-scoped values remain readable.
+        clearAccountProjections()
+        accountDirectoryScope = null
         _verifiedOwnerAuthentication.value = null
+        // Wake the existing connection loop even when its authenticated peer sends no frames.
+        activeSession?.let { obsolete ->
+            scope.launch { runCatching { obsolete.close(CloseReason(CloseReason.Codes.NORMAL, "Account credentials invalidated")) } }
+        }
+        if (topicsPoolOwnerUuid != null) _streamsQueryState.value = QueryState.Error("")
+    }
+
+    private fun clearAccountProjections() {
+        _currentUser.value = null
+        _streams.value = emptyList()
+        _users.value = emptyList()
+        _folders.value = emptyList()
+        _currentlySelectedFolder.value = null
+        _messagesPool.value = emptyList()
+        _streamTopicMessages.value = emptyMap()
+        _draftsPool.value = emptyList()
+        _userReactions.value = emptyList()
+        _topicsPool.value = emptyList()
+        _streamTopics.value = emptyMap()
+        membership.invalidateRequests()
+        streamBindings.value.keys.toList().forEach { membership.removeStream(it) }
+        historyGeneration++
+    }
+
+    /** Keep an unverified mounted route fail-closed without exposing its suspended metadata. */
+    internal fun isKnownProtectedStream(streamUuid: String): Boolean = synchronized(realtimeStateLock) {
+        _streams.value.any { it.uuid == streamUuid && it.encryption } ||
+            suspendedAccountSnapshot?.streams.orEmpty().any { it.uuid == streamUuid && it.encryption }
+    }
+
+    private fun restoreSameOwnerSnapshot(ownerUuid: String) {
+        val saved = suspendedAccountSnapshot
+        suspendedAccountSnapshot = null
+        if (saved?.ownerUuid != ownerUuid) return
+        _streams.value = saved.streams
+        _users.value = saved.users
+        _folders.value = saved.folders
+        _currentlySelectedFolder.value = saved.selectedFolder
+        _messagesPool.value = saved.messages
+        _streamTopicMessages.value = saved.history
+        _draftsPool.value = saved.drafts
+        _userReactions.value = saved.reactions
+        _topicsPool.value = saved.topics
+        _streamTopics.value = saved.streamTopics
+        saved.bindings.forEach { (stream, bindings) -> addStreamBindings(stream, bindings) }
+        _streamsQueryState.value = saved.queryState
+    }
+
+    /** Login must verify even when the old websocket stays quiet. This job is bounded to HTTP. */
+    fun verifyAfterLogin() {
+        scope.launch { verifyCurrentAccount() }
+    }
+
+    fun captureTopicCacheScope(): TopicCacheScope = synchronized(realtimeStateLock) {
+        val server = client.userViewModel?.servers?.value?.firstOrNull { it.id == serverId }?.copy() ?: originalServer.copy()
+        val token = tokenStore.get(serverId)?.accessToken?.takeIf { it.isNotBlank() }
+        val proof = _verifiedOwnerAuthentication.value?.takeIf {
+            it.capturedServer == server && it.userUuid == topicsPoolOwnerUuid && it.authentication.matchesAccessToken(token)
+        }
+        TopicCacheScope(ownerVerificationLineage, topicCacheGeneration, proof?.userUuid,
+            token?.let(::ProtectedRequestAuthentication), server)
+    }
+
+    internal fun isTopicCacheGenerationCurrent(captured: TopicCacheScope): Boolean = synchronized(realtimeStateLock) {
+        captured.lineage === ownerVerificationLineage && captured.generation == topicCacheGeneration &&
+            matchesServerConfiguration(captured.server) &&
+            (client.userViewModel == null || client.userViewModel!!.servers.value.firstOrNull { it.id == serverId }?.let { current ->
+                // Organization branding may refresh while the same account's read is in flight.
+                matchesServerConfiguration(current) && current.needsToRelogin == captured.server.needsToRelogin
+            } == true)
+    }
+
+    internal fun isTopicCacheScopeCurrent(captured: TopicCacheScope): Boolean = synchronized(realtimeStateLock) {
+        isTopicCacheGenerationCurrent(captured) && captured.ownerUuid == topicsPoolOwnerUuid &&
+            captured.matchesCredential(tokenStore.get(serverId)?.accessToken) &&
+            (_verifiedOwnerAuthentication.value?.let { proof ->
+                proof.userUuid == captured.ownerUuid && proof.authentication.matches(captured.authentication)
+            } ?: (captured.ownerUuid == null))
+    }
+
+    private inline fun applyTopicCache(captured: TopicCacheScope, block: () -> Unit): Boolean = synchronized(realtimeStateLock) {
+        if (!isTopicCacheScopeCurrent(captured)) false else { block(); true }
+    }
+
+    /** Publish metadata and its optional message enrichment atomically under the captured session. */
+    internal fun publishTopicSnapshot(captured: TopicCacheScope, topics: Map<String, List<TopicsResponseData>>,
+                                      messages: List<MessageResponse> = emptyList()): Boolean = applyTopicCache(captured) {
+        updateMessagesPool(messages)
+        topics.forEach { (streamUuid, fresh) ->
+            val previous = _streamTopics.value[streamUuid].orEmpty().associateBy { it.uuid }
+            val enriched = fresh.map { topic -> topic.copy(lastMessage = poolMessage(topic.lastMessageUuid)
+                ?: previous[topic.uuid]?.lastMessage?.takeIf { it.uuid == topic.lastMessageUuid }) }
+            addStreamTopicsUnchecked(streamUuid, enriched)
+        }
     }
 
     fun updateCurrentUser(newValue: UserResponseData) {
@@ -345,12 +484,17 @@ class EventsRepository(
         }
         _messagesPool.update { current -> current.filterNot { it.uuid == messageUuid } }
         _userReactions.update { current -> current.filterNot { it.messageUuid == messageUuid } }
-        _streams.update { current ->
-            current.map { stream ->
-                if (stream.lastMessageUuid == messageUuid) {
-                    stream.copy(lastMessageUuid = null, lastMessage = null)
-                } else {
-                    stream
+        synchronized(realtimeStateLock) {
+            _streams.value.filter { it.lastMessageUuid == messageUuid }.forEach {
+                directoryReadChanges?.streams?.set(it.uuid, it.copy(lastMessageUuid = null, lastMessage = null))
+            }
+            _streams.update { current ->
+                current.map { stream ->
+                    if (stream.lastMessageUuid == messageUuid) {
+                        stream.copy(lastMessageUuid = null, lastMessage = null)
+                    } else {
+                        stream
+                    }
                 }
             }
         }
@@ -370,6 +514,7 @@ class EventsRepository(
     /** One repository belongs to one server/account projection; invalidate before removing its caches. */
     fun removeStream(streamUuid: String) {
         synchronized(realtimeStateLock) {
+            directoryReadChanges?.streams?.set(streamUuid, null)
             streamRemovalRevisions[streamUuid] = streamRemovalRevision(streamUuid) + 1
             historyGeneration++ // An older HTTP history response must not restore a deleted conversation.
             _streams.update { it.filterNot { stream -> stream.uuid == streamUuid } }
@@ -402,13 +547,19 @@ class EventsRepository(
     private val _streamTopics = MutableStateFlow<Map<String, List<TopicsResponseData>>>(emptyMap())
     val streamTopics: StateFlow<Map<String, List<TopicsResponseData>>> = _streamTopics.asStateFlow()
 
-    fun addStreamTopics(streamUuid: String, topics: List<TopicsResponseData>) {
+    fun addStreamTopics(streamUuid: String, topics: List<TopicsResponseData>, captured: TopicCacheScope): Boolean =
+        applyTopicCache(captured) { addStreamTopicsUnchecked(streamUuid, topics) }
+
+    private fun addStreamTopicsUnchecked(streamUuid: String, topics: List<TopicsResponseData>) {
         _streamTopics.update { current ->
             current + (streamUuid to topics)
         }
-        appendItemsToTopicsPool(topics)
+        appendTopicsUnchecked(topics)
     }
-    fun addTopicToStream(topic: TopicsResponseData) {
+    fun addTopicToStream(topic: TopicsResponseData, captured: TopicCacheScope): Boolean =
+        applyTopicCache(captured) { addTopicToStreamUnchecked(topic) }
+
+    private fun addTopicToStreamUnchecked(topic: TopicsResponseData) {
         _streamTopics.update { current ->
             if (current[topic.streamUuid] != null) {
                 val existingTopics = current[topic.streamUuid].orEmpty()
@@ -417,10 +568,13 @@ class EventsRepository(
                 current
             }
         }
-        appendItemsToTopicsPool(listOf(topic))
+        appendTopicsUnchecked(listOf(topic))
     }
 
-    fun updateTopic(updatedTopic: TopicsResponseData) {
+    fun updateTopic(updatedTopic: TopicsResponseData, captured: TopicCacheScope): Boolean =
+        applyTopicCache(captured) { updateTopicUnchecked(updatedTopic) }
+
+    private fun updateTopicUnchecked(updatedTopic: TopicsResponseData) {
         val message = messagesPool.value.firstOrNull { it.uuid == updatedTopic.lastMessageUuid }
         _streamTopics.update { current ->
             val topics = current[updatedTopic.streamUuid] ?: return@update current
@@ -474,9 +628,12 @@ class EventsRepository(
         updateOwnStreamRole(streamUuid, bindings)
     }
 
-    private fun updateOwnStreamRole(streamUuid: String, changes: List<StreamBindingResponseData> = emptyList()) {
+    private fun updateOwnStreamRole(streamUuid: String, changes: List<StreamBindingResponseData> = emptyList()) = synchronized(realtimeStateLock) {
         val ownBinding = (membership.bindings.value[streamUuid] ?: changes)
-            .firstOrNull { it.userUuid == _currentUser.value?.uuid } ?: return
+            .firstOrNull { it.userUuid == _currentUser.value?.uuid } ?: return@synchronized
+        _streams.value.firstOrNull { it.uuid == streamUuid }?.let {
+            directoryReadChanges?.streams?.set(streamUuid, it.copy(role = ownBinding.role))
+        }
         _streams.update { streams -> streams.map { stream ->
             if (stream.uuid == streamUuid) stream.copy(role = ownBinding.role) else stream
         } }
@@ -509,7 +666,10 @@ class EventsRepository(
     private val _topicsPool = MutableStateFlow<List<TopicsResponseData>>(emptyList())
     val topicsPool: StateFlow<List<TopicsResponseData>> = _topicsPool.asStateFlow()
 
-    fun appendItemsToTopicsPool(newList: List<TopicsResponseData>) {
+    fun appendItemsToTopicsPool(newList: List<TopicsResponseData>, captured: TopicCacheScope): Boolean =
+        applyTopicCache(captured) { appendTopicsUnchecked(newList) }
+
+    private fun appendTopicsUnchecked(newList: List<TopicsResponseData>) {
         val currentPoolIds = _messagesPool.value.map { it.uuid }
         val filteredTopics = newList.filter { !currentPoolIds.contains(it.uuid) }
 
@@ -518,7 +678,7 @@ class EventsRepository(
         }
     }
 
-    fun updateTopicInTopicsPool(updatedTopic: TopicsResponseData) {
+    private fun updateTopicInTopicsPool(updatedTopic: TopicsResponseData) {
         _topicsPool.update { current ->
             current.map { topic ->
                 if (topic.uuid == updatedTopic.uuid) {
@@ -605,7 +765,8 @@ class EventsRepository(
     private val _users = MutableStateFlow<List<UserResponseData>>(emptyList())
     val users: StateFlow<List<UserResponseData>> = _users.asStateFlow()
 
-    fun updateUser(updatedUser: UserResponseData) {
+    fun updateUser(updatedUser: UserResponseData) = synchronized(realtimeStateLock) {
+        directoryReadChanges?.users?.set(updatedUser.uuid, updatedUser)
         _users.update { current ->
             current.map { user ->
                 if (user.uuid == updatedUser.uuid) {
@@ -625,7 +786,8 @@ class EventsRepository(
         }
     }
 
-    fun addUser(newUser: UserResponseData) {
+    fun addUser(newUser: UserResponseData) = synchronized(realtimeStateLock) {
+        directoryReadChanges?.users?.set(newUser.uuid, newUser)
         _users.update { current ->
             current + newUser
         }
@@ -644,7 +806,8 @@ class EventsRepository(
     private val _streams = MutableStateFlow<List<Stream>>(emptyList())
     val streams: StateFlow<List<Stream>> = _streams.asStateFlow()
 
-    fun updateStream(updatedStream: Stream) {
+    fun updateStream(updatedStream: Stream) = synchronized(realtimeStateLock) {
+        directoryReadChanges?.streams?.set(updatedStream.uuid, updatedStream)
         val message = messagesPool.value.firstOrNull { it.uuid == updatedStream.lastMessageUuid }
         _streams.update { current ->
             current.map { stream ->
@@ -674,7 +837,8 @@ class EventsRepository(
         }
     }
 
-    fun addStream(newStream: Stream) {
+    fun addStream(newStream: Stream) = synchronized(realtimeStateLock) {
+        directoryReadChanges?.streams?.set(newStream.uuid, newStream)
         var streamWithUser = newStream
         val directUserUuid = newStream.directUserUuid
         if (directUserUuid != null) {
@@ -849,9 +1013,12 @@ class EventsRepository(
                         config,
                     )
                 ) {
-                    is ApiResult.Success -> {
-                        latestEpoch = response.value.epochVersion
-                        epochGeneration = response.value.epochGeneration
+                    is ApiResult.Success -> synchronized(realtimeStateLock) {
+                        // A concurrent owner-scoped bootstrap may already have captured its cursor.
+                        if (epochGeneration.isBlank()) {
+                            latestEpoch = response.value.epochVersion
+                            epochGeneration = response.value.epochGeneration
+                        }
                     }
 
                     is ApiResult.Error -> {
@@ -954,9 +1121,18 @@ class EventsRepository(
         baseUrl: String,
         onConnected: () -> Unit
     ) {
+        var topicScope = captureTopicCacheScope()
+        if (topicScope.ownerUuid == null && synchronized(realtimeStateLock) { topicsPoolOwnerUuid != null }) {
+            verifyCurrentAccount()
+            topicScope = captureTopicCacheScope()
+            if (topicScope.ownerUuid == null) throw java.io.IOException("Account owner unavailable")
+        }
         val accessToken = tokenStore.get(serverId)?.accessToken
+        if (!topicScope.matchesCredential(accessToken) || !isTopicCacheScopeCurrent(topicScope))
+            throw java.io.IOException("Account context changed")
         val selectedServer = webSocketClient.requireUserViewModel().getServer(serverId)?.copy()
         val ownerUuid = _currentUser.value?.uuid
+        val (connectingEpoch, connectingGeneration) = synchronized(realtimeStateLock) { latestEpoch to epochGeneration }
         if (accessToken != null) {
             val endpoint = resolveWebSocketEndpoint(baseUrl)
             Log.d("WebSocket", "Connecting: ${endpoint.displayUrl()}")
@@ -967,15 +1143,21 @@ class EventsRepository(
                         host = endpoint.host
                         endpoint.port?.let { port = it }
                         path("/api/workspace/v1/events/ws")
-                        parameters.append("last_epoch_version", latestEpoch.toString())
-                        parameters.append("epoch_generation", epochGeneration)
+                        parameters.append("last_epoch_version", connectingEpoch.toString())
+                        parameters.append("epoch_generation", connectingGeneration)
                     }
                     headers {
                         append(HttpHeaders.SecWebSocketProtocol, "workspace.events.v1, bearer.$accessToken")
                     }
                 }
             ) {
-                synchronized(realtimeStateLock) { activeSession = this }
+                val accepted = synchronized(realtimeStateLock) {
+                    if (!isTopicCacheScopeCurrent(topicScope)) false else { activeSession = this; true }
+                }
+                if (!accepted) {
+                    close(CloseReason(CloseReason.Codes.NORMAL, "Account context changed during handshake"))
+                    return@webSocket
+                }
                 try {
                     onConnected()
                     Log.d("WebSocket", "Connected: ${endpoint.displayUrl()}")
@@ -991,7 +1173,9 @@ class EventsRepository(
                                 val receivedText = frame.readText()
                                 val jsonObject = json.decodeFromString<JsonObject>(receivedText)
                                 if (isExpiredRealtimeCursorFrame(jsonObject)) {
-                                    invalidateRealtimeCursor()
+                                    synchronized(realtimeStateLock) {
+                                        if (epochGeneration == connectingGeneration) invalidateRealtimeCursor()
+                                    }
                                     close(CloseReason(CloseReason.Codes.NORMAL, "Event cursor expired"))
                                     return@webSocket
                                 }
@@ -999,6 +1183,7 @@ class EventsRepository(
                                 val newEpochVersion =
                                     jsonObject["epoch_version"]?.jsonPrimitive?.contentOrNull?.toInt()
                                 synchronized(realtimeStateLock) {
+                                    if (!isTopicCacheScopeCurrent(topicScope)) return@webSocket
                                     // A frame from the socket being closed must not revive an expired cursor.
                                     if (messageResyncRequired) return@webSocket
                                     if (jsonObject["type"]?.jsonPrimitive?.contentOrNull == "ready") {
@@ -1016,36 +1201,42 @@ class EventsRepository(
                                 }
                                 val payload = jsonObject["payload"]?.toString()
                                 if (action != null && payload != null) {
-                                    when (jsonObject["object_type"]?.toString()?.trim('"')) {
-                                        "message" -> {
-                                            didReceiveMessageEvent(payload, action)
-                                        }
+                                    val accepted = applyTopicCache(topicScope) {
+                                        when (jsonObject["object_type"]?.toString()?.trim('"')) {
+                                            "message" -> {
+                                                didReceiveMessageEvent(payload, action)
+                                            }
 
-                                        "user" -> {
-                                            didReceiveUserEvent(payload, action)
-                                        }
+                                            "user" -> {
+                                                didReceiveUserEvent(payload, action)
+                                            }
 
-                                        "folder" -> {
-                                            didReceiveFolderEvent(payload, action)
-                                        }
+                                            "folder" -> {
+                                                didReceiveFolderEvent(payload, action)
+                                            }
 
-                                        "stream" -> {
-                                            didReceiveStreamEvent(payload, action)
-                                        }
+                                            "stream" -> {
+                                                didReceiveStreamEvent(payload, action)
+                                            }
 
-                                        "stream_bindings", "stream_binding" -> {
-                                            didReceiveStreamBindingEvent(payload, action)
-                                        }
+                                            "stream_bindings", "stream_binding" -> {
+                                                didReceiveStreamBindingEvent(payload, action)
+                                            }
 
-                                        "topic" -> {
-                                            didReceiveTopicEvent(payload, action)
-                                        }
+                                            "topic" -> {
+                                                didReceiveTopicEvent(payload, action, topicScope)
+                                            }
 
-                                        "message_reaction" -> {
-                                            didReceiveReactionEvent(payload, action)
-                                        }
+                                            "message_reaction" -> {
+                                                didReceiveReactionEvent(payload, action)
+                                            }
 
-                                        else -> Log.d("WebSocket", "Received: $receivedText")
+                                            else -> Log.d("WebSocket", "Received: $receivedText")
+                                        }
+                                    }
+                                    if (!accepted) {
+                                        close(CloseReason(CloseReason.Codes.NORMAL, "Account context changed"))
+                                        return@webSocket
                                     }
                                 }
                             }
@@ -1060,7 +1251,7 @@ class EventsRepository(
                         }
                     }
                 } finally {
-                    synchronized(realtimeStateLock) { activeSession = null }
+                    synchronized(realtimeStateLock) { if (activeSession === this) activeSession = null }
                     val reason = closeReason.await()
                     if (reason?.code?.toInt() == 4401) {
                         webSocketClient.refreshSession(serverId, accessToken)
@@ -1177,15 +1368,15 @@ class EventsRepository(
         }
     }
 
-    fun didReceiveTopicEvent(payload: String, action: String) {
+    fun didReceiveTopicEvent(payload: String, action: String, captured: TopicCacheScope) {
         when(action) {
             "created" -> {
                 val topic = json.decodeFromString< TopicsResponseData>(payload)
-                addTopicToStream(topic)
+                addTopicToStream(topic, captured)
             }
             "updated" -> {
                 val topic = json.decodeFromString< TopicsResponseData>(payload)
-                updateTopic(topic)
+                updateTopic(topic, captured)
             }
             "deleted" -> {
 
@@ -1216,12 +1407,54 @@ class EventsRepository(
         }
     }
 
-    suspend fun loadUserInfo() {
+    /** Load the owner's directory without entering the long-lived workspace bootstrap. */
+    suspend fun ensureCurrentAccountDirectory(): Boolean = accountDirectoryMutex.withLock {
+        val captured = captureTopicCacheScope()
+        val changes = DirectoryReadChanges()
+        synchronized(realtimeStateLock) {
+            if (isTopicCacheScopeCurrent(captured) && accountDirectoryScope?.sameOwner(captured) == true) return@withLock true
+            directoryReadChanges = changes
+        }
+        try {
+            val read = client.withTopicCacheRead(this) { session, recovery ->
+                when (val users = client.performRequest(if (recovery) session.recover(UsersRequest()) else session.pin(UsersRequest()), serverId, session.server)) {
+                    is ApiResult.Error -> users
+                    is ApiResult.Success -> when (val streams = client.performRequest(if (recovery) session.recover(StreamsRequest()) else session.pin(StreamsRequest()), serverId, session.server)) {
+                        is ApiResult.Error -> streams
+                        is ApiResult.Success -> ApiResult.Success(users.value to streams.value)
+                    }
+                }
+            }
+            when (val response = read.result) {
+                is ApiResult.Error -> false
+                is ApiResult.Success -> applyTopicCache(read.scope) {
+                    val previous = _streams.value.associateBy { it.uuid }
+                    setInitialUsers(reconcileDirectory(response.value.first, _users.value, changes.users) { it.uuid })
+                    val streams = reconcileDirectory(response.value.second, _streams.value, changes.streams) { it.uuid }
+                    setInitialStreams(streams.map { stream ->
+                        stream.copy(lastMessage = stream.lastMessage ?: previous[stream.uuid]?.lastMessage
+                            ?.takeIf { it.uuid == stream.lastMessageUuid })
+                    })
+                    accountDirectoryScope = read.scope
+                }
+            }
+        } finally {
+            synchronized(realtimeStateLock) { if (directoryReadChanges === changes) directoryReadChanges = null }
+        }
+    }
+
+    /** Confirm credentials; a replacement owner reloads snapshots without starting another realtime loop. */
+    suspend fun verifyCurrentAccount() = loadUserInfo(loadWorkspaceData = false)
+
+    suspend fun loadUserInfo() = loadUserInfo(loadWorkspaceData = true)
+
+    private suspend fun loadUserInfo(loadWorkspaceData: Boolean) {
         val webSocketClient = client ?: return
         val userState = webSocketClient.requireUserViewModel()
         val captured = userState.getServer(serverId)?.copy() ?: return
         val token = userState.getTokens(serverId)?.accessToken?.takeIf { it.isNotBlank() } ?: return
         var authentication = ProtectedRequestAuthentication(token)
+        var ownerReplaced = false
         val verificationRevision = ownerVerificationRevision
         fun current() = ownerVerificationRevision == verificationRevision &&
             verifiedOwnerRequestStillCurrent(captured, userState.servers.value.firstOrNull { it.id == serverId }, authentication,
@@ -1245,130 +1478,169 @@ class EventsRepository(
         }
         when(response) {
             is ApiResult.Success -> {
+                var verifiedScope: TopicCacheScope? = null
                 val confirmed = userState.repo.withCurrentSession(captured, authentication) {
                     synchronized(realtimeStateLock) {
                         if (!current()) false else {
                             tokenStore.rememberConfirmedOwner(captured, response.value.uuid)
+                            // A shared stream/topic UUID does not authorize the previous owner's metadata.
+                            if (topicsPoolOwnerUuid != response.value.uuid) {
+                                if (topicsPoolOwnerUuid != null) {
+                                    ownerReplaced = true
+                                    _streamsQueryState.value = QueryState.Loading
+                                    _streams.value = emptyList()
+                                    _users.value = emptyList()
+                                    _folders.value = emptyList()
+                                    _currentlySelectedFolder.value = null
+                                    _messagesPool.value = emptyList()
+                                    _streamTopicMessages.value = emptyMap()
+                                    _draftsPool.value = emptyList()
+                                    _userReactions.value = emptyList()
+                                    membership.invalidateRequests()
+                                    streamBindings.value.keys.toList().forEach { membership.removeStream(it) }
+                                    historyGeneration++
+                                    openConversation.value = null
+                                    staleConversations.clear()
+                                    streamRemovalRevisions.clear()
+                                    pendingMessageUuids.value = emptySet()
+                                    messageResyncRequired = false
+                                    latestEpoch = 0
+                                    epochGeneration = ""
+                                    accountDirectoryScope = null
+                                }
+                                _topicsPool.value = emptyList()
+                                _streamTopics.value = emptyMap()
+                                topicCacheGeneration++
+                                topicsPoolOwnerUuid = response.value.uuid
+                            }
+                            restoreSameOwnerSnapshot(response.value.uuid)
                             updateCurrentUser(response.value)
                             _verifiedOwnerAuthentication.value = VerifiedOwnerAuthentication(serverId, captured.baseUrl,
                                 response.value.uuid, authentication, ++ownerVerificationRevision, captured.copy(), ownerVerificationLineage)
+                            verifiedScope = captureTopicCacheScope()
                             true
                         }
                     }
                 }
                 if (confirmed != true) return
-                loadMessageReactions(response.value.uuid)
-            }
-
-            is ApiResult.Error -> {
-                _streamsQueryState.value = QueryState.Error("")
-            }
-        }
-    }
-
-    suspend fun loadMessageReactions(userUuid: String) {
-        val webSocketClient = client ?: return
-        val response = webSocketClient.performRequest(MessageReactionsRequest(userUuid), serverId)
-        when(response) {
-            is ApiResult.Success -> {
-                setInitialMessageReactions(response.value)
-                loadAllUsersInfo()
-            }
-
-            is ApiResult.Error -> {
-                _streamsQueryState.value = QueryState.Error("")
-            }
-        }
-    }
-
-    suspend fun loadAllUsersInfo() {
-        val webSocketClient = client ?: return
-        val response = webSocketClient.performRequest(UsersRequest(), serverId)
-        when(response) {
-            is ApiResult.Success -> {
-                setInitialUsers(response.value)
-                loadFolders()
-            }
-
-            is ApiResult.Error -> {
-                _streamsQueryState.value = QueryState.Error("")
-            }
-        }
-    }
-    suspend fun loadFolders() {
-        val webSocketClient = client ?: return
-        val response = webSocketClient.performRequest(FoldersRequest(), serverId)
-        when(response) {
-            is ApiResult.Success -> {
-                setInitialFolders(response.value.sortedBy { LocalDateTime.parse(it.creationDate, folderCreationFormatter) })
-                if (!folders.value.isEmpty()) {
-                    _currentlySelectedFolder.value = folders.value.first()
-                }
-                loadSubscribedChannels()
-            }
-
-            is ApiResult.Error -> {
-                _streamsQueryState.value = QueryState.Error("")
-            }
-        }
-    }
-
-    suspend fun loadSubscribedChannels() {
-        val webSocketClient = client ?: return
-        val response = webSocketClient.performRequest(StreamsRequest(), serverId)
-        when(response) {
-            is ApiResult.Success -> {
-                val messageIds = response.value.mapNotNull { it.lastMessageUuid }
-                if (!messageIds.isEmpty()) {
-                    val messagesResponse = webSocketClient.performRequest(
-                        MessagesByIdsRequest(messageIds),
-                        serverId,
-                    )
-                    when (messagesResponse) {
+                var bootstrapScope = verifiedScope ?: return
+                if (ownerReplaced || (loadWorkspaceData && epochGeneration.isBlank())) {
+                    // Replay from before the snapshots, including events arriving during their reads.
+                    val cursor = client.readTopicCache(this, EpochRequest(), bootstrapScope)
+                    if (cursor.stale || !bootstrapScope.sameOwner(cursor.scope)) return
+                    when (val epoch = cursor.result) {
                         is ApiResult.Success -> {
-                            setInitialMessagesPool(messagesResponse.value)
-                            val streamsWithMessages = response.value.map { stream ->
-                                var updatedStream = stream
-                                updatedStream.lastMessage = poolMessage(stream.lastMessageUuid)
-                                updatedStream
-                            }
-                            setInitialStreams(streamsWithMessages)
-                            loadDrafts()
+                            if (!applyTopicCache(cursor.scope) {
+                                if (epochGeneration.isBlank()) {
+                                    latestEpoch = epoch.value.epochVersion
+                                    epochGeneration = epoch.value.epochGeneration
+                                }
+                            }) return
+                            bootstrapScope = cursor.scope
                         }
-
                         is ApiResult.Error -> {
-                            setInitialStreams(response.value)
-                            loadDrafts()
+                            applyTopicCache(cursor.scope) { _streamsQueryState.value = QueryState.Error("") }
+                            return
                         }
                     }
-                } else {
-                    setInitialStreams(response.value)
-                    loadDrafts()
+                }
+                if (loadWorkspaceData || ownerReplaced)
+                    loadMessageReactions(response.value.uuid, startRealtime = loadWorkspaceData, expected = bootstrapScope)
+            }
+
+            is ApiResult.Error -> {
+                synchronized(realtimeStateLock) {
+                    if ((loadWorkspaceData || suspendedAccountSnapshot != null) && current())
+                        _streamsQueryState.value = QueryState.Error("")
                 }
             }
-
-            is ApiResult.Error -> {
-                _streamsQueryState.value = QueryState.Error("")
-            }
         }
     }
 
-    suspend fun loadDrafts() {
-        val webSocketClient = client ?: return
-        val response = webSocketClient.performRequest(DraftsRequest(), serverId)
-        when(response) {
+    suspend fun loadMessageReactions(userUuid: String, startRealtime: Boolean = true, expected: TopicCacheScope? = null) {
+        // Bind the owner identifier before IO as well as every later bootstrap stage.
+        val initial = expected ?: captureTopicCacheScope()
+        if (initial.ownerUuid != userUuid) return
+        val read = client.readTopicCache(this, MessageReactionsRequest(userUuid), initial)
+        if (read.stale || !initial.sameOwner(read.scope)) return
+        when (val response = read.result) {
             is ApiResult.Success -> {
-                setInitialDraftsPool(response.value)
-                _streamsQueryState.value = QueryState.Success
-                start()
+                if (!applyTopicCache(read.scope) { setInitialMessageReactions(response.value) }) return
+                loadAllUsersInfo(startRealtime, read.scope)
             }
-
-            is ApiResult.Error -> {
-                _streamsQueryState.value = QueryState.Success
-                start()
-            }
+            is ApiResult.Error -> applyTopicCache(read.scope) { _streamsQueryState.value = QueryState.Error("") }
         }
     }
+
+    suspend fun loadAllUsersInfo(startRealtime: Boolean = true, expected: TopicCacheScope? = null) {
+        val read = client.readTopicCache(this, UsersRequest(), expected)
+        if (read.stale || expected?.let { !it.sameOwner(read.scope) } == true) return
+        when (val response = read.result) {
+            is ApiResult.Success -> {
+                if (!applyTopicCache(read.scope) { setInitialUsers(response.value) }) return
+                loadFolders(startRealtime, read.scope)
+            }
+            is ApiResult.Error -> applyTopicCache(read.scope) { _streamsQueryState.value = QueryState.Error("") }
+        }
+    }
+    suspend fun loadFolders(startRealtime: Boolean = true, expected: TopicCacheScope? = null) {
+        val read = client.readTopicCache(this, FoldersRequest(), expected)
+        if (read.stale || expected?.let { !it.sameOwner(read.scope) } == true) return
+        when (val response = read.result) {
+            is ApiResult.Success -> {
+                if (!applyTopicCache(read.scope) {
+                    setInitialFolders(response.value.sortedBy { LocalDateTime.parse(it.creationDate, folderCreationFormatter) })
+                    _currentlySelectedFolder.value = folders.value.firstOrNull()
+                }) return
+                loadSubscribedChannels(startRealtime, read.scope)
+            }
+            is ApiResult.Error -> applyTopicCache(read.scope) { _streamsQueryState.value = QueryState.Error("") }
+        }
+    }
+
+    suspend fun loadSubscribedChannels(startRealtime: Boolean = true, expected: TopicCacheScope? = null) {
+        val read = client.withTopicCacheRead(this) { session, recovery ->
+            if (expected != null && !expected.sameOwner(session))
+                return@withTopicCacheRead ApiResult.Error(ApiError("Account changed", "AUTHENTICATION_CHANGED"))
+            when (val streams = client.performRequest(if (recovery) session.recover(StreamsRequest()) else session.pin(StreamsRequest()), serverId, session.server)) {
+                is ApiResult.Error -> streams
+                is ApiResult.Success -> {
+                    val ids = streams.value.mapNotNull { it.lastMessageUuid }.distinct()
+                    val messages = if (ids.isEmpty()) emptyList() else {
+                        val request = MessagesByIdsRequest(ids)
+                        when (val result = client.performRequest(if (recovery) session.recover(request) else session.pin(request), serverId, session.server)) {
+                            is ApiResult.Error -> emptyList()
+                            is ApiResult.Success -> result.value
+                        }
+                    }
+                    ApiResult.Success(streams.value to messages)
+                }
+            }
+        }
+        if (read.stale || expected?.let { !it.sameOwner(read.scope) } == true) return
+        when (val response = read.result) {
+            is ApiResult.Success -> {
+                if (!applyTopicCache(read.scope) {
+                    if (response.value.second.isNotEmpty()) setInitialMessagesPool(response.value.second)
+                    setInitialStreams(response.value.first.map { stream -> stream.copy(lastMessage = response.value.second.firstOrNull { it.uuid == stream.lastMessageUuid }) })
+                }) return
+                loadDrafts(startRealtime, read.scope)
+            }
+            is ApiResult.Error -> applyTopicCache(read.scope) { _streamsQueryState.value = QueryState.Error("") }
+        }
+    }
+
+    suspend fun loadDrafts(startRealtime: Boolean = true, expected: TopicCacheScope? = null) {
+        val read = client.readTopicCache(this, DraftsRequest(), expected)
+        if (read.stale || expected?.let { !it.sameOwner(read.scope) } == true) return
+        if (!applyTopicCache(read.scope) {
+            if (read.result is ApiResult.Success) setInitialDraftsPool(read.result.value)
+            // Draft lookup remains optional, as in the normal bootstrap.
+            _streamsQueryState.value = QueryState.Success
+        }) return
+        if (startRealtime) start()
+    }
+
 }
 
 internal data class WebSocketEndpoint(

@@ -33,4 +33,5 @@
     <string name="messages_forward_limit">Select no more than %d messages to forward</string>
     <string name="forward_members_online">%1$s, %2$d online</string>
     <string name="inbox_open_failed">Could not open the unread message. Please try again.</string>
+    <string name="mentions_topic_retry">Retry loading topic</string>
 </resources>

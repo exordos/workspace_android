@@ -3,11 +3,14 @@ package ru.genesiscorporation.workspace.beta.modules.homedrafts
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
+import ru.genesiscorporation.workspace.beta.data.readTopicCache
 import ru.genesiscorporation.workspace.beta.data.EventsRepositoryStore
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
@@ -27,48 +30,45 @@ class HomeDraftsViewModel(
     val eventsRepository = eventsRepositoryStore.get(client.getCurrentServerId()) ?: error("Cannot get current event repository")
 
     val drafts: StateFlow<List<Draft>> = eventsRepository.draftsPool
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = eventsRepository.draftsPool.value
-        )
-
     val streams: StateFlow<List<Stream>> = eventsRepository.streams
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = eventsRepository.streams.value
-        )
-
     val topicsPool: StateFlow<List<TopicsResponseData>> = eventsRepository.topicsPool
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = eventsRepository.topicsPool.value
-        )
 
+    private val topicQueryGeneration = java.util.concurrent.atomic.AtomicLong()
     private val _topicsQueryState = MutableStateFlow<QueryState>(QueryState.Idle)
     val topicsQueryState: StateFlow<QueryState> = _topicsQueryState
 
 
     init {
         viewModelScope.launch {
-            loadTopicsIfNeeded()
+            // Same-owner token refresh must finish its bounded read instead of restarting the observer.
+            val owners = eventsRepository.verifiedOwnerAuthentication.map { it?.userUuid }.distinctUntilChanged()
+            combine(drafts, owners) { _, ownerUuid -> ownerUuid }
+                .collectLatest { ownerUuid ->
+                    if (ownerUuid == null) {
+                        topicQueryGeneration.incrementAndGet()
+                        _topicsQueryState.value = QueryState.Idle
+                    } else {
+                        loadTopicsIfNeeded()
+                    }
+                }
         }
     }
 
     suspend fun loadTopicsIfNeeded() {
+        val generation = topicQueryGeneration.incrementAndGet()
         val draftTopicUuids = drafts.value.map { it.topicUuid }
             .filter { draftUuid ->
                 topicsPool.value.firstOrNull { it.uuid == draftUuid } == null
             }
         if (!draftTopicUuids.isEmpty()) {
             _topicsQueryState.value = QueryState.Loading
-            val topicsResponse = client.performRequest(TopicsByIdsRequest(draftTopicUuids))
-            when(topicsResponse) {
+            val scoped = client.readTopicCache(eventsRepository, TopicsByIdsRequest(draftTopicUuids))
+            if (generation != topicQueryGeneration.get()) return
+            if (scoped.stale) { _topicsQueryState.value = QueryState.Idle; return }
+            when(val topicsResponse = scoped.result) {
                 is ApiResult.Success -> {
-                    eventsRepository.appendItemsToTopicsPool(topicsResponse.value)
-                    _topicsQueryState.value = QueryState.Success
+                    if (eventsRepository.appendItemsToTopicsPool(topicsResponse.value, scoped.scope))
+                        _topicsQueryState.value = QueryState.Success
                 }
                 is ApiResult.Error -> {
                     _topicsQueryState.value = QueryState.Error("")

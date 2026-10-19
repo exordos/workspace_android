@@ -29,6 +29,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.assertFalse
 import org.junit.Test
 import org.junit.runner.RunWith
+import ru.genesiscorporation.workspace.beta.fixtures.WorkspaceTestAccount
+import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
+import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import ru.genesiscorporation.workspace.beta.UserViewModel
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
@@ -56,6 +59,71 @@ import java.util.concurrent.atomic.AtomicReference
 
 @RunWith(AndroidJUnit4::class)
 class RealtimeRecoveryInstrumentedTest {
+    @Test fun directorySnapshotPreservesConcurrentRealtimeChanges() = runBlocking {
+        CursorRecoveryServer(CursorExpirySignal.PROBE, false, quietLogin = true, directoryRace = true).use { server ->
+            val account = WorkspaceTestAccount.create(server.baseUrl, enableWebSockets = true)
+            val work = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+            try {
+                account.repo.verifyCurrentAccount()
+                account.repo.setInitialStreams(listOf(directoryStream("updated"), directoryStream("deleted")))
+                account.repo.setInitialUsers(listOf(directoryUser("peer")))
+                val connection = work.launch { account.repo.start() }
+                try {
+                    withTimeout(5_000) { account.repo.messagesPool.first { all -> all.any { it.uuid == "quiet-start" } } }
+                    val directory = work.async { account.repo.ensureCurrentAccountDirectory() }
+                    try {
+                        assertTrue(withContext(Dispatchers.IO) { server.directoryStarted.await(5, TimeUnit.SECONDS) })
+                        server.sendDirectoryEvent("stream", "created", Json.encodeToString(directoryStream("created")))
+                        server.sendDirectoryEvent("stream", "updated", Json.encodeToString(directoryStream("updated").copy(name = "Live title")))
+                        server.sendDirectoryEvent("stream", "deleted", """{"uuid":"deleted"}""")
+                        server.sendDirectoryEvent("stream", "updated", Json.encodeToString(directoryStream("snapshot-only").copy(name = "Live newly loaded title")))
+                        server.sendDirectoryEvent("user", "updated", Json.encodeToString(directoryUser("snapshot-only-user").copy(firstName = "Live newly loaded author")))
+                        server.sendDirectoryEvent("user", "created", Json.encodeToString(directoryUser("created-user")))
+                        server.sendDirectoryEvent("user", "updated", Json.encodeToString(directoryUser("peer").copy(firstName = "Live author")))
+                        withTimeout(5_000) { account.repo.users.first { users -> users.any { it.uuid == "peer" && it.firstName == "Live author" } } }
+                        assertEquals(setOf("updated", "created"), account.repo.streams.value.map { it.uuid }.toSet())
+                        server.releaseDirectory.countDown()
+                        assertTrue(withTimeout(5_000) { directory.await() })
+                        assertEquals("The older HTTP snapshot must preserve realtime creation and deletion",
+                            setOf("updated", "created", "snapshot-only"), account.repo.streams.value.map { it.uuid }.toSet())
+                        assertEquals("Live title", account.repo.streams.value.single { it.uuid == "updated" }.name)
+                        assertEquals("Live newly loaded title", account.repo.streams.value.single { it.uuid == "snapshot-only" }.name)
+                        assertEquals(setOf("peer", "created-user", "snapshot-only-user"), account.repo.users.value.map { it.uuid }.toSet())
+                        assertEquals("Live newly loaded author", account.repo.users.value.single { it.uuid == "snapshot-only-user" }.firstName)
+                        assertEquals("Live author", account.repo.users.value.single { it.uuid == "peer" }.firstName)
+                        assertTrue(account.repo.ensureCurrentAccountDirectory())
+                        assertEquals("A reconciled directory is reusable", 1, server.directoryRequests.get())
+                    } finally { server.releaseDirectory.countDown(); directory.cancelAndJoin() }
+                } finally { connection.cancelAndJoin() }
+            } finally { account.close(); work.cancel() }
+        }
+    }
+
+    @Test fun loginImmediatelyReplacesAQuietAuthenticatedSocket() = checkLoginSocket(heldHandshake = false)
+    @Test fun loginRejectsAnOldHandshakeThatFinishesAfterReplacement() = checkLoginSocket(heldHandshake = true)
+
+    private fun checkLoginSocket(heldHandshake: Boolean) = runBlocking {
+        CursorRecoveryServer(CursorExpirySignal.PROBE, false, quietLogin = true, holdFirstHandshake = heldHandshake).use { server ->
+            val account = WorkspaceTestAccount.create(server.baseUrl, enableWebSockets = true)
+            val work = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+            try {
+                account.repo.verifyCurrentAccount()
+                val connection = work.launch { account.repo.start() }
+                try {
+                    if (heldHandshake) assertTrue(withContext(Dispatchers.IO) { server.firstHandshakeStarted.await(5, TimeUnit.SECONDS) })
+                    else withTimeout(5_000) { account.repo.messagesPool.first { all -> all.any { it.uuid == "quiet-start" } } }
+                    assertTrue(account.user.setTokensAndWait("cassi-fixture-replacement", "synthetic-new-refresh", account.config.id))
+                    account.repo.verifyCurrentAccount()
+                    server.releaseFirstHandshake.countDown()
+                    withTimeout(5_000) { account.repo.messagesPool.first { all -> all.any { it.uuid == "replacement-live" } } }
+                    assertEquals(listOf("original", "replacement"), server.socketOwners.toList())
+                    assertTrue("The former quiet socket must close before replacement updates arrive",
+                        withContext(Dispatchers.IO) { server.firstSocketClosed.await(1, TimeUnit.SECONDS) })
+                } finally { server.releaseFirstHandshake.countDown(); connection.cancelAndJoin() }
+            } finally { account.close(); work.cancel() }
+        }
+    }
+
     @Test fun close4410ReloadsTheOpenConversationAndResumesReplay() = runBlocking {
         checkRecovery(CursorExpirySignal.CLOSE)
     }
@@ -317,6 +385,10 @@ private fun recoveryMessage(id: String) = MessageResponse(
     payload = MessageResponsePayload("markdown", id), isOwn = false, reactions = emptyMap(), read = false,
 )
 
+private fun directoryStream(id: String) = Stream(id, 0, 0, 0, "2026-10-19T00:00:00Z", id, false, 0,
+    notificationMode = "all_messages", ownerUuid = "reader", role = "member")
+private fun directoryUser(id: String) = UserResponseData(username = id, uuid = id, firstName = "Snapshot author", status = "active", avatar = "")
+
 /** A real loopback HTTP/WebSocket peer; no app hooks, production account or external service. */
 private class CursorRecoveryServer(
     private val signal: CursorExpirySignal,
@@ -324,6 +396,9 @@ private class CursorRecoveryServer(
     private val blockHistory: Boolean = false,
     private val delayFirstInactiveHistory: Boolean = false,
     private val overlappingHistory: Boolean = false,
+    private val quietLogin: Boolean = false,
+    private val holdFirstHandshake: Boolean = false,
+    private val directoryRace: Boolean = false,
 ) : AutoCloseable {
     private val server = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
     private val running = AtomicBoolean(true)
@@ -332,6 +407,9 @@ private class CursorRecoveryServer(
     private val currentEpoch = AtomicInteger(10)
     private val histories = AtomicInteger()
     val historyRequests: Int get() = histories.get()
+    val directoryStarted = CountDownLatch(1)
+    val releaseDirectory = CountDownLatch(1)
+    val directoryRequests = AtomicInteger()
     val inactiveHistories = AtomicInteger()
     val failInactive = AtomicBoolean(true)
     val historyStarted = CountDownLatch(1)
@@ -340,6 +418,10 @@ private class CursorRecoveryServer(
     val releaseOlderHistory = CountDownLatch(1)
     private val liveSocket = AtomicReference<Socket?>()
     val socketCursors = CopyOnWriteArrayList<Int>()
+    val socketOwners = CopyOnWriteArrayList<String>()
+    val firstHandshakeStarted = CountDownLatch(1)
+    val releaseFirstHandshake = CountDownLatch(1)
+    val firstSocketClosed = CountDownLatch(1)
     val calls = CopyOnWriteArrayList<String>()
     val baseUrl = "http://127.0.0.1:${server.localPort}"
 
@@ -378,6 +460,18 @@ private class CursorRecoveryServer(
         }
         repeat(headers["content-length"]?.toIntOrNull() ?: 0) { input.read() }
         when {
+            quietLogin && path.contains("/me/") -> respond(socket, 200, Json.encodeToString(UserResponseData(
+                username = "Fixture", uuid = if (headers["authorization"] == "Bearer cassi-fixture-replacement") "replacement-reader" else "reader", status = "active", avatar = "")))
+            directoryRace && path.substringBefore('?').endsWith("/users/") ->
+                respond(socket, 200, Json.encodeToString(listOf(directoryUser("peer"), directoryUser("snapshot-only-user"))))
+            directoryRace && path.substringBefore('?').endsWith("/streams/") -> {
+                val snapshot = Json.encodeToString(listOf(directoryStream("updated"), directoryStream("deleted"), directoryStream("snapshot-only")))
+                directoryRequests.incrementAndGet()
+                directoryStarted.countDown()
+                check(releaseDirectory.await(10, TimeUnit.SECONDS))
+                respond(socket, 200, snapshot)
+            }
+            quietLogin && listOf("/message_reactions/", "/users/", "/folders/", "/streams/", "/drafts/").any { path.substringBefore('?').endsWith(it) } -> respond(socket, 200, "[]")
             headers["upgrade"] == "websocket" -> websocket(socket, input, path, headers)
             path.startsWith("/api/workspace/v1/epoch/") -> {
                 val epoch = currentEpoch.get()
@@ -439,12 +533,25 @@ private class CursorRecoveryServer(
         val first = socketCursors.isEmpty()
         socketCursors += cursor
         calls += "socket:$cursor"
+        val replacement = headers["sec-websocket-protocol"]?.contains("cassi-fixture-replacement") == true
+        if (quietLogin) {
+            socketOwners += if (replacement) "replacement" else "original"
+            if (first && holdFirstHandshake) { firstHandshakeStarted.countDown(); releaseFirstHandshake.await() }
+        }
         val accept = Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-1")
             .digest((headers.getValue("sec-websocket-key") + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").toByteArray()))
         socket.getOutputStream().write(("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n" +
             "Connection: Upgrade\r\nSec-WebSocket-Accept: $accept\r\n" +
             "Sec-WebSocket-Protocol: workspace.events.v1\r\n\r\n").toByteArray())
-        text(socket, """{"type":"ready","epoch_version":$cursor,"epoch_generation":"generation"}""")
+        if (!quietLogin || replacement || !holdFirstHandshake) {
+            text(socket, """{"type":"ready","epoch_version":$cursor,"epoch_generation":"generation"}""")
+            if (quietLogin) {
+                if (directoryRace) liveSocket.set(socket)
+                val message = recoveryMessage(if (replacement) "replacement-live" else "quiet-start")
+                    .copy(userUuid = if (replacement) "replacement-reader" else "reader")
+                text(socket, """{"object_type":"message","action":"created","epoch_version":$cursor,"payload":${Json.encodeToString(message)}}""")
+            }
+        }
         if (first && signal != CursorExpirySignal.PROBE) {
             if (overlappingHistory) historyStarted.await()
             currentEpoch.set(11)
@@ -453,7 +560,7 @@ private class CursorRecoveryServer(
             frame(socket, 8, ByteBuffer.allocate(2).putShort(if (signal == CursorExpirySignal.CLOSE) 4410 else 1000).array())
             return
         }
-        if (!first) {
+        if (!first && !quietLogin) {
             liveSocket.set(socket)
             calls += "live:$cursor"
             if (!overlappingHistory) {
@@ -476,13 +583,19 @@ private class CursorRecoveryServer(
             val data = ByteArray(length).also { input.readFully(it) }
             if (mask != null) data.indices.forEach { data[it] = (data[it].toInt() xor mask[it % 4].toInt()).toByte() }
             when (firstByte and 15) {
-                8 -> { frame(socket, 8, data); return }
+                8 -> { if (quietLogin && first) firstSocketClosed.countDown(); frame(socket, 8, data); return }
                 9 -> frame(socket, 10, data)
             }
         }
     }
 
     private fun text(socket: Socket, text: String) = frame(socket, 1, text.toByteArray())
+
+    fun sendDirectoryEvent(type: String, action: String, payload: String) {
+        val socket = checkNotNull(liveSocket.get())
+        val epoch = currentEpoch.incrementAndGet()
+        text(socket, """{"object_type":"$type","action":"$action","epoch_version":$epoch,"payload":$payload}""")
+    }
 
     fun sendLive(id: String) {
         val socket = checkNotNull(liveSocket.get())
@@ -509,8 +622,10 @@ private class CursorRecoveryServer(
 
     override fun close() {
         running.set(false)
+        releaseDirectory.countDown()
         releaseHistory.countDown()
         releaseOlderHistory.countDown()
+        releaseFirstHandshake.countDown()
         server.close()
         sockets.forEach { it.close() }
         workers.shutdownNow()

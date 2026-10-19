@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import ru.genesiscorporation.workspace.beta.HomeFlow
+import ru.genesiscorporation.workspace.beta.data.readTopicSnapshot
 import ru.genesiscorporation.workspace.beta.data.EventsRepositoryStore
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
@@ -41,6 +42,7 @@ class HomeInboundsViewModel(
     val streams = eventsRepository.streams
     val streamTopics = eventsRepository.streamTopics
 
+    private val topicQueryGeneration = java.util.concurrent.atomic.AtomicLong()
     private val _topicsQueryState = MutableStateFlow<QueryState>(QueryState.Idle)
     val topicsQueryState: StateFlow<QueryState> = _topicsQueryState
 
@@ -57,29 +59,20 @@ class HomeInboundsViewModel(
     }
 
     suspend fun loadTopics(streams: List<Stream>) {
+        val generation = topicQueryGeneration.incrementAndGet()
         if (_topicsQueryState.value != QueryState.Success) _topicsQueryState.value = QueryState.Loading
         if (streams.isEmpty()) {
             _topicsQueryState.value = QueryState.Success
             return
         }
-        when (val response = client.performRequest(TopicsRequest(streams.map { it.uuid }))) {
+        val scoped = client.readTopicSnapshot(eventsRepository, TopicsRequest(streams.map { it.uuid }))
+        if (generation != topicQueryGeneration.get()) return
+        if (scoped.stale) { _topicsQueryState.value = QueryState.Idle; return }
+        when (val response = scoped.result) {
             is ApiResult.Success -> {
-                val messageIds = response.value.mapNotNull { it.lastMessageUuid }.distinct()
-                if (messageIds.isNotEmpty()) {
-                    when (val messages = client.performRequest(MessagesByIdsRequest(messageIds))) {
-                        is ApiResult.Success -> eventsRepository.updateMessagesPool(messages.value)
-                        is ApiResult.Error -> Unit
-                    }
-                }
-                streams.forEach { stream ->
-                    val cachedTopics = streamTopics.value[stream.uuid].orEmpty().associateBy { it.uuid }
-                    val topics = response.value.filter { it.streamUuid == stream.uuid }.map { topic ->
-                        topic.copy(lastMessage = eventsRepository.poolMessage(topic.lastMessageUuid)
-                            ?: cachedTopics[topic.uuid]?.lastMessage?.takeIf { it.uuid == topic.lastMessageUuid })
-                    }
-                    eventsRepository.addStreamTopics(stream.uuid, topics)
-                }
-                _topicsQueryState.value = QueryState.Success
+                val topics = streams.associate { stream -> stream.uuid to response.value.topics.filter { it.streamUuid == stream.uuid } }
+                if (eventsRepository.publishTopicSnapshot(scoped.scope, topics, response.value.messages))
+                    _topicsQueryState.value = QueryState.Success
             }
             is ApiResult.Error -> _topicsQueryState.value = QueryState.Error("")
         }

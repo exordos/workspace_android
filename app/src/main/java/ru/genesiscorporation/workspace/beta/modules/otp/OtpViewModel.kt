@@ -58,6 +58,7 @@ class OtpViewModel(
                     refreshToken = userResponse.refreshToken,
                 )
                 _queryState.value = if (saved) {
+                    userViewModel.verifyCurrentLogin()
                     QueryState.Success
                 } else {
                     QueryState.Error("Error")

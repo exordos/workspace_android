@@ -1,5 +1,6 @@
 package ru.genesiscorporation.workspace.beta.modules.streaminfo
 
+import ru.genesiscorporation.workspace.beta.data.addStreamTopics
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.material3.Text

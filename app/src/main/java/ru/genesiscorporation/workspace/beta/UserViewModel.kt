@@ -10,6 +10,8 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -139,6 +141,17 @@ class UserViewModel(
             targetServerId,
             TokenPair(accessToken, refreshToken),
         )
+        return true
+    }
+
+    suspend fun verifyCurrentLogin(reloadWorkspace: Boolean = false, serverId: String? = null): Boolean {
+        val id = serverId ?: selectedServerId.value ?: return false
+        val server = repo.getServer(id) ?: return false
+        // Proof and bootstrap must capture the final persisted project, not a lagging UI snapshot.
+        withTimeoutOrNull(5_000) { servers.first { all -> all.firstOrNull { it.id == id } == server } }
+            ?: return false
+        if (repo.getServer(id) != server) return false
+        repo.verifyLogin(server, reloadWorkspace)
         return true
     }
 

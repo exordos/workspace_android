@@ -220,6 +220,14 @@ class WorkspaceAPIClient(
                     val response = json.decodeFromString<Response>(responseString)
                     ApiResult.Success(response)
                 }
+            } else if (httpResponse.status.value == 401 && request is RecoverableProtectedRequest) {
+                // A renewed credential has no confirmed owner yet. Leave the captured operation
+                // unreplayed; account observers must verify /me and issue a fresh query.
+                when (val refresh = refreshSession(activeServerId, accessToken.orEmpty(),
+                    expectedAuthentication = request.authentication, expectedServer = activeServerConfig)) {
+                    is ApiResult.Success -> ApiResult.Error(ApiError("Session renewed; verify the owner before reloading", "AUTHENTICATION_CHANGED"))
+                    is ApiResult.Error -> ApiResult.Error(refresh.error)
+                }
             } else if (
                 httpResponse.status.value == 401 &&
                 request.requiresApiKey &&
@@ -431,8 +439,18 @@ class WorkspaceAPIClient(
     internal suspend fun refreshSession(
         serverId: String,
         failedAccessToken: String,
+        expectedAuthentication: ProtectedRequestAuthentication? = null,
+        expectedServer: ServerConfig? = null,
     ): ApiResult<TokenPair, ApiError> = refreshMutex.withLock {
+        suspend fun scopeCurrent(): Boolean = expectedServer == null ||
+            (requireUserViewModel().selectedServer.value == expectedServer &&
+                requireUserViewModel().selectedServerId.value == serverId &&
+                requireUserViewModel().getServer(serverId) == expectedServer && !expectedServer.needsToRelogin)
         val currentTokens = requireUserViewModel().getTokens(serverId)
+        if (!scopeCurrent() || (expectedAuthentication != null &&
+                !expectedAuthentication.matchesAccessToken(currentTokens?.accessToken))) {
+            return@withLock ApiResult.Error(authenticationChangedError())
+        }
         val currentAccessToken = currentTokens?.accessToken
         if (
             !currentAccessToken.isNullOrBlank() &&
@@ -454,6 +472,7 @@ class WorkspaceAPIClient(
             val refreshResponse = performRequest(
                 TokenRefreshRequest(storedRefreshToken),
                 serverId,
+                serverConfig = expectedServer,
             )
         ) {
             is ApiResult.Success -> {
@@ -462,6 +481,7 @@ class WorkspaceAPIClient(
                     accessToken = userResponse.accessToken,
                     refreshToken = userResponse.refreshToken,
                 )
+                if (!scopeCurrent()) return@withLock ApiResult.Error(authenticationChangedError())
                 val saved = requireUserViewModel().repo.saveRefreshedTokensIfCurrent(
                     serverId = serverId,
                     expectedRefreshToken = storedRefreshToken,
@@ -473,7 +493,7 @@ class WorkspaceAPIClient(
                 ApiResult.Success(refreshedTokens)
             }
             is ApiResult.Error -> {
-                if (shouldRequireReloginAfterRefresh(refreshResponse.error)) {
+                if (scopeCurrent() && shouldRequireReloginAfterRefresh(refreshResponse.error)) {
                     requireUserViewModel().repo.setNeedsToReloginIfRefreshTokenCurrent(
                         serverId = serverId,
                         expectedRefreshToken = storedRefreshToken,

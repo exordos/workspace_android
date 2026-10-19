@@ -1,5 +1,6 @@
 package ru.genesiscorporation.workspace.beta.modules.chatdialog
 
+import ru.genesiscorporation.workspace.beta.data.readTopicCache
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -202,14 +203,17 @@ internal fun ForwardMessagesDialog(
         } else {
             scope.launch {
                 topicsLoading = true
-                when (val response = client.performRequest(TopicsRequest(listOf(stream.uuid)))) {
+                val scoped = client.readTopicCache(repo, TopicsRequest(listOf(stream.uuid)))
+                if (scoped.stale) { topicsLoading = false; return@launch }
+                when (val response = scoped.result) {
                     is ApiResult.Success -> {
-                        topics = response.value.filter {
+                        val freshTopics = response.value.filter {
                             it.streamUuid == stream.uuid && isCanonicalForwardUuid(it.uuid)
                         }.distinctBy(TopicsResponseData::uuid).sortedWith(
                             compareByDescending<TopicsResponseData> { it.isDefault }.thenBy { it.name.lowercase() },
                         )
-                        repo.addStreamTopics(stream.uuid, topics)
+                        if (!repo.addStreamTopics(stream.uuid, freshTopics, scoped.scope)) { topicsLoading = false; return@launch }
+                        topics = freshTopics
                         if (stream.isPrivate && !stream.directUserUuid.isNullOrBlank()) {
                             topics.singleOrNull { it.isDefault }?.let { topic ->
                                 destination = ForwardDestination(stream.uuid, topic.uuid)

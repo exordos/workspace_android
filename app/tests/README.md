@@ -370,3 +370,185 @@ the themed invalid-ciphertext error, then repeat after process recreation and
 rotation. The optional host port permits
 independent runs; its default and the existing request/retry modes are unchanged.
 Neither the key nor real account data belongs in the exported payload file.
+
+## Mentions topic navigation
+
+Pinned Mentions queries opt into the shared HTTP client's session recovery. A 401
+may renew the still-current credential through the common refresh mutex and token
+store, but never replays that captured query. The owner-only
+`EventsRepository.verifyCurrentAccount()` path shares `/me` verification. A
+same-owner check returns before bootstrap and preserves shared state on failure.
+A proven owner replacement clears account projections and runs the existing
+owner-scoped metadata bootstrap without starting another realtime loop. Chat
+therefore reloads even when Mentions is never created; failure exposes its Retry
+UI. Every bootstrap stage carries the captured owner generation, and reconnect
+captures a fresh owner-bound cursor before replacement snapshots, so replay
+covers events arriving during their reads. The Chat reconnect regressions check
+that cursor HTTP request precedes the first metadata request.
+
+Every asynchronous topic-cache producer carries a `TopicCacheScope` captured before
+IO. Publication checks the repository lineage, account generation, owner, server
+and credential while holding the same lock as owner verification. Explicit login
+replacement revokes the generation even if token values are reused. All account
+projections are hidden on revocation. A private in-memory snapshot
+can be restored only after `/me` confirms the same owner; a replacement owner
+discards it. Ordinary same-owner refresh and unchanged-credential verification
+preserve valid caches. Realtime uses the scope
+captured for its connection. Immediate projection fixtures have test-only seeding
+extensions; production has no unscoped metadata-write overload.
+
+`readTopicCache` and `readTopicSnapshot` share the bounded owner-bound read for chat,
+inbox, drafts and forwarding. Metadata and optional message enrichment form one
+attempt. A credential change discards the whole old result, confirms `/me`, and
+starts one fresh attempt only for the same owner; a replacement owner never
+receives the old IDs. Atomic snapshot publication also guards message enrichment.
+Pinned encrypted-runtime reads retain their existing mutation/session policy.
+
+A confirmed owner replacement also clears the shared stream/user directory.
+The private suspended snapshot preserves same-owner data needed to restore
+encrypted chats after fresh `/me` proof. Mentions waits
+for a fresh owner-scoped directory before publishing rows, including previously
+unseen streams and colliding stream/user UUIDs. It reads the current repository
+user flow directly so author/avatar data cannot remain in an unsubscribed
+derived flow. Directory snapshots use the same bounded captured-session recovery;
+late bootstrap responses cannot overwrite another owner's data or advance its
+loading state. Folder snapshots and the selected filter are scoped as well.
+Explicit credential replacement hides every public account projection immediately.
+A private suspended snapshot is restored only after `/me` proves the same owner,
+including topic/history caches used by retained Inbox, Drafts and Chat consumers.
+A different owner discards it. Failed proof keeps data hidden and exposes Retry.
+Login and OTP start the bounded common verification without waiting for a websocket
+frame. Regressions reproduce all four paths on the previous APK.
+
+Project selection finalizes login only after the project-scoped credential and
+project configuration are persisted. The shared login hook waits for the current
+configuration snapshot, gets the matching repository and starts the existing
+workspace bootstrap for the final project. Regressions cover reselecting the same
+project after preliminary Login verification and selecting a different project.
+
+Credential revocation also closes the captured active websocket through the
+existing connection loop, without waiting for an incoming frame or the 30-second
+probe. A handshake completing after revocation is rejected before publishing its
+session. Real loopback websocket regressions keep the old peer quiet and require
+replacement-credential live messages within five seconds, covering both an active
+session and a delayed handshake.
+
+Retained Drafts observes the repository's current draft list and verified owner,
+cancels superseded topic loads and reads direct repository flows. A new owner's
+draft emission therefore starts a scoped topic load without recreating the screen.
+Same-owner token refresh does not restart that observer, preserving the shared
+one-refresh budget; a repeated 401 exposes Error. UI regressions cover replacement
+while idle and with an old request in flight, plus the bounded expiry control.
+
+Regressions cover replacement names/avatars, different stream IDs, failed reloads,
+successful delayed bootstrap responses and expiry on both directory endpoints.
+Same-owner directory reloads preserve an already loaded last-message preview
+only when its UUID still matches the fresh stream metadata; replacement-owner
+clearing prevents carrying the previous account's preview across.
+The real `ChatWithTopics` regressions cover realtime replacement without Mentions,
+failure/retry, and a delayed old folder response. Their account fixture enables
+WebSockets so they also verify a real reconnect request after the bounded reload.
+
+Regressions delay successful Chat/Inbox metadata and enrichment responses across
+login replacement, reuse stream/topic UUIDs across owners, and verify 403 handling,
+shared Home/Chat state after owner-only 503, primary/enrichment expiry recovery,
+concurrent recovery and bounded retries. The regular bootstrap failure path remains
+covered separately. Adjacent Inbox, forwarding, encrypted runtime, realtime,
+notification/deletion projections and transport checks cover the shared boundary.
+
+`MentionNavigationInstrumentedTest` clicks the actual `HomeMentionsScreen` row,
+then decodes `HomeFlow.ChatDialog` and passes those arguments to the production
+dialog. It verifies message topic UUID/name, visible history, real HTTP query
+parameters, cold and cached default history, cached topic metadata, lookup retry,
+stream/topic mismatch, account switches and same-server replacement logins during
+message/topic requests or after row rendering. A credential change must verify its
+owner and perform a fresh bounded load before publishing results. It covers
+public topics, two-member private chats and self conversations using isolated synthetic
+accounts and the existing loopback HTTP fixture.
+
+```sh
+ANDROID_SERIAL=TASK_EMULATOR ./gradlew :app:connectedExordosDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.class=ru.genesiscorporation.workspace.beta.modules.homementions.MentionNavigationInstrumentedTest
+```
+
+Private-chat presentation continues to use the existing privacy contract.
+The tests preserve conversation classification and use two-member private chats.
+A mixed cached/missing-topic lookup failure keeps cached mentions usable. The
+unresolved row retries only missing metadata, without repeating the messages
+request or hiding cached rows when that endpoint is unavailable. The retry is
+disabled while the lookup is pending. Account invalidations clear loaded bodies
+even while the Activity is stopped and its Mentions view model is retained.
+Repeating /me with unchanged credentials must preserve the loaded list and route.
+A credential refresh first clears old bodies, verifies the same owner, then loads
+fresh rows automatically. A verified replacement owner rebinds the retained model
+and loads that account's rows, including after the Activity resumes and on explicit
+reload. The old rows stay cleared while verification is pending. Delayed responses
+remain bound to the credential that sent the request and cannot replace the new
+owner's rows or metadata. Superseded requests cannot publish bodies or metadata.
+Both messages and topic lookups pin the verified credential, so a delayed 401
+cannot replay the old operation or its topic UUIDs as a replacement account.
+The HTTP regressions confirm the held response is 401 and wait for the old
+operation to finish before checking the wire log; the two accounts have different topic UUIDs.
+Switching away and back must restore the original organization; returning to the
+original owner after another login also restores its list. A cosmetic organization
+name change must not leave a retained screen blank. A first-open model after
+replacement login must adopt the verified owner rather than cached /me data.
+
+For optimized APK acceptance, reuse the debug seed and same-certificate release
+update under **Avatar credential boundary**. Run the Kotlin host fixture with
+the following command, then forward
+the seeded device port 19557 to that host port. Open My activity → Mentions and
+select public/private default and non-default rows. Self-chat coverage remains in
+the instrumented matrix. Check
+`navigation-network.jsonl` for the exact selected topic UUID and authorization
+match booleans, and inspect the rendered header/history after cold entry, cached
+default history, process recreation, rotation and window resizing. Stop only the
+task's host fixture and remove its emulator/port forward afterward. No deployed
+backend, production account or physical device is needed for these checks.
+
+```sh
+./gradlew --no-daemon -p app/tests/host runNavigationFixture \
+  -PnavigationArtifacts=/absolute/artifacts -PnavigationPort=FREE_PORT
+```
+
+The fixture's Epoch HTTP contract is checked separately against the numeric
+version and string generation expected by the Android DTO:
+
+```sh
+./gradlew --no-daemon -p app/tests/host runNavigationFixture \
+  -PnavigationArtifacts=/absolute/fresh-artifacts -PnavigationPort=FREE_PORT \
+  -PnavigationVerifyEpoch=true
+```
+
+The loopback host fixture has four workers, a 32-task queue and a 2 MiB request-log
+cap. Its resource regression exercises both the actual executor and log writer:
+
+```sh
+./gradlew --no-daemon -p app/tests/host runNavigationFixture \
+  -PnavigationArtifacts=/absolute/fresh-artifacts -PnavigationPort=FREE_PORT \
+  -PnavigationVerifyLimits=true
+```
+
+To check partial lookup failure in the optimized APK, write `cached-only` to the
+fixture's `navigation-mode.txt` before opening Mentions. Then write `fail-topics`
+and retry an unresolved row: cached rows must remain visible and usable after the
+503. Write `fail-messages` and retry again: metadata must resolve without another
+mentioned-messages request, and the selected row must open its actual topic. Write
+`normal` before the ordinary navigation matrix.
+The fixture returns only synthetic data in every mode.
+
+For optimized token-expiry acceptance, set `navigation-mode.txt` to
+`expire-messages` or `expire-topics` before opening Mentions in a freshly seeded
+fixture account. The fixture rejects the old credential on that endpoint and
+returns a synthetic renewed credential from the real refresh path. Require one
+refresh, a subsequent `/me`, a fresh mentions query, and correct topic navigation;
+`refreshed_fixture` in the bounded request log records credential use without
+logging token values. These checks use the loopback peer, not a deployed IAM service.
+
+For optimized coverage of the shared snapshot reader, the host fixture also
+supports `expire-enrichment`: it rejects the old credential on a messages-by-IDs
+request and supplies synthetic last-message IDs for topics. Open Inbox and require
+one refresh, owner verification, a fresh metadata/enrichment attempt, and the
+selected topic history. `expire-topics` on the Chat topic list exercises the same
+owner-bound path. The fixture remains loopback-only and logs matching booleans,
+never credential values.

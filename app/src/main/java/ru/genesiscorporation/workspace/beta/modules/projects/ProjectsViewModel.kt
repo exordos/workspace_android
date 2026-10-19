@@ -80,8 +80,11 @@ class ProjectsViewModel(
                     refreshToken = userResponse.refreshToken,
                     serverId = serverId,
                 )
-                if (saved) userViewModel.updateSelectedServerProjectUuid(projectUuid, projectName, serverId)
-                _queryState.value = if (saved) {
+                val ready = if (saved) {
+                    userViewModel.updateSelectedServerProjectUuid(projectUuid, projectName, serverId)
+                    userViewModel.verifyCurrentLogin(reloadWorkspace = true, serverId = serverId)
+                } else false
+                _queryState.value = if (ready) {
                     QueryState.Success
                 } else {
                     QueryState.Error("Error")
