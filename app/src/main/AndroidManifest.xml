@@ -17,6 +17,16 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Wokspace"
         android:networkSecurityConfig="@xml/network_security_config">
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
+        </provider>
         <activity
             android:name=".MainActivity"
             android:launchMode="singleTop"
@@ -44,6 +54,7 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/message_share_paths" />
         </provider>
+        <receiver android:name=".data.push.PushDismissReceiver" android:exported="false" />
         <service
             android:name=".data.MyFirebaseMessagingService"
             android:exported="false">

@@ -13,7 +13,6 @@ import ru.genesiscorporation.workspace.beta.data.EventsRepository
 import ru.genesiscorporation.workspace.beta.data.EventsRepositoryStore
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
-import ru.genesiscorporation.workspace.beta.data.remote.dto.DeleteFcmTokenRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ResetAvatarRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 

@@ -1,0 +1,14 @@
+<resources>
+    <string name="push_channel_name">Сообщения Workspace</string>
+    <string name="push_new_message">Новое сообщение</string>
+    <string name="push_display_limits">Уведомления на устройстве</string>
+    <string name="push_group_limit">Чатов на экране: %1$d</string>
+    <string name="push_message_limit">Сообщений в чате: %1$d</string>
+    <string name="push_limit_explanation">Скрытые уведомления остаются непрочитанными и могут вернуться без звука. Одновременно показывается не более 40 карточек, включая группы.</string>
+    <plurals name="push_unread_count">
+        <item quantity="one">%d непрочитанное сообщение</item>
+        <item quantity="few">%d непрочитанных сообщения</item>
+        <item quantity="many">%d непрочитанных сообщений</item>
+        <item quantity="other">%d непрочитанных сообщений</item>
+    </plurals>
+</resources>

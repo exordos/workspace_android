@@ -7,6 +7,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,6 +26,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.Slider
+import androidx.compose.ui.res.stringResource
+import kotlinx.coroutines.Dispatchers
+import ru.genesiscorporation.workspace.beta.data.push.WorkspacePushNotifications
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -88,7 +94,9 @@ fun VisualSettingsScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .background(LocalWorkspaceColorsPalette.current.background)
+                .verticalScroll(rememberScrollState())
         ) {
+            PushNotificationLimits()
             Column(
                 modifier = Modifier
                     .padding(horizontal = 12.dp)
@@ -180,5 +188,23 @@ fun VisualSettingsScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun PushNotificationLimits() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var limits by remember { mutableStateOf(WorkspacePushNotifications(context).limits()) }
+    fun save() { scope.launch(Dispatchers.IO) { WorkspacePushNotifications(context).setLimits(limits.conversations, limits.messages) } }
+    Column(Modifier.fillMaxWidth().padding(12.dp)) {
+        Text(stringResource(R.string.push_display_limits), color = LocalWorkspaceColorsPalette.current.textHeaders)
+        Text(stringResource(R.string.push_group_limit, limits.conversations))
+        Slider(value = limits.conversations.toFloat(), onValueChange = { limits = limits.copy(conversations = it.toInt()) },
+            valueRange = 1f..5f, steps = 3, onValueChangeFinished = { save() })
+        Text(stringResource(R.string.push_message_limit, limits.messages))
+        Slider(value = limits.messages.toFloat(), onValueChange = { limits = limits.copy(messages = it.toInt()) },
+            valueRange = 1f..10f, steps = 8, onValueChangeFinished = { save() })
+        Text(stringResource(R.string.push_limit_explanation), fontSize = 12.sp)
     }
 }

@@ -90,6 +90,12 @@ class EventsRepository(
 ) {
 
     private val originalServer = config.copy()
+    internal var onPushMessagesKnown: (List<MessageResponse>) -> Unit = {}
+    internal var onPushMessageRemoved: (String) -> Unit = {}
+    internal var onPushRead: (List<String>) -> Unit = {}
+    internal var onPushRefreshNeeded: () -> Unit = {}
+    fun notificationRead(messageUuids: List<String>) { onPushRead(messageUuids) }
+
     internal fun matchesServerConfiguration(server: ServerConfig): Boolean =
         server.id == serverId && server.baseUrl == originalServer.baseUrl && server.projectUuid == originalServer.projectUuid
 
@@ -183,6 +189,7 @@ class EventsRepository(
         _currentlySelectedFolder.update { newFolder }
     }
     fun addStreamTopicMessages(streamUuid: String, topicUuid: String, messages: List<MessageResponse>) {
+        onPushMessagesKnown(messages)
         val messagesWithUser = messages.map { message ->
             message.user = users.value.firstOrNull { it.uuid == message.authorUuid }
             message
@@ -338,6 +345,7 @@ class EventsRepository(
     }
 
     fun removeMessage(messageUuid: String) {
+        onPushMessageRemoved(messageUuid)
         _streamTopicMessages.update { current ->
             current.mapValues { (_, messages) ->
                 messages.filterNot { it.uuid == messageUuid }
@@ -495,6 +503,7 @@ class EventsRepository(
     }
 
     fun updateMessagesPool(newList: List<MessageResponse>) {
+        onPushMessagesKnown(newList)
         val currentPoolIds = _messagesPool.value.map { it.uuid }
         val filteredMessages = newList.filter { !currentPoolIds.contains(it.uuid) }
         val messagesWithUser = filteredMessages.map { message ->
@@ -978,6 +987,7 @@ class EventsRepository(
                 synchronized(realtimeStateLock) { activeSession = this }
                 try {
                     onConnected()
+                    onPushRefreshNeeded()
                     Log.d("WebSocket", "Connected: ${endpoint.displayUrl()}")
                     for (frame in incoming) {
                         if (tokenStore.get(serverId)?.accessToken != accessToken ||
@@ -1178,6 +1188,7 @@ class EventsRepository(
     }
 
     fun didReceiveTopicEvent(payload: String, action: String) {
+        onPushRefreshNeeded()
         when(action) {
             "created" -> {
                 val topic = json.decodeFromString< TopicsResponseData>(payload)
