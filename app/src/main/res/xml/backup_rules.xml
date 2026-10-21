@@ -2,4 +2,7 @@
 <full-backup-content>
     <!-- Chat keys are device-bound; recovery uses the authenticated key-request flow. -->
     <exclude domain="sharedpref" path="workspace_chat_secrets_v1.xml" />
+        <exclude domain="sharedpref" path="workspace_push_secrets_v1.xml" />
+        <exclude domain="sharedpref" path="workspace_push_receipts.xml" />
+        <exclude domain="database" path="workspace_push_inbox.db" />
 </full-backup-content>

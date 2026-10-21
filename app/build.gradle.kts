@@ -99,6 +99,7 @@ tasks.withType<GoogleServicesTask>().configureEach {
 }
 
 dependencies {
+    implementation("androidx.work:work-runtime-ktx:2.11.2")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
@@ -138,6 +139,7 @@ dependencies {
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
+    androidTestImplementation("androidx.work:work-testing:2.11.2")
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.tooling)
@@ -147,6 +149,8 @@ dependencies {
 tasks.register<JavaCompile>("compileEmojiReleaseSmoke") {
     source("tests/release/EmojiReleaseInstrumentation.java",
         "tests/release/FirebaseNotificationReleaseInstrumentation.java",
+        "tests/release/PushWorkerReleaseInstrumentation.java",
+        "tests/release/WorkspacePushLiveReleaseInstrumentation.java",
         "tests/instrumented/java/com/exordos/workspace/cassi/releasetest/AvatarFixtureInstrumentation.java")
     classpath = files(providers.provider { androidComponents.sdkComponents.bootClasspath.get() })
     destinationDirectory.set(layout.buildDirectory.dir("emoji-release-smoke/classes"))
@@ -189,6 +193,10 @@ tasks.register("buildEmojiReleaseSmoke") {
                 <instrumentation android:name="com.exordos.workspace.cassi.releasetest.AvatarFixtureInstrumentation"
                     android:targetPackage="com.exordos.workspace"/>
                 <instrumentation android:name="com.exordos.workspace.cassi.releasetest.FirebaseNotificationReleaseInstrumentation"
+                    android:targetPackage="com.exordos.workspace"/>
+                <instrumentation android:name="com.exordos.workspace.cassi.releasetest.PushWorkerReleaseInstrumentation"
+                    android:targetPackage="com.exordos.workspace"/>
+                <instrumentation android:name="com.exordos.workspace.cassi.releasetest.WorkspacePushLiveReleaseInstrumentation"
                     android:targetPackage="com.exordos.workspace"/>
             </manifest>
         """.trimIndent(), Charsets.UTF_8)

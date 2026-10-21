@@ -88,6 +88,34 @@ system Toast for each response.
 
 ## FCM notification regressions
 
+`PushWorkerFactoryTest` verifies constructor injection against an isolated
+authenticated loopback account, fresh worker instances, fallback for unrelated
+workers, and execution through the application's real WorkManager configuration
+without launching an Activity. Run it in a fresh dedicated test process to check
+cold background startup:
+
+```sh
+ANDROID_SERIAL=TASK_SERIAL ./gradlew :app:connectedExordosDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.class=ru.genesiscorporation.workspace.beta.data.push.PushWorkerFactoryTest
+```
+
+For the optimized APK, build `:app:buildEmojiReleaseSmoke` and sign its framework
+driver and the release APK with the same test certificate. On a dedicated test
+installation, force-stop the target and run:
+
+```sh
+adb -s TASK_SERIAL shell am instrument -w \
+  com.exordos.workspace.cassi.releasetest/.PushWorkerReleaseInstrumentation
+```
+
+Require `result=PASS`, `new_startup_worker_succeeded=true`,
+`activity_launched=false` and instrumentation code `-1`. Before
+`Application.onCreate`, the driver removes Activity tasks left by earlier UI
+tests and snapshots existing work IDs. It requires a new successful
+startup reconciliation, so an earlier debug run cannot satisfy it. If the
+release mapping renames the worker, pass its mapped name with `-e workerClass`.
+The driver adds no production keep rules and does not require a live backend.
+
 `NotificationMessageIdTest` covers decimal producer IDs, malformed values and
 notification-key compatibility. `FirebaseNotificationsTest` posts synthetic
 callbacks into Android's real notification registry: private/stream payloads,

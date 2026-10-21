@@ -126,3 +126,9 @@ Update the [architecture](architecture.md), [features](features.md), and
 histories and logs in the external verification archive; retain commands,
 criteria, and current limitations here. Commit, PR, release, and deployment
 operations require authorization within the task's scope.
+
+## Native encrypted mobile push
+
+The per-device registration, HPKE envelope, offline receipt and account-scoped
+notification route are described in [mobile-push.md](mobile-push.md). Firebase
+client configuration and server sending credentials are separate requirements.
