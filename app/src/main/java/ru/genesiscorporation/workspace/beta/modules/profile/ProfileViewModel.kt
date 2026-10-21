@@ -20,7 +20,6 @@ import ru.genesiscorporation.workspace.beta.data.confirmedAccountContext
 import ru.genesiscorporation.workspace.beta.data.EventsRepositoryStore
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
-import ru.genesiscorporation.workspace.beta.data.remote.dto.DeleteFcmTokenRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ServerSettingsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ProjectsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
@@ -109,29 +108,17 @@ class ProfileViewModel(
         }
     }
 
-    fun currentPushToken(): String? {
-        return eventsRepo.value?.pushId
-    }
     fun logout() {
         val captured = userViewModel.selectedServer.value?.copy() ?: return
         if (userViewModel.selectedServerId.value != captured.id) return
-        val repo = eventsRepositoryStore.get(captured.id)
-        val confirmed = repo?.let { confirmedAccountContext(client, it) }
-        val pushToken = repo?.pushId
         viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
             try {
                 userViewModel.removeServer(captured.id)
             } catch (_: Exception) {
                 _queryState.value = QueryState.Error("Не удалось удалить локальные ключи. Повторите выход.")
-                return@launch
-            }
-            if (confirmed != null && pushToken != null) {
-                client.performRequest(confirmed.pin(DeleteFcmTokenRequest("workspace:android:$pushToken")), captured.id, captured)
             }
         }
     }
 
-    suspend fun deleteToken(token: String) {
-        client.performRequest(DeleteFcmTokenRequest(token))
-    }
+
 }

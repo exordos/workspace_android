@@ -20,6 +20,8 @@ class ServerSettingsRequest(
 
 @Serializable
 data class ServerSettingsResponseData(
+    @SerialName("organization_uuid") val organizationUuid: String? = null,
+    @SerialName("push_notifications_enabled") val pushNotificationsEnabled: Boolean = false,
     val email_auth_enabled: Boolean,
     @SerialName("realm_name") val realmName: String,
     @SerialName("realm_url") val realmUrl: String,

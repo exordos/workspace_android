@@ -17,6 +17,11 @@ import ru.genesiscorporation.workspace.beta.R
 
 class MyFirebaseMessagingService: FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
+        message.data["payload"]?.let {
+            // New Workspace protocol is data-only and never falls through to plaintext legacy parsing.
+            runCatching { ru.genesiscorporation.workspace.beta.data.push.WorkspacePushNotifications(this).receive(it) }
+            return
+        }
 
         // Check if message contains a data payload.
         if (message.data.isNotEmpty() && message.data["kind"] != null) {
@@ -113,6 +118,7 @@ class MyFirebaseMessagingService: FirebaseMessagingService() {
         super.onNewToken(token)
         // handle token refresh
         FCMTokenHolder.token = token
+        ru.genesiscorporation.workspace.beta.data.push.PushRegistrationWorker.schedule(this)
         Log.d(TAG, "FCM registration token refreshed")
     }
 

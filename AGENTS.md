@@ -1,5 +1,13 @@
 # Android project instructions
 
+## Kotlin imports
+
+- Use explicit imports at the top of Kotlin files for referenced types and
+  top-level functions, and short names in the code. Keep a fully qualified name
+  only to resolve an actual name collision; prefer an import alias when clearer.
+- Before publishing, check changed Kotlin code for unnecessary repeated package
+  paths and move them to imports.
+
 ## Google Play technical quality
 
 - For development and release preparation, verify the applicable requirements in [Google Play technical quality requirements](https://support.google.com/googleplay/android-developer/answer/17492799). Read the current source for thresholds, scope, and enforcement dates.

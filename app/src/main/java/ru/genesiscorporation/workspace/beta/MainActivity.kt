@@ -5,6 +5,8 @@ import android.app.Activity
 import android.app.Application
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.Network
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
@@ -69,6 +71,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
+import androidx.work.Configuration
 import com.google.firebase.messaging.FirebaseMessaging
 import ru.genesiscorporation.workspace.beta.data.remote.workspaceHttpClient
 import io.ktor.client.plugins.HttpTimeout
@@ -94,12 +97,22 @@ import ru.genesiscorporation.workspace.beta.ui.theme.WokspaceTheme
 import io.ktor.client.plugins.api.*
 import io.ktor.http.HttpHeaders
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
+import ru.genesiscorporation.workspace.beta.data.confirmedAccountContext
+import ru.genesiscorporation.workspace.beta.data.push.PushReconciliationWorker
+import ru.genesiscorporation.workspace.beta.data.push.PushRegistrationWorker
+import ru.genesiscorporation.workspace.beta.data.push.PushWorkerFactory
+import ru.genesiscorporation.workspace.beta.data.push.WorkspacePushNotifications
+import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
+import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesByIdsRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.PushStreamRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsByIdsRequest
 import ru.genesiscorporation.workspace.beta.ui.IncomingCall
 import ru.genesiscorporation.workspace.beta.ui.Avatar
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import ru.genesiscorporation.workspace.beta.data.EventsRepositoryStore
@@ -141,7 +154,7 @@ import ru.genesiscorporation.workspace.beta.modules.streaminfo.StreamInfoViewMod
 import ru.genesiscorporation.workspace.beta.modules.visualsettings.VisualSettingsScreen
 import ru.genesiscorporation.workspace.beta.modules.visualsettings.VisualSettingsViewModel
 
-class WorkspaceApplication : Application() {
+class WorkspaceApplication : Application(), Configuration.Provider {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     lateinit var serverRepository: ServerRepository
         private set
@@ -149,6 +162,13 @@ class WorkspaceApplication : Application() {
         private set
     lateinit var eventsRepositoryStore: EventsRepositoryStore
         private set
+    private lateinit var pushApiClient: WorkspaceAPIClient
+
+    override val workManagerConfiguration: Configuration
+        get() = Configuration.Builder()
+            .setWorkerFactory(PushWorkerFactory(pushApiClient, serverRepository))
+            .build()
+
     override fun onCreate() {
         super.onCreate()
         val httpClient = workspaceHttpClient {
@@ -171,6 +191,47 @@ class WorkspaceApplication : Application() {
             eventsRepositoryStore = eventsRepositoryStore,
             appScope = appScope
         )
+        // The background adapter lives with the application and never needs an Activity.
+        pushApiClient = WorkspaceAPIClient(httpClient).apply {
+            attachUserViewModel(UserViewModel(serverRepository))
+        }
+        eventsRepositoryStore.onPushMessagesKnown = { serverId, owner, messages ->
+            if (messages.any { it.read }) appScope.launch(Dispatchers.IO) {
+                WorkspacePushNotifications(this@WorkspaceApplication)
+                    .knownMessages(serverId, owner, messages)
+            }
+        }
+        eventsRepositoryStore.onPushMessageRemoved = { serverId, owner, messageUuid ->
+            appScope.launch(Dispatchers.IO) {
+                WorkspacePushNotifications(this@WorkspaceApplication)
+                    .removedMessage(serverId, owner, messageUuid)
+            }
+        }
+        eventsRepositoryStore.onPushRead = { serverId, owner, messageUuids ->
+            appScope.launch(Dispatchers.IO) {
+                WorkspacePushNotifications(this@WorkspaceApplication)
+                    .readMessages(serverId, owner, messageUuids)
+            }
+            PushReconciliationWorker.schedule(this)
+        }
+        eventsRepositoryStore.onPushRefreshNeeded = {
+            PushReconciliationWorker.schedule(this)
+        }
+        appScope.launch(Dispatchers.IO) { WorkspacePushNotifications(this@WorkspaceApplication).restore() }
+        PushReconciliationWorker.installPeriodic(this)
+        PushReconciliationWorker.schedule(this)
+        getSystemService(ConnectivityManager::class.java).registerDefaultNetworkCallback(
+            object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) {
+                    PushReconciliationWorker.schedule(this@WorkspaceApplication)
+                }
+            }
+        )
+        serverRepository.onPushRegistrationNeeded = { PushRegistrationWorker.schedule(this) }
+        serverRepository.unregisterPush = { serverId ->
+            PushRegistrationWorker.unregister(this, serverId, pushApiClient, serverRepository)
+        }
+        PushRegistrationWorker.schedule(this)
     }
 }
 class MainActivity : ComponentActivity() {
@@ -192,7 +253,11 @@ class MainActivity : ComponentActivity() {
                 eventsRepositoryStore = app.eventsRepositoryStore,
                 userState = userState,
                 pendingDeepLink = pendingDeepLink,
-                onDeepLinkHandled = { pendingDeepLink = null },
+                onDeepLinkHandled = {
+                    pendingDeepLink = null
+                    intent.removeExtra("deeplink")
+                    intent.data = null
+                },
             )
         }
     }
@@ -268,6 +333,18 @@ fun ApplicationSwitcher(
     val selectedServer by user.selectedServer.collectAsState()
     val isAccessTokenLoaded by user.isAccessTokenLoaded.collectAsState()
     val isServersLoaded by user.isServersLoaded.collectAsState()
+    val pushContext = LocalContext.current
+    LaunchedEffect(pendingDeepLink, isServersLoaded, servers) {
+        if (!isServersLoaded || pendingDeepLink?.startsWith("workspace-push/") != true) return@LaunchedEffect
+        val route = WorkspacePushNotifications(pushContext)
+            .resolve(pendingDeepLink)
+        val target = servers.firstOrNull { it.id == route?.serverId && it.projectUuid == route.projectUuid }
+        if (target == null) { onDeepLinkHandled(); return@LaunchedEffect }
+        if (user.selectedServerId.value != target.id) user.selectServer(target.id)
+        // A cold target may be created after the initial startAllRepos pass.
+        // Bootstrap it explicitly, including when another connection shows login.
+        if (!target.needsToRelogin) eventsRepositoryStore.getOrCreate(target).loadServerSettings()
+    }
     var navController = rememberNavController()
     val chooseServerViewModelFactory = remember { ChooseServerViewModelFactory(workspaceApiClient, user) }
     val chooseServerViewModel: ChooseServerViewModel = viewModel(factory = chooseServerViewModelFactory)
@@ -327,6 +404,7 @@ fun WorkspaceApp(
         ?.takeIf { it == accessToken }
     val avatarUser = currentUser?.takeIf { avatarAccessToken != null }
     val avatarAuthHeaders = workspaceApiClient.authHeaders(selectedServer?.id)
+    val pushOwnerProof = currentUserRepository?.verifiedOwnerAuthentication?.collectAsState()?.value
     val currentCallMessage by viewModel.currentCallMessage.collectAsState()
     var currentDestination = rememberSaveable { mutableStateOf(0 ) }
     var showNavigation by rememberSaveable { mutableStateOf(true) }
@@ -347,20 +425,23 @@ fun WorkspaceApp(
         eventsRepositoryStore.startAllRepos()
     }
 
-    LaunchedEffect(lifecycleOwner) {
-
-        FirebaseMessaging.getInstance().token
-            .addOnSuccessListener { token ->
-//                eventsRepositoryStore.pushId = token
-                // Credentials must never enter logcat, including verification builds.
-//                scope.launch {
-//                    viewModel.sendToken("$token")
-//                }
-            }
-            .addOnFailureListener { e ->
-                Log.e("FCM", "Token fetch failed", e)
-            }
+    LaunchedEffect(pendingDeepLink, selectedServerId, selectedServer, pushOwnerProof, currentUser) {
+        if (pendingDeepLink?.startsWith("workspace-push/") != true) return@LaunchedEffect
+        val route = WorkspacePushNotifications(context).resolve(pendingDeepLink)
+        if (route == null) { onDeepLinkHandled(); return@LaunchedEffect }
+        val target = user.repo.getServer(route.serverId)
+        if (target == null || target.projectUuid != route.projectUuid) { onDeepLinkHandled(); return@LaunchedEffect }
+        if (selectedServerId != target.id) return@LaunchedEffect
+        val repository = currentUserRepository ?: return@LaunchedEffect
+        val account = confirmedAccountContext(workspaceApiClient, repository) ?: return@LaunchedEffect
+        if (account.userUuid != route.userUuid) { onDeepLinkHandled(); return@LaunchedEffect }
+        selectDestination(1)
     }
+
+    LaunchedEffect(lifecycleOwner) {
+        PushRegistrationWorker.schedule(context)
+    }
+
 
 
     NavigationSuiteScaffold(
@@ -544,6 +625,36 @@ fun ChatNavigation(
     val user = UserState.current
     val chatViewModelFactory = remember { ChatViewModelFactory(workspaceApiClient, user, eventsRepositoryStore, pendingDeepLink, onDeepLinkHandled) }
     val chatViewModel: ChatViewModel = viewModel(factory = chatViewModelFactory)
+    val pushContext = LocalContext.current
+    val pushServer by user.selectedServer.collectAsState()
+    val pushRepository = pushServer?.let { eventsRepositoryStore.get(it.id) }
+    val pushProof = pushRepository?.verifiedOwnerAuthentication?.collectAsState()?.value
+    LaunchedEffect(pendingDeepLink, pushServer, pushProof) {
+        if (pendingDeepLink?.startsWith("workspace-push/") != true) return@LaunchedEffect
+        val route = WorkspacePushNotifications(pushContext).resolve(pendingDeepLink) ?: return@LaunchedEffect
+        val server = pushServer?.takeIf { it.id == route.serverId && it.projectUuid == route.projectUuid } ?: return@LaunchedEffect
+        val account = pushRepository?.let { confirmedAccountContext(workspaceApiClient, it) } ?: return@LaunchedEffect
+        if (account.userUuid != route.userUuid) return@LaunchedEffect
+        val response = workspaceApiClient.performRequest(PushStreamRequest(route.streamUuid), server.id, server)
+        if (!account.isCurrent(workspaceApiClient, requireNotNull(pushRepository))) return@LaunchedEffect
+        val stream = (response as? ApiResult.Success)?.value
+            ?: run { onDeepLinkHandled(); return@LaunchedEffect }
+        val topics = workspaceApiClient.performRequest(TopicsByIdsRequest(listOf(route.topicUuid)), server.id, server)
+        if (!account.isCurrent(workspaceApiClient, requireNotNull(pushRepository))) return@LaunchedEffect
+        val topic = (topics as? ApiResult.Success)?.value?.firstOrNull { it.uuid == route.topicUuid && it.streamUuid == route.streamUuid }
+            ?: run { onDeepLinkHandled(); return@LaunchedEffect }
+        val messages = workspaceApiClient.performRequest(MessagesByIdsRequest(listOf(route.messageUuid)), server.id, server)
+        if (!account.isCurrent(workspaceApiClient, requireNotNull(pushRepository))) return@LaunchedEffect
+        val message = (messages as? ApiResult.Success)?.value
+            ?.firstOrNull { it.uuid == route.messageUuid && it.streamUuid == route.streamUuid && it.topicUuid == route.topicUuid }
+            ?: run { onDeepLinkHandled(); return@LaunchedEffect }
+        navController.navigate(ChatFlow.ChatDialog(stream?.displayableName() ?: "Workspace", route.streamUuid, topic?.name,
+            route.topicUuid, stream?.directUserUuid != null, null, route.messageUuid)) {
+            popUpTo<ChatFlow.ChatList>()
+            launchSingleTop = true
+        }
+        onDeepLinkHandled()
+    }
     NavHost(navController = navController, startDestination = ChatFlow.ChatList) {
         composable<ChatFlow.ChatList> {
             ChatScreen(chatViewModel, navController)
@@ -555,7 +666,7 @@ fun ChatNavigation(
                 context = LocalContext.current,
                 client = workspaceApiClient,
             )
-            val chatDialogViewModelFactory = remember { ChatDialogViewModelFactory(workspaceApiClient, user, args.title, args.chatId, args.topicName, args.topicUuid, args.isDirectMessages, eventsRepositoryStore, args.userId, storage) }
+            val chatDialogViewModelFactory = remember { ChatDialogViewModelFactory(workspaceApiClient, user, args.title, args.chatId, args.topicName, args.topicUuid, args.isDirectMessages, eventsRepositoryStore, args.userId, storage, args.firstUnreadMessageUuid) }
             val chatDialogViewModel: ChatDialogViewModel = viewModel(factory = chatDialogViewModelFactory)
             ChatDialogScreen(chatDialogViewModel, navController)
         }
