@@ -31,6 +31,7 @@ This map describes covered contracts; it does not establish full line coverage.
 | Confirmed account owner, server/project changes | `ConfirmedAccountContextTest`, `VerifiedOwnerAuthenticationTest`, `ServerConfigCompatibilityTest` |
 | Event URL, cursor, retries, missed events, stale history | `RealtimeTransportPolicyTest`, `RealtimeRecoveryInstrumentedTest`, `MessageHistorySnapshotTest` |
 | Member snapshots, late responses, user search | `StreamMembershipStateTest`, `StreamMembershipInstrumentedTest`, `UserSearchTest` |
+| Ordinary/direct/encrypted stream creation without legacy `source`, canonical key metadata and one selected member | `AddStreamRequestContractTest`, `WorkspaceRequestHttpContractTest#streamCreationUsesSupportedFieldsWithTheProductionJsonConfiguration`, `EncryptedChatRuntimeInstrumentedTest#createEncryptedStreamFinalizesKeyAndInvitationRetryDoesNotCreateAnotherStream` |
 | Active unread, topic overrides, first unread message, folders | `InboxUnreadTest`, `InboxInstrumentedTest`, `NotificationIndicatorRepositoryTest` |
 | Markdown, URNs, links, snapshots, bounded quotes | `UrnParserTest`, `MarkdownAttachmentUrnParsingTest`, `ForwardedQuoteParsingTest`, `MessageQuote*Test`, `ChatHistoryPresentationTest` |
 | Sending/forwarding/deletion/selection, partial failures | `MessageDeletion*Test`, `DeleteMessage*Test`, `MessageSelection*Test`, `MessageForwardingTest`, `Forward*Test`, `EncryptedMessageForwardingTest` |

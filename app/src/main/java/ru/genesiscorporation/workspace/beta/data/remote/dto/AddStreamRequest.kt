@@ -6,7 +6,6 @@ import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
 import ru.genesiscorporation.workspace.beta.data.remote.ApiError
 import ru.genesiscorporation.workspace.beta.data.remote.ApiRequest
-import ru.genesiscorporation.workspace.beta.data.remote.EmptyRequestData
 import ru.genesiscorporation.workspace.beta.data.remote.HTTPMethod
 
 class AddStreamRequest(
@@ -33,12 +32,7 @@ data class AddStreamRequestData(
     val description: String,
     @SerialName("direct_user_uuid") val directUserUuid: String?,
     @SerialName("source_name") val sourceName: String?,
-    val source: AddStreamRequestSource = AddStreamRequestSource(),
     val encryption: Boolean = false,
     @EncodeDefault(EncodeDefault.Mode.NEVER) @SerialName("current_encryption_key_uuid") val currentEncryptionKeyUuid: String? = null,
     @EncodeDefault(EncodeDefault.Mode.NEVER) val uuid: String? = null,
-)
-@Serializable
-data class AddStreamRequestSource(
-    val kind: String = "native"
 )
