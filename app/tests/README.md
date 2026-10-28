@@ -371,6 +371,20 @@ rotation. The optional host port permits
 independent runs; its default and the existing request/retry modes are unchanged.
 Neither the key nor real account data belongs in the exported payload file.
 
+## Project picker after authentication
+
+`ProjectsDuplicateIdentityTest` drives the real HTTP client, login and OTP
+screens, project picker, selection and project-scoped token refresh against an
+isolated loopback server. Duplicate project UUIDs must render once (using the
+first record's metadata), and both authentication paths must still open the
+selected project. The suite includes unique-list controls, a failed lookup/retry
+and return to credentials. No deployed account or server is used.
+
+```sh
+ANDROID_SERIAL=TASK_SERIAL ./gradlew :app:connectedExordosDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.class=ru.genesiscorporation.workspace.beta.modules.projects.ProjectsDuplicateIdentityTest
+```
+
 ## Crashlytics configuration
 
 `CrashlyticsConfigurationTest` checks provider registration and disabled automatic

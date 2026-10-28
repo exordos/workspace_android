@@ -23,6 +23,7 @@ This map describes covered contracts; it does not establish full line coverage.
 
 | Contract / risk | Checks |
 | --- | --- |
+| Duplicate project UUIDs after password/OTP login, first-record metadata, retry, project scope and return to login | `ProjectsDuplicateIdentityTest` |
 | Crashlytics initialized with debug collection disabled | `CrashlyticsConfigurationTest`, `CrashlyticsReleaseInstrumentation`; separate synthetic crash/restart acceptance in Firebase |
 | HTTP status, refresh/relogin, credential replacement | `AuthenticationReloginPolicyTest`, `ProtectedRequestAuthenticationTest`, `AuthenticationRefreshInstrumentedTest` |
 | Incomplete/extended errors, Throwable message, blank-message fallback and JSON round-trip, login/OTP/refresh JSON, query lists, percent encoding | `ApiErrorTest`, `ResponseErrorTest`, `SessionRequestContractTest`, `RequestQuerySerializationTest`, `WorkspaceRequestHttpContractTest` |
