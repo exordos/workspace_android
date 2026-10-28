@@ -188,3 +188,13 @@ sender IDs also need a defined mapping to Workspace UUIDs.
 Calls launch the Jitsi SDK from a chat
 or channel information screen. This separate integration requires provider and
 device-permission checks.
+
+## Crash diagnostics
+
+Firebase provider discovery initializes Crashlytics before the application for
+uncaught Java/Kotlin crash reports. Debug manifests disable automatic collection;
+release builds use the SDK default and the Crashlytics Gradle plugin associates
+R8 mappings with the injected build ID. The application adds no custom crash
+logs, user identifiers or Analytics integration. Firebase reporting and Play
+Android vitals are independent delivery paths. See [development](development.md)
+for local build exclusions and publication acceptance.

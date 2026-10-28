@@ -49,6 +49,42 @@ registration token on a dedicated device and receives a test notification.
 Format validation alone cannot detect a revoked key, API restrictions, or a
 server-side delivery problem. Never log or attach registration tokens.
 
+## Crash reporting
+
+Release variants include Firebase Crashlytics using the existing Firebase Android
+client selected by `google-services.json`. Firebase's provider initializes the
+SDK before `Application.onCreate`, so early uncaught Java/Kotlin crashes can be
+recorded. No custom user identifiers, account details, request bodies, credentials,
+message contents, Analytics dependency, or manual exception logging are added.
+Native symbol reporting is not configured by this integration.
+
+Automatic report collection is disabled in both debug flavors by the debug
+manifest. The release SDK uses its default automatic collection policy. Do not
+add a persisted runtime override just for development: it takes precedence over
+the manifest on future launches of the same installation.
+
+The Crashlytics Gradle plugin injects the build ID and uploads the matching R8
+mapping for each minified release. Keep `SourceFile`/`LineNumberTable` attributes
+and retain the exact candidate's mapping with its APK/AAB. For local release
+verification that must not write to Firebase, exclude the upload task:
+
+```sh
+./gradlew :app:assembleExordosRelease :app:bundleExordosRelease \
+  -x :app:uploadCrashlyticsMappingFileExordosRelease
+```
+
+An authorized publication build must run without that exclusion and verify the
+matching mapping upload. Use the corresponding Genesis task for that package.
+Do not count a local build or mapping generation as cloud delivery proof.
+
+Before publishing the first Crashlytics-enabled release, agree and update any
+required diagnostics disclosure/Data safety answers, confirm the intended
+Firebase Android client and Console setup, and verify a synthetic crash followed
+by restart in the Firebase dashboard. Do this on a dedicated installation without
+real accounts; do not add a crash button to the production UI. Uploading a mapping
+or receiving a report does not authorize publishing an app update. Crashlytics
+reports appear in Firebase; Android vitals continues to collect independently.
+
 ## Commands
 
 ```sh

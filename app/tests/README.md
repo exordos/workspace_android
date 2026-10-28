@@ -384,3 +384,28 @@ and return to credentials. No deployed account or server is used.
 ANDROID_SERIAL=TASK_SERIAL ./gradlew :app:connectedExordosDebugAndroidTest \
   -Pandroid.testInstrumentationRunnerArguments.class=ru.genesiscorporation.workspace.beta.modules.projects.ProjectsDuplicateIdentityTest
 ```
+
+## Crashlytics configuration
+
+`CrashlyticsConfigurationTest` checks provider registration and disabled automatic
+collection in an installed debug build. Run it only on a dedicated installation,
+without persisted SDK collection overrides. Both brands use the debug manifest.
+
+The existing `buildEmojiReleaseSmoke` task also packages
+`CrashlyticsReleaseInstrumentation` for the optimized Exordos APK. Sign this
+framework-only driver with the same test certificate as the installed release.
+Supply the exact generated `com.google.firebase.crashlytics.mapping_file_id` and
+the obfuscated `CrashlyticsUncaughtExceptionHandler` class from that candidate's
+`mapping.txt`; no production keep rules are needed for the driver. On an isolated
+emulator with networking disabled, run:
+
+```sh
+adb -s TASK_SERIAL shell am instrument -w -r \
+  -e mappingId CANDIDATE_MAPPING_ID -e handlerClass R8_HANDLER_CLASS \
+  com.exordos.workspace.cassi.releasetest/.CrashlyticsReleaseInstrumentation
+```
+
+It checks release flags, automatic collection policy in the manifest, the
+packaged mapping ID and the SDK's installed uncaught-exception hook under R8.
+It does not send an event. Keep cloud receipt/deobfuscation verification as a
+separate synthetic crash-and-restart acceptance step before publication.
