@@ -60,3 +60,11 @@ See the [encryption contract](encrypted-chats.md) for details.
   loopback tests do not establish those results.
 - Restore Credentials API is not integrated into the current code. Requirements
   and release applicability are checked separately in the [quality plan](testing.md).
+
+## Crash diagnostics
+
+Release builds include Firebase Crashlytics for uncaught Java/Kotlin failures;
+local debug builds disable automatic report collection. The integration does not
+add a reporting control or test-crash action to the user interface. Deployment
+and first cloud report verification remain release acceptance steps described in
+[development](development.md#crash-reporting).

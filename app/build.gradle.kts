@@ -9,6 +9,7 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.firebase)
+    alias(libs.plugins.crashlytics)
 }
 
 android {
@@ -126,6 +127,7 @@ dependencies {
     implementation(libs.kotlinx.serialization.properties)
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.cloud.messaging)
+    implementation(libs.firebase.crashlytics)
     implementation(libs.androidx.material3)
     implementation(libs.coil.compose)
     implementation(libs.coil.gif)
@@ -146,6 +148,7 @@ dependencies {
 
 tasks.register<JavaCompile>("compileEmojiReleaseSmoke") {
     source("tests/release/EmojiReleaseInstrumentation.java",
+        "tests/release/CrashlyticsReleaseInstrumentation.java",
         "tests/release/FirebaseNotificationReleaseInstrumentation.java",
         "tests/instrumented/java/com/exordos/workspace/cassi/releasetest/AvatarFixtureInstrumentation.java")
     classpath = files(providers.provider { androidComponents.sdkComponents.bootClasspath.get() })
@@ -189,6 +192,8 @@ tasks.register("buildEmojiReleaseSmoke") {
                 <instrumentation android:name="com.exordos.workspace.cassi.releasetest.AvatarFixtureInstrumentation"
                     android:targetPackage="com.exordos.workspace"/>
                 <instrumentation android:name="com.exordos.workspace.cassi.releasetest.FirebaseNotificationReleaseInstrumentation"
+                    android:targetPackage="com.exordos.workspace"/>
+                <instrumentation android:name="com.exordos.workspace.cassi.releasetest.CrashlyticsReleaseInstrumentation"
                     android:targetPackage="com.exordos.workspace"/>
             </manifest>
         """.trimIndent(), Charsets.UTF_8)

@@ -23,6 +23,7 @@ This map describes covered contracts; it does not establish full line coverage.
 
 | Contract / risk | Checks |
 | --- | --- |
+| Crashlytics initialized with debug collection disabled | `CrashlyticsConfigurationTest`, `CrashlyticsReleaseInstrumentation`; separate synthetic crash/restart acceptance in Firebase |
 | HTTP status, refresh/relogin, credential replacement | `AuthenticationReloginPolicyTest`, `ProtectedRequestAuthenticationTest`, `AuthenticationRefreshInstrumentedTest` |
 | Incomplete/extended errors, Throwable message, blank-message fallback and JSON round-trip, login/OTP/refresh JSON, query lists, percent encoding | `ApiErrorTest`, `ResponseErrorTest`, `SessionRequestContractTest`, `RequestQuerySerializationTest`, `WorkspaceRequestHttpContractTest` |
 | Draft revision / If-Match, read/read-up-to, notification/done actions over real HTTP | `DraftRequestContractTest`, `WorkspaceRequestHttpContractTest` |
