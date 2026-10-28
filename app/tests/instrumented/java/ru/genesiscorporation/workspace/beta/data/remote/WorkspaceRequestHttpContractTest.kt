@@ -26,6 +26,44 @@ import java.util.concurrent.TimeUnit
 @RunWith(AndroidJUnit4::class)
 class WorkspaceRequestHttpContractTest {
     @Test
+    fun streamCreationUsesSupportedFieldsWithTheProductionJsonConfiguration() = runBlocking {
+        val streamUuid = "00000000-0000-4000-8000-000000000001"
+        val keyUuid = "00000000-0000-4000-8000-000000000002"
+        val peerUuid = "00000000-0000-4000-8000-000000000003"
+        val response = """{
+            "uuid":"$streamUuid","name":"CASSI contract","updated_at":"2026-01-01T00:00:00Z",
+            "unread_count":0,"active_unread_count":0,"passive_unread_count":0,
+            "private":false,"color":0,"notification_mode":"all_messages"
+        }"""
+        // The deployed stream schema accepts source_name, not the legacy nested source.
+        val supportedFields = setOf("uuid", "name", "description", "source_name", "invite_only",
+            "announce", "direct_user_uuid", "private", "color", "encryption", "current_encryption_key_uuid")
+        val cases = listOf(
+            AddStreamRequest("CASSI contract", "", null) to
+                """{"name":"CASSI contract","description":"","direct_user_uuid":null,"source_name":"native","encryption":false}""",
+            AddStreamRequest("CASSI contract", "", null, true, keyUuid, streamUuid) to
+                """{"name":"CASSI contract","description":"","direct_user_uuid":null,"source_name":"native","encryption":true,"current_encryption_key_uuid":"$keyUuid","uuid":"$streamUuid"}""",
+            AddStreamRequest("CASSI contract", "", peerUuid) to
+                """{"name":"CASSI contract","description":"","direct_user_uuid":"$peerUuid","source_name":"native","encryption":false}""",
+        )
+        withPeer(response, respond = { request ->
+            val unknownFields = Json.parseToJsonElement(request.body).jsonObject.keys - supportedFields
+            if (unknownFields.isEmpty()) LoopbackWorkspaceServer.Response(response)
+            else LoopbackWorkspaceServer.Response("""{"msg":"Unsupported stream properties","code":"VALIDATION_ERROR"}""", 400)
+        }) { account, requests ->
+            for ((creation, expected) in cases) {
+                val result = account.api.performRequest(creation)
+                assertTrue("Stream creation failed: $result", result is ApiResult.Success)
+                val request = requests.receive()
+                assertProtected(request)
+                assertEquals("POST", request.method)
+                assertEquals("/api/workspace/v1/messenger/streams/", request.path)
+                assertJson(request, expected)
+            }
+        }
+    }
+
+    @Test
     fun loginSendsOtpOnlyAsAHeaderAndNeverUsesTheSavedBearer() = runBlocking {
         withPeer("""{"access_token":"synthetic-access","refresh_token":"synthetic-refresh","future_field":true}""") { account, requests ->
             val result = account.api.performRequest(LoginRequest("cassi+fixture@example.invalid", "synthetic \"пароль\"", "123456"))

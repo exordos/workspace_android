@@ -73,6 +73,14 @@ and error boundaries without Android. `WorkspaceShareTest` belongs under
 tests. `MessageTimeFormattingTest` fixes the clock and zones; its temporary
 default timezone is always restored.
 
+`AddStreamRequestContractTest` checks ordinary, direct and encrypted creation
+bodies with default encoding enabled: only `source_name` is sent, and encrypted
+creation retains its canonical stream and key-generation UUIDs. The HTTP suite's
+`streamCreationUsesSupportedFieldsWithTheProductionJsonConfiguration` repeats
+those cases through the actual Ktor transport. The encrypted conversation peer
+rejects unknown creation fields so runtime creation/invitation tests cannot
+silently accept a body rejected by the backend.
+
 `StreamMembershipInstrumentedTest` exercises creation, invitation retries,
 membership changes and user search through the production screens and HTTP
 client with three synthetic authenticated loopback accounts. It does not

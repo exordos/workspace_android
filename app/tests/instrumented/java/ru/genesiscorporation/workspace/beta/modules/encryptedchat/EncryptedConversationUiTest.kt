@@ -1143,6 +1143,12 @@ internal class EncryptedConversationServer : Closeable {
                     return
                 }
                 val request = Json.parseToJsonElement(body).jsonObject
+                val supportedFields = setOf("uuid", "name", "description", "source_name", "invite_only",
+                    "announce", "direct_user_uuid", "private", "color", "encryption", "current_encryption_key_uuid")
+                if (request.keys.any { it !in supportedFields }) {
+                    respondError(connection, status = 400)
+                    return
+                }
                 val id = request["uuid"]?.jsonPrimitive?.contentOrNull ?: UUID.randomUUID().toString()
                 val created = createdStreams.firstOrNull { it.uuid == id } ?: Stream(id, 0, 0, 0, TIME,
                     request.getValue("name").jsonPrimitive.content, true, 0,
