@@ -91,7 +91,7 @@ internal fun ProjectsContent(
                 )
             }
         }
-        items(projects, key = { it.uuid }, contentType = { "project" }) { project ->
+        items(projects.distinctBy(ProjectResponseData::uuid), key = { it.uuid }, contentType = { "project" }) { project ->
             ProjectCell(project, project.uuid == selectedProject?.uuid, colors, !loading, onProjectSelected)
         }
         item(contentType = "projects-actions") {
