@@ -52,6 +52,9 @@ class ServerRepository internal constructor(
 ) {
     constructor(context: Context, tokenStore: SecureTokenStore, eventsRepositoryStore: EventsRepositoryStore, appScope: CoroutineScope) : this(context.dataStore, tokenStore, eventsRepositoryStore, appScope)
 
+    internal val pushRegistrationMutex = Mutex()
+    var onPushRegistrationNeeded: (() -> Unit)? = null
+    var unregisterPush: (suspend (String) -> Unit)? = null
     private val tokensVersion = MutableStateFlow(0)
     private val sessionMutationMutex = Mutex()
     private val SELECTED_SERVER_ID = stringPreferencesKey("selected_server_id")
@@ -100,6 +103,8 @@ class ServerRepository internal constructor(
     }
     /** The explicit leave/logout path for every screen; ordinary expiry/refresh never calls it. */
     suspend fun removeServer(serverId: String) = withContext(NonCancellable) {
+        pushRegistrationMutex.withLock {
+        runCatching { unregisterPush?.invoke(serverId) }
         sessionMutationMutex.withLock {
             eventsRepositoryStore.get(serverId)?.let { repository ->
                 repository.verifiedOwnerAuthentication.value?.let { proof ->
@@ -117,6 +122,7 @@ class ServerRepository internal constructor(
                 if (prefs[SELECTED_SERVER_ID] == serverId) prefs[SELECTED_SERVER_ID] = remaining.firstOrNull()?.id.orEmpty()
             }
             tokensVersion.value = tokensVersion.value + 1
+        }
         }
     }
 
@@ -138,6 +144,7 @@ class ServerRepository internal constructor(
             prefs[SERVERS] = json.encodeToString(updated)
         }
         tokens?.let { saveTokens(config.id, it) }
+        onPushRegistrationNeeded?.invoke()
     }
 
     suspend fun getServer(serverId: String): ServerConfig? {
@@ -146,16 +153,25 @@ class ServerRepository internal constructor(
 
     fun tokensFor(serverId: String): TokenPair? = tokenStore.get(serverId)
 
-    suspend fun saveTokens(serverId: String, tokens: TokenPair) =
-        sessionMutationMutex.withLock {
-            saveTokensLocked(serverId, tokens)
-        }
+    suspend fun saveTokens(serverId: String, tokens: TokenPair) = pushRegistrationMutex.withLock {
+        if (tokenStore.get(serverId) != tokens) retirePushRegistration(serverId)
+        sessionMutationMutex.withLock { saveTokensLocked(serverId, tokens) }
+    }
 
-    suspend fun saveTokensAndClearRelogin(serverId: String, tokens: TokenPair) =
+    suspend fun saveTokensAndClearRelogin(serverId: String, tokens: TokenPair) = pushRegistrationMutex.withLock {
+        if (tokenStore.get(serverId) != tokens) retirePushRegistration(serverId)
         sessionMutationMutex.withLock {
             saveTokensLocked(serverId, tokens)
             setNeedsToRelogin(false, serverId)
         }
+    }
+
+    private suspend fun retirePushRegistration(serverId: String) = withContext(NonCancellable) {
+        // Explicit login/project replacement retires the old registration while its credentials still work.
+        // Automatic refresh has its own path and keeps the device identity.
+        runCatching { unregisterPush?.invoke(serverId) }
+        withContext(Dispatchers.IO) { tokenStore.clearPushState(serverId) }
+    }
 
     suspend fun saveRefreshedTokensIfCurrent(
         serverId: String,
@@ -237,9 +253,11 @@ class ServerRepository internal constructor(
     private fun saveTokensLocked(serverId: String, tokens: TokenPair) {
         tokenStore.save(serverId, tokens)
         tokensVersion.value = tokensVersion.value + 1
+        onPushRegistrationNeeded?.invoke()
     }
 
-    suspend fun updateServerProjectUuid(serverId: String, projectUuid: String, projectName: String? = null) {
+    suspend fun updateServerProjectUuid(serverId: String, projectUuid: String, projectName: String? = null) = pushRegistrationMutex.withLock {
+        if (getServer(serverId)?.projectUuid != projectUuid) retirePushRegistration(serverId)
         dataStore.edit { prefs ->
             val current = prefs[SERVERS]
                 ?.let { json.decodeFromString<List<ServerConfig>>(it) }
@@ -253,6 +271,7 @@ class ServerRepository internal constructor(
             }
             prefs[SERVERS] = json.encodeToString(updated)
         }
+        onPushRegistrationNeeded?.invoke()
     }
 
     suspend fun updateServerProjectName(serverId: String, projectUuid: String, projectName: String) {

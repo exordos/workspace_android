@@ -53,7 +53,13 @@ class SecureTokenStore(context: Context) {
         check(prefs.edit().putString(ownerKey(server.id), Json.encodeToString(owner)).commit())
     }
 
+    internal fun clearPushState(serverId: String) {
+        ru.genesiscorporation.workspace.beta.data.push.PushKeyStore(appContext).remove(serverId)
+        ru.genesiscorporation.workspace.beta.data.push.WorkspacePushNotifications(appContext).cancelServer(serverId)
+    }
+
     fun clear(serverId: String) {
+        clearPushState(serverId)
         val record = synchronized(tokenLock) { prefs.getString(ownerKey(serverId), null) }
         record?.let { check(EncryptedChatKeyStore(appContext).purgeOwner(Json.decodeFromString<ChatKeyOwner>(it))) }
         synchronized(tokenLock) {

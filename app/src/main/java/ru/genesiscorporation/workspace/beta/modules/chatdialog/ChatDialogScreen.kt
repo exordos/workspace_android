@@ -99,6 +99,11 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import ru.genesiscorporation.workspace.beta.data.push.WorkspacePushNotifications
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import coil3.compose.AsyncImage
@@ -188,6 +193,13 @@ fun ChatDialogScreen(
         }
     }
     val notifiedKeys = remember { mutableSetOf<String>() }
+    val notificationContext = LocalContext.current.applicationContext
+    val notificationOwner = remember(viewModel) { Any() }
+    val notificationLifecycle by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsState()
+    DisposableEffect(notificationOwner) {
+        onDispose { WorkspacePushNotifications(notificationContext).visibility(notificationOwner, viewModel.repo.serverId, emptySet()) }
+    }
+
 
     val messageFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
 
@@ -243,8 +255,11 @@ fun ChatDialogScreen(
         }
     }
 
-    LaunchedEffect(listState, openingUnread && hasDoneInitialScroll) {
-        if (openingUnread && !hasDoneInitialScroll) return@LaunchedEffect
+    LaunchedEffect(listState, openingUnread && hasDoneInitialScroll, notificationLifecycle) {
+        if (notificationLifecycle != Lifecycle.State.RESUMED || (openingUnread && !hasDoneInitialScroll)) {
+            withContext(Dispatchers.IO) { WorkspacePushNotifications(notificationContext).visibility(notificationOwner, viewModel.repo.serverId, emptySet()) }
+            return@LaunchedEffect
+        }
         snapshotFlow {
             listState.isScrollInProgress to !listState.canScrollForward
         }
@@ -297,14 +312,21 @@ fun ChatDialogScreen(
         }
     }
 
-    LaunchedEffect(listState, openingUnread && hasDoneInitialScroll) {
-        if (openingUnread && !hasDoneInitialScroll) return@LaunchedEffect
+    LaunchedEffect(listState, openingUnread && hasDoneInitialScroll, notificationLifecycle) {
+        if (notificationLifecycle != Lifecycle.State.RESUMED || (openingUnread && !hasDoneInitialScroll)) {
+            withContext(Dispatchers.IO) { WorkspacePushNotifications(notificationContext).visibility(notificationOwner, viewModel.repo.serverId, emptySet()) }
+            return@LaunchedEffect
+        }
         snapshotFlow { listState.layoutInfo.visibleItemsInfo }
             .collect { visibleItemsInfo ->
                 val visibleKeysNow: Set<String> =
                     visibleItemsInfo.mapNotNull { info ->
                         info.key as? String
                     }.toSet()
+                withContext(Dispatchers.IO) {
+                    WorkspacePushNotifications(notificationContext).visibleMessages(notificationOwner, viewModel.repo.serverId,
+                        viewModel.userViewModel.selectedServer.value?.projectUuid, viewModel.repo.currentUser.value?.uuid, visibleKeysNow)
+                }
                 val newlyVisible = visibleKeysNow.filter { it !in notifiedKeys }
                 if (newlyVisible.isNotEmpty()) {
                     notifiedKeys.addAll(newlyVisible)

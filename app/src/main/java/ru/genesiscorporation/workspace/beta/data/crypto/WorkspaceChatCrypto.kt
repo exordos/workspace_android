@@ -11,6 +11,7 @@ import java.util.Base64
 import javax.crypto.Cipher
 import javax.crypto.Mac
 import javax.crypto.spec.IvParameterSpec
+import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
 data class ChatMessageContext(val streamUuid: String, val keyUuid: String)
@@ -229,7 +230,6 @@ internal object HkdfSha256 {
 internal object HpkeBase {
     private val version = "HPKE-v1".toByteArray(Charsets.US_ASCII)
     private val kemSuite = "KEM".toByteArray(Charsets.US_ASCII) + byteArrayOf(0, 0x20)
-    private val hpkeSuite = "HPKE".toByteArray(Charsets.US_ASCII) + byteArrayOf(0, 0x20, 0, 1, 0, 3)
 
     fun seal(recipientPublic: ByteArray, ephemeralPrivate: ByteArray, info: ByteArray,
              aad: ByteArray, plaintext: ByteArray): Pair<ByteArray, ByteArray> {
@@ -245,6 +245,20 @@ internal object HpkeBase {
         val sharedSecret = sharedSecret(recipientPrivate, enc, enc, recipientPublic)
         return try {
             crypt(sharedSecret, info) { key, nonce -> ChaChaAead.decrypt(key, nonce, ciphertext, aad) }
+        } finally { sharedSecret.fill(0) }
+    }
+
+    fun openAes256Gcm(recipientPrivate: ByteArray, recipientPublic: ByteArray, enc: ByteArray,
+                      info: ByteArray, aad: ByteArray, ciphertext: ByteArray): ByteArray {
+        val sharedSecret = sharedSecret(recipientPrivate, enc, enc, recipientPublic)
+        return try {
+            crypt(sharedSecret, info, 2) { key, nonce ->
+                Cipher.getInstance("AES/GCM/NoPadding").run {
+                    init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, nonce))
+                    updateAAD(aad)
+                    doFinal(ciphertext)
+                }
+            }
         } finally { sharedSecret.fill(0) }
     }
 
@@ -264,8 +278,10 @@ internal object HpkeBase {
             finally { prk.fill(0) }
     }
 
-    private inline fun crypt(sharedSecret: ByteArray, info: ByteArray,
+    private inline fun crypt(sharedSecret: ByteArray, info: ByteArray, aeadId: Int = 3,
                              operation: (ByteArray, ByteArray) -> ByteArray): ByteArray {
+        val hpkeSuite = "HPKE".toByteArray(Charsets.US_ASCII) +
+            byteArrayOf(0, 0x20, 0, 1, 0, aeadId.toByte())
         val empty = ByteArray(0)
         val context = byteArrayOf(0) + labeledExtract(hpkeSuite, empty, "psk_id_hash", empty) +
             labeledExtract(hpkeSuite, empty, "info_hash", info)

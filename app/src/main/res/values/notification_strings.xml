@@ -1,0 +1,12 @@
+<resources>
+    <string name="push_channel_name">Workspace messages</string>
+    <string name="push_new_message">New message</string>
+    <string name="push_display_limits">Notifications on this device</string>
+    <string name="push_group_limit">Displayed conversations: %1$d</string>
+    <string name="push_message_limit">Messages per conversation: %1$d</string>
+    <string name="push_limit_explanation">Hidden notifications stay unread and may return silently. Up to 40 cards are displayed, including group summaries.</string>
+    <plurals name="push_unread_count">
+        <item quantity="one">%d unread message</item>
+        <item quantity="other">%d unread messages</item>
+    </plurals>
+</resources>

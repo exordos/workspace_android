@@ -9,13 +9,24 @@ class EventsRepositoryStore(
     var client: WorkspaceAPIClient
 ) {
     private val repos = mutableMapOf<String, EventsRepository>()
+    var onPushMessagesKnown: (String, String?, List<ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse>) -> Unit = { _, _, _ -> }
+    var onPushMessageRemoved: (String, String?, String) -> Unit = { _, _, _ -> }
+    var onPushRead: (String, String?, List<String>) -> Unit = { _, _, _ -> }
+    var onPushRefreshNeeded: () -> Unit = {}
+
     @Synchronized
     fun getOrCreate(config: ServerConfig): EventsRepository {
         repos[config.id]?.let { existing ->
             if (existing.matchesServerConfiguration(config)) return existing
             existing.close()
         }
-        return EventsRepository(config.id, config.copy(), tokenStore, client).also { repos[config.id] = it }
+        return EventsRepository(config.id, config.copy(), tokenStore, client).also { repo ->
+            repo.onPushMessagesKnown = { onPushMessagesKnown(config.id, repo.currentUser.value?.uuid, it) }
+            repo.onPushMessageRemoved = { onPushMessageRemoved(config.id, repo.currentUser.value?.uuid, it) }
+            repo.onPushRead = { onPushRead(config.id, repo.currentUser.value?.uuid, it) }
+            repo.onPushRefreshNeeded = { onPushRefreshNeeded() }
+            repos[config.id] = repo
+        }
     }
 
     @Synchronized
