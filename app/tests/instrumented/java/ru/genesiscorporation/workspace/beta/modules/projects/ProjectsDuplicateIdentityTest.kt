@@ -1,16 +1,24 @@
 package ru.genesiscorporation.workspace.beta.modules.projects
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasAnyDescendant
+import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -75,6 +83,29 @@ class ProjectsDuplicateIdentityTest {
 
     @Test
     fun projectLookupRetryCanRenderDuplicatesAndOpenTheSelectedProject(): Unit = checkLogin(initialError = true)
+
+    @Test
+    fun retryActionOutsideTheInitialViewportCanBeReached() {
+        val retries = AtomicInteger()
+        compose.setContent {
+            WokspaceTheme(darkTheme = false, dynamicColor = false) {
+                Box(Modifier.height(180.dp)) {
+                    ProjectsContent(
+                        projects = emptyList(),
+                        selectedProject = null,
+                        state = QueryState.Error(""),
+                        loginState = QueryState.Idle,
+                        onProjectSelected = {},
+                        onRetry = { retries.incrementAndGet() },
+                        onOpenProject = {},
+                        onReturnToLogin = {},
+                    )
+                }
+            }
+        }
+        retryProjectLookup()
+        assertEquals(1, retries.get())
+    }
 
     @Test
     fun otpLoginWithDuplicatedProjectsCanOpenTheSelectedProject(): Unit =
@@ -165,7 +196,7 @@ class ProjectsDuplicateIdentityTest {
             }
             if (initialError) {
                 compose.waitUntil(15_000) { projects?.projectsQueryState?.value is QueryState.Error }
-                compose.onNodeWithText("Повторить").performScrollTo().performClick()
+                retryProjectLookup()
             }
             compose.waitUntil(15_000) { projects?.projectsQueryState?.value is QueryState.Success }
             compose.onAllNodesWithText(first.name).assertCountEquals(1)
@@ -193,5 +224,11 @@ class ProjectsDuplicateIdentityTest {
                 try { owner.close() } finally { server.close() }
             }
         }
+    }
+
+    private fun retryProjectLookup() {
+        compose.onNode(hasScrollAction() and hasAnyDescendant(hasText("Выберите проект")))
+            .performScrollToNode(hasText("Повторить"))
+        compose.onNodeWithText("Повторить").performClick()
     }
 }
