@@ -91,6 +91,7 @@ class EventsRepository(
     internal var onPushMessagesKnown: (List<MessageResponse>) -> Unit = {}
     internal var onPushMessageRemoved: (String) -> Unit = {}
     internal var onPushRead: (List<String>) -> Unit = {}
+    internal var onPushTopicUpdated: (TopicsResponseData, Long, String) -> Unit = { _, _, _ -> }
     internal var onPushRefreshNeeded: () -> Unit = {}
     fun notificationRead(messageUuids: List<String>) { onPushRead(messageUuids) }
 
@@ -1045,7 +1046,7 @@ class EventsRepository(
                                         }
 
                                         "topic" -> {
-                                            didReceiveTopicEvent(payload, action)
+                                            didReceiveTopicEvent(payload, action, newEpochVersion?.toLong(), epochGeneration)
                                         }
 
                                         "message_reaction" -> {
@@ -1184,7 +1185,7 @@ class EventsRepository(
         }
     }
 
-    fun didReceiveTopicEvent(payload: String, action: String) {
+    fun didReceiveTopicEvent(payload: String, action: String, epochVersion: Long? = null, generation: String? = null) {
         onPushRefreshNeeded()
         when(action) {
             "created" -> {
@@ -1194,6 +1195,7 @@ class EventsRepository(
             "updated" -> {
                 val topic = json.decodeFromString< TopicsResponseData>(payload)
                 updateTopic(topic)
+                if (epochVersion != null && generation != null) onPushTopicUpdated(topic, epochVersion, generation)
             }
             "deleted" -> {
 

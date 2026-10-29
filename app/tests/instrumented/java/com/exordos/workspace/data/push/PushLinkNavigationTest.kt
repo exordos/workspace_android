@@ -23,7 +23,6 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNotNull
 import org.junit.Before
@@ -48,7 +47,7 @@ class PushLinkNavigationTest {
     private val message = UUID.randomUUID().toString()
 
     @Before fun prepare() = runBlocking {
-        assertFalse(context.resources.getBoolean(R.bool.push_enabled))
+        assertTrue(context.resources.getBoolean(R.bool.push_enabled))
         server = LoopbackWorkspaceServer { request ->
             // Keep /me owner verification, without starting unrelated repository bootstrap jobs.
             if (request.path.contains("/message_reactions/"))
@@ -96,13 +95,13 @@ class PushLinkNavigationTest {
         if (::server.isInitialized) server.close()
     }
 
-    @Test fun coldPushLinkOpensMessageWhilePushDeliveryIsDisabled() {
+    @Test fun coldPushLinkOpensMessageWhilePushDeliveryIsEnabled() {
         pending.value = link
         render(chatOnly = false)
         assertLinkedMessageOpens()
     }
 
-    @Test fun warmPushLinkOpensMessageWhilePushDeliveryIsDisabled() {
+    @Test fun warmPushLinkOpensMessageWhilePushDeliveryIsEnabled() {
         render(chatOnly = true)
         compose.onNodeWithText("Мессенджер").assertIsDisplayed()
         compose.runOnIdle { pending.value = link }
