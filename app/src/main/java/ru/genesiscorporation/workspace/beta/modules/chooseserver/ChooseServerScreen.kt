@@ -33,6 +33,7 @@ import ru.genesiscorporation.workspace.beta.ui.AuthPrimaryButton
 import ru.genesiscorporation.workspace.beta.ui.AuthLoadingOverlay
 import ru.genesiscorporation.workspace.beta.ui.AuthScreen
 import ru.genesiscorporation.workspace.beta.ui.AuthTextField
+import ru.genesiscorporation.workspace.beta.ui.WorkspacePrivacyPolicyLink
 import ru.genesiscorporation.workspace.beta.ui.authColors
 
 private const val PUBLIC_SERVER_URL = "https://workspace.exordos.com"
@@ -179,6 +180,7 @@ internal fun ChooseServerContent(
                 modifier = Modifier.padding(start = 14.dp),
             )
         }
+        WorkspacePrivacyPolicyLink(Modifier.padding(top = 12.dp))
     }
 
     if (state is QueryState.Loading) {

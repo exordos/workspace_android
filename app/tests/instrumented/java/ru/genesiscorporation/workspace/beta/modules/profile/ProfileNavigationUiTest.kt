@@ -7,6 +7,8 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.os.Build
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.onAllNodesWithText
@@ -33,6 +35,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import ru.genesiscorporation.workspace.beta.*
+import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.data.*
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
@@ -110,6 +113,27 @@ class ProfileNavigationUiTest {
         compose.onNodeWithText("Example User").assertIsDisplayed()
         compose.waitUntil(5000) { user.servers.value.single().name == "Example project" }
         compose.onNodeWithText("Example project").assertIsDisplayed()
+    }
+
+    @Test fun signedInProfileOpensTheWorkspacePrivacyPolicy() {
+        var opened: String? = null
+        val handler = object : UriHandler {
+            override fun openUri(uri: String) { opened = uri }
+        }
+        compose.setContent {
+            WokspaceTheme(darkTheme = false, dynamicColor = false) {
+                CompositionLocalProvider(UserState provides user, LocalUriHandler provides handler) {
+                    WorkspaceApp(workspace, api, events, null, {})
+                }
+            }
+        }
+        compose.onNodeWithContentDescription("Profile").performClick()
+        val title = InstrumentationRegistry.getInstrumentation().targetContext
+            .getString(R.string.privacy_policy_title)
+        compose.onNodeWithText(title).assertIsDisplayed().performClick()
+        compose.runOnIdle {
+            assertEquals("https://exordos.com/legal/workspace-privacy", opened)
+        }
     }
 
     @Test fun avatarFollowsSelectedSessionAndKeepsProfileNavigation() = runBlocking {

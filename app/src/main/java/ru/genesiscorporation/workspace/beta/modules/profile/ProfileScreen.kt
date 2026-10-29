@@ -75,6 +75,7 @@ import ru.genesiscorporation.workspace.beta.data.UrnParser
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.CreateTopic
+import ru.genesiscorporation.workspace.beta.ui.WorkspacePrivacyPolicyLink
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -298,6 +299,7 @@ fun ProfileScreenContent(
                         }
                     }
                     Spacer(modifier = Modifier.weight(1f))
+                    WorkspacePrivacyPolicyLink()
                     Text(
                         BuildConfig.VERSION_NAME,
                         color = LocalWorkspaceColorsPalette.current.textAdditional30,
