@@ -49,7 +49,7 @@ class LivePushWireCompatibilityTest {
             } finally { privateKey.fill(0) }
             try {
                 val preview = json.decodeFromString<PushPreview>(plaintext.decodeToString())
-                assertEquals("message", preview.kind)
+                assertEquals(if (payload.kind == WorkspacePushCrypto.TOPIC_UPDATE) "topic" else "message", preview.kind)
                 assertEquals(requireNotNull(arguments.getString("expectedMessageText")), preview.text)
             } finally { plaintext.fill(0) }
         } catch (failure: Throwable) {
