@@ -45,6 +45,7 @@ class EncryptedPushReceiptTest {
     private val secondary = registration.copy(serverId = "cassi-pr97-second-connection")
     private val route = PushRoute.from(payload, registration.serverId)
     private val notifications = WorkspacePushNotifications(context)
+    private val previousLimits = notifications.limits()
     private val create = fixture.getValue("payload").toString()
 
     @Before fun prepare() {
@@ -53,7 +54,11 @@ class EncryptedPushReceiptTest {
         keys.save(registration)
         notifications.setLimits(5, 5)
     }
-    @After fun finish() { cleanup(); privateKey.fill(0) }
+    @After fun finish() {
+        cleanup()
+        notifications.setLimits(previousLimits.conversations, previousLimits.messages)
+        privateKey.fill(0)
+    }
     private fun cleanup() {
         listOf(registration.serverId, secondary.serverId).forEach { notifications.cancelServer(it); keys.remove(it) }
         notifications.visibility(this, registration.serverId, emptySet())
@@ -213,7 +218,10 @@ class EncryptedPushReceiptTest {
     @Test fun overflowReturnsOlderUnreadMessagesSilentlyInsteadOfDismissingThem() {
         notifications.setLimits(1, 2)
         val middle = another(); val newest = another(); val otherConversation = another(topic = UUID.randomUUID().toString())
-        inbox.accept(route, 1); inbox.accept(middle, 2); inbox.accept(newest, 3); inbox.accept(otherConversation, 0)
+        // Rank only these fixtures ahead of real accounts; preserve their existing receipts.
+        val createdAt = System.currentTimeMillis() + 60_000
+        inbox.accept(route, createdAt + 1); inbox.accept(middle, createdAt + 2)
+        inbox.accept(newest, createdAt + 3); inbox.accept(otherConversation, createdAt)
         notifications.restore()
         assertAbsent(route); assertPresent(middle); assertPresent(newest); assertAbsent(otherConversation)
         assertEquals(route, notifications.resolve("workspace-push/${route.identity}"))

@@ -43,6 +43,18 @@ class NotificationIndicatorRepositoryTest {
     }
 
     @Test
+    fun topicRealtimeCursorReachesThePushConsumer() {
+        val update = topic(activeUnread = 0)
+        var received: Triple<TopicsResponseData, Long, String>? = null
+        repository.onPushTopicUpdated = { topic, epoch, generation -> received = Triple(topic, epoch, generation) }
+        repository.didReceiveTopicEvent(Json.encodeToString(update), "updated", 300, "generation")
+        assertEquals(Triple(update, 300L, "generation"), received)
+        received = null
+        repository.didReceiveTopicEvent(Json.encodeToString(update), "updated")
+        assertNull(received)
+    }
+
+    @Test
     fun topicUpdatedAppliesActiveUnreadToEveryCachedProjection() {
         val before = topic(activeUnread = 0)
         repository.addStreamTopics(before.streamUuid, listOf(before))

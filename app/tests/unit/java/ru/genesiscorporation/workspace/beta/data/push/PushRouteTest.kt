@@ -22,8 +22,27 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import ru.genesiscorporation.workspace.beta.data.crypto.WorkspacePushCrypto
 import ru.genesiscorporation.workspace.beta.data.crypto.WorkspacePushPayload
+import com.google.crypto.tink.subtle.X25519
 
 class PushRouteTest {
+    @Test fun topicSnapshotDecryptsAndKeepsOneIdentityWhenItsAnchorChanges() {
+        val fixture = Json.parseToJsonElement(javaClass.classLoader!!.getResource("topic_push_events.json")!!.readText()).jsonObject
+        val payloads = fixture.getValue("payloads").jsonObject
+        val first = Json.decodeFromJsonElement<WorkspacePushPayload>(payloads.getValue("first"))
+        val second = Json.decodeFromJsonElement<WorkspacePushPayload>(payloads.getValue("second"))
+        val key = fixture.getValue("recipient_private_key_hex").jsonPrimitive.content.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        val plaintext = WorkspacePushCrypto.decrypt(key, X25519.publicFromPrivate(key), first)
+        val content = Json.parseToJsonElement(plaintext.decodeToString()).jsonObject
+        assertEquals("Первое непрочитанное сообщение", content.getValue("text").jsonPrimitive.content)
+        assertEquals("2", content.getValue("unread_count").jsonPrimitive.content)
+        val firstRoute = PushRoute.from(first, "saved-server")
+        val secondRoute = PushRoute.from(second, "saved-server")
+        assertTrue(firstRoute.topicUpdate)
+        assertEquals(firstRoute.identity, secondRoute.identity)
+        assertNotEquals(firstRoute.messageUuid, secondRoute.messageUuid)
+        assertNotEquals(firstRoute.identity, firstRoute.copy(serverId = "other-account").identity)
+        key.fill(0); plaintext.fill(0)
+    }
     @Test fun pythonProducerPayloadDecryptsAndHasExactMessageRoute() {
         val fixture = Json.parseToJsonElement(javaClass.classLoader!!.getResource("mobile_push_event.json")!!.readText()).jsonObject
         val payload = Json.decodeFromJsonElement(WorkspacePushPayload.serializer(), fixture.getValue("payload"))

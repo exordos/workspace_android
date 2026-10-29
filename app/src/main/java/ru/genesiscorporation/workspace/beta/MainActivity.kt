@@ -214,6 +214,12 @@ class WorkspaceApplication : Application(), Configuration.Provider {
             }
             PushReconciliationWorker.schedule(this)
         }
+        eventsRepositoryStore.onPushTopicUpdated = { serverId, owner, topic, epoch, generation ->
+            appScope.launch(Dispatchers.IO) {
+                WorkspacePushNotifications(this@WorkspaceApplication).topicUpdated(serverId, owner,
+                    topic.streamUuid, topic.uuid, topic.activeUnreadCount, epoch, generation)
+            }
+        }
         eventsRepositoryStore.onPushRefreshNeeded = {
             PushReconciliationWorker.schedule(this)
         }

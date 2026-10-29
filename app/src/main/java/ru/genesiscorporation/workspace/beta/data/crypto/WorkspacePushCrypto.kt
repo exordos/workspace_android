@@ -17,6 +17,7 @@ package ru.genesiscorporation.workspace.beta.data.crypto
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.nullable
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import java.security.GeneralSecurityException
@@ -39,12 +40,12 @@ data class WorkspacePushPayload(
     @SerialName("project_uuid") val projectUuid: String,
     @SerialName("stream_uuid") val streamUuid: String,
     @SerialName("topic_uuid") val topicUuid: String,
-    @SerialName("message_uuid") val messageUuid: String,
+    @SerialName("message_uuid") val messageUuid: String?,
     @SerialName("user_uuid") val userUuid: String,
     @SerialName("device_uuid") val deviceUuid: String,
     val content: EncryptedPushContent,
 ) {
-    fun associatedData(): ByteArray = Json.encodeToString(ListSerializer(String.serializer()), listOf(
+    fun associatedData(): ByteArray = Json.encodeToString(ListSerializer(String.serializer().nullable), listOf(
         uuid, kind, organizationUuid, projectUuid, streamUuid, topicUuid, messageUuid,
         userUuid, deviceUuid, content.keyUuid,
     )).toByteArray(Charsets.US_ASCII)
@@ -55,11 +56,12 @@ object WorkspacePushCrypto {
     const val ALGORITHM = "HPKE-v1-BASE-X25519-HKDF-SHA256-AES-256-GCM"
     const val MESSAGE_CREATE = "notification_message_create"
     const val MESSAGE_CANCELLED = "notification_message_cancel"
+    const val TOPIC_UPDATE = "notification_topic_update"
     private val info = "workspace-mobile-push".toByteArray(Charsets.US_ASCII)
 
     fun decrypt(privateKey: ByteArray, publicKey: ByteArray, payload: WorkspacePushPayload): ByteArray {
         if (payload.content.kind != "encrypted" || payload.content.algorithm != ALGORITHM ||
-            payload.kind !in setOf(MESSAGE_CREATE, MESSAGE_CANCELLED)) {
+            payload.kind !in setOf(MESSAGE_CREATE, MESSAGE_CANCELLED, TOPIC_UPDATE)) {
             throw GeneralSecurityException("Unsupported push content")
         }
         val decoder = Base64.getUrlDecoder()

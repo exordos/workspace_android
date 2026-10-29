@@ -3,6 +3,7 @@ package ru.genesiscorporation.workspace.beta.data
 import io.ktor.client.HttpClient
 import ru.genesiscorporation.workspace.beta.UserViewModel
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
+import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 
 class EventsRepositoryStore(
     private val tokenStore: SecureTokenStore,
@@ -12,6 +13,7 @@ class EventsRepositoryStore(
     var onPushMessagesKnown: (String, String?, List<ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse>) -> Unit = { _, _, _ -> }
     var onPushMessageRemoved: (String, String?, String) -> Unit = { _, _, _ -> }
     var onPushRead: (String, String?, List<String>) -> Unit = { _, _, _ -> }
+    var onPushTopicUpdated: (String, String?, TopicsResponseData, Long, String) -> Unit = { _, _, _, _, _ -> }
     var onPushRefreshNeeded: () -> Unit = {}
 
     @Synchronized
@@ -24,6 +26,7 @@ class EventsRepositoryStore(
             repo.onPushMessagesKnown = { onPushMessagesKnown(config.id, repo.currentUser.value?.uuid, it) }
             repo.onPushMessageRemoved = { onPushMessageRemoved(config.id, repo.currentUser.value?.uuid, it) }
             repo.onPushRead = { onPushRead(config.id, repo.currentUser.value?.uuid, it) }
+            repo.onPushTopicUpdated = { topic, epoch, generation -> onPushTopicUpdated(config.id, repo.currentUser.value?.uuid, topic, epoch, generation) }
             repo.onPushRefreshNeeded = { onPushRefreshNeeded() }
             repos[config.id] = repo
         }

@@ -30,10 +30,13 @@ import ru.genesiscorporation.workspace.beta.data.crypto.WorkspacePushPayload
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import java.time.Instant
 import java.util.Base64
+import java.util.UUID
 
 @Serializable
 internal data class PushPreview(val kind: String, val sender_name: String = "Workspace", val text: String = "Новое сообщение",
-    val created_at: String? = null)
+    val created_at: String? = null, val stream_name: String = "", val topic_name: String = "",
+    val unread_count: Int = 0, val active_unread_count: Int = 0, val passive_unread_count: Int = 0,
+    val epoch_version: Long = 0, val epoch_generation: String = "")
 
 internal data class PushDisplayLimits(val conversations: Int = 5, val messages: Int = 5)
 
@@ -73,8 +76,27 @@ internal class WorkspacePushNotifications(private val context: Context, private 
                     accepted = true
                     return@forEach
                 }
-                val preview = json.decodeFromString<PushPreview>(plaintext.decodeToString())
+                val preview = runCatching { json.decodeFromString<PushPreview>(plaintext.decodeToString()) }.getOrNull() ?: return@forEach
+                if (payload.kind == WorkspacePushCrypto.TOPIC_UPDATE) {
+                    if ((preview.active_unread_count > 0 && payload.messageUuid == null) ||
+                        preview.kind != "topic" || preview.unread_count < 0 || preview.active_unread_count < 0 ||
+                        preview.passive_unread_count < 0 || preview.active_unread_count.toLong() + preview.passive_unread_count != preview.unread_count.toLong() ||
+                        preview.epoch_version <= 0 || runCatching { UUID.fromString(preview.epoch_generation).toString() }.getOrNull() != preview.epoch_generation)
+                        return@forEach
+                    val alert = inbox.updateTopic(route, now(), preview.unread_count, preview.active_unread_count,
+                        preview.epoch_version, preview.epoch_generation)
+                    if (alert != null) {
+                        if (inbox.resolve(route.identity) != null) previews[route.identity] = preview else previews.remove(route.identity)
+                        render(if (alert) route.identity else null)
+                    }
+                    accepted = true
+                    return@forEach
+                }
                 if (preview.kind != "message") return@forEach
+                if (inbox.hasTopic(route.conversationIdentity)) {
+                    accepted = true
+                    return@forEach
+                }
                 // Preserve pre-upgrade cancellations as well as new database tombstones.
                 if (preferences.contains("cancel:${legacyIdentity(route)}")) inbox.close(route)
                 val createdAt = preview.created_at?.let { runCatching { Instant.parse(it).toEpochMilli() }.getOrNull() }
@@ -102,6 +124,12 @@ internal class WorkspacePushNotifications(private val context: Context, private 
         render()
     }
 
+
+    fun reconciledTopics(registration: PushRegistration, closed: List<PushReceipt>) = synchronized(lock) {
+        if (keys.get(registration.serverId) != registration) return
+        closed.forEach(inbox::closeTopicSnapshot)
+        render()
+    }
 
     fun retireRegistration(registration: PushRegistration): Boolean = synchronized(lock) {
         if (keys.get(registration.serverId) != registration) return false
@@ -136,6 +164,15 @@ internal class WorkspacePushNotifications(private val context: Context, private 
         render()
     }
 
+    fun topicUpdated(serverId: String, userUuid: String?, streamUuid: String, topicUuid: String,
+        activeUnreadCount: Int, epochVersion: Long, epochGeneration: String) = synchronized(lock) {
+        if (activeUnreadCount != 0 || epochVersion <= 0 ||
+            runCatching { UUID.fromString(epochGeneration).toString() }.getOrNull() != epochGeneration) return
+        val registration = keys.get(serverId)?.takeIf { !it.disabled && it.userUuid == userUuid } ?: return
+        inbox.closeTopic(registration, streamUuid, topicUuid, epochVersion, epochGeneration)
+        render()
+    }
+
     fun readMessages(serverId: String, userUuid: String?, messageUuids: List<String>) = synchronized(lock) {
         val registration = keys.get(serverId)?.takeIf { !it.disabled && it.userUuid == userUuid } ?: return
         inbox.closeMessages(registration, messageUuids)
@@ -155,8 +192,8 @@ internal class WorkspacePushNotifications(private val context: Context, private 
         render()
     }
 
-    fun dismiss(identity: String?, conversation: String?, snapshot: Long) = synchronized(lock) {
-        if (identity != null) inbox.dismiss(identity)
+    fun dismiss(identity: String?, conversation: String?, snapshot: Long, generation: String? = null) = synchronized(lock) {
+        if (identity != null) inbox.dismiss(identity, snapshot, generation)
         if (conversation != null && snapshot > 0) inbox.dismissConversation(conversation, snapshot)
         render()
     }
@@ -179,10 +216,10 @@ internal class WorkspacePushNotifications(private val context: Context, private 
             putExtra("deeplink", "workspace-push/${route.identity}")
         }, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
-    private fun deleteIntent(id: String? = null, group: String? = null, snapshot: Long = 0): PendingIntent = PendingIntent.getBroadcast(context, 0,
+    private fun deleteIntent(id: String? = null, group: String? = null, snapshot: Long = 0, generation: String? = null): PendingIntent = PendingIntent.getBroadcast(context, 0,
         Intent(context, PushDismissReceiver::class.java).apply {
-            identifier = "workspace-push-dismiss:${id ?: group}:$snapshot"
-            putExtra("identity", id); putExtra("conversation", group); putExtra("snapshot", snapshot)
+            identifier = "workspace-push-dismiss:${id ?: group}:$generation:$snapshot"
+            putExtra("identity", id); putExtra("conversation", group); putExtra("snapshot", snapshot); putExtra("epoch_generation", generation)
         }, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
     private fun builder() = NotificationCompat.Builder(context, CHANNEL).setSmallIcon(R.drawable.icon)
@@ -207,8 +244,28 @@ internal class WorkspacePushNotifications(private val context: Context, private 
         inbox.conversations(limits.conversations.coerceIn(1, 5)).forEach { group ->
             if (budget < 2) return@forEach
             val messages = inbox.messages(group.identity, limits.messages.coerceIn(1, 10) + hiddenVisible.size)
-                .filter { it.route.identity !in hiddenVisible && valid(it.route) }.take(minOf(limits.messages, budget - 1))
+                .filter { it.route.identity !in hiddenVisible &&
+                    PushRoute.messageIdentity(it.route.serverId,it.route.organizationUuid,it.route.projectUuid,it.route.userUuid,it.route.messageUuid) !in hiddenVisible &&
+                    valid(it.route) }.take(minOf(limits.messages, budget - 1))
             if (messages.isEmpty()) return@forEach
+            messages.firstOrNull { it.route.topicUpdate }?.let { receipt ->
+                val route = receipt.route
+                val preview = previews[route.identity]
+                val count = context.resources.getQuantityString(R.plurals.push_unread_count, receipt.unreadCount, receipt.unreadCount)
+                val title = preview?.let { "${it.stream_name} · ${it.topic_name}" } ?: "Workspace"
+                val text = preview?.let { "${it.sender_name}: ${it.text}" } ?: context.getString(R.string.push_new_message)
+                val notification = builder().setContentTitle(title).setContentText(text).setSubText(count)
+                    .setStyle(NotificationCompat.BigTextStyle().bigText(text).setSummaryText(count))
+                    .setNumber(receipt.unreadCount).setWhen(now()).setShowWhen(false)
+                    .setOnlyAlertOnce(route.identity != alertIdentity).setSilent(route.identity != alertIdentity)
+                    .setGroupAlertBehavior(if (route.identity == alertIdentity) NotificationCompat.GROUP_ALERT_CHILDREN else NotificationCompat.GROUP_ALERT_SUMMARY)
+                    .setContentIntent(contentIntent(route))
+                    .setDeleteIntent(deleteIntent(id = route.identity, snapshot = receipt.epochVersion, generation = receipt.epochGeneration)).build()
+                shown += messageTag(route.identity)
+                manager.notify(messageTag(route.identity), 0, notification)
+                budget--
+                return@forEach
+            }
             val groupKey = "workspace:${group.identity}"
             messages.forEach { receipt ->
                 val route = receipt.route
