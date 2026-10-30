@@ -57,98 +57,66 @@ registration requests are removed.
 
 ## Receipt and privacy
 
-The new wire message is data-only: `data.payload` is a compact JSON string with
-an event UUID, action, installation/project/stream/topic/message/user/device
-UUIDs, and `content={kind:encrypted, algorithm, key_uuid, enc, ciphertext}`.
-The supported actions are exactly `notification_message_create` and
-`notification_message_cancel`.
+The wire message is data-only: `data.payload` contains an Event UUID, installation,
+project, stream, topic, target message, user and device UUIDs, and an encrypted
+HPKE envelope. The producer uses `notification_topic_update`; the receiver still
+accepts legacy create/cancel kinds for in-flight deliveries.
 
-The profile is `HPKE-v1-BASE-X25519-HKDF-SHA256-AES-256-GCM` using RFC 9180 base
-mode, raw 32-byte X25519 keys and unpadded base64url. The `info` is
-`workspace-mobile-push`. Associated data is compact JSON in this exact order:
+HPKE follows RFC 9180 base mode, X25519/HKDF-SHA256/AES-256-GCM, raw 32-byte keys,
+unpadded base64url and `info=workspace-mobile-push`. AAD is compact JSON:
 
 ```text
 [event_uuid, kind, organization_uuid, project_uuid, stream_uuid, topic_uuid,
  message_uuid, user_uuid, device_uuid, key_uuid]
 ```
 
-The existing chat HPKE suite retains its previous behavior; push adds the
-AES-256-GCM suite separately. A wrong key, unsupported profile or altered action
-or route cannot authenticate. Such input is dropped without logging ciphertext,
-tokens, keys or preview text.
+Protected content includes `kind=topic`, stream/topic/sender names, target message
+text and timestamp, absolute unread/active/passive counts, and the existing
+Workspace `epoch_version`/`epoch_generation`. Android validates count consistency,
+recipient/key/route authentication and ordering before showing anything. Bad input
+is dropped without logging it. No text, key or token is stored in the receipt DB.
+No server request or image download is required to render a received snapshot.
 
-After decryption, a create contains only the preview fields needed locally:
+`WorkspacePushNotifications` shows one `workspace_messages` channel card per saved
+connection/account/project/stream/topic. The title is the stream/topic, its count
+is the absolute unread count and its preview/click target use the first unread
+message. A newer snapshot replaces the same card, including when that first
+unread message changes. Active-unread growth can alert; decrease, repeat and
+restoration are silent. Zero active unread removes it. Android permission and
+channel settings apply; the lock-screen public version is generic.
 
-```json
-{"kind":"message","sender_name":"Alice","text":"Hello"}
-```
+The additive SQLite upgrade preserves existing legacy receipts. Topic receipts
+persist their existing WebSocket cursor and retired generation decisions, so an
+older push cannot undo a zero snapshot or restore an old account's card. A
+WebSocket all-read topic update closes the card immediately, including when it
+arrives before the first FCM delivery. A stale swipe intent cannot dismiss a newer
+snapshot, including after a WebSocket generation reset. A deliberate swipe stays dismissed until active unread grows again.
+Tapping alone does not close a card. A later new snapshot updates its click target.
+Closed topic receipts expire one delivery window after the last zero/closure,
+including WebSocket-only tombstones. This bounds closed-topic storage while
+retaining the barrier for every still-deliverable push. Unread and deliberately
+dismissed cards are retained.
 
-`WorkspacePushNotifications` renders through the `workspace_messages` channel.
-No server request or image download is needed. Android notification permission
-and channel settings still apply. Lock-screen public content is generic.
-Existing encrypted chat messages use a generic encrypted-message preview; the
-backend does not acquire their chat keys.
+The existing background reconciliation worker also batches topic IDs through the
+ordinary authenticated topic API. All-read, deleted or inaccessible topics close
+only the receipt captured before HTTP; failed requests retain it and a concurrent
+newer FCM snapshot survives. Legacy receipts keep their message-API repair. This
+runs separately from offline receipt/rendering and requires no resolver endpoint.
 
-A cancellation authenticates its own encrypted `{}` content. The durable identity
-includes the saved connection, organization, project, owner and public message
-UUID. Different event kinds for that message share one alert; two saved
-connections to the same account own separate registrations, keys, routes and
-Android notification tags. Logout or removal clears only that connection.
-Explicit login/project replacement retires the old registration before replacing
-its credentials; automatic token refresh keeps the existing device identity.
+The default limit remains five conversations. Legacy per-message cards retain
+the existing per-conversation limit and read/delete reconciliation during
+transition. Topic snapshots use a single card and no separate summary. Overflow
+preserves pending routes and returns silently when room is available. A message
+actually visible in the resumed chat is hidden without changing its unread state.
+The application being open elsewhere does not make messages read.
 
-`workspace_push_inbox.db` stores only routes, ordering timestamps and unread,
-dismissed or closed decisions. It stores no decrypted preview, FCM token or key,
-and is excluded from backup/transfer. There is no unread age deadline. Terminal
-read/delete/cancellation decisions and manual dismissals prevent late, repeated
-or reordered creates from reviving an alert. Tapping alone does not auto-cancel
-it. Old SharedPreferences routes are imported once; already expired routes from
-an earlier installation cannot be reconstructed by that migration.
-
-Loading old read history only closes receipts that already exist; it does not
-create a row for every historical message. A recent read snapshot, or an explicit
-read/delete arriving before its push, keeps a route-less decision for the
-existing one-hour delivery window. Such transient decisions are pruned during
-receipt/restoration; pre-release rows without a timestamp get one full window
-on upgrade. This cleanup never removes an unread route or the dismissal/closed
-decision belonging to a received push. Recent read-before-push races therefore
-remain covered without accumulating the user's entire read history.
-
-The default display limits are **5 conversations and 5 messages per conversation**.
-Appearance settings allow 1–5 conversations and 1–10 messages per conversation; a total budget of 40 Android cards,
-including summaries, may reduce the displayed number further. Conversations are
-separate for each saved connection/account/project/stream/topic. The oldest
-eligible items are hidden first, preserving unread state and their click routes;
-they return silently when room becomes available. Counts may exceed the number
-of displayed messages. A group dismissal covers its current sequence snapshot,
-including hidden messages represented by its unread count; later arrivals are
-not included. A single swipe dismisses only that message on this device.
-
-Repeated deliveries, preview changes, restoration and overflow returns are
-silent. Decrypted previews live only in a bounded process-local display cache;
-restoration may use generic text. Actually visible messages in the resumed chat
-are temporarily hidden without changing unread state. Read confirmation removes
-their records; a failed read leaves them eligible when the user leaves that chat.
-The app being open in another screen does not make a message read.
-
-Android 16 supplies its own three-day timeout when the requested timeout is zero,
-and rejects newly posted cards whose supplied `when` is over 14 days old. The
-system-card timeout therefore uses a maximum-duration compatibility sentinel
-with arithmetic headroom, rather than an application age-expiry policy. Posting
-uses current time with `showWhen=false`; original message time remains in the
-sort key and receipt, so chronology is preserved. Android and user settings
-still control OS presentation. This does not promise preservation through
-reinstall, reboot, force-stop or system restrictions on background work.
-
-A local periodic worker restores eligible cards silently even offline. Startup,
-network return, realtime reconnect/read/delete and periodic work also reconcile
-known routes in batches of 50 through the existing authenticated message API.
-Confirmed reads and successful snapshots omitting deleted/inaccessible messages
-close their routes; failed HTTP/authentication requests retain them. Periodic
-work uses the platform's inexact minimum 15-minute interval. There is no new
-resolver or status endpoint. Workspace retains route-only cancellation data for
-unread messages; terminal create tokens/ciphertexts are removed. The original
-one-hour server/FCM delivery deadline remains unchanged.
+Decrypted previews live only in a bounded process cache. After process death,
+restoration uses generic text until a new encrypted snapshot arrives. Unread
+receipts have no age deadline; this does not promise background delivery through
+force-stop, reinstall or OS restrictions. Android 16 timeout compatibility uses
+the existing maximum-duration sentinel and current posting time. The transport
+still has its one-hour delivery window. No new revision or status endpoint is
+introduced.
 
 ## Opening a notification
 
@@ -215,8 +183,8 @@ for normal chat loading. Repeat critical receipt/click checks on the optimized
 release artifact; unit tests and a debug build do not replace those checks.
 Never uninstall or clear an existing app's data to work around a signing mismatch.
 
-Deploy the Notification changes in `exordos_notification#106` first, then the
-Workspace backend changes in `workspace_backend#196`, and finally this client.
+Deploy Notification support and this Android consumer before enabling the new
+Workspace topic-update producer. Keep legacy kinds during the transition.
 
 ## Live connection preflight
 
@@ -408,3 +376,18 @@ normal read from another authorized client, then verify `cancel`. Restore and
 verify connectivity before navigation checks. End instrumentation can stop its
 target process; start the app normally before the next background-delivery test.
 Remove only task-owned network rules and emulator resources afterwards.
+
+
+`LiveTopicPushNoRealtimeTest` is an opt-in real-delivery check. Given an unread
+external topic Event in a selected saved connection, it closes only that
+connection's realtime scope and signals readiness through a temporary local
+marker. An external test driver marks the topic read through its authenticated
+API. The phone must receive a new authenticated FCM snapshot and persist zero
+before the test restores the repository. It never injects a payload or changes
+keys/tokens; the marker is removed in `finally`.
+
+A topic update that closes an empty topic after its last message was deleted has
+`message_uuid: null`. Its authenticated route still includes the topic; Android
+removes that topic's card without creating a click target. A positive active
+unread count requires a non-null message UUID. Existing message create/cancel
+payloads still require a canonical message UUID.

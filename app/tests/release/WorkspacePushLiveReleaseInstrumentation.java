@@ -95,9 +95,11 @@ public final class WorkspacePushLiveReleaseInstrumentation extends Instrumentati
         return found;
     }
 
-    private boolean closed(String event, String expectedState) {
-        try { Receipt value = receipt(event); return value != null && expectedState.equals(value.state); }
-        catch (Exception error) { return false; }
+    private boolean closedIdentity(String identity, String expectedState) {
+        try (SQLiteDatabase db = SQLiteDatabase.openDatabase(getTargetContext().getDatabasePath("workspace_push_inbox.db").getPath(), null, SQLiteDatabase.OPEN_READONLY);
+             Cursor cursor = db.rawQuery("SELECT state FROM push_receipts WHERE identity=?", new String[] {identity})) {
+            return cursor.moveToFirst() && expectedState.equals(cursor.getString(0));
+        } catch (Exception error) { return false; }
     }
 
     @Override public void onStart() {
@@ -121,13 +123,15 @@ public final class WorkspacePushLiveReleaseInstrumentation extends Instrumentati
             Receipt receipt = receipt(event);
             JSONObject route = receipt.route;
             String identity = "workspace:message:" + receipt.identity;
-            require(route.getString("messageUuid").equals(argument("messageUuid")), "Wrong receipt message");
+            String expectedMessage = "cancel".equals(action)
+                    ? arguments.getString("messageUuid", "") : argument("messageUuid");
+            require(route.getString("messageUuid").equals(expectedMessage), "Wrong receipt message");
             manager = getTargetContext().getSystemService(NotificationManager.class);
             if ("absent".equals(action)) {
-                await(() -> active(identity) == null && closed(event, "dismissed"),
+                await(() -> active(identity) == null && closedIdentity(receipt.identity, "dismissed"),
                         "A dismissed receipt reappeared");
             } else if ("cancel".equals(action)) {
-                await(() -> active(identity) == null && closed(event, "closed"),
+                await(() -> active(identity) == null && closedIdentity(receipt.identity, "closed"),
                         "Authenticated cancellation was not applied");
             } else if ("age".equals(action)) {
                 require("unread".equals(receipt.state), "Only unread fixtures can be aged");
@@ -138,6 +142,7 @@ public final class WorkspacePushLiveReleaseInstrumentation extends Instrumentati
             } else {
                 await(() -> active(identity) != null, "Expected external notification was not displayed");
                 Notification notification = active(identity);
+                if (arguments.containsKey("expectedCount")) require(notification.number == Integer.parseInt(argument("expectedCount")), "Wrong unread count");
                 require(notification.getTimeoutAfter() >= 3L * 24 * 3600000L, "Unexpected short alert deadline");
                 require((notification.flags & Notification.FLAG_AUTO_CANCEL) == 0, "A tap would discard an unread alert");
                 require(argument("expectedSender").equals(notification.extras.getString(Notification.EXTRA_TITLE)), "Wrong sender");
@@ -158,7 +163,7 @@ public final class WorkspacePushLiveReleaseInstrumentation extends Instrumentati
                 }
                 if ("dismiss".equals(action)) {
                     notification.deleteIntent.send();
-                    await(() -> active(identity) == null && closed(event, "dismissed"), "Manual dismissal was not retained");
+                    await(() -> active(identity) == null && closedIdentity(receipt.identity, "dismissed"), "Manual dismissal was not retained");
                 }
                 if ("open".equals(action) || "openOffline".equals(action)) {
                     if ("openOffline".equals(action)) require(getTargetContext().getSystemService(
@@ -186,7 +191,7 @@ public final class WorkspacePushLiveReleaseInstrumentation extends Instrumentati
                         }
                         return false;
                     }, "The optimized app did not load the actual chat message");
-                    await(() -> active(identity) == null && closed(event, "closed"),
+                    await(() -> active(identity) == null && closedIdentity(receipt.identity, "closed"),
                             "Successful message read did not remove its notification");
                 }
             }

@@ -36,6 +36,7 @@ import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
 import ru.genesiscorporation.workspace.beta.data.remote.WorkspaceAPIClient
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessagesByIdsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.OwnUserRequest
+import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsByIdsRequest
 import java.util.concurrent.TimeUnit
 
 /** Repair missed read/delete updates through the ordinary authenticated message API. */
@@ -70,15 +71,28 @@ class PushReconciliationWorker(
                     while (serverRepository.getServer(server.id) == server && keys.get(server.id) == registration) {
                         val batch = inbox.pending(registration, after)
                         if (batch.isEmpty()) break
-                        val response = client.performRequest(MessagesByIdsRequest(batch.map { it.route.messageUuid }), server.id, server)
-                        if (response !is ApiResult.Success) { retry = true; break }
-                        if (serverRepository.getServer(server.id) != server || keys.get(server.id) != registration) break
-                        if (response.value.any { it.projectId != null && it.projectId != registration.projectUuid }) { retry = true; break }
-                        // A successful filtered snapshot omits deleted or no-longer-accessible messages.
-                        val readable = response.value.associateBy { it.uuid }
-                        notifications.reconciled(registration, batch.map { it.route.messageUuid }.filter {
-                            readable[it] == null || readable[it]?.read == true
-                        })
+                        val topics = batch.filter { it.route.topicUpdate }
+                        if (topics.isNotEmpty()) {
+                            val response = client.performRequest(TopicsByIdsRequest(topics.map { it.route.topicUuid }.distinct()), server.id, server)
+                            if (response !is ApiResult.Success) { retry = true; break }
+                            if (serverRepository.getServer(server.id) != server || keys.get(server.id) != registration) break
+                            val available = response.value.associateBy { it.uuid }
+                            notifications.reconciledTopics(registration, topics.filter {
+                                val current = available[it.route.topicUuid]
+                                current == null || (current.streamUuid == it.route.streamUuid && current.activeUnreadCount == 0)
+                            })
+                        }
+                        val legacy = batch.filter { !it.route.topicUpdate }
+                        if (legacy.isNotEmpty()) {
+                            val response = client.performRequest(MessagesByIdsRequest(legacy.map { it.route.messageUuid }), server.id, server)
+                            if (response !is ApiResult.Success) { retry = true; break }
+                            if (serverRepository.getServer(server.id) != server || keys.get(server.id) != registration) break
+                            if (response.value.any { it.projectId != null && it.projectId != registration.projectUuid }) { retry = true; break }
+                            val readable = response.value.associateBy { it.uuid }
+                            notifications.reconciled(registration, legacy.map { it.route.messageUuid }.filter {
+                                readable[it] == null || readable[it]?.read == true
+                            })
+                        }
                         after = batch.last().sequence
                     }
                 }
