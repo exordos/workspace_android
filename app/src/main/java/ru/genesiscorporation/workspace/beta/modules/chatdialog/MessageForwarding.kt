@@ -8,6 +8,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
+import ru.genesiscorporation.workspace.beta.data.WorkspaceDateTime
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.data.remote.ApiError
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
@@ -53,7 +54,7 @@ internal fun escapeWorkspaceMarkdownInline(value: String): String = buildString 
 internal fun forwardableStreams(streams: List<Stream>): List<Stream> = streams
     .filter { !it.isArchived && isCanonicalForwardUuid(it.uuid) }
     .distinctBy(Stream::uuid)
-    .sortedByDescending(Stream::updatedAt)
+    .sortedByDescending { WorkspaceDateTime.parse(it.updatedAt) }
 
 internal data class ForwardDestination(val streamUuid: String, val topicUuid: String)
 

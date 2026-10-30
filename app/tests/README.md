@@ -445,3 +445,36 @@ It checks release flags, automatic collection policy in the manifest, the
 packaged mapping ID and the SDK's installed uncaught-exception hook under R8.
 It does not send an event. Keep cloud receipt/deobfuscation verification as a
 separate synthetic crash-and-restart acceptance step before publication.
+
+## Shared date/time contract and Android 12 regressions
+
+Use `data.WorkspaceDateTime` for wall-clock parsing, serialization and display.
+API/cache input is an ISO date with `Z` or a numeric offset; sort by the parsed
+`Instant`, never by the date string or `LocalDateTime`. New local timestamps use
+UTC `Z`. Calendar days and displayed times use the current device zone, with an
+explicit zone available for deterministic tests. Epoch-second and epoch-millisecond
+formatters are distinct. Invalid/offset-free input throws; existing callers keep
+their error handling. Scheduling intervals and monotonic deadlines are durations,
+not wall-clock dates.
+
+Run `ChatTimestampRegressionTest` on an Android 12 (API 31) emulator as well as
+a current Android runtime. A host JVM accepts numeric offsets in `Instant.parse`
+that Android 12 rejects, so JVM tests alone do not cover this crash. The test
+uses the reported `2026-10-30T11:39:50.168+03:00` timestamp, mixed-offset history
+ordering, key requests, the real chat screen and a pending/confirmed message
+sent from `GMT+03:00`. It also checks message neighbors, the latest-history read
+boundary and local day separators across UTC midnight. `DateTimeScreensRegressionTest`
+checks folder loading and the actual drafts/mentions screens with mixed offsets.
+Their HTTP servers, accounts and storage are isolated fixtures.
+
+```sh
+ANDROID_SERIAL=TASK_SERIAL ./gradlew --no-daemon \
+  :app:connectedExordosDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.class=ru.genesiscorporation.workspace.beta.modules.chatdialog.ChatTimestampRegressionTest,ru.genesiscorporation.workspace.beta.data.DateTimeScreensRegressionTest
+```
+
+`WorkspaceDateTimeTest`, `WorkspaceDateTimeFormattingTest` and
+`ActivityTimestampTest` cover precision, invalid input, UTC output, positive and
+negative offsets, device-zone changes, DST, stream/topic activity and forwarding
+destination order. Keep the device run: a passing JVM test does not establish
+that the platform date parser behaves the same on older Android.

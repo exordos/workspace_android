@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
 import org.jitsi.meet.sdk.JitsiMeetActivity
 import org.jitsi.meet.sdk.JitsiMeetConferenceOptions
+import ru.genesiscorporation.workspace.beta.data.WorkspaceDateTime
 import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
@@ -38,10 +39,6 @@ import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.net.URL
-import java.time.Instant
-import java.time.LocalDateTime
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 import kotlin.time.ExperimentalTime
 
 @OptIn(ExperimentalTime::class)
@@ -53,8 +50,6 @@ fun CallMessageView(
     onForwardMessage: ((MessageResponse) -> Unit)? = null,
 ) {
     var menuExpanded by remember(item.uuid) { mutableStateOf(false) }
-    val zone = ZoneId.systemDefault()
-    val hhmmFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val itemUrl = URL(item.payload.content)
@@ -195,9 +190,9 @@ fun CallMessageView(
                     Row(
                         horizontalArrangement = Arrangement.End
                     ) {
-                        val instant = Instant.parse(item.createdAt)
+                        val messageTime = WorkspaceDateTime.formatTime(item.createdAt)
                         Text(
-                            text = instant.atZone(zone).format(hhmmFormatter),
+                            text = messageTime,
                             color = LocalWorkspaceColorsPalette.current.messageTimeColor,
                             fontSize = 14.sp,
                             fontFamily = InterFontFamily,

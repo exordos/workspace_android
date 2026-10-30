@@ -49,16 +49,13 @@ import coil3.network.NetworkHeaders
 import coil3.network.httpHeaders
 import coil3.request.ImageRequest
 import kotlinx.coroutines.launch
+import ru.genesiscorporation.workspace.beta.data.WorkspaceDateTime
 import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.data.UrnParser
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
-import java.time.Instant
-import java.time.LocalDateTime
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 import kotlin.io.encoding.Base64
 
 @Composable
@@ -72,9 +69,7 @@ fun ImageMessageView(
     onForwardMessage: ((MessageResponse) -> Unit)? = null,
 ) {
     var menuExpanded by remember(item.uuid) { mutableStateOf(false) }
-    val zone = ZoneId.systemDefault()
     val scope = rememberCoroutineScope()
-    val hhmmFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
     var showFullscreen by remember { mutableStateOf(false) }
     val bubbleShape = if (item.isOwn) {
         RoundedCornerShape(
@@ -243,9 +238,9 @@ fun ImageMessageView(
     //                    contentDescription = null,
     //                )
                     Spacer(modifier = Modifier.widthIn(min = 20.dp))
-                    val instant = Instant.parse(item.createdAt)
+                    val messageTime = WorkspaceDateTime.formatTime(item.createdAt)
                     Text(
-                        text = instant.atZone(zone).format(hhmmFormatter),
+                        text = messageTime,
                         color = LocalWorkspaceColorsPalette.current.messageTimeColor,
                         fontSize = 14.sp,
                         fontFamily = InterFontFamily,

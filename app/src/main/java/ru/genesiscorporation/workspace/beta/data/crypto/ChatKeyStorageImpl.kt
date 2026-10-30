@@ -4,6 +4,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
+import ru.genesiscorporation.workspace.beta.data.WorkspaceDateTime
 import java.security.MessageDigest
 import java.util.UUID
 
@@ -308,7 +309,7 @@ internal class ChatKeyStorageImpl(private val records: ChatSecretRecords) : Chat
     private fun keyRecord(address: ChatKeyAddress, previous: KeyRecord?, groupKey: ByteArray,
                           sendOrder: Long): KeyRecord = KeyRecord(address.scope.deviceId,
         address.streamUuid, address.keyUuid, groupKey.copyOf(),
-        if (previous?.groupKey != null) previous.receivedAt else System.currentTimeMillis(),
+        if (previous?.groupKey != null) previous.receivedAt else WorkspaceDateTime.nowEpochMillis(),
         sendOrder, previous?.deletionRevision ?: 0)
 
     private fun KeyRecord.matches(scope: ChatKeyScope, stream: String): Boolean {

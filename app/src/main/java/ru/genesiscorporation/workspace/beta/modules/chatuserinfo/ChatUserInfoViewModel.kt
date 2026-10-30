@@ -20,8 +20,6 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.SendMessageRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
-import java.time.OffsetDateTime
-import java.time.format.DateTimeFormatter
 import kotlin.collections.first
 
 class ChatUserInfoViewModel(

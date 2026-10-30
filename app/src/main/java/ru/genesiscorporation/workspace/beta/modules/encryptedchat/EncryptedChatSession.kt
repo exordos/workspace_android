@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import ru.genesiscorporation.workspace.beta.data.WorkspaceDateTime
 import ru.genesiscorporation.workspace.beta.data.crypto.ChatCryptoException
 import ru.genesiscorporation.workspace.beta.data.crypto.ChatGrantContext
 import ru.genesiscorporation.workspace.beta.data.crypto.ChatKeyAddress
@@ -340,7 +341,7 @@ class EncryptedChatSession(
                     it.previousGroupKey?.contentEquals(previousGroupKey) == true)
             }.minWithOrNull(compareBy<PendingChatKeyRequest> { it.createdAt }.thenBy { it.localRequestId })
             val pending = existing ?: PendingChatKeyRequest(UUID.randomUUID().toString(), null,
-                crypto.createRequestKeyPair(), System.currentTimeMillis(), recoveryEnvelope, previousGroupKey).also {
+                crypto.createRequestKeyPair(), WorkspaceDateTime.nowEpochMillis(), recoveryEnvelope, previousGroupKey).also {
                 current()
                 if (deletionRevision != storage.readChatKeyDeletionRevision(keyAddress)) fail(EncryptedChatFailure.MISSING_KEY)
                 if (!storage.writePendingRequest(keyAddress, it)) fail(EncryptedChatFailure.STORAGE_FAILED)

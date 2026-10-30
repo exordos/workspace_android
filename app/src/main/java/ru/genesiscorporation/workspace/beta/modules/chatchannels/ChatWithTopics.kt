@@ -43,6 +43,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import kotlinx.coroutines.launch
+import ru.genesiscorporation.workspace.beta.data.WorkspaceDateTime
 import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
@@ -51,9 +52,7 @@ import ru.genesiscorporation.workspace.beta.ui.AnimatedGif
 import ru.genesiscorporation.workspace.beta.ui.FullScreenError
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
-import java.time.LocalDateTime
-import java.time.OffsetDateTime
-import java.time.format.DateTimeFormatter
+import java.time.Instant
 import kotlin.collections.mapNotNull
 import kotlin.collections.sortedByDescending
 import kotlin.math.roundToInt
@@ -69,7 +68,6 @@ fun ChatWithTopics(
     val currentlySelectedFolder by chatViewModel.currentlySelectedFolder.collectAsState()
     val searchQuery by chatViewModel.searchQuery.collectAsState()
     val currentlySelectedStream by chatViewModel.currentlySelectedStream.collectAsState()
-    val messageFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
     val scope = rememberCoroutineScope()
     val streamTopics by chatViewModel.streamTopics.collectAsStateWithLifecycle()
     val streamsQueryState by chatViewModel.streamsQueryState.collectAsStateWithLifecycle()
@@ -299,11 +297,8 @@ fun ChatWithTopics(
     }
 }
 
-private val streamDateFormatter = DateTimeFormatter.ISO_LOCAL_DATE_TIME
-
-fun Stream.sortKey(): LocalDateTime =
-    OffsetDateTime.parse(lastMessage?.createdAt ?: updatedAt)
-        .toLocalDateTime()
+fun Stream.sortKey(): Instant =
+    WorkspaceDateTime.parse(lastMessage?.createdAt ?: updatedAt)
 
 fun List<Stream>.sortedForInbox(): List<Stream> =
     sortedWith(
@@ -314,9 +309,8 @@ fun List<Stream>.sortedForInbox(): List<Stream> =
 fun List<Stream>.sortedByActivity(): List<Stream> =
     sortedByDescending { it.sortKey() }
 
-fun TopicsResponseData.sortKey(): LocalDateTime =
-    OffsetDateTime.parse(lastMessage?.createdAt ?: updatedAt)
-        .toLocalDateTime()
+fun TopicsResponseData.sortKey(): Instant =
+    WorkspaceDateTime.parse(lastMessage?.createdAt ?: updatedAt)
 private val TopicsResponseData.isNotMuted: Boolean
     get() = notificationMode != "mute"
 

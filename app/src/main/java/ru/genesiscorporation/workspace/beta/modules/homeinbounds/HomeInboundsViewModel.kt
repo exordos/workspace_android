@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import ru.genesiscorporation.workspace.beta.data.WorkspaceDateTime
 import ru.genesiscorporation.workspace.beta.HomeFlow
 import ru.genesiscorporation.workspace.beta.data.EventsRepositoryStore
 import ru.genesiscorporation.workspace.beta.data.remote.ApiResult
@@ -19,7 +20,6 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
-import java.time.Instant
 
 internal val Stream.hasInboxUnread: Boolean
     get() = activeUnreadCount > 0
@@ -31,7 +31,7 @@ internal fun firstInboxUnread(messages: List<MessageResponse>, stream: Stream, t
     messages.asSequence().filter {
         it.streamUuid == stream.uuid && it.topicUuid == topic.uuid &&
             it.isActiveUnread(stream.notificationMode, topic.notificationMode)
-    }.minWithOrNull(compareBy<MessageResponse> { Instant.parse(it.createdAt) }.thenBy { it.uuid })
+    }.minWithOrNull(compareBy<MessageResponse> { WorkspaceDateTime.parse(it.createdAt) }.thenBy { it.uuid })
 
 class HomeInboundsViewModel(
     val client: WorkspaceAPIClient,

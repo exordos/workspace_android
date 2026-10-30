@@ -60,6 +60,7 @@ import coil3.network.httpHeaders
 import coil3.request.ImageRequest
 import dev.jeziellago.compose.markdowntext.MarkdownText
 import kotlinx.coroutines.launch
+import ru.genesiscorporation.workspace.beta.data.WorkspaceDateTime
 import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.data.UrnParser
@@ -78,10 +79,6 @@ import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatP
 import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatRequestStatus
 import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatLock
 import java.io.File
-import java.time.Instant
-import java.time.LocalDateTime
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 import kotlin.context
 
 @Composable
@@ -96,8 +93,6 @@ fun TextMessageView(
     val encrypted = lockedPresentation != null || item.originalEncryptedPayload != null
     val quotedMessages by viewModel.quotedMessages.collectAsState()
     val deletingMessageUuids by viewModel.deletingMessageUuids.collectAsStateWithLifecycle()
-    val zone = ZoneId.systemDefault()
-    val hhmmFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var showFullscreen by remember { mutableStateOf(false) }
@@ -317,9 +312,9 @@ fun TextMessageView(
                             }
                         }
                         Spacer(modifier = Modifier.widthIn(min = 20.dp))
-                        val instant = Instant.parse(item.createdAt)
+                        val messageTime = WorkspaceDateTime.formatTime(item.createdAt)
                         Text(
-                            text = instant.atZone(zone).format(hhmmFormatter),
+                            text = messageTime,
                             color = if (encrypted) LocalWorkspaceColorsPalette.current.textHeaders
                                 else LocalWorkspaceColorsPalette.current.messageTimeColor,
                             fontSize = 14.sp,
