@@ -1,0 +1,162 @@
+package com.exordos.workspace
+
+import android.content.SharedPreferences
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import com.exordos.workspace.data.ServerRepository
+import com.exordos.workspace.data.ServerConfig
+import com.exordos.workspace.data.TokenPair
+import com.exordos.workspace.data.remote.dto.UserResponseData
+import java.util.UUID
+import kotlin.String
+
+class UserViewModel(
+    val repo: ServerRepository
+):  ViewModel() {
+
+    var userData: UserResponseData? = null
+    val selectedServerId: StateFlow<String?> = repo.selectedServerIdFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    val streamsOrderIsUnreadFirst: StateFlow<Boolean> = repo.isUnreadFirst
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    private val serversSharing = repo.serversFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val servers: StateFlow<List<ServerConfig>> = serversSharing
+    val isServersLoaded: StateFlow<Boolean> = repo.serversFlow
+        .map { true }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    val selectedServer: StateFlow<ServerConfig?> = combine(
+        servers,
+        selectedServerId,
+    ) { list, id ->
+        list.find { it.id == id } ?: list.firstOrNull()
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    val organizationName: StateFlow<String?> = selectedServer
+        .map { it?.name }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    val organizationUrl: StateFlow<String?> = selectedServer
+        .map { it?.baseUrl }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    val organizationImageUrl: StateFlow<String?> = selectedServer
+        .map { it?.imageUrl }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    val baseUrl: StateFlow<String?> = organizationUrl
+
+    val accessToken: StateFlow<String?> = repo.selectedAccessTokenFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    val refreshToken: StateFlow<String?> = repo.selectedRefreshTokenFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    val isAccessTokenLoaded: StateFlow<Boolean> = accessToken
+        .map { true }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    suspend fun getServer(serverId: String): ServerConfig? {
+        return repo.getServer(serverId)
+    }
+
+    fun selectServer(serverId: String?) {
+        viewModelScope.launch {
+            repo.setSelectedServerId(serverId)
+        }
+    }
+    fun addServer(
+        baseUrl: String,
+        imageUrl: String,
+        name: String,
+        tokens: TokenPair? = null,
+    ) {
+        viewModelScope.launch {
+            val config = ServerConfig(
+                id = UUID.randomUUID().toString(),
+                name = name,
+                baseUrl = baseUrl,
+                imageUrl = imageUrl,
+                needsToRelogin = false
+            )
+            repo.addServer(config, tokens)
+            repo.setSelectedServerId(config.id)
+        }
+    }
+
+    fun setNeedsToReloginCurrentServer(newValue: Boolean) {
+        val currentServerUuid = selectedServerId.value ?: return
+        setNeedsToRelogin(newValue, currentServerUuid)
+    }
+
+    fun setNeedsToRelogin(newValue: Boolean, serverUuid: String) {
+        viewModelScope.launch {
+            repo.setNeedsToRelogin(newValue, serverUuid)
+        }
+    }
+
+    fun updateServer(config: ServerConfig, tokens: TokenPair? = null) {
+        viewModelScope.launch {
+            repo.updateServer(config, tokens)
+        }
+    }
+    suspend fun removeServer(serverId: String) = repo.removeServer(serverId)
+
+
+    suspend fun removeCurrentServer() {
+        val currentServerUuid = selectedServerId.value ?: return
+        removeServer(currentServerUuid)
+    }
+
+    fun setStreamsOrderIsUnreadFirst(isUnreadFirst: Boolean) {
+        viewModelScope.launch {
+            repo.setStreamsOrderIsUnreadFirst(isUnreadFirst)
+        }
+    }
+
+    fun getTokens(serverId: String): TokenPair? {
+        return repo.tokensFor(serverId)
+    }
+
+    fun getCurrentTokens(): TokenPair? {
+        val serverId = selectedServer.value?.id ?: return null
+        return repo.tokensFor(serverId)
+    }
+
+    suspend fun setTokensAndWait(
+        accessToken: String,
+        refreshToken: String,
+        serverId: String? = null,
+    ): Boolean {
+        val targetServerId = serverId ?: selectedServer.value?.id ?: return false
+        repo.saveTokensAndClearRelogin(
+            targetServerId,
+            TokenPair(accessToken, refreshToken),
+        )
+        return true
+    }
+
+    suspend fun updateSelectedServerProjectUuid(
+        projectUuid: String,
+        projectName: String? = null,
+        serverId: String? = null,
+    ) {
+        val id = serverId ?: selectedServer.value?.id ?: return
+        repo.updateServerProjectUuid(id, projectUuid, projectName)
+    }
+
+    fun clearAll() {
+        viewModelScope.launch {
+            repo.clearAll() // clears servers + selected id + email/userId + all secure tokens
+            userData = null
+        }
+    }
+}
+
+val UserState = compositionLocalOf<UserViewModel> { error("User state not found") }

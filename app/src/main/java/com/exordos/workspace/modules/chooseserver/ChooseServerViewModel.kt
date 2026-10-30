@@ -1,0 +1,62 @@
+package com.exordos.workspace.modules.chooseserver
+
+import androidx.lifecycle.ViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import com.exordos.workspace.UserViewModel
+import com.exordos.workspace.data.ServerConfig
+import com.exordos.workspace.data.remote.ApiResult
+import com.exordos.workspace.data.remote.WorkspaceAPIClient
+import com.exordos.workspace.data.remote.dto.ServerSettingsRequest
+import java.util.UUID
+
+sealed interface QueryState {
+    object Idle : QueryState
+    object Loading : QueryState
+    object Success : QueryState
+    data class Error(val message: String) : QueryState
+}
+class ChooseServerViewModel(
+    val client: WorkspaceAPIClient,
+    val userViewModel: UserViewModel
+): ViewModel() {
+
+    private val _queryState = MutableStateFlow<QueryState>(QueryState.Idle)
+    val queryState: StateFlow<QueryState> = _queryState
+
+    private val _serverText = MutableStateFlow("")
+    val serverText: StateFlow<String> = _serverText
+
+    fun onServerChange(newText: String) {
+        _serverText.value = newText
+    }
+
+    fun returnToIdleState() {
+        _queryState.value = QueryState.Idle
+    }
+
+    suspend fun getServerSettings() {
+        val previousState = _queryState.value
+        if (previousState is QueryState.Loading || !_queryState.compareAndSet(previousState, QueryState.Loading)) return
+        val serverUrl = serverText.value
+        val response = client.performRequest(ServerSettingsRequest(baseUrl = serverUrl))
+        when(response) {
+            is ApiResult.Success -> {
+                userViewModel.addServer(serverUrl, response.value.realmIcon, response.value.realmName)
+                _queryState.value = QueryState.Success
+            }
+            is ApiResult.Error -> {
+                _queryState.value = QueryState.Error(response.error.message ?: "Error")
+            }
+        }
+    }
+
+    private fun ensureHttpsPrefix(input: String): String {
+        val trimmed = input.trim()
+
+        return when {
+            trimmed.startsWith("https://", ignoreCase = true) -> trimmed
+            else -> "https://$trimmed"
+        }
+    }
+}

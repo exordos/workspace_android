@@ -7,7 +7,7 @@ the backend, IAM, and calling provider are separate systems. The HTTP contract
 lives in `data/remote/dto/`; the server enforces server-side access rules.
 
 Source paths below are relative to
-`app/src/main/java/ru/genesiscorporation/workspace/beta/`.
+`app/src/main/java/com/exordos/workspace/`.
 
 ```mermaid
 flowchart TD
