@@ -70,8 +70,6 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UsersRequest
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
 import java.net.URI
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
 import kotlin.collections.map
 import kotlin.collections.orEmpty
 import kotlin.collections.plus
@@ -149,7 +147,6 @@ class EventsRepository(
     }
 
 
-    private val folderCreationFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
 
     private val _currentUser = MutableStateFlow<UserResponseData?>(null)
     val currentUser: StateFlow<UserResponseData?> = _currentUser.asStateFlow()
@@ -1311,7 +1308,7 @@ class EventsRepository(
         val response = webSocketClient.performRequest(FoldersRequest(), serverId)
         when(response) {
             is ApiResult.Success -> {
-                setInitialFolders(response.value.sortedBy { LocalDateTime.parse(it.creationDate, folderCreationFormatter) })
+                setInitialFolders(response.value.sortedBy { WorkspaceDateTime.parse(it.creationDate) })
                 if (!folders.value.isEmpty()) {
                     _currentlySelectedFolder.value = folders.value.first()
                 }

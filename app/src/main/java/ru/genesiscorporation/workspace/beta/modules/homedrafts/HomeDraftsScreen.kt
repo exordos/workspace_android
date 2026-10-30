@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import kotlinx.coroutines.launch
+import ru.genesiscorporation.workspace.beta.data.WorkspaceDateTime
 import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.HomeFlow
 import ru.genesiscorporation.workspace.beta.R
@@ -49,8 +50,6 @@ import ru.genesiscorporation.workspace.beta.ui.AnimatedGif
 import ru.genesiscorporation.workspace.beta.ui.FullScreenError
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -63,7 +62,6 @@ fun HomeDraftsScreen(
     val topicsPool by viewModel.topicsPool.collectAsStateWithLifecycle()
     val topicsQueryState by viewModel.topicsQueryState.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
-    val dateFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
     Scaffold(
         topBar = {
             TopAppBar(
@@ -137,9 +135,7 @@ fun HomeDraftsScreen(
                         ) {
                             items(
                                 items = drafts.sortedByDescending {
-                                    LocalDateTime.parse(
-                                        it.updatedAt, dateFormatter
-                                    )
+                                    WorkspaceDateTime.parse(it.updatedAt)
                                 }
                             ) { item ->
                                 val topic = topicsPool.firstOrNull { it.uuid == item.topicUuid }

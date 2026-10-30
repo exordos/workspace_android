@@ -23,12 +23,12 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import ru.genesiscorporation.workspace.beta.data.WorkspaceDateTime
 import ru.genesiscorporation.workspace.beta.MainActivity
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.data.crypto.WorkspacePushCrypto
 import ru.genesiscorporation.workspace.beta.data.crypto.WorkspacePushPayload
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
-import java.time.Instant
 import java.util.Base64
 
 @Serializable
@@ -38,7 +38,7 @@ internal data class PushPreview(val kind: String, val sender_name: String = "Wor
 internal data class PushDisplayLimits(val conversations: Int = 5, val messages: Int = 5)
 
 /** Render entirely offline. Durable receipts contain routes and decisions, never decrypted previews. */
-internal class WorkspacePushNotifications(private val context: Context, private val now: () -> Long = System::currentTimeMillis) {
+internal class WorkspacePushNotifications(private val context: Context, private val now: () -> Long = WorkspaceDateTime::nowEpochMillis) {
     private val keys = PushKeyStore(context)
     private val inbox = PushInbox(context)
     private val json = Json { ignoreUnknownKeys = true }
@@ -77,7 +77,7 @@ internal class WorkspacePushNotifications(private val context: Context, private 
                 if (preview.kind != "message") return@forEach
                 // Preserve pre-upgrade cancellations as well as new database tombstones.
                 if (preferences.contains("cancel:${legacyIdentity(route)}")) inbox.close(route)
-                val createdAt = preview.created_at?.let { runCatching { Instant.parse(it).toEpochMilli() }.getOrNull() }
+                val createdAt = preview.created_at?.let { runCatching { WorkspaceDateTime.parse(it).toEpochMilli() }.getOrNull() }
                     ?.takeIf { it > 0 } ?: now()
                 val isNew = inbox.accept(route, createdAt)
                 if (inbox.resolve(route.identity) != null) previews[route.identity] = preview
@@ -123,7 +123,7 @@ internal class WorkspacePushNotifications(private val context: Context, private 
         val cutoff = now() - PushInbox.DELIVERY_WINDOW_MILLIS
         val (recent, history) = messages.filter {
             it.read && (it.projectId == null || it.projectId == registration.projectUuid)
-        }.partition { runCatching { Instant.parse(it.createdAt).toEpochMilli() >= cutoff }.getOrDefault(false) }
+        }.partition { runCatching { WorkspaceDateTime.parse(it.createdAt).toEpochMilli() >= cutoff }.getOrDefault(false) }
         // Old loaded history can close an existing alert, but cannot have an undelivered new push.
         inbox.closeMessages(registration, history.map { it.uuid }, rememberUnknown = false)
         inbox.closeMessages(registration, recent.map { it.uuid })

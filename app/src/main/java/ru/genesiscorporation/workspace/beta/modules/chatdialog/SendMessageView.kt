@@ -78,6 +78,7 @@ import coil3.compose.AsyncImage
 import io.ktor.http.ContentDisposition.Companion.File
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
+import ru.genesiscorporation.workspace.beta.data.WorkspaceDateTime
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.ui.ReferenceMessage
@@ -405,7 +406,7 @@ fun AttachButton(
     }
 
     fun launchCamera() {
-        val photoFile = File(context.cacheDir, "photo_${System.currentTimeMillis()}.jpg")
+        val photoFile = File(context.cacheDir, "photo_${WorkspaceDateTime.nowEpochMillis()}.jpg")
         val uri = FileProvider.getUriForFile(
             context,
             "${context.packageName}.fileprovider",
@@ -481,7 +482,7 @@ fun getFileName(context: Context, uri: Uri): String? {
 
 private fun createImageUri(context: Context): Uri {
     val authority = "${context.packageName}.fileprovider"
-    val photoFile = File(context.cacheDir, "photo_${System.currentTimeMillis()}.jpg")
+    val photoFile = File(context.cacheDir, "photo_${WorkspaceDateTime.nowEpochMillis()}.jpg")
     return FileProvider.getUriForFile(context, authority, photoFile)
 }
 private val MentionPattern =

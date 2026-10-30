@@ -17,7 +17,6 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.ProjectResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.ProjectsRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.TokenRefreshRequest
 import ru.genesiscorporation.workspace.beta.modules.chooseserver.QueryState
-import java.time.LocalDateTime
 
 class ProjectsViewModel(
     val client: WorkspaceAPIClient,

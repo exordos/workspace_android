@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.core.content.FileProvider
+import ru.genesiscorporation.workspace.beta.data.WorkspaceDateTime
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
 import kotlinx.coroutines.Dispatchers
@@ -114,7 +115,7 @@ internal suspend fun prepareExternalShareIntent(
     }
     val root = File(context.cacheDir, "message-shares").apply { mkdirs() }
     // Keep granted files long enough for the selected app to consume them.
-    root.listFiles()?.filter { it.lastModified() < System.currentTimeMillis() - 24 * 60 * 60 * 1_000L }
+    root.listFiles()?.filter { it.lastModified() < WorkspaceDateTime.nowEpochMillis() - 24 * 60 * 60 * 1_000L }
         ?.forEach { it.deleteRecursively() }
     val sessionDir = File(root, UUID.randomUUID().toString()).apply { check(mkdirs()) }
     try {

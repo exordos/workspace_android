@@ -1,5 +1,6 @@
 package ru.genesiscorporation.workspace.beta.modules.chatdialog
 
+import ru.genesiscorporation.workspace.beta.data.WorkspaceDateTime
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatSessionState
 import java.time.Instant
@@ -36,7 +37,7 @@ internal fun deriveChatHistoryPresentation(
     encryption: EncryptedChatSessionState,
 ): ChatHistoryPresentation {
     val ordered = visibleMessages?.distinctBy { it.uuid }
-        ?.map { it to Instant.parse(it.createdAt) }
+        ?.map { it to WorkspaceDateTime.parse(it.createdAt) }
         ?.sortedWith(compareBy<Pair<MessageResponse, Instant>> { it.second }.thenBy { it.first.uuid })
         ?.map { it.first }
     val latest = mutableMapOf<OwnGenerationRequestKey, Pair<Instant, String>>()
@@ -49,7 +50,7 @@ internal fun deriveChatHistoryPresentation(
                 val generation = message.payload.keyUuid?.takeIf { it.isNotBlank() } ?: return@forEach
                 val key = OwnGenerationRequestKey(message.streamUuid, generation, viewerUuid, deviceId)
                 ownRequests += key
-                val instant = runCatching { Instant.parse(message.createdAt) }.getOrNull() ?: return@forEach
+                val instant = runCatching { WorkspaceDateTime.parse(message.createdAt) }.getOrNull() ?: return@forEach
                 val previous = latest[key]
                 if (previous == null || instant > previous.first || (instant == previous.first && message.uuid > previous.second)) {
                     latest[key] = instant to message.uuid

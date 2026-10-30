@@ -1,4 +1,4 @@
-package ru.genesiscorporation.workspace.beta.modules.chatdialog
+package ru.genesiscorporation.workspace.beta.data
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -6,9 +6,9 @@ import java.time.Instant
 import java.time.ZoneId
 import java.util.TimeZone
 
-class MessageTimeFormattingTest {
+class WorkspaceDateTimeFormattingTest {
     private val now = Instant.parse("2026-01-10T12:00:00Z")
-    private fun relative(seconds: Long) = pastEpochSecondsToRelativeRu(now.epochSecond - seconds, now)
+    private fun relative(seconds: Long) = WorkspaceDateTime.relativeTimeRu(now.epochSecond - seconds, now)
 
     @Test
     fun futureAndSubMinuteTimestampsDoNotProduceNegativeAges() {
@@ -50,15 +50,15 @@ class MessageTimeFormattingTest {
     fun messageTimeUsesEpochSecondsAndExplicitZoneAcrossMidnight() {
         val timestamp = Instant.parse("2026-01-01T23:30:00Z").epochSecond
 
-        assertEquals("23:30", timestamp.formatHHmm(ZoneId.of("UTC")))
-        assertEquals("02:30", timestamp.formatHHmm(ZoneId.of("Europe/Moscow")))
-        assertEquals("18:30", timestamp.formatHHmm(ZoneId.of("America/New_York")))
+        assertEquals("23:30", WorkspaceDateTime.formatEpochSecondsTime(timestamp, ZoneId.of("UTC")))
+        assertEquals("02:30", WorkspaceDateTime.formatEpochSecondsTime(timestamp, ZoneId.of("Europe/Moscow")))
+        assertEquals("18:30", WorkspaceDateTime.formatEpochSecondsTime(timestamp, ZoneId.of("America/New_York")))
     }
 
     @Test
     fun messageTimeFollowsDaylightSavingRulesOfTheSelectedZone() {
         val zone = ZoneId.of("Europe/Berlin")
-        assertEquals("01:59", Instant.parse("2026-03-29T00:59:00Z").epochSecond.formatHHmm(zone))
-        assertEquals("03:00", Instant.parse("2026-03-29T01:00:00Z").epochSecond.formatHHmm(zone))
+        assertEquals("01:59", WorkspaceDateTime.formatEpochSecondsTime(Instant.parse("2026-03-29T00:59:00Z").epochSecond, zone))
+        assertEquals("03:00", WorkspaceDateTime.formatEpochSecondsTime(Instant.parse("2026-03-29T01:00:00Z").epochSecond, zone))
     }
 }

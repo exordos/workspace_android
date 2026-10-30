@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.CancellationException
+import ru.genesiscorporation.workspace.beta.data.WorkspaceDateTime
 import ru.genesiscorporation.workspace.beta.modules.encryptedchat.*
 import ru.genesiscorporation.workspace.beta.modules.streaminfo.ProtectedCallStarter
 import ru.genesiscorporation.workspace.beta.modules.streaminfo.currentProtectedStreamContext
@@ -58,9 +59,6 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.TopicsResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UsersRequest
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import java.io.File
-import java.time.LocalDateTime
-import java.time.OffsetDateTime
-import java.time.format.DateTimeFormatter
 import kotlin.collections.filter
 import kotlin.collections.first
 import kotlin.collections.firstOrNull
@@ -393,8 +391,6 @@ class ChatDialogViewModel(
 
     var shouldScrollToBottom: Boolean = firstUnreadMessageUuid == null
 
-    val messageFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
-
     fun addUri(newUri: Uri, fileName: String, type: String) {
         val attachedUri = AttachedUri(newUri, fileName, type)
         _uriList.update { current -> current + attachedUri }
@@ -406,7 +402,7 @@ class ChatDialogViewModel(
 
     fun nextMessageByUuid(currentUuid: String): MessageResponse? {
         val streamTopicKey = "${chatId}.${topicUuid}"
-        val messages = streamTopicMessages.value[streamTopicKey]?.sortedBy { LocalDateTime.parse(it.createdAt, messageFormatter) }
+        val messages = streamTopicMessages.value[streamTopicKey]?.sortedWith(compareBy<MessageResponse> { WorkspaceDateTime.parse(it.createdAt) }.thenBy { it.uuid })
         if (messages != null) {
             val i =
                 messages.indexOfFirst { it.uuid == currentUuid }
@@ -418,7 +414,7 @@ class ChatDialogViewModel(
 
     fun previousMessageByUuid(currentUuid: String): MessageResponse? {
         val streamTopicKey = "${chatId}.${topicUuid}"
-        val messages = streamTopicMessages.value[streamTopicKey]?.sortedBy { LocalDateTime.parse(it.createdAt, messageFormatter) }
+        val messages = streamTopicMessages.value[streamTopicKey]?.sortedWith(compareBy<MessageResponse> { WorkspaceDateTime.parse(it.createdAt) }.thenBy { it.uuid })
         if (messages != null) {
             val i =
                 messages.indexOfFirst { it.uuid == currentUuid }
@@ -618,10 +614,11 @@ class ChatDialogViewModel(
         }
         val userId = repo.currentUser.value?.uuid
         val uuid: Uuid = Uuid.random()
+        val timestamp = WorkspaceDateTime.apiTimestamp()
         var newMessage = MessageResponse(
             uuid.toString(),
-            OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
-            OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
+            timestamp,
+            timestamp,
             chatId,
             topicUuid,
             userId ?: "",
@@ -748,7 +745,7 @@ class ChatDialogViewModel(
         val messagesResponse = repo.refreshConversation(chatId, topicUuid)
         when(messagesResponse) {
             is ApiResult.Success -> {
-                val lastMessage = messagesResponse.value.sortedBy { LocalDateTime.parse(it.createdAt, messageFormatter) }.lastOrNull()
+                val lastMessage = messagesResponse.value.maxWithOrNull(compareBy<MessageResponse> { WorkspaceDateTime.parse(it.createdAt) }.thenBy { it.uuid })
                 if (lastMessage != null && firstUnreadMessageUuid == null) {
                     markMessagesReadUpTo(lastMessage.uuid)
                 }

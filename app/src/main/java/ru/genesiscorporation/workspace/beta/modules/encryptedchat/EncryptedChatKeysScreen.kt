@@ -59,14 +59,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
+import ru.genesiscorporation.workspace.beta.data.WorkspaceDateTime
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.data.remote.AuthHeader
 import ru.genesiscorporation.workspace.beta.data.remote.dto.UserResponseData
 import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
 private val KeyScreenBackground = Color(0xFF1B1B1D)
 private val KeyFieldBackground = Color(0xFF262628)
@@ -387,9 +385,9 @@ private fun EncryptionConfirmation(
 }
 
 private fun formatGenerationDate(timestamp: Long): String = runCatching {
-    DateTimeFormatter.ofPattern("dd.MM.yyyy").withZone(ZoneId.systemDefault()).format(Instant.ofEpochMilli(timestamp))
+    WorkspaceDateTime.formatEpochMillis(timestamp, "dd.MM.yyyy")
 }.getOrDefault("")
 
 private fun formatKeyReceipt(timestamp: Long): String = runCatching {
-    DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm").withZone(ZoneId.systemDefault()).format(Instant.ofEpochMilli(timestamp))
+    WorkspaceDateTime.formatEpochMillis(timestamp, "dd.MM.yyyy HH:mm")
 }.getOrDefault("")

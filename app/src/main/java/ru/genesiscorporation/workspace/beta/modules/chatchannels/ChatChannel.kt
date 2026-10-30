@@ -45,19 +45,15 @@ import androidx.compose.ui.unit.sp
 import androidx.core.graphics.toColorInt
 import dev.jeziellago.compose.markdowntext.MarkdownText
 import kotlinx.coroutines.launch
+import ru.genesiscorporation.workspace.beta.data.WorkspaceDateTime
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.data.remote.dto.FolderResponseData
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
 import ru.genesiscorporation.workspace.beta.data.remote.dto.Stream
-import ru.genesiscorporation.workspace.beta.modules.chatdialog.formatHHmm
 import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatAvatarBadge
 import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
-import java.time.Instant
-import java.time.LocalDateTime
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
 @Composable
 fun ChatChannel(
@@ -87,8 +83,6 @@ fun ChatChannel(
 //        animationSpec = tween(durationMillis = 250),
 //        label = "chatHeaderBackground"
 //    )
-    val zone = ZoneId.systemDefault()
-    val HHMMFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
     Box(
         modifier = Modifier
@@ -204,9 +198,9 @@ fun ChatChannel(
                 }
                 Spacer(modifier = Modifier.weight(1f))
                 if (lastMessage != null) {
-                    val instant = Instant.parse(encryptedPreview?.createdAt ?: lastMessage.createdAt)
+                    val messageTime = WorkspaceDateTime.formatTime(encryptedPreview?.createdAt ?: lastMessage.createdAt)
                     Text(
-                        text = instant.atZone(zone).format(HHMMFormatter),
+                        text = messageTime,
                         color = LocalWorkspaceColorsPalette.current.messageTimeColor,
                         fontSize = 12.sp,
                         fontFamily = InterFontFamily,

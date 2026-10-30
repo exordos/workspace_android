@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import kotlinx.coroutines.launch
+import ru.genesiscorporation.workspace.beta.data.WorkspaceDateTime
 import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.HomeFlow
 import ru.genesiscorporation.workspace.beta.R
@@ -55,10 +56,6 @@ import ru.genesiscorporation.workspace.beta.ui.EnhancedMarkdown
 import ru.genesiscorporation.workspace.beta.ui.FullScreenError
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
-import java.time.Instant
-import java.time.LocalDateTime
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -71,10 +68,6 @@ fun HomeMentionsScreen(
     val streams by viewModel.streams.collectAsStateWithLifecycle()
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
-    val dateFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
-    val zone = ZoneId.systemDefault()
-    val hhmmFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
-    val messageFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
     Scaffold(
         topBar = {
             TopAppBar(
@@ -135,7 +128,7 @@ fun HomeMentionsScreen(
                             .fillMaxSize()
                     ) {
                         items(
-                            items = messages.sortedByDescending  { LocalDateTime.parse(it.createdAt, messageFormatter) }
+                            items = messages.sortedByDescending  { WorkspaceDateTime.parse(it.createdAt) }
                         ) { item ->
 
                             val stream = streams.firstOrNull { it.uuid == item.streamUuid }
@@ -198,9 +191,9 @@ fun HomeMentionsScreen(
                                             )
                                         }
                                         Spacer(modifier = Modifier.widthIn(min = 20.dp))
-                                        val instant = Instant.parse(item.createdAt)
+                                        val messageTime = WorkspaceDateTime.formatTime(item.createdAt)
                                         Text(
-                                            text = instant.atZone(zone).format(hhmmFormatter),
+                                            text = messageTime,
                                             color = LocalWorkspaceColorsPalette.current.messageTimeColor,
                                             fontSize = 14.sp,
                                             fontFamily = InterFontFamily,

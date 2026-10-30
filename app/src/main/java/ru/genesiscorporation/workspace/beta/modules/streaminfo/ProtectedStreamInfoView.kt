@@ -42,6 +42,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import org.jitsi.meet.sdk.JitsiMeetActivity
 import org.jitsi.meet.sdk.JitsiMeetConferenceOptions
+import ru.genesiscorporation.workspace.beta.data.WorkspaceDateTime
 import ru.genesiscorporation.workspace.beta.ChatFlow
 import ru.genesiscorporation.workspace.beta.LocalProtectedBottomBarStyle
 import ru.genesiscorporation.workspace.beta.R
@@ -59,7 +60,6 @@ import ru.genesiscorporation.workspace.beta.ui.Avatar
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.net.URL
-import java.time.Instant
 
 private enum class ProtectedInfoPage { INFO, EDIT, TYPE, MEMBERS, KEYS, LOCAL_KEYS }
 private val ProtectedMuted = Color(0xFF707070)
@@ -114,7 +114,7 @@ fun ProtectedStreamInfoView(viewModel: StreamInfoViewModel, navController: NavHo
         if (targetStream == null || currentKey.isNullOrBlank()) null else (pooledMessages.asSequence() + rawMessages.values.asSequence().flatten()).filter {
             it.streamUuid == targetStream && it.payload.kind == "key_announced" && it.payload.keyUuid == currentKey &&
                 (it.projectId == null || it.projectId == selectedServer?.projectUuid)
-        }.mapNotNull { runCatching { Instant.parse(it.createdAt).toEpochMilli() }.getOrNull() }.minOrNull()
+        }.mapNotNull { runCatching { WorkspaceDateTime.parse(it.createdAt).toEpochMilli() }.getOrNull() }.minOrNull()
     }
 
     DisposableEffect(page, stream?.encryption == true, setProtectedBottomBarStyle) {

@@ -103,6 +103,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import ru.genesiscorporation.workspace.beta.data.WorkspaceDateTime
 import ru.genesiscorporation.workspace.beta.data.push.WorkspacePushNotifications
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
@@ -117,10 +118,6 @@ import org.jitsi.meet.sdk.JitsiMeetConferenceOptions
 import ru.genesiscorporation.workspace.beta.R
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
 import java.net.URL
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.time.Instant
-import java.time.Duration
 import java.util.Locale
 import androidx.compose.ui.platform.LocalLocale
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -138,7 +135,6 @@ import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatL
 import ru.genesiscorporation.workspace.beta.ui.AnimatedGif
 import ru.genesiscorporation.workspace.beta.ui.theme.InterFontFamily
 import ru.genesiscorporation.workspace.beta.ui.theme.LocalWorkspaceColorsPalette
-import java.time.LocalDateTime
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -201,7 +197,6 @@ fun ChatDialogScreen(
     }
 
 
-    val messageFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
 
     var hasDoneInitialScroll by remember { mutableStateOf(false) }
     var imeHeight = remember { mutableStateOf(0) }
@@ -351,7 +346,7 @@ fun ChatDialogScreen(
                         onCancel = viewModel::clearMessageSelection,
                         onForward = {
                             forwardingSelection = true
-                            forwardingMessages = viewModel.selectedMessages().sortedBy { Instant.parse(it.createdAt) }
+                            forwardingMessages = viewModel.selectedMessages().sortedBy { WorkspaceDateTime.parse(it.createdAt) }
                         },
                         isForwarding = forwardingMessages != null,
                         canForward = selectedMessageUuids.size <= MAX_FORWARD_SOURCE_MESSAGES &&
@@ -665,21 +660,18 @@ internal fun ChatMessage(
     val encryptedChatState by viewModel.encryptedChatState.collectAsStateWithLifecycle()
     val encryptedPresentations by viewModel.encryptedPresentations.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
-    val messageFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier.testTag("chat-message-${item.uuid}"),
     ) {
         val previousMessage = viewModel.previousMessageByUuid(item.uuid)
         if (previousMessage != null) {
-            val currentMessageDate = LocalDateTime.parse(item.createdAt, messageFormatter).toLocalDate()
-            val previousMessageDate = LocalDateTime.parse(previousMessage.createdAt, messageFormatter).toLocalDate()
+            val currentMessageDate = WorkspaceDateTime.localDate(item.createdAt)
+            val previousMessageDate = WorkspaceDateTime.localDate(previousMessage.createdAt)
             if (currentMessageDate != previousMessageDate) {
-                val zone = ZoneId.systemDefault()
                 val locale = LocalLocale.current.platformLocale
-                val formatter = DateTimeFormatter.ofPattern("d MMM", locale)
                 Text(
-                    text = currentMessageDate.format(formatter),
+                    text = WorkspaceDateTime.formatDay(item.createdAt, locale),
                     color = LocalWorkspaceColorsPalette.current.textAdditional50,
                     fontSize = 14.sp,
                     fontFamily = InterFontFamily,
@@ -773,11 +765,6 @@ fun toUnicodeEmoji(raw: String): String {
     return match?.getEmoji() ?: value
 }
 
-private val HHMM: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
-
-fun Long.formatHHmm(zoneId: ZoneId = ZoneId.systemDefault()): String =
-    HHMM.format(Instant.ofEpochSecond(this).atZone(zoneId))
-
 object JitsiStyleRoomNameGenerator {
     private val adjectives = listOf(
         "amber", "brisk", "calm", "clever", "daring", "eager", "fancy", "gentle",
@@ -808,47 +795,5 @@ object JitsiStyleRoomNameGenerator {
             part.lowercase().replaceFirstChar { it.titlecase() }
         }
         return head + tail
-    }
-}
-
-private fun ruPlural(n: Long, one: String, few: String, many: String): String {
-    val nAbs = kotlin.math.abs(n) % 100
-    val n10 = nAbs % 10
-    return when {
-        nAbs in 11L..14L -> many
-        n10 == 1L -> one
-        n10 in 2L..4L -> few
-        else -> many
-    }
-}
-fun pastEpochSecondsToRelativeRu(
-    pastEpochSeconds: Long,
-    now: Instant = Instant.now()
-): String {
-    val past = Instant.ofEpochSecond(pastEpochSeconds)
-    val seconds = Duration.between(past, now).seconds.coerceAtLeast(0)
-    return when {
-        seconds < 60 -> "только что"
-        seconds < 3600 -> {
-            val m: Long = seconds / 60
-            val word = ruPlural(m, "минуту", "минуты", "минут")
-            "$m $word назад"
-        }
-        seconds < 86400 -> {
-            val h: Long = seconds / 3600
-            val word = ruPlural(h, "час", "часа", "часов")
-            "$h $word назад"
-        }
-        seconds < 604800 -> {
-            val d: Long = seconds / 86400
-            val word = ruPlural(d, "день", "дня", "дней")
-            "$d $word назад"
-        }
-        else -> {
-            val z = java.time.ZoneId.systemDefault()
-            java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy", java.util.Locale("ru", "RU"))
-                .withZone(z)
-                .format(past)
-        }
     }
 }

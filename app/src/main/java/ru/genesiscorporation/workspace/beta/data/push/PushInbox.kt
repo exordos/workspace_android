@@ -14,6 +14,7 @@
 
 package ru.genesiscorporation.workspace.beta.data.push
 
+import ru.genesiscorporation.workspace.beta.data.WorkspaceDateTime
 import android.content.ContentValues
 import android.content.Context
 import android.database.Cursor
@@ -53,7 +54,7 @@ internal class PushInbox(context: Context) {
                     put("conversation", ""); put("server_id", registration.serverId)
                     put("organization_uuid", registration.organizationUuid); put("project_uuid", registration.projectUuid)
                     put("user_uuid", registration.userUuid); put("message_uuid", messageUuid)
-                    put("created_at", System.currentTimeMillis()); put("state", CLOSED)
+                    put("created_at", WorkspaceDateTime.nowEpochMillis()); put("state", CLOSED)
                 }, SQLiteDatabase.CONFLICT_IGNORE)
             }
             ids.chunked(100).forEach { batch ->

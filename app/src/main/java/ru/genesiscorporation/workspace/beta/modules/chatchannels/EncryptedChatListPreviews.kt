@@ -6,6 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
+import ru.genesiscorporation.workspace.beta.data.WorkspaceDateTime
 import ru.genesiscorporation.workspace.beta.data.ConfirmedAccountContext
 import ru.genesiscorporation.workspace.beta.data.crypto.*
 import ru.genesiscorporation.workspace.beta.data.remote.dto.MessageResponse
@@ -14,7 +15,6 @@ import ru.genesiscorporation.workspace.beta.data.remote.dto.StreamBindingRespons
 import ru.genesiscorporation.workspace.beta.modules.encryptedchat.latestEncryptedChatWireMessages
 import ru.genesiscorporation.workspace.beta.modules.encryptedchat.EncryptedChatScope
 import ru.genesiscorporation.workspace.beta.modules.encryptedchat.encryptedChatStorageScopeMatches
-import java.time.Instant
 
 internal data class EncryptedPreviewSource(
     val streamUuid: String, val messageUuid: String, val keyUuid: String, val ciphertext: String,
@@ -28,9 +28,9 @@ internal fun latestLoadedEncryptedPreviewMessage(stream: Stream, pool: List<Mess
     val last = known.firstOrNull { it.uuid == stream.lastMessageUuid } ?: return null
     if (last.payload.kind == "e2ee") return last
     if (last.payload.kind !in encryptedServiceKinds) return null
-    val time = runCatching { Instant.parse(last.createdAt) }.getOrNull() ?: return null
-    return known.filter { it.payload.kind == "e2ee" && runCatching { Instant.parse(it.createdAt) <= time }.getOrDefault(false) }
-        .maxWithOrNull(compareBy<MessageResponse> { Instant.parse(it.createdAt) }.thenBy { it.uuid })
+    val time = runCatching { WorkspaceDateTime.parse(last.createdAt) }.getOrNull() ?: return null
+    return known.filter { it.payload.kind == "e2ee" && runCatching { WorkspaceDateTime.parse(it.createdAt) <= time }.getOrDefault(false) }
+        .maxWithOrNull(compareBy<MessageResponse> { WorkspaceDateTime.parse(it.createdAt) }.thenBy { it.uuid })
 }
 
 /** Captures only public wire fields; repository objects and ciphertext are never replaced with plaintext. */
@@ -42,7 +42,7 @@ internal fun encryptedPreviewSource(stream: Stream, message: MessageResponse?, o
         stream.role in memberRoles && (bindings == null || bindings.any {
             it.streamUuid == stream.uuid && it.userUuid == ownUserUuid && it.role in memberRoles
         }) && (message.uuid == stream.lastMessageUuid || (catalogLast != null && catalogLast.uuid == stream.lastMessageUuid && catalogLast.payload.kind in encryptedServiceKinds &&
-            runCatching { Instant.parse(message.createdAt) <= Instant.parse(catalogLast.createdAt) }.getOrDefault(false))) && message.streamUuid == stream.uuid &&
+            runCatching { WorkspaceDateTime.parse(message.createdAt) <= WorkspaceDateTime.parse(catalogLast.createdAt) }.getOrDefault(false))) && message.streamUuid == stream.uuid &&
         message.userUuid == ownUserUuid && (message.projectId == null || message.projectId == projectUuid)
     return EncryptedPreviewSource(stream.uuid, message.uuid, requireNotNull(message.payload.keyUuid), message.payload.content, authorized,
         stream.lastMessageUuid, message.user?.displayableName(), message.createdAt)

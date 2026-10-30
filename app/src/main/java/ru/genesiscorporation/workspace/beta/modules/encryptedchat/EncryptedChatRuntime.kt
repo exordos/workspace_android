@@ -18,6 +18,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import ru.genesiscorporation.workspace.beta.data.WorkspaceDateTime
 import ru.genesiscorporation.workspace.beta.data.EventsRepository
 import ru.genesiscorporation.workspace.beta.data.ConfirmedAccountContext
 import ru.genesiscorporation.workspace.beta.data.confirmedAccountContext
@@ -457,8 +458,8 @@ internal fun latestEncryptedChatWireMessages(pool: List<MessageResponse>, conver
     for (message in pool + conversations) {
         if (message.streamUuid != streamId || message.payload.kind == "markdown") continue
         val previous = latest[message.uuid]
-        val updated = runCatching { Instant.parse(message.updatedAt) }.getOrDefault(Instant.MIN)
-        val previousUpdated = previous?.let { runCatching { Instant.parse(it.updatedAt) }.getOrDefault(Instant.MIN) }
+        val updated = runCatching { WorkspaceDateTime.parse(message.updatedAt) }.getOrDefault(Instant.MIN)
+        val previousUpdated = previous?.let { runCatching { WorkspaceDateTime.parse(it.updatedAt) }.getOrDefault(Instant.MIN) }
         // Open conversation wins ties because it receives edits directly from the repository.
         if (previousUpdated == null || updated >= previousUpdated) latest[message.uuid] = message
     }
