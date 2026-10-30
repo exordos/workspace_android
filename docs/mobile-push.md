@@ -183,8 +183,8 @@ publication is required for these checks.
 
 ```bash
 ./gradlew --no-daemon --max-workers=2 :app:testExordosDebugUnitTest \
-  --tests 'ru.genesiscorporation.workspace.beta.data.crypto.*' \
-  --tests 'ru.genesiscorporation.workspace.beta.data.push.*'
+  --tests 'com.exordos.workspace.data.crypto.*' \
+  --tests 'com.exordos.workspace.data.push.*'
 ./gradlew --no-daemon --max-workers=2 \
   :app:assembleExordosDebug :app:assembleExordosDebugAndroidTest
 ```
@@ -228,7 +228,7 @@ exception classes without logging requests or tokens:
 ./gradlew --no-daemon --max-workers=2 -PfirebaseLiveSmoke=true \
   :app:assembleExordosDebugAndroidTest
 adb shell am instrument -w \
-  -e class ru.genesiscorporation.workspace.beta.data.push.WorkspaceConnectionSmokeTest \
+  -e class com.exordos.workspace.data.push.WorkspaceConnectionSmokeTest \
   -e workspaceBaseUrl https://<WORKSPACE_HOST> \
   com.exordos.workspace.test/androidx.test.runner.AndroidJUnitRunner
 ```
@@ -248,7 +248,7 @@ the registered real device first, then pass its event UUID and expected preview:
 
 ```sh
 adb shell am instrument -w \
-  -e class ru.genesiscorporation.workspace.beta.data.push.LivePushDeliveryTest \
+  -e class com.exordos.workspace.data.push.LivePushDeliveryTest \
   -e eventUuid '<EVENT_UUID>' -e action open \
   -e expectedSender '<EXPECTED_SENDER>' -e expectedPreview '<EXPECTED_PREVIEW>' \
   -e expectedMessageText '<ACTUAL_CHAT_MESSAGE_TEXT>' \

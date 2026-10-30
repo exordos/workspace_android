@@ -57,7 +57,7 @@ revoked membership, a partial batch, an unexpected payload, or cancellation.
 ## Running and interpreting checks
 
 1. Run the relevant JVM class with `--tests`, then the full JVM suite for that
-   flavor. Check both flavors after changing shared requests or resources.
+   flavor. Check the supported Exordos flavor after changing requests or resources.
 2. Select a dedicated Android device with `ANDROID_SERIAL`. Filter classes with
    `-Pandroid.testInstrumentationRunnerArguments.class=fully.qualified.ClassName`.
    Run the full UI suite in a clean test installation.
@@ -111,3 +111,9 @@ turning them into a permanent product contract.
 FCM ID parsing, cancellation and independent notification intents are covered by
 `NotificationMessageIdTest`, `FirebaseNotificationsTest` and the optimized
 `FirebaseNotificationReleaseInstrumentation` driver; see [test commands](../app/tests/README.md#fcm-notification-regressions).
+
+Source-package migrations additionally require the old-installation replacement
+checks in [the test guide](../app/tests/README.md#source-package-migration-and-installed-app-updates):
+saved accounts and encrypted tokens, current typed-route restoration, existing
+home-screen icons, background tasks and the current launcher/activity components.
+A clean install alone does not exercise these contracts.

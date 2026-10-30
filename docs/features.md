@@ -2,7 +2,7 @@
 
 This catalog describes flows available in the code. Google Play release status
 is tracked separately. Source paths refer to the main Kotlin package
-`ru.genesiscorporation.workspace.beta`.
+`com.exordos.workspace`.
 
 | Area | Implemented behavior | Main code |
 | --- | --- | --- |

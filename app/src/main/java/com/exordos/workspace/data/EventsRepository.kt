@@ -1,0 +1,1462 @@
+package com.exordos.workspace.data
+
+import android.util.Log
+import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
+import io.ktor.client.plugins.websocket.webSocket
+import io.ktor.client.request.headers
+import io.ktor.http.HttpHeaders
+import io.ktor.http.URLProtocol
+import io.ktor.http.path
+import io.ktor.websocket.CloseReason
+import io.ktor.websocket.Frame
+import io.ktor.websocket.close
+import io.ktor.websocket.readReason
+import io.ktor.websocket.readText
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonPrimitive
+import com.exordos.workspace.data.remote.ApiResult
+import com.exordos.workspace.data.remote.ApiError
+import com.exordos.workspace.data.remote.WorkspaceAPIClient
+import com.exordos.workspace.data.remote.dto.DeletedMessageReaction
+import com.exordos.workspace.data.remote.dto.Draft
+import com.exordos.workspace.data.remote.dto.DraftsRequest
+import com.exordos.workspace.data.remote.dto.EpochRequest
+import com.exordos.workspace.data.remote.dto.EventsProbeRequest
+import com.exordos.workspace.data.remote.dto.FolderResponseData
+import com.exordos.workspace.data.remote.dto.FoldersRequest
+import com.exordos.workspace.data.remote.dto.MessageReaction
+import com.exordos.workspace.data.remote.dto.MessageReactionsRequest
+import com.exordos.workspace.data.remote.dto.MessageResponse
+import com.exordos.workspace.data.remote.dto.MessagesByIdsRequest
+import com.exordos.workspace.data.remote.dto.MessagesRequest
+import com.exordos.workspace.data.remote.dto.OwnUserRequest
+import com.exordos.workspace.data.remote.ProtectedRequestAuthentication
+import com.exordos.workspace.data.remote.dto.PresenceRequest
+import com.exordos.workspace.data.remote.dto.ServerSettingsRequest
+import com.exordos.workspace.data.remote.dto.Stream
+import com.exordos.workspace.data.remote.dto.StreamBindingResponseData
+import com.exordos.workspace.data.remote.dto.StreamsRequest
+import com.exordos.workspace.data.remote.dto.TopicsResponseData
+import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.remote.dto.UsersRequest
+import com.exordos.workspace.modules.chooseserver.QueryState
+import java.net.URI
+import kotlin.collections.map
+import kotlin.collections.orEmpty
+import kotlin.collections.plus
+import kotlin.plus
+
+private const val INITIAL_RETRY_DELAY_MILLIS = 1_000L
+private const val MAX_RETRY_DELAY_MILLIS = 30_000L
+private const val REALTIME_PROBE_INTERVAL_MILLIS = 30_000L
+private const val EVENTS_CURSOR_EXPIRED_STATUS_CODE = 410
+
+class EventsRepository(
+    val serverId: String,
+    private val config: ServerConfig,
+    private val tokenStore: SecureTokenStore,
+    var client: WorkspaceAPIClient
+) {
+
+    private val originalServer = config.copy()
+    internal var onPushMessagesKnown: (List<MessageResponse>) -> Unit = {}
+    internal var onPushMessageRemoved: (String) -> Unit = {}
+    internal var onPushRead: (List<String>) -> Unit = {}
+    internal var onPushRefreshNeeded: () -> Unit = {}
+    fun notificationRead(messageUuids: List<String>) { onPushRead(messageUuids) }
+
+    internal fun matchesServerConfiguration(server: ServerConfig): Boolean =
+        server.id == serverId && server.baseUrl == originalServer.baseUrl && server.projectUuid == originalServer.projectUuid
+
+    private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+
+    fun close() {
+        invalidateVerifiedOwnerAuthentication()
+        membership.invalidateRequests()
+        scope.cancel()
+    }
+
+    @Volatile
+    var latestEpoch: Int = 0
+    @Volatile
+    var epochGeneration: String = ""
+    private val connectionMutex = Mutex()
+    private val realtimeStateLock = Any()
+    @Volatile
+    private var activeSession: DefaultClientWebSocketSession? = null
+    @Volatile
+    private var messageResyncRequired = false
+    private data class OpenConversation(val owner: Any, val streamUuid: String, val topicUuid: String) {
+        val key: String get() = "$streamUuid.$topicUuid"
+    }
+    private val openConversation = MutableStateFlow<OpenConversation?>(null)
+    private var historyGeneration = 0L
+    private val streamRemovalRevisions = mutableMapOf<String, Long>()
+
+    fun streamRemovalRevision(streamUuid: String): Long = synchronized(realtimeStateLock) {
+        streamRemovalRevisions[streamUuid] ?: 0L
+    }
+
+    /** Linearize plaintext publication with removal, independently of flow collector timing. */
+    fun <T : Any> withStreamRevision(streamUuid: String, expected: Long, block: () -> T): T? = synchronized(realtimeStateLock) {
+        if (streamRemovalRevision(streamUuid) == expected) block() else null
+    }
+    private val staleConversations = mutableSetOf<String>()
+    private val pendingMessageUuids = MutableStateFlow<Set<String>>(emptySet())
+    private val heartbeatJob: Job = scope.every30Seconds {
+        val webSocketClient = client ?: return@every30Seconds
+        heartbeatTask(webSocketClient)
+    }
+
+    var pushId: String? = null
+
+    var jitsiServerUrl: String = ""
+
+    private val json = Json {
+        ignoreUnknownKeys = true
+        isLenient = true
+    }
+
+
+
+    private val _currentUser = MutableStateFlow<UserResponseData?>(null)
+    val currentUser: StateFlow<UserResponseData?> = _currentUser.asStateFlow()
+    private val _verifiedOwnerAuthentication = MutableStateFlow<VerifiedOwnerAuthentication?>(null)
+    val verifiedOwnerAuthentication: StateFlow<VerifiedOwnerAuthentication?> = _verifiedOwnerAuthentication.asStateFlow()
+    @Volatile private var ownerVerificationRevision = 0L
+    private val ownerVerificationLineage = Any()
+
+    fun invalidateVerifiedOwnerAuthentication() = synchronized(realtimeStateLock) {
+        ownerVerificationRevision++
+        _verifiedOwnerAuthentication.value = null
+    }
+
+    fun updateCurrentUser(newValue: UserResponseData) {
+        _currentUser.update { newValue }
+    }
+
+    private var didLoadData: Boolean = false
+
+    private val _streamsQueryState = MutableStateFlow<QueryState>(QueryState.Idle)
+    val streamsQueryState: StateFlow<QueryState> = _streamsQueryState
+
+
+    private val _currentlySelectedFolder = MutableStateFlow<FolderResponseData?>(null)
+    var currentlySelectedFolder: StateFlow<FolderResponseData?> = _currentlySelectedFolder
+
+    private val _streamTopicMessages = MutableStateFlow<Map<String, List<MessageResponse>>>(emptyMap())
+    val streamTopicMessages: StateFlow<Map<String, List<MessageResponse>>> = _streamTopicMessages.asStateFlow()
+    private val _messageDeletedEvents = MutableSharedFlow<String>(extraBufferCapacity = 64)
+    val messageDeletedEvents = _messageDeletedEvents.asSharedFlow()
+    private val _messageUpdatedEvents = MutableSharedFlow<MessageResponse>(extraBufferCapacity = 64)
+    val messageUpdatedEvents = _messageUpdatedEvents.asSharedFlow()
+    private val _streamDeletedEvents = MutableSharedFlow<String>(extraBufferCapacity = 64)
+    val streamDeletedEvents = _streamDeletedEvents.asSharedFlow()
+
+    fun updateCurrentlySelectedFolder(newFolder: FolderResponseData?) {
+        _currentlySelectedFolder.update { newFolder }
+    }
+    fun addStreamTopicMessages(streamUuid: String, topicUuid: String, messages: List<MessageResponse>) {
+        onPushMessagesKnown(messages)
+        val messagesWithUser = messages.map { message ->
+            message.user = users.value.firstOrNull { it.uuid == message.authorUuid }
+            message
+        }
+        val key = "$streamUuid.$topicUuid"
+        _streamTopicMessages.update { current ->
+            current + (key to messagesWithUser)
+        }
+    }
+
+    internal fun openConversation(owner: Any, streamUuid: String, topicUuid: String) {
+        synchronized(realtimeStateLock) {
+            val conversation = OpenConversation(owner, streamUuid, topicUuid)
+            if (messageResyncRequired) staleConversations += conversation.key
+            openConversation.value = conversation
+        }
+    }
+
+    internal fun closeConversation(owner: Any) {
+        synchronized(realtimeStateLock) {
+            if (openConversation.value?.owner === owner) openConversation.value = null
+        }
+    }
+
+    internal fun isConversationStale(streamUuid: String, topicUuid: String): Boolean =
+        synchronized(realtimeStateLock) { "$streamUuid.$topicUuid" in staleConversations }
+
+    suspend fun refreshConversation(
+        streamUuid: String,
+        topicUuid: String,
+    ): ApiResult<List<MessageResponse>, ApiError> = refreshConversation(streamUuid, topicUuid, false)
+
+    private suspend fun refreshConversation(
+        streamUuid: String,
+        topicUuid: String,
+        coveredByRecoveryCursor: Boolean,
+    ): ApiResult<List<MessageResponse>, ApiError> {
+        val key = "$streamUuid.$topicUuid"
+        // Events can arrive before the first history request completes.
+        _streamTopicMessages.update { current ->
+            if (key in current) current else current + (key to emptyList())
+        }
+        val beforeRequest = _streamTopicMessages.value[key].orEmpty().map {
+            it.copy(payload = it.payload.copy(), reactions = it.reactions.toMap())
+        }
+        val (generation, canClearStale) = synchronized(realtimeStateLock) {
+            if (messageResyncRequired) staleConversations += key
+            // A normal load may precede the fresh cursor and leave an uncovered event gap.
+            historyGeneration to (!messageResyncRequired || coveredByRecoveryCursor)
+        }
+        val response = client.performRequest(MessagesRequest(streamUuid, topicUuid), serverId, config)
+        if (response is ApiResult.Success) {
+            // Check and publish atomically with cursor invalidation. An older response must
+            // not overwrite a newer recovery snapshot, even if that snapshot was empty.
+            synchronized(realtimeStateLock) {
+                if (historyGeneration != generation) {
+                    return ApiResult.Error(ApiError("History response is obsolete", "HISTORY_RESPONSE_OBSOLETE"))
+                }
+                val snapshot = response.value.map { message ->
+                    message.copy(user = users.value.firstOrNull { it.uuid == message.authorUuid })
+                }
+                _streamTopicMessages.update { current ->
+                    current + (key to mergeMessageHistorySnapshot(
+                        beforeRequest, current[key].orEmpty(), snapshot, pendingMessageUuids.value,
+                    ))
+                }
+                val refreshed = _streamTopicMessages.value[key].orEmpty().associateBy { it.uuid }
+                _messagesPool.update { current ->
+                    current.filterNot { it.uuid in refreshed } + refreshed.values
+                }
+                if (canClearStale) staleConversations -= key
+            }
+        }
+        return response
+    }
+
+    fun addPendingMessage(message: MessageResponse) {
+        pendingMessageUuids.update { it + message.uuid }
+        updateMessagesPool(listOf(message))
+        addMessageToStreamTopic(message)
+    }
+    fun addMessageToStreamTopic(message: MessageResponse) {
+        val key = "${message.streamUuid}.${message.topicUuid}"
+        message.user = users.value.firstOrNull { it.uuid == message.authorUuid }
+
+        _streamTopicMessages.update { current ->
+            if (current[key] != null ) {
+                val existingMessages = current[key].orEmpty()
+                val pendingMessages = existingMessages.filter {
+                    it.uuid == "" && it.authorUuid == message.authorUuid && it.payload.content == message.payload.content
+                }
+                val filteredExistingMessages = existingMessages.filter { it.uuid == message.uuid }
+                if (filteredExistingMessages.isEmpty() && pendingMessages.isEmpty()) {
+                    current + (key to (existingMessages + message))
+                } else {
+                    current
+                }
+            } else {
+                current
+            }
+        }
+    }
+
+    fun updateMessage(updatedMessage: MessageResponse) {
+        val key = "${updatedMessage.streamUuid}.${updatedMessage.topicUuid}"
+        _streamTopicMessages.update { current ->
+            val messages = current[key] ?: return@update current
+            val updatedMessages = messages.map { message ->
+                if (message.uuid == updatedMessage.uuid) {
+                    message.copy(
+                        payload = updatedMessage.payload,
+                        updatedAt = updatedMessage.updatedAt,
+                        mentioned = updatedMessage.mentioned,
+                        reactions = updatedMessage.reactions
+                    )
+                } else {
+                    message
+                }
+            }
+
+            if (updatedMessages == messages) return@update current
+            current + (key to updatedMessages)
+        }
+        val referenceUpdate = updatedMessage.copy(payload = updatedMessage.payload.copy())
+        if (!_messageUpdatedEvents.tryEmit(referenceUpdate)) {
+            scope.launch { _messageUpdatedEvents.emit(referenceUpdate) }
+        }
+    }
+
+    /** Reconcile HTTP confirmation with either ordering of the matching WS event. */
+    fun reconcileSentMessage(pendingUuid: String, confirmed: MessageResponse) {
+        val key = "${confirmed.streamUuid}.${confirmed.topicUuid}"
+        _streamTopicMessages.update { current ->
+            val hadPending = current.values.any { messages -> messages.any { it.uuid == pendingUuid } }
+            val cleaned = current.mapValues { (_, messages) ->
+                messages.filterNot { it.uuid == pendingUuid }
+            }
+            if (!hadPending && key !in cleaned) return@update cleaned
+            val messages = cleaned[key].orEmpty()
+            val reconciled = if (messages.any { it.uuid == confirmed.uuid }) {
+                messages.distinctBy { it.uuid }
+            } else messages + confirmed
+            cleaned + (key to reconciled)
+        }
+        _messagesPool.update { current ->
+            if (current.any { it.uuid == confirmed.uuid }) {
+                current.filterNot { it.uuid == pendingUuid }.distinctBy { it.uuid }
+            } else if (current.any { it.uuid == pendingUuid }) {
+                current.map { if (it.uuid == pendingUuid) confirmed else it }
+            } else current + confirmed
+        }
+        pendingMessageUuids.update { it - pendingUuid }
+    }
+
+    fun removeMessage(messageUuid: String) {
+        onPushMessageRemoved(messageUuid)
+        _streamTopicMessages.update { current ->
+            current.mapValues { (_, messages) ->
+                messages.filterNot { it.uuid == messageUuid }
+            }
+        }
+        _messagesPool.update { current -> current.filterNot { it.uuid == messageUuid } }
+        _userReactions.update { current -> current.filterNot { it.messageUuid == messageUuid } }
+        _streams.update { current ->
+            current.map { stream ->
+                if (stream.lastMessageUuid == messageUuid) {
+                    stream.copy(lastMessageUuid = null, lastMessage = null)
+                } else {
+                    stream
+                }
+            }
+        }
+        _streamTopics.update { current ->
+            current.mapValues { (_, topics) ->
+                topics.map { it.withoutDeletedMessage(messageUuid) }
+            }
+        }
+        _topicsPool.update { current ->
+            current.map { it.withoutDeletedMessage(messageUuid) }
+        }
+        if (!_messageDeletedEvents.tryEmit(messageUuid)) {
+            scope.launch { _messageDeletedEvents.emit(messageUuid) }
+        }
+    }
+
+    /** One repository belongs to one server/account projection; invalidate before removing its caches. */
+    fun removeStream(streamUuid: String) {
+        synchronized(realtimeStateLock) {
+            streamRemovalRevisions[streamUuid] = streamRemovalRevision(streamUuid) + 1
+            historyGeneration++ // An older HTTP history response must not restore a deleted conversation.
+            _streams.update { it.filterNot { stream -> stream.uuid == streamUuid } }
+            val messageIds = (_messagesPool.value + _streamTopicMessages.value.values.flatten())
+                .filter { it.streamUuid == streamUuid }.map { it.uuid }.toSet()
+            membership.removeStream(streamUuid)
+            _streamTopics.update { it - streamUuid }
+            _topicsPool.update { it.filterNot { topic -> topic.streamUuid == streamUuid } }
+            _streamTopicMessages.update { it.filterKeys { key -> !key.startsWith("$streamUuid.") } }
+            _messagesPool.update { it.filterNot { message -> message.streamUuid == streamUuid } }
+            _draftsPool.update { it.filterNot { draft -> draft.streamUuid == streamUuid } }
+            _userReactions.update { it.filterNot { reaction -> reaction.messageUuid in messageIds } }
+            pendingMessageUuids.update { it - messageIds }
+            staleConversations.removeAll { it.startsWith("$streamUuid.") }
+            if (openConversation.value?.streamUuid == streamUuid) openConversation.value = null
+            if (!_streamDeletedEvents.tryEmit(streamUuid)) scope.launch { _streamDeletedEvents.emit(streamUuid) }
+            messageIds.forEach { uuid ->
+                if (!_messageDeletedEvents.tryEmit(uuid)) scope.launch { _messageDeletedEvents.emit(uuid) }
+            }
+        }
+    }
+
+    private fun TopicsResponseData.withoutDeletedMessage(messageUuid: String): TopicsResponseData =
+        if (lastMessageUuid == messageUuid) {
+            copy(lastMessageUuid = null, lastMessage = null)
+        } else {
+            this
+        }
+
+    private val _streamTopics = MutableStateFlow<Map<String, List<TopicsResponseData>>>(emptyMap())
+    val streamTopics: StateFlow<Map<String, List<TopicsResponseData>>> = _streamTopics.asStateFlow()
+
+    fun addStreamTopics(streamUuid: String, topics: List<TopicsResponseData>) {
+        _streamTopics.update { current ->
+            current + (streamUuid to topics)
+        }
+        appendItemsToTopicsPool(topics)
+    }
+    fun addTopicToStream(topic: TopicsResponseData) {
+        _streamTopics.update { current ->
+            if (current[topic.streamUuid] != null) {
+                val existingTopics = current[topic.streamUuid].orEmpty()
+                current + (topic.streamUuid to (existingTopics + topic))
+            } else {
+                current
+            }
+        }
+        appendItemsToTopicsPool(listOf(topic))
+    }
+
+    fun updateTopic(updatedTopic: TopicsResponseData) {
+        val message = messagesPool.value.firstOrNull { it.uuid == updatedTopic.lastMessageUuid }
+        _streamTopics.update { current ->
+            val topics = current[updatedTopic.streamUuid] ?: return@update current
+            val updatedTopics = topics.map { topic ->
+                if (topic.uuid == updatedTopic.uuid) {
+                    topic.copy(
+                        unreadCount = updatedTopic.unreadCount,
+                        activeUnreadCount = updatedTopic.activeUnreadCount,
+                        name = updatedTopic.name,
+                        lastMessageUuid = updatedTopic.lastMessageUuid,
+                        isDone = updatedTopic.isDone,
+                        lastMessage = message,
+                        notificationMode = updatedTopic.notificationMode,
+                        summary = updatedTopic.summary
+                    )
+                } else {
+                    topic
+                }
+            }
+
+            if (updatedTopics == topics) return@update current
+            current + (updatedTopic.streamUuid to updatedTopics)
+        }
+        updateTopicInTopicsPool(updatedTopic)
+    }
+
+    private val membership = StreamMembershipState(realtimeStateLock)
+    val streamBindings: StateFlow<Map<String, List<StreamBindingResponseData>>> = membership.bindings
+
+    internal fun beginStreamBindingsRequest(streamUuid: String) = membership.beginRequest(streamUuid)
+
+    internal fun applyStreamBindingsSnapshot(request: StreamMembershipState.Request, bindings: List<StreamBindingResponseData>): Boolean =
+        membership.replaceSnapshot(request, bindings)
+
+    internal fun applyStreamBindingsResponse(request: StreamMembershipState.Request, bindings: List<StreamBindingResponseData>): Boolean =
+        membership.mergeResponse(request, bindings)
+
+    /** Immediate authoritative setup; HTTP callers must capture a request before starting I/O. */
+    fun addStreamBindings(streamUuid: String, streamBindings: List<StreamBindingResponseData>) {
+        beginStreamBindingsRequest(streamUuid).use { applyStreamBindingsSnapshot(it, streamBindings) }
+    }
+
+    fun addBindingToStream(streamBinding: StreamBindingResponseData) =
+        mergeStreamBindings(streamBinding.streamUuid, listOf(streamBinding))
+
+    fun updateStreamBindings(updatedStreamBinding: StreamBindingResponseData) =
+        mergeStreamBindings(updatedStreamBinding.streamUuid, listOf(updatedStreamBinding))
+
+    fun mergeStreamBindings(streamUuid: String, bindings: List<StreamBindingResponseData>) = synchronized(realtimeStateLock) {
+        membership.upsert(streamUuid, bindings)
+        updateOwnStreamRole(streamUuid, bindings)
+    }
+
+    private fun updateOwnStreamRole(streamUuid: String, changes: List<StreamBindingResponseData> = emptyList()) {
+        val ownBinding = (membership.bindings.value[streamUuid] ?: changes)
+            .firstOrNull { it.userUuid == _currentUser.value?.uuid } ?: return
+        _streams.update { streams -> streams.map { stream ->
+            if (stream.uuid == streamUuid) stream.copy(role = ownBinding.role) else stream
+        } }
+    }
+
+    private val _messagesPool = MutableStateFlow<List<MessageResponse>>(emptyList())
+    val messagesPool: StateFlow<List<MessageResponse>> = _messagesPool.asStateFlow()
+    fun setInitialMessagesPool(newList: List<MessageResponse>) {
+        val messagesWithUser = newList.map { message ->
+            message.user = users.value.firstOrNull { it.uuid == message.authorUuid }
+            message
+        }
+        _messagesPool.update {
+            messagesWithUser
+        }
+    }
+
+    fun updateMessagesPool(newList: List<MessageResponse>) {
+        onPushMessagesKnown(newList)
+        val currentPoolIds = _messagesPool.value.map { it.uuid }
+        val filteredMessages = newList.filter { !currentPoolIds.contains(it.uuid) }
+        val messagesWithUser = filteredMessages.map { message ->
+            message.user = users.value.firstOrNull { it.uuid == message.authorUuid }
+            message
+        }
+        _messagesPool.update { current ->
+            current + messagesWithUser
+        }
+    }
+
+    private val _topicsPool = MutableStateFlow<List<TopicsResponseData>>(emptyList())
+    val topicsPool: StateFlow<List<TopicsResponseData>> = _topicsPool.asStateFlow()
+
+    fun appendItemsToTopicsPool(newList: List<TopicsResponseData>) {
+        val currentPoolIds = _messagesPool.value.map { it.uuid }
+        val filteredTopics = newList.filter { !currentPoolIds.contains(it.uuid) }
+
+        _topicsPool.update { current ->
+            current + filteredTopics
+        }
+    }
+
+    fun updateTopicInTopicsPool(updatedTopic: TopicsResponseData) {
+        _topicsPool.update { current ->
+            current.map { topic ->
+                if (topic.uuid == updatedTopic.uuid) {
+                    topic.copy(
+                        unreadCount = updatedTopic.unreadCount,
+                        activeUnreadCount = updatedTopic.activeUnreadCount,
+                        name = updatedTopic.name,
+                        lastMessageUuid = updatedTopic.lastMessageUuid,
+                        isDone = updatedTopic.isDone,
+                        notificationMode = updatedTopic.notificationMode,
+                        summary = updatedTopic.summary
+                    )
+                } else {
+                    topic
+                }
+            }
+        }
+    }
+
+    private val _draftsPool = MutableStateFlow<List<Draft>>(emptyList())
+    val draftsPool: StateFlow<List<Draft>> = _draftsPool.asStateFlow()
+
+    fun setInitialDraftsPool(newList: List<Draft>) {
+        _draftsPool.update {
+            newList
+        }
+    }
+
+    fun addDraft(newValue: Draft) {
+        _draftsPool.update { current ->
+            current + newValue
+        }
+    }
+
+    fun updateDraft(updatedDraft: Draft) {
+        _draftsPool.update { current ->
+            current.map { draft ->
+                if (draft.uuid == updatedDraft.uuid) {
+                    draft.copy(
+                        payload = updatedDraft.payload
+                    )
+                } else {
+                    draft
+                }
+            }
+        }
+    }
+
+    fun removeDraft(valueToRemove: Draft) {
+        _draftsPool.update { current ->
+            current - valueToRemove
+        }
+    }
+
+    private val _userReactions = MutableStateFlow<List<MessageReaction>>(emptyList())
+
+    val userReactions: StateFlow<List<MessageReaction>> = _userReactions.asStateFlow()
+
+    fun setInitialMessageReactions(newList: List<MessageReaction>) {
+        _userReactions.update {
+            newList
+        }
+    }
+
+    fun addReaction(reaction: MessageReaction) {
+        val user = _currentUser.value
+        if (user != null) {
+            if (reaction.userUuid == user.uuid)
+                _userReactions.update { current ->
+                    current + reaction
+                }
+        }
+    }
+
+    fun deleteReaction(reaction: DeletedMessageReaction) {
+        val reactionToDelete = _userReactions.value.firstOrNull { it.uuid == reaction.uuid && it.userUuid == reaction.userUuid }
+        if (reactionToDelete != null) {
+            _userReactions.update { current ->
+                current.filterNot { it == reactionToDelete }
+            }
+        }
+    }
+
+    private val _users = MutableStateFlow<List<UserResponseData>>(emptyList())
+    val users: StateFlow<List<UserResponseData>> = _users.asStateFlow()
+
+    fun updateUser(updatedUser: UserResponseData) {
+        _users.update { current ->
+            current.map { user ->
+                if (user.uuid == updatedUser.uuid) {
+                    user.copy(
+                        email = updatedUser.email,
+                        firstName = updatedUser.firstName,
+                        lastName = updatedUser.lastName,
+                        status = updatedUser.status,
+                        statusText = updatedUser.statusText,
+                        statusEmoji = updatedUser.statusEmoji,
+                        avatar = updatedUser.avatar
+                    )
+                } else {
+                    user
+                }
+            }
+        }
+    }
+
+    fun addUser(newUser: UserResponseData) {
+        _users.update { current ->
+            current + newUser
+        }
+    }
+
+    fun setInitialUsers(newList: List<UserResponseData>) {
+        _users.update {
+            newList
+        }
+    }
+
+    fun poolMessage(uuid: String?): MessageResponse? {
+        return messagesPool.value.firstOrNull { it.uuid == uuid }
+    }
+
+    private val _streams = MutableStateFlow<List<Stream>>(emptyList())
+    val streams: StateFlow<List<Stream>> = _streams.asStateFlow()
+
+    fun updateStream(updatedStream: Stream) {
+        val message = messagesPool.value.firstOrNull { it.uuid == updatedStream.lastMessageUuid }
+        _streams.update { current ->
+            current.map { stream ->
+                if (stream.uuid == updatedStream.uuid) {
+                    stream.copy(
+                        lastMessageUuid = updatedStream.lastMessageUuid,
+                        unreadCount = updatedStream.unreadCount,
+                        activeUnreadCount = updatedStream.activeUnreadCount,
+                        passiveUnreadCount = updatedStream.passiveUnreadCount,
+                        notificationMode = updatedStream.notificationMode,
+                        lastMessage = message,
+                        currentEncryptionKeyUuid = updatedStream.currentEncryptionKeyUuid,
+                        name = updatedStream.name,
+                        description = updatedStream.description,
+                        inviteOnly = updatedStream.inviteOnly,
+                        announce = updatedStream.announce,
+                        encryption = updatedStream.encryption,
+                        ownerUuid = updatedStream.ownerUuid,
+                        role = updatedStream.role,
+                        projectId = updatedStream.projectId,
+                        userUuid = updatedStream.userUuid,
+                    )
+                } else {
+                    stream
+                }
+            }
+        }
+    }
+
+    fun addStream(newStream: Stream) {
+        var streamWithUser = newStream
+        val directUserUuid = newStream.directUserUuid
+        if (directUserUuid != null) {
+            val directUser = _users.value.firstOrNull { it.uuid == directUserUuid }
+            streamWithUser.directUser = directUser
+        }
+        _streams.update { current ->
+            current + streamWithUser
+        }
+    }
+
+    fun setInitialStreams(newList: List<Stream>) {
+        val streamsWithUsers  = newList.map { newStream ->
+            var streamWithUser = newStream
+            val directUserUuid = newStream.directUserUuid
+            if (directUserUuid != null) {
+                val directUser = _users.value.firstOrNull { it.uuid == directUserUuid }
+                streamWithUser.directUser = directUser
+            }
+            streamWithUser
+        }
+        _streams.update {
+            streamsWithUsers
+        }
+    }
+
+    private val _folders = MutableStateFlow<List<FolderResponseData>>(emptyList())
+    val folders: StateFlow<List<FolderResponseData>> = _folders.asStateFlow()
+    fun updateFolder(updatedFolder: FolderResponseData) {
+        _folders.update { current ->
+            current.map { folder ->
+                if (folder.uuid == updatedFolder.uuid) {
+                    folder.copy(
+                        unreadCount = updatedFolder.unreadCount,
+                        title = updatedFolder.title,
+                        items = updatedFolder.items
+                    )
+                } else {
+                    folder
+                }
+            }
+        }
+        // The active tab has its own snapshot used to filter visible streams.
+        _currentlySelectedFolder.update { selected ->
+            if (selected?.uuid == updatedFolder.uuid) {
+                _folders.value.firstOrNull { it.uuid == updatedFolder.uuid }
+            } else selected
+        }
+    }
+
+    fun removeFolder(folderUuid: String) {
+        _folders.update { current -> current.filterNot { it.uuid == folderUuid } }
+        _currentlySelectedFolder.update { selected ->
+            if (selected?.uuid == folderUuid) _folders.value.firstOrNull() else selected
+        }
+    }
+
+    fun addFolder(newFolder: FolderResponseData) {
+        _folders.update { current ->
+            current + newFolder
+        }
+    }
+
+    fun setInitialFolders(newList: List<FolderResponseData>) {
+        _folders.update {
+            newList
+        }
+    }
+
+    private fun CoroutineScope.every30Seconds(block: suspend () -> Unit): Job = launch {
+        while (isActive) {
+            delay(REALTIME_PROBE_INTERVAL_MILLIS)
+            block()
+        }
+    }
+
+    private suspend fun probeVisibleEvents() {
+        val webSocketClient = client ?: return
+        val probedSession = activeSession ?: return
+        val probedEpochVersion = latestEpoch
+        val probedEpochGeneration = epochGeneration
+        if (probedEpochGeneration.isBlank()) return
+
+        when (
+            val response = webSocketClient.performRequest(
+                EventsProbeRequest(
+                    afterEpochVersion = probedEpochVersion,
+                    epochGeneration = probedEpochGeneration
+                ),
+                serverId,
+            )
+        ) {
+            is ApiResult.Success -> {
+                if (
+                    activeSession === probedSession &&
+                    shouldReconnectForEventsProbe(
+                        savedEpochVersion = latestEpoch,
+                        probeEpochVersions = response.value.map { it.epochVersion }
+                    )
+                ) {
+                    Log.d(
+                        "WebSocket",
+                        "Visible events are pending; reconnecting from the saved event cursor"
+                    )
+                    probedSession.close(
+                        CloseReason(CloseReason.Codes.NORMAL, "Visible events are pending")
+                    )
+                }
+            }
+
+            is ApiResult.Error -> {
+                val invalidated = synchronized(realtimeStateLock) {
+                    if (response.error.httpStatusCode == EVENTS_CURSOR_EXPIRED_STATUS_CODE &&
+                        activeSession === probedSession &&
+                        latestEpoch == probedEpochVersion &&
+                        epochGeneration == probedEpochGeneration
+                    ) {
+                        invalidateRealtimeCursor()
+                        true
+                    } else false
+                }
+                if (invalidated) {
+                    Log.d("WebSocket", "Event cursor expired; reconnecting with a fresh cursor")
+                    probedSession.close(
+                        CloseReason(CloseReason.Codes.NORMAL, "Event cursor expired")
+                    )
+                } else {
+                    Log.d("WebSocket", "Failed to probe visible events")
+                }
+            }
+        }
+    }
+
+    private suspend fun heartbeatTask(webSocketClient: WorkspaceAPIClient) {
+        probeVisibleEvents()
+
+        val myUser = currentUser.value ?: return
+        val myStatus = if (myUser.status == "offline" || myUser.status == "idle") {
+            "active"
+        } else {
+            myUser.status
+        }
+        when (
+            webSocketClient.performRequest(
+                PresenceRequest(
+                    myUser.uuid,
+                    myStatus,
+                    myUser.statusEmoji,
+                    myUser.statusText
+                ),
+                serverId,
+            )
+        ) {
+            is ApiResult.Success -> Unit
+            is ApiResult.Error -> Log.d("Presence", "Failed to update presence")
+        }
+    }
+
+    suspend fun start() = connectionMutex.withLock {
+        val webSocketClient = client
+        if (webSocketClient == null) return@withLock
+
+        var retryDelayMillis = INITIAL_RETRY_DELAY_MILLIS
+        while (currentCoroutineContext().isActive) {
+            val currentBaseUrl = config.baseUrl
+
+            if (epochGeneration.isBlank()) {
+                when (
+                    val response = webSocketClient.performRequest(
+                        EpochRequest(),
+                        serverId,
+                        config,
+                    )
+                ) {
+                    is ApiResult.Success -> {
+                        latestEpoch = response.value.epochVersion
+                        epochGeneration = response.value.epochGeneration
+                    }
+
+                    is ApiResult.Error -> {
+                        Log.d("WebSocket", "Failed to load the initial event cursor")
+                        delay(retryDelayMillis)
+                        retryDelayMillis = nextRetryDelayMillis(retryDelayMillis)
+                        continue
+                    }
+                }
+            }
+
+            // Capture the cursor before reading snapshots. Replaying from it then
+            // covers messages created while those HTTP requests are in flight.
+            if (messageResyncRequired) {
+                val failedConversation = refreshOpenConversationForRecovery()
+                if (failedConversation != null) {
+                    // Closing or switching the failed chat must not wait for its retry backoff.
+                    withTimeoutOrNull(retryDelayMillis) {
+                        openConversation.first { it != failedConversation }
+                    }
+                    retryDelayMillis = nextRetryDelayMillis(retryDelayMillis)
+                    continue
+                }
+            }
+
+            var connectionEstablished = false
+            try {
+                startWebsocketConnection(webSocketClient, currentBaseUrl) {
+                    connectionEstablished = true
+                }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (exception: Exception) {
+                Log.d(
+                    "WebSocket",
+                    "Connection failed: ${exception::class.simpleName}: ${exception.message}"
+                )
+            }
+
+            if (currentCoroutineContext().isActive) {
+                if (connectionEstablished) {
+                    retryDelayMillis = INITIAL_RETRY_DELAY_MILLIS
+                }
+                Log.d("WebSocket", "Reconnecting in ${retryDelayMillis}ms")
+                delay(retryDelayMillis)
+                retryDelayMillis = nextRetryDelayMillis(retryDelayMillis)
+            }
+        }
+    }
+
+    private fun invalidateRealtimeCursor() = synchronized(realtimeStateLock) {
+        historyGeneration++
+        staleConversations += _streamTopicMessages.value.keys
+        openConversation.value?.let { staleConversations += it.key }
+        messageResyncRequired = true
+        latestEpoch = 0
+        epochGeneration = ""
+    }
+
+    private suspend fun refreshOpenConversationForRecovery(): OpenConversation? = coroutineScope {
+        while (true) {
+            val active = synchronized(realtimeStateLock) {
+                val current = openConversation.value
+                if (current == null || current.key !in staleConversations) {
+                    messageResyncRequired = false
+                    return@coroutineScope null
+                }
+                current
+            }
+            val reload = async { refreshConversation(active.streamUuid, active.topicUuid, true) }
+            val switched = async { openConversation.first { it != active } }
+            val response = try {
+                select {
+                    reload.onAwait { it }
+                    switched.onAwait { null }
+                }
+            } finally {
+                reload.cancelAndJoin()
+                switched.cancelAndJoin()
+            }
+            synchronized(realtimeStateLock) {
+                if (openConversation.value == active && response is ApiResult.Error) {
+                    if (response.error.httpStatusCode in setOf(403, 404)) {
+                        addStreamTopicMessages(active.streamUuid, active.topicUuid, emptyList())
+                        // Keep the stale marker: only a successful history response clears it.
+                        messageResyncRequired = false
+                        return@coroutineScope null
+                    }
+                    Log.d("WebSocket", "Failed to reload open chat history; recovery will retry")
+                    return@coroutineScope active
+                }
+            }
+        }
+        @Suppress("UNREACHABLE_CODE")
+        null
+    }
+
+    private suspend fun startWebsocketConnection(
+        webSocketClient: WorkspaceAPIClient,
+        baseUrl: String,
+        onConnected: () -> Unit
+    ) {
+        val accessToken = tokenStore.get(serverId)?.accessToken
+        val selectedServer = webSocketClient.requireUserViewModel().getServer(serverId)?.copy()
+        val ownerUuid = _currentUser.value?.uuid
+        if (accessToken != null) {
+            val endpoint = resolveWebSocketEndpoint(baseUrl)
+            Log.d("WebSocket", "Connecting: ${endpoint.displayUrl()}")
+            webSocketClient.client.webSocket(
+                request = {
+                    url {
+                        protocol = endpoint.protocol
+                        host = endpoint.host
+                        endpoint.port?.let { port = it }
+                        path("/api/workspace/v1/events/ws")
+                        parameters.append("last_epoch_version", latestEpoch.toString())
+                        parameters.append("epoch_generation", epochGeneration)
+                    }
+                    headers {
+                        append(HttpHeaders.SecWebSocketProtocol, "workspace.events.v1, bearer.$accessToken")
+                    }
+                }
+            ) {
+                synchronized(realtimeStateLock) { activeSession = this }
+                try {
+                    onConnected()
+                    onPushRefreshNeeded()
+                    Log.d("WebSocket", "Connected: ${endpoint.displayUrl()}")
+                    for (frame in incoming) {
+                        if (tokenStore.get(serverId)?.accessToken != accessToken ||
+                            webSocketClient.requireUserViewModel().getServer(serverId) != selectedServer ||
+                            _currentUser.value?.uuid != ownerUuid) {
+                            close(CloseReason(CloseReason.Codes.NORMAL, "Account context changed"))
+                            return@webSocket
+                        }
+                        when (frame) {
+                            is Frame.Text -> {
+                                val receivedText = frame.readText()
+                                val jsonObject = json.decodeFromString<JsonObject>(receivedText)
+                                if (isExpiredRealtimeCursorFrame(jsonObject)) {
+                                    invalidateRealtimeCursor()
+                                    close(CloseReason(CloseReason.Codes.NORMAL, "Event cursor expired"))
+                                    return@webSocket
+                                }
+                                val action = jsonObject["action"]?.jsonPrimitive?.contentOrNull
+                                val newEpochVersion =
+                                    jsonObject["epoch_version"]?.jsonPrimitive?.contentOrNull?.toInt()
+                                synchronized(realtimeStateLock) {
+                                    // A frame from the socket being closed must not revive an expired cursor.
+                                    if (messageResyncRequired) return@webSocket
+                                    if (jsonObject["type"]?.jsonPrimitive?.contentOrNull == "ready") {
+                                        epochGeneration = jsonObject["epoch_generation"]
+                                            ?.jsonPrimitive?.contentOrNull ?: epochGeneration
+                                    }
+                                    if (newEpochVersion != null) latestEpoch = newEpochVersion
+                                }
+                                if (jsonObject["type"]?.jsonPrimitive?.contentOrNull == "ready") {
+                                    Log.d(
+                                        "WebSocket",
+                                        "Ready: epoch_version=$latestEpoch, " +
+                                            "epoch_generation=$epochGeneration"
+                                    )
+                                }
+                                val payload = jsonObject["payload"]?.toString()
+                                if (action != null && payload != null) {
+                                    when (jsonObject["object_type"]?.toString()?.trim('"')) {
+                                        "message" -> {
+                                            didReceiveMessageEvent(payload, action)
+                                        }
+
+                                        "user" -> {
+                                            didReceiveUserEvent(payload, action)
+                                        }
+
+                                        "folder" -> {
+                                            didReceiveFolderEvent(payload, action)
+                                        }
+
+                                        "stream" -> {
+                                            didReceiveStreamEvent(payload, action)
+                                        }
+
+                                        "stream_bindings", "stream_binding" -> {
+                                            didReceiveStreamBindingEvent(payload, action)
+                                        }
+
+                                        "topic" -> {
+                                            didReceiveTopicEvent(payload, action)
+                                        }
+
+                                        "message_reaction" -> {
+                                            didReceiveReactionEvent(payload, action)
+                                        }
+
+                                        else -> Log.d("WebSocket", "Received: $receivedText")
+                                    }
+                                }
+                            }
+
+                            is Frame.Binary -> Log.d("WebSocket", "Received binary data bundle")
+                            is Frame.Close -> Log.d(
+                                "WebSocket",
+                                "Connection closing reason: ${frame.readReason()}"
+                            )
+
+                            else -> Log.d("WebSocket", "Received control or ping/pong frame")
+                        }
+                    }
+                } finally {
+                    synchronized(realtimeStateLock) { activeSession = null }
+                    val reason = closeReason.await()
+                    if (reason?.code?.toInt() == 4401) {
+                        webSocketClient.refreshSession(serverId, accessToken)
+                    } else if (reason?.code?.toInt() == 4410) {
+                        // The error frame can be missing; the close code alone is sufficient.
+                        invalidateRealtimeCursor()
+                    }
+                    Log.d("WebSocket", "Disconnected: $reason")
+                }
+            }
+        }
+    }
+
+    fun didReceiveStreamBindingEvent(payload: String, action: String) {
+        when (action) {
+            "created" -> {
+                val batch = json.decodeFromString<CreatedStreamBindingsEvent>(payload)
+                mergeStreamBindings(batch.uuid, batch.items)
+            }
+            "updated" -> updateStreamBindings(json.decodeFromString<StreamBindingResponseData>(payload))
+            "deleted" -> {
+                val deleted = json.decodeFromString<DeletedStreamBindingEvent>(payload)
+                synchronized(realtimeStateLock) {
+                    membership.removeBinding(deleted.streamUuid, deleted.uuid)
+                }
+                if (deleted.userUuid == _currentUser.value?.uuid && _streams.value.any { it.uuid == deleted.streamUuid }) {
+                    removeStream(deleted.streamUuid)
+                }
+            }
+        }
+    }
+
+    fun didReceiveUserEvent(payload: String, action: String) {
+        when(action) {
+            "created" -> {
+                val user = json.decodeFromString<UserResponseData>(payload)
+                addUser(user)
+            }
+            "updated" -> {
+                val user = json.decodeFromString<UserResponseData>(payload)
+                val currentUser = _currentUser.value
+                if (currentUser?.uuid == user.uuid) {
+                    updateCurrentUser(user)
+                }
+                updateUser(user)
+            }
+            "deleted" -> {
+
+            }
+        }
+    }
+
+    fun didReceiveMessageEvent(payload: String, action: String) {
+        when(action) {
+            "created" -> {
+                val message = json.decodeFromString<MessageResponse>(payload)
+                updateMessagesPool(listOf(message))
+                addMessageToStreamTopic(message)
+            }
+            "updated" -> {
+                val message = json.decodeFromString<MessageResponse>(payload)
+                updateMessagesPool(listOf(message))
+                updateMessage(message)
+            }
+            "deleted" -> {
+                val message = json.decodeFromString<JsonObject>(payload)
+                message["uuid"]?.jsonPrimitive?.contentOrNull?.let(::removeMessage)
+            }
+        }
+    }
+
+    fun didReceiveFolderEvent(payload: String, action: String) {
+        when(action) {
+            "created" -> {
+                val folder = json.decodeFromString<FolderResponseData>(payload)
+                addFolder(folder)
+            }
+            "updated" -> {
+                val folder = json.decodeFromString<FolderResponseData>(payload)
+                updateFolder(folder)
+            }
+            "deleted" -> {
+                json.decodeFromString<JsonObject>(payload)["uuid"]?.jsonPrimitive?.contentOrNull?.let(::removeFolder)
+            }
+        }
+    }
+
+    fun didReceiveReactionEvent(payload: String, action: String) {
+        when(action) {
+            "created" -> {
+                val reaction = json.decodeFromString<MessageReaction>(payload)
+                addReaction(reaction)
+            }
+            "deleted" -> {
+                val reaction = json.decodeFromString<DeletedMessageReaction>(payload)
+                deleteReaction(reaction)
+            }
+        }
+    }
+
+    fun didReceiveStreamEvent(payload: String, action: String) {
+        when(action) {
+            "created" -> {
+                val stream = json.decodeFromString<Stream>(payload)
+                addStream(stream)
+            }
+            "updated" -> {
+                val stream = json.decodeFromString<Stream>(payload)
+                updateStream(stream)
+            }
+            "deleted" -> {
+                json.decodeFromString<JsonObject>(payload)["uuid"]?.jsonPrimitive?.contentOrNull?.let(::removeStream)
+            }
+        }
+    }
+
+    fun didReceiveTopicEvent(payload: String, action: String) {
+        onPushRefreshNeeded()
+        when(action) {
+            "created" -> {
+                val topic = json.decodeFromString< TopicsResponseData>(payload)
+                addTopicToStream(topic)
+            }
+            "updated" -> {
+                val topic = json.decodeFromString< TopicsResponseData>(payload)
+                updateTopic(topic)
+            }
+            "deleted" -> {
+
+            }
+        }
+    }
+
+    fun loadServerSettings() {
+        scope.launch {
+            val webSocketClient = client
+            _streamsQueryState.value = QueryState.Loading
+            val response = webSocketClient.performRequest(
+                ServerSettingsRequest(
+                    config.baseUrl,
+                ),
+                serverId,
+            )
+            when (response) {
+                is ApiResult.Success -> {
+                    jitsiServerUrl = response.value.meetUrl
+                    loadUserInfo()
+                }
+
+                is ApiResult.Error -> {
+                    _streamsQueryState.value = QueryState.Error("")
+                }
+            }
+        }
+    }
+
+    suspend fun loadUserInfo() {
+        val webSocketClient = client ?: return
+        val userState = webSocketClient.requireUserViewModel()
+        val captured = userState.getServer(serverId)?.copy() ?: return
+        val token = userState.getTokens(serverId)?.accessToken?.takeIf { it.isNotBlank() } ?: return
+        var authentication = ProtectedRequestAuthentication(token)
+        val verificationRevision = ownerVerificationRevision
+        fun current() = ownerVerificationRevision == verificationRevision &&
+            verifiedOwnerRequestStillCurrent(captured, userState.servers.value.firstOrNull { it.id == serverId }, authentication,
+                userState.getTokens(serverId)?.accessToken)
+        if (!current()) return
+        var response = webSocketClient.performRequest(authentication.pin(OwnUserRequest()), serverId, captured)
+        // Preserve the existing one-refresh /me recovery, while recording the credential that actually verified the owner.
+        if (response is ApiResult.Error && response.error.httpStatusCode == 401) {
+            if (!current()) return
+            when (val refresh = webSocketClient.refreshSession(serverId, token)) {
+                is ApiResult.Success -> {
+                    authentication = ProtectedRequestAuthentication(refresh.value.accessToken)
+                    if (!current()) return
+                    response = webSocketClient.performRequest(authentication.pin(OwnUserRequest()), serverId, captured)
+                    if (!current()) return
+                    if (response is ApiResult.Error && response.error.httpStatusCode == 401)
+                        userState.repo.setNeedsToReloginIfTokensCurrent(serverId, refresh.value)
+                }
+                is ApiResult.Error -> response = refresh
+            }
+        }
+        when(response) {
+            is ApiResult.Success -> {
+                val confirmed = userState.repo.withCurrentSession(captured, authentication) {
+                    synchronized(realtimeStateLock) {
+                        if (!current()) false else {
+                            tokenStore.rememberConfirmedOwner(captured, response.value.uuid)
+                            updateCurrentUser(response.value)
+                            _verifiedOwnerAuthentication.value = VerifiedOwnerAuthentication(serverId, captured.baseUrl,
+                                response.value.uuid, authentication, ++ownerVerificationRevision, captured.copy(), ownerVerificationLineage)
+                            true
+                        }
+                    }
+                }
+                if (confirmed != true) return
+                loadMessageReactions(response.value.uuid)
+            }
+
+            is ApiResult.Error -> {
+                _streamsQueryState.value = QueryState.Error("")
+            }
+        }
+    }
+
+    suspend fun loadMessageReactions(userUuid: String) {
+        val webSocketClient = client ?: return
+        val response = webSocketClient.performRequest(MessageReactionsRequest(userUuid), serverId)
+        when(response) {
+            is ApiResult.Success -> {
+                setInitialMessageReactions(response.value)
+                loadAllUsersInfo()
+            }
+
+            is ApiResult.Error -> {
+                _streamsQueryState.value = QueryState.Error("")
+            }
+        }
+    }
+
+    suspend fun loadAllUsersInfo() {
+        val webSocketClient = client ?: return
+        val response = webSocketClient.performRequest(UsersRequest(), serverId)
+        when(response) {
+            is ApiResult.Success -> {
+                setInitialUsers(response.value)
+                loadFolders()
+            }
+
+            is ApiResult.Error -> {
+                _streamsQueryState.value = QueryState.Error("")
+            }
+        }
+    }
+    suspend fun loadFolders() {
+        val webSocketClient = client ?: return
+        val response = webSocketClient.performRequest(FoldersRequest(), serverId)
+        when(response) {
+            is ApiResult.Success -> {
+                setInitialFolders(response.value.sortedBy { WorkspaceDateTime.parse(it.creationDate) })
+                if (!folders.value.isEmpty()) {
+                    _currentlySelectedFolder.value = folders.value.first()
+                }
+                loadSubscribedChannels()
+            }
+
+            is ApiResult.Error -> {
+                _streamsQueryState.value = QueryState.Error("")
+            }
+        }
+    }
+
+    suspend fun loadSubscribedChannels() {
+        val webSocketClient = client ?: return
+        val response = webSocketClient.performRequest(StreamsRequest(), serverId)
+        when(response) {
+            is ApiResult.Success -> {
+                val messageIds = response.value.mapNotNull { it.lastMessageUuid }
+                if (!messageIds.isEmpty()) {
+                    val messagesResponse = webSocketClient.performRequest(
+                        MessagesByIdsRequest(messageIds),
+                        serverId,
+                    )
+                    when (messagesResponse) {
+                        is ApiResult.Success -> {
+                            setInitialMessagesPool(messagesResponse.value)
+                            val streamsWithMessages = response.value.map { stream ->
+                                var updatedStream = stream
+                                updatedStream.lastMessage = poolMessage(stream.lastMessageUuid)
+                                updatedStream
+                            }
+                            setInitialStreams(streamsWithMessages)
+                            loadDrafts()
+                        }
+
+                        is ApiResult.Error -> {
+                            setInitialStreams(response.value)
+                            loadDrafts()
+                        }
+                    }
+                } else {
+                    setInitialStreams(response.value)
+                    loadDrafts()
+                }
+            }
+
+            is ApiResult.Error -> {
+                _streamsQueryState.value = QueryState.Error("")
+            }
+        }
+    }
+
+    suspend fun loadDrafts() {
+        val webSocketClient = client ?: return
+        val response = webSocketClient.performRequest(DraftsRequest(), serverId)
+        when(response) {
+            is ApiResult.Success -> {
+                setInitialDraftsPool(response.value)
+                _streamsQueryState.value = QueryState.Success
+                start()
+            }
+
+            is ApiResult.Error -> {
+                _streamsQueryState.value = QueryState.Success
+                start()
+            }
+        }
+    }
+}
+
+internal data class WebSocketEndpoint(
+    val protocol: URLProtocol,
+    val host: String,
+    val port: Int?
+) {
+    fun displayUrl(): String = buildString {
+        append(protocol.name)
+        append("://")
+        append(host)
+        port?.let {
+            append(":")
+            append(it)
+        }
+    }
+}
+
+internal fun resolveWebSocketEndpoint(baseUrl: String): WebSocketEndpoint {
+    val uri = URI(baseUrl)
+    val protocol = when (uri.scheme?.lowercase()) {
+        "https" -> URLProtocol.WSS
+        "http" -> URLProtocol.WS
+        else -> throw IllegalArgumentException("Workspace base URL must use HTTP or HTTPS")
+    }
+    val host = requireNotNull(uri.host) { "Workspace base URL must contain a host" }
+    return WebSocketEndpoint(
+        protocol = protocol,
+        host = host,
+        port = uri.port.takeIf { it != -1 }
+    )
+}
+
+internal fun nextRetryDelayMillis(currentDelayMillis: Long): Long =
+    (currentDelayMillis * 2).coerceAtMost(MAX_RETRY_DELAY_MILLIS)
+
+internal fun shouldReconnectForEventsProbe(
+    savedEpochVersion: Int,
+    probeEpochVersions: List<Int>
+): Boolean = probeEpochVersions.any { it > savedEpochVersion }
+
+internal fun isExpiredRealtimeCursorFrame(frame: JsonObject): Boolean =
+    frame["code"]?.jsonPrimitive?.intOrNull == EVENTS_CURSOR_EXPIRED_STATUS_CODE &&
+        frame["error"]?.jsonPrimitive?.contentOrNull == "epoch_pruned"
+
+@Serializable
+data class PongMessage(
+    val type: String,
+    val ts: String
+)
+
+@Serializable
+private data class CreatedStreamBindingsEvent(val uuid: String, val items: List<StreamBindingResponseData>)
+
+@Serializable
+private data class DeletedStreamBindingEvent(
+    val uuid: String,
+    @SerialName("stream_uuid") val streamUuid: String,
+    @SerialName("user_uuid") val userUuid: String,
+)
+
+@Serializable
+data class MessageEvent(
+    val type: String,
+    val message: MessageResponse,
+    @SerialName("epoch_version") val epoch_version: Int
+)
+
+@Serializable
+data class StreamEvent(
+    val type: String,
+    val stream: Stream,
+    @SerialName("epoch_version") val epoch_version: Int
+)
+
+/** In-memory evidence from a successful existing /me request; never persisted with message caches. */
+data class VerifiedOwnerAuthentication(val serverId: String, val baseUrl: String, val userUuid: String,
+                                       val authentication: ProtectedRequestAuthentication, val revision: Long,
+                                       val capturedServer: ServerConfig? = null, val lineage: Any = Any())
+
+internal fun verifiedOwnerRequestStillCurrent(captured: ServerConfig, current: ServerConfig?,
+                                               authentication: ProtectedRequestAuthentication, token: String?): Boolean =
+    captured == current && authentication.matchesAccessToken(token)
