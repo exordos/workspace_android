@@ -1,0 +1,21 @@
+name: Formatting
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  final-newlines:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-java@v6.1.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v6.4.1
+        with:
+          gradle-version: '9.2.1'
+      - run: gradle --no-daemon spotlessCheck
+      - run: python3 app/tests/host/verify_final_newlines.py --gradle gradle

@@ -13,20 +13,20 @@ All app tests live in this directory:
 - `live/`: opt-in Android checks that require a real Firebase configuration and service access.
 
 Keep Java and Kotlin package paths under each directory's `java/` folder.
-The source set mappings are defined in `app/build.gradle.kts`; Gradle task names
-are unchanged.
+The source set mappings are defined in `app/build.gradle.kts`; Exordos test task
+names are unchanged.
 `app/src/test` and `app/src/androidTest` are not configured source roots.
 
 From the repository root, run the JVM tests with:
 
 ```sh
-./gradlew :app:testGenesisDebugUnitTest
+./gradlew :app:testExordosDebugUnitTest
 ```
 
 With an Android device or emulator connected, run the instrumented tests with:
 
 ```sh
-./gradlew :app:connectedGenesisDebugAndroidTest
+./gradlew :app:connectedExordosDebugAndroidTest
 ```
 
 ## Notification indicators
@@ -34,8 +34,8 @@ With an Android device or emulator connected, run the instrumented tests with:
 Run the repository regressions on a connected Android device or emulator:
 
 ```sh
-./gradlew :app:connectedGenesisDebugAndroidTest \
-  -Pandroid.testInstrumentationRunnerArguments.class=ru.genesiscorporation.workspace.beta.data.NotificationIndicatorRepositoryTest
+./gradlew :app:connectedExordosDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.class=com.exordos.workspace.data.NotificationIndicatorRepositoryTest
 ```
 
 These cases verify that authoritative topic events update active unread in both
@@ -44,8 +44,7 @@ selected folder's items and counter without switching tabs, preserve unrelated
 selections, and remove deleted folders with a valid remaining selection or none.
 Repeated deletion events must be harmless and must not delete conversations.
 
-Use the corresponding `ExordosDebug` tasks for the Exordos package. Select the
-dedicated device with `ANDROID_SERIAL` before running a connected task.
+Select the dedicated device with `ANDROID_SERIAL` before running a connected task.
 
 `PublicationWindowTest` exercises the signed-out entry screen. Run the full
 suite in a clean test installation or a separate Android user; do not clear
@@ -63,7 +62,7 @@ server errors. It never contacts a deployed Workspace.
 
 ```sh
 ANDROID_SERIAL=TASK_SERIAL ./gradlew :app:connectedExordosDebugAndroidTest \
-  -Pandroid.testInstrumentationRunnerArguments.class=ru.genesiscorporation.workspace.beta.data.remote.WorkspaceRequestHttpContractTest
+  -Pandroid.testInstrumentationRunnerArguments.class=com.exordos.workspace.data.remote.WorkspaceRequestHttpContractTest
 ```
 
 JVM regressions `SessionRequestContractTest`, `DraftRequestContractTest`,
@@ -104,7 +103,7 @@ cold background startup:
 
 ```sh
 ANDROID_SERIAL=TASK_SERIAL ./gradlew :app:connectedExordosDebugAndroidTest \
-  -Pandroid.testInstrumentationRunnerArguments.class=ru.genesiscorporation.workspace.beta.data.push.PushWorkerFactoryTest
+  -Pandroid.testInstrumentationRunnerArguments.class=com.exordos.workspace.data.push.PushWorkerFactoryTest
 ```
 
 For the optimized APK, build `:app:buildEmojiReleaseSmoke` and sign its framework
@@ -135,7 +134,7 @@ establish activity delivery, not completed chat navigation or remote FCM deliver
 
 ```sh
 ANDROID_SERIAL=TASK_SERIAL ./gradlew :app:connectedExordosDebugAndroidTest \
-  -Pandroid.testInstrumentationRunnerArguments.class=ru.genesiscorporation.workspace.beta.data.FirebaseNotificationsTest
+  -Pandroid.testInstrumentationRunnerArguments.class=com.exordos.workspace.data.FirebaseNotificationsTest
 ```
 
 The existing `:app:buildEmojiReleaseSmoke` task also builds the framework-only
@@ -154,6 +153,17 @@ invalid/large IDs and independent update/cancel behavior, then sends both
 notification intents to the real activity. It requires a non-debuggable target,
 uses no account or live Firebase credentials, and adds no production keep rules.
 
+## Final newline regression
+
+The formatter's new-file and Git-control-file discovery regression runs with:
+
+```sh
+python3 app/tests/host/verify_final_newlines.py
+```
+
+It uses the real Spotless task and temporary untracked files; GitHub Actions
+runs it alongside the repository newline check.
+
 ## Firebase release configuration regression
 
 ```sh
@@ -161,7 +171,7 @@ uses no account or live Firebase credentials, and adds no production keep rules.
 ```
 
 This copies the production build script into a temporary Android project and
-executes its actual Google services tasks offline. It checks both flavors,
+executes its actual Google services tasks offline. It checks the Exordos client,
 placeholder/missing/malformed configuration, app/project consistency, matching
 client selection, variant-file precedence, the first API key and redacted errors.
 All values are synthetic; no Firebase account or registration token is used.
@@ -175,7 +185,7 @@ configuration and Google Play services on a dedicated installation, run:
 ```sh
 ANDROID_SERIAL=TASK_SERIAL ./gradlew :app:connectedExordosDebugAndroidTest \
   -PfirebaseLiveSmoke=true \
-  -Pandroid.testInstrumentationRunnerArguments.class=ru.genesiscorporation.workspace.beta.data.FirebaseRegistrationSmokeTest
+  -Pandroid.testInstrumentationRunnerArguments.class=com.exordos.workspace.data.FirebaseRegistrationSmokeTest
 ```
 
 It obtains an actual FCM token without printing it. `FirebaseTokenLoggingTest`
@@ -284,7 +294,7 @@ are isolated; no live account or backend is required.
 
 ```sh
 ANDROID_SERIAL=TASK_SERIAL ./gradlew :app:connectedExordosDebugAndroidTest \
-  -Pandroid.testInstrumentationRunnerArguments.class=ru.genesiscorporation.workspace.beta.data.RealtimeRecoveryInstrumentedTest
+  -Pandroid.testInstrumentationRunnerArguments.class=com.exordos.workspace.data.RealtimeRecoveryInstrumentedTest
 ```
 
 `MessageHistorySnapshotTest` covers pending sends and concurrent incoming messages,
@@ -311,7 +321,7 @@ read; new messages must preserve the selected unread position.
 
 ```sh
 ANDROID_SERIAL=TASK_SERIAL ./gradlew :app:connectedExordosDebugAndroidTest \
-  -Pandroid.testInstrumentationRunnerArguments.class=ru.genesiscorporation.workspace.beta.modules.homeinbounds.InboxInstrumentedTest
+  -Pandroid.testInstrumentationRunnerArguments.class=com.exordos.workspace.modules.homeinbounds.InboxInstrumentedTest
 ```
 
 ## Encrypted runtime binding and reopen
@@ -418,7 +428,7 @@ and return to credentials. No deployed account or server is used.
 
 ```sh
 ANDROID_SERIAL=TASK_SERIAL ./gradlew :app:connectedExordosDebugAndroidTest \
-  -Pandroid.testInstrumentationRunnerArguments.class=ru.genesiscorporation.workspace.beta.modules.projects.ProjectsDuplicateIdentityTest
+  -Pandroid.testInstrumentationRunnerArguments.class=com.exordos.workspace.modules.projects.ProjectsDuplicateIdentityTest
 ```
 
 ## Crashlytics configuration
@@ -470,7 +480,7 @@ Their HTTP servers, accounts and storage are isolated fixtures.
 ```sh
 ANDROID_SERIAL=TASK_SERIAL ./gradlew --no-daemon \
   :app:connectedExordosDebugAndroidTest \
-  -Pandroid.testInstrumentationRunnerArguments.class=ru.genesiscorporation.workspace.beta.modules.chatdialog.ChatTimestampRegressionTest,ru.genesiscorporation.workspace.beta.data.DateTimeScreensRegressionTest
+  -Pandroid.testInstrumentationRunnerArguments.class=com.exordos.workspace.modules.chatdialog.ChatTimestampRegressionTest,com.exordos.workspace.data.DateTimeScreensRegressionTest
 ```
 
 `WorkspaceDateTimeTest`, `WorkspaceDateTimeFormattingTest` and
@@ -478,3 +488,52 @@ ANDROID_SERIAL=TASK_SERIAL ./gradlew --no-daemon \
 negative offsets, device-zone changes, DST, stream/topic activity and forwarding
 destination order. Keep the device run: a passing JVM test does not establish
 that the platform date parser behaves the same on older Android.
+
+## Source-package migration and installed-app updates
+
+The source namespace is `com.exordos.workspace`, matching the existing Exordos
+application ID. The obsolete Genesis product flavor is removed; Exordos Gradle
+task names are retained. Never change the application ID or signing certificate
+as part of a source-package migration.
+
+`NavigationRouteIdentityTest` checks every typed-route name in the current
+namespace. `PackageRenameCompatibilityTest` checks the current launcher and
+forwarding activity and restores a saved back stack with current destinations.
+Production components and serialized destinations use the Exordos namespace.
+`AppUpdateReceiverTest` disables a real task's root activity without killing
+the process, verifies removal on package replacement and keeps resolvable tasks.
+The update receiver removes only this app's unresolvable task roots, so Recents
+cannot relaunch a removed activity; it leaves account storage untouched.
+
+For an in-place upgrade on a disposable emulator:
+
+1. Install a pre-migration, pre-push **debug** Exordos APK and sign in to a synthetic local
+   fixture. Sign both the candidate optimized APK and framework test driver with
+   the same test certificate as that baseline.
+2. Install the framework driver built by `:app:buildEmojiReleaseSmoke`, then run
+   `adb -s TASK_SERIAL shell am instrument -w -r -e mode seed
+   com.exordos.workspace.cassi.releasetest/.PackageUpgradeInstrumentation`.
+   It records the UID, first install time and private fingerprints of saved
+   accounts and encrypted tokens.
+3. Immediately install the optimized APK with `adb -s TASK_SERIAL install -r
+   CANDIDATE.apk`. Retain the application data throughout the update.
+4. Run the same instrumentation with `-r -e mode verify`. Require code `-1`, the
+   same UID, first install time and storage fingerprints. Reopen the app,
+   enter the existing project/chat without logging in,
+   and check that the local fixture received no new password login.
+5. Also keep a home-screen icon and a background task with an open chat from the
+   baseline. Replace the APK without force-stopping or clearing that task first;
+   verify that obsolete task roots are removed before any instrumentation or
+   manual force-stop, that the existing icon opens the new launcher, and that
+   Recents opens a current task. Repeat process recreation and
+   rotation on the updated app.
+
+This exercises Android's replacement path with a local test certificate; it
+is separate from a Play-signed upgrade from the currently published version.
+Before release, also test that exact distribution/version/signature path.
+
+To exercise the optimized conference SDK on a 16 KB emulator, grant its runtime
+permissions and run `adb -s TASK_SERIAL shell am instrument -w -r
+com.exordos.workspace.cassi.releasetest/.SdkReleaseInstrumentation`. Require
+code `-1` and initialized native bridge, bundled JavaScript and mounted view.
+The driver uses a synthetic invalid conference URL.

@@ -2,7 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
         <activity
-            android:name="ru.genesiscorporation.workspace.beta.sharefixture.ExternalShareReceiverActivity"
+            android:name="com.exordos.workspace.sharefixture.ExternalShareReceiverActivity"
             android:exported="true"
             android:label="CASSI share receiver"
             android:theme="@android:style/Theme.NoDisplay" />

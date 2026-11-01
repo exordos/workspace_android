@@ -1,0 +1,86 @@
+package com.exordos.workspace.modules.login
+
+import androidx.lifecycle.ViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.buffer
+import com.exordos.workspace.UserViewModel
+import com.exordos.workspace.data.remote.ApiResult
+import com.exordos.workspace.data.remote.WorkspaceAPIClient
+import com.exordos.workspace.data.remote.dto.LoginRequest
+import com.exordos.workspace.data.remote.dto.OwnUserRequest
+import com.exordos.workspace.modules.chooseserver.QueryState
+
+
+class LoginViewModel(
+    val client: WorkspaceAPIClient,
+    val userViewModel: UserViewModel,
+    val isFirstOrganization: Boolean
+): ViewModel() {
+
+    private val _queryState = MutableStateFlow<QueryState>(QueryState.Idle)
+    val queryState: StateFlow<QueryState> = _queryState
+    private val _webUrl = MutableStateFlow<String?>(null)
+    val webUrl: StateFlow<String?> = _webUrl.asStateFlow()
+
+    fun setWebUrl(url: String?) {
+        _webUrl.value = url
+    }
+
+    private val _loginText = MutableStateFlow("")
+    val loginText: StateFlow<String> = _loginText
+
+    fun onLoginChange(newText: String) {
+        _loginText.value = newText
+    }
+
+    private val _passwordText = MutableStateFlow("")
+    val passwordText: StateFlow<String> = _passwordText
+
+    fun onPasswordChange(newText: String) {
+        _passwordText.value = newText
+    }
+
+    fun idleQueryState() {
+        _queryState.value = QueryState.Idle
+    }
+
+    suspend fun leaveOrganization(): Boolean {
+        _queryState.value = QueryState.Loading
+        return try {
+            userViewModel.removeCurrentServer()
+            _queryState.value = QueryState.Idle
+            true
+        } catch (_: Exception) {
+            _queryState.value = QueryState.Error("Не удалось удалить локальные ключи. Повторите выход.")
+            false
+        }
+    }
+
+    suspend fun onLoginClick() {
+        _queryState.value = QueryState.Loading
+        val response = client.performRequest(LoginRequest(loginText.value, passwordText.value))
+        when(response) {
+            is ApiResult.Success -> {
+                val userResponse = response.value
+                val saved = userViewModel.setTokensAndWait(
+                    accessToken = userResponse.accessToken,
+                    refreshToken = userResponse.refreshToken,
+                )
+                _queryState.value = if (saved) {
+                    QueryState.Success
+                } else {
+                    QueryState.Error("Error")
+                }
+            }
+            is ApiResult.Error -> {
+                if (response.error.httpStatusCode == 401) {
+                    _queryState.value = QueryState.Error("needs_otp")
+                } else {
+                    _queryState.value = QueryState.Error(response.error.message ?: "Error")
+                }
+            }
+        }
+    }
+}

@@ -18,8 +18,8 @@ The repository's Gradle files define the required versions:
    environment variables. Use Android Studio with support for the project's AGP.
 2. Download `google-services.json` from the existing Firebase project's
    **Project settings > General > Your apps**, selecting the Android app whose
-   package matches the required flavor. Place it in `app/google-services.json`;
-   building both flavors requires both application IDs in that file. Obtain
+   package is `com.exordos.workspace`. Place it in `app/google-services.json`;
+   the Exordos application ID must be present in that file. Obtain
    access from the project maintainer if needed. Keep the downloaded configuration
    out of Git, documentation, logs, and test fixtures.
 3. Check for `gradle/wrapper/gradle-wrapper.jar`: the current `.gitignore` excludes
@@ -58,7 +58,7 @@ recorded. No custom user identifiers, account details, request bodies, credentia
 message contents, Analytics dependency, or manual exception logging are added.
 Native symbol reporting is not configured by this integration.
 
-Automatic report collection is disabled in both debug flavors by the debug
+Automatic report collection is disabled in debug builds by the debug
 manifest. The release SDK uses its default automatic collection policy. Do not
 add a persisted runtime override just for development: it takes precedence over
 the manifest on future launches of the same installation.
@@ -74,7 +74,7 @@ verification that must not write to Firebase, exclude the upload task:
 ```
 
 An authorized publication build must run without that exclusion and verify the
-matching mapping upload. Use the corresponding Genesis task for that package.
+matching mapping upload.
 Do not count a local build or mapping generation as cloud delivery proof.
 
 Before publishing the first Crashlytics-enabled release, agree and update any
@@ -92,12 +92,9 @@ reports appear in Firebase; Android vitals continues to collect independently.
 ./gradlew :app:testExordosDebugUnitTest :app:assembleExordosDebug
 ./gradlew :app:lintExordosDebug
 
-# Second application ID
-./gradlew :app:testGenesisDebugUnitTest :app:assembleGenesisDebug :app:lintGenesisDebug
-
 # One JVM class
 ./gradlew :app:testExordosDebugUnitTest \
-  --tests 'ru.genesiscorporation.workspace.beta.data.RealtimeTransportPolicyTest'
+  --tests 'com.exordos.workspace.data.RealtimeTransportPolicyTest'
 
 # Android tests on a selected dedicated device/emulator
 ANDROID_SERIAL=TASK_SERIAL ./gradlew :app:connectedExordosDebugAndroidTest
@@ -111,6 +108,21 @@ APKs are written to `app/build/outputs/apk/`, AABs to
 Release builds enable R8 minification and resource shrinking; no signing
 configuration is defined in `app/build.gradle.kts`. A successful `bundle` task
 does not establish a signed or published release.
+
+## Text formatting
+
+Every repository text file ends with a newline. `.editorconfig` enables this in
+editors; Spotless checks UTF-8 text files discovered through Git, including new
+unignored files. Binary files, ignored local configuration and generated outputs
+are excluded. Existing LF/CRLF conventions are preserved.
+
+Run `./gradlew spotlessCheck` to verify and `./gradlew spotlessApply` to fix
+trailing newlines. The root `check` and app Android lint tasks include this check.
+The formatter currently enforces the final newline only.
+CI also runs `python3 app/tests/host/verify_final_newlines.py`, which requires
+the real formatter to reject new source and `.gitignore` files without a final
+newline and accept them after correction. Gradle's default exclusions for Git
+control files are disabled in `settings.gradle.kts` so those files are checked.
 
 ## Code conventions
 

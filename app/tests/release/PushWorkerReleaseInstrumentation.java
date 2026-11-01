@@ -36,9 +36,9 @@ public final class PushWorkerReleaseInstrumentation extends Instrumentation {
     @Override public void onCreate(Bundle arguments) {
         super.onCreate(arguments);
         workerClass = arguments == null
-                ? "ru.genesiscorporation.workspace.beta.data.push.PushReconciliationWorker"
+                ? "com.exordos.workspace.data.push.PushReconciliationWorker"
                 : arguments.getString("workerClass",
-                        "ru.genesiscorporation.workspace.beta.data.push.PushReconciliationWorker");
+                        "com.exordos.workspace.data.push.PushReconciliationWorker");
         // Remove tasks from earlier UI tests before Application.onCreate can start new work.
         ActivityManager activities = (ActivityManager) getTargetContext().getSystemService(Context.ACTIVITY_SERVICE);
         for (ActivityManager.AppTask task : activities.getAppTasks()) {

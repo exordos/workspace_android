@@ -41,7 +41,7 @@ tasks.register("verifyFirebaseReleaseConfig") {
             "project_info" to mapOf("project_number" to number, "project_id" to "cassi-firebase-fixture"),
             "client" to clients.toList(), "configuration_version" to "1",
         ))
-        val good = config(client("com.exordos.workspace"), client("ru.genesiscorporation.workspace.beta"))
+        val good = config(client("com.exordos.workspace"))
         val placeholder = config(client("com.exordos.workspace", "cassi-synthetic-key"))
         fun runCase(name: String, success: Boolean, variant: String = "ExordosRelease", setup: () -> Unit) {
             configFile.delete()
@@ -61,8 +61,7 @@ tasks.register("verifyFirebaseReleaseConfig") {
             logger.lifecycle("Firebase configuration regression: $name PASS")
         }
         runCase("placeholder-key", false) { configFile.writeText(placeholder) }
-        runCase("valid-both-clients", true) { configFile.writeText(good) }
-        runCase("valid-genesis", true, "GenesisRelease") { configFile.writeText(good) }
+        runCase("valid-exordos-client", true) { configFile.writeText(good) }
         runCase("missing-file", false) {}
         runCase("malformed-json-redacted", false) {
             configFile.writeText("{ CASSI_CONFIG_VALUE_MUST_NOT_LEAK")
@@ -72,11 +71,11 @@ tasks.register("verifyFirebaseReleaseConfig") {
         }
         runCase("unrelated-client-does-not-break-exordos", true) {
             configFile.writeText(config(client("com.exordos.workspace"),
-                client("ru.genesiscorporation.workspace.beta", "cassi-synthetic-key")))
+                client("com.example.unrelated", "cassi-synthetic-key")))
         }
-        runCase("matching-genesis-client-is-checked", false, "GenesisRelease") {
-            configFile.writeText(config(client("com.exordos.workspace"),
-                client("ru.genesiscorporation.workspace.beta", "cassi-synthetic-key")))
+        runCase("matching-exordos-client-is-checked", false) {
+            configFile.writeText(config(client("com.example.unrelated"),
+                client("com.exordos.workspace", "cassi-synthetic-key")))
         }
         runCase("invalid-variant-overrides-valid-root", false) {
             configFile.writeText(good); overrideFile.parentFile.mkdirs(); overrideFile.writeText(placeholder)

@@ -24,6 +24,10 @@ dependencyResolutionManagement {
     }
 }
 
+// Spotless checks Git control files too; Gradle file trees exclude these by default.
+listOf("**/.gitignore", "**/.gitattributes", "**/.gitmodules").forEach {
+    org.apache.tools.ant.DirectoryScanner.removeDefaultExclude(it)
+}
+
 rootProject.name = "Workspace"
 include(":app")
- 

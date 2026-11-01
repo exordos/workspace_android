@@ -1,5 +1,6 @@
 [versions]
 agp = "9.0.1"
+spotless = "8.10.4"
 coreKtx = "1.10.1"
 junit = "4.13.2"
 junitVersion = "1.1.5"
@@ -77,3 +78,4 @@ kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "ko
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 firebase = { id = "com.google.gms.google-services", version.ref = "firebasePlugin" }
 crashlytics = { id = "com.google.firebase.crashlytics", version.ref = "crashlyticsPlugin" }
+spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }

@@ -13,7 +13,7 @@ plugins {
 }
 
 android {
-    namespace = "ru.genesiscorporation.workspace.beta"
+    namespace = "com.exordos.workspace"
     compileSdk {
         version = release(36) {
             minorApiLevel = 1
@@ -22,10 +22,6 @@ android {
 
     flavorDimensions += "brand"
     productFlavors {
-        create("genesis") {
-            dimension = "brand"
-            applicationId = "ru.genesiscorporation.workspace.beta"
-        }
         create("exordos") {
             dimension = "brand"
             applicationId = "com.exordos.workspace"
@@ -154,6 +150,8 @@ tasks.register<JavaCompile>("compileEmojiReleaseSmoke") {
         "tests/release/FirebaseNotificationReleaseInstrumentation.java",
         "tests/release/PushWorkerReleaseInstrumentation.java",
         "tests/release/WorkspacePushLiveReleaseInstrumentation.java",
+        "tests/release/PackageUpgradeInstrumentation.java",
+        "tests/release/SdkReleaseInstrumentation.java",
         "tests/instrumented/java/com/exordos/workspace/cassi/releasetest/AvatarFixtureInstrumentation.java")
     classpath = files(providers.provider { androidComponents.sdkComponents.bootClasspath.get() })
     destinationDirectory.set(layout.buildDirectory.dir("emoji-release-smoke/classes"))
@@ -202,6 +200,10 @@ tasks.register("buildEmojiReleaseSmoke") {
                 <instrumentation android:name="com.exordos.workspace.cassi.releasetest.PushWorkerReleaseInstrumentation"
                     android:targetPackage="com.exordos.workspace"/>
                 <instrumentation android:name="com.exordos.workspace.cassi.releasetest.WorkspacePushLiveReleaseInstrumentation"
+                    android:targetPackage="com.exordos.workspace"/>
+                <instrumentation android:name="com.exordos.workspace.cassi.releasetest.SdkReleaseInstrumentation"
+                    android:targetPackage="com.exordos.workspace"/>
+                <instrumentation android:name="com.exordos.workspace.cassi.releasetest.PackageUpgradeInstrumentation"
                     android:targetPackage="com.exordos.workspace"/>
             </manifest>
         """.trimIndent(), Charsets.UTF_8)

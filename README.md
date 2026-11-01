@@ -30,7 +30,7 @@ flavor, and the Gradle wrapper as described in the
 ./gradlew :app:lintExordosDebug
 ```
 
-For Genesis, replace `Exordos` with `Genesis`. Run
+Run
 `:app:connectedExordosDebugAndroidTest` on a dedicated device or emulator selected
 with `ANDROID_SERIAL`. The full UI suite requires a clean test installation;
 do not clear a user's saved accounts to meet that requirement.
@@ -39,11 +39,10 @@ do not clear a user's saved accounts to meet that requirement.
 
 | Flavor | Application ID |
 | --- | --- |
-| `genesis` | `ru.genesiscorporation.workspace.beta` |
 | `exordos` | `com.exordos.workspace` |
 
-Both variants share source code and the namespace
-`ru.genesiscorporation.workspace.beta`. SDK and application versions are defined
+The source package and namespace are
+`com.exordos.workspace`. SDK and application versions are defined
 in [app/build.gradle.kts](app/build.gradle.kts); library versions are in the
 [version catalog](gradle/libs.versions.toml).
 

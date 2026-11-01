@@ -74,11 +74,11 @@ public final class AvatarFixtureInstrumentation extends Instrumentation {
                     .getMethod("first", loader.loadClass("kotlinx.coroutines.flow.Flow"), continuation), null, flow);
             for (Object session : sessions) require("cassi-avatar-57-fixture".equals(
                     session.getClass().getMethod("getId").invoke(session)), "Existing user sessions must be preserved");
-            Class<?> tokensClass = loader.loadClass("ru.genesiscorporation.workspace.beta.data.TokenPair");
+            Class<?> tokensClass = loader.loadClass("com.exordos.workspace.data.TokenPair");
             Object tokens = tokensClass.getConstructor(String.class, String.class)
                     .newInstance("cassi-avatar-57-access", "cassi-avatar-57-refresh");
             if (sessions.isEmpty()) {
-                Class<?> configClass = loader.loadClass("ru.genesiscorporation.workspace.beta.data.ServerConfig");
+                Class<?> configClass = loader.loadClass("com.exordos.workspace.data.ServerConfig");
                 Object config = configClass.getConstructor(String.class, String.class, String.class,
                         String.class, boolean.class, String.class).newInstance("cassi-avatar-57-fixture",
                         "http://127.0.0.1:19557", "", "Avatar fixture", false, "project");
@@ -110,7 +110,7 @@ public final class AvatarFixtureInstrumentation extends Instrumentation {
 
     /** Uses the production crypto and secure store; exports ciphertext only for the host peer. */
     private void seedProtectedBodies() throws Exception {
-        String prefix = "ru.genesiscorporation.workspace.beta.data.crypto.";
+        String prefix = "com.exordos.workspace.data.crypto.";
         String stream = "00000000-0000-4000-8000-000000000069";
         String key = "00000000-0000-4000-8002-000000000069";
         Class<?> ownerClass = loader.loadClass(prefix + "ChatKeyOwner");

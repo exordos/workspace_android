@@ -36,7 +36,6 @@
             android:theme="@style/Theme.Wokspace">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
@@ -55,6 +54,11 @@
                 android:resource="@xml/message_share_paths" />
         </provider>
         <receiver android:name=".data.push.PushDismissReceiver" android:exported="false" />
+        <receiver android:name=".AppUpdateReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
         <service
             android:name=".data.MyFirebaseMessagingService"
             android:exported="false">
