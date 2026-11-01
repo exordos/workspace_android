@@ -190,10 +190,11 @@ fun ChatDialogScreen(
     }
     val notifiedKeys = remember { mutableSetOf<String>() }
     val notificationContext = LocalContext.current.applicationContext
+    val pushEnabled = notificationContext.resources.getBoolean(R.bool.push_enabled)
     val notificationOwner = remember(viewModel) { Any() }
     val notificationLifecycle by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsState()
-    DisposableEffect(notificationOwner) {
-        onDispose { WorkspacePushNotifications(notificationContext).visibility(notificationOwner, viewModel.repo.serverId, emptySet()) }
+    DisposableEffect(notificationOwner, pushEnabled) {
+        onDispose { if (pushEnabled) WorkspacePushNotifications(notificationContext).visibility(notificationOwner, viewModel.repo.serverId, emptySet()) }
     }
 
 
@@ -252,7 +253,7 @@ fun ChatDialogScreen(
 
     LaunchedEffect(listState, openingUnread && hasDoneInitialScroll, notificationLifecycle) {
         if (notificationLifecycle != Lifecycle.State.RESUMED || (openingUnread && !hasDoneInitialScroll)) {
-            withContext(Dispatchers.IO) { WorkspacePushNotifications(notificationContext).visibility(notificationOwner, viewModel.repo.serverId, emptySet()) }
+            if (pushEnabled) withContext(Dispatchers.IO) { WorkspacePushNotifications(notificationContext).visibility(notificationOwner, viewModel.repo.serverId, emptySet()) }
             return@LaunchedEffect
         }
         snapshotFlow {
@@ -309,7 +310,7 @@ fun ChatDialogScreen(
 
     LaunchedEffect(listState, openingUnread && hasDoneInitialScroll, notificationLifecycle) {
         if (notificationLifecycle != Lifecycle.State.RESUMED || (openingUnread && !hasDoneInitialScroll)) {
-            withContext(Dispatchers.IO) { WorkspacePushNotifications(notificationContext).visibility(notificationOwner, viewModel.repo.serverId, emptySet()) }
+            if (pushEnabled) withContext(Dispatchers.IO) { WorkspacePushNotifications(notificationContext).visibility(notificationOwner, viewModel.repo.serverId, emptySet()) }
             return@LaunchedEffect
         }
         snapshotFlow { listState.layoutInfo.visibleItemsInfo }
@@ -318,7 +319,7 @@ fun ChatDialogScreen(
                     visibleItemsInfo.mapNotNull { info ->
                         info.key as? String
                     }.toSet()
-                withContext(Dispatchers.IO) {
+                if (pushEnabled) withContext(Dispatchers.IO) {
                     WorkspacePushNotifications(notificationContext).visibleMessages(notificationOwner, viewModel.repo.serverId,
                         viewModel.userViewModel.selectedServer.value?.projectUuid, viewModel.repo.currentUser.value?.uuid, visibleKeysNow)
                 }

@@ -117,3 +117,10 @@ checks in [the test guide](../app/tests/README.md#source-package-migration-and-i
 saved accounts and encrypted tokens, current typed-route restoration, existing
 home-screen icons, background tasks and the current launcher/activity components.
 A clean install alone does not exercise these contracts.
+
+For a push-disabled candidate, pass `-e checkPushDisabled true` to both the
+`seed` and `verify` calls of `PackageUpgradeInstrumentation`. The old debug
+fixture must have Google Play services: the driver enables delegation through
+the old Firebase SDK, then verifies that replacement cleared it as well as
+preserving the account fingerprints. Manifest defaults alone do not reset a
+delegate initialized by an older SDK.

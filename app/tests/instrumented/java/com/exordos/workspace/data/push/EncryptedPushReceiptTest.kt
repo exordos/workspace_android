@@ -16,6 +16,8 @@ package com.exordos.workspace.data.push
 
 import android.app.Notification
 import android.app.NotificationManager
+import android.content.ComponentName
+import android.content.pm.PackageManager
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.*
 import org.junit.Before
@@ -34,6 +36,8 @@ class EncryptedPushReceiptTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context = instrumentation.targetContext
     private val manager = context.getSystemService(NotificationManager::class.java)
+    private val dismissReceiver = ComponentName(context, PushDismissReceiver::class.java)
+    private var dismissReceiverState = PackageManager.COMPONENT_ENABLED_STATE_DEFAULT
     private val keys = PushKeyStore(context)
     private val inbox = PushInbox(context)
     private val fixture = Json.parseToJsonElement(instrumentation.context.assets.open("mobile_push_event.json").bufferedReader().readText()).jsonObject
@@ -48,12 +52,21 @@ class EncryptedPushReceiptTest {
     private val create = fixture.getValue("payload").toString()
 
     @Before fun prepare() {
+        dismissReceiverState = context.packageManager.getComponentEnabledSetting(dismissReceiver)
+        context.packageManager.setComponentEnabledSetting(dismissReceiver,
+            PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP)
         if (android.os.Build.VERSION.SDK_INT >= 33) instrumentation.uiAutomation.grantRuntimePermission(context.packageName, android.Manifest.permission.POST_NOTIFICATIONS)
         cleanup()
         keys.save(registration)
         notifications.setLimits(5, 5)
     }
-    @After fun finish() { cleanup(); privateKey.fill(0) }
+    @After fun finish() {
+        try { cleanup() } finally {
+            context.packageManager.setComponentEnabledSetting(dismissReceiver, dismissReceiverState,
+                PackageManager.DONT_KILL_APP)
+            privateKey.fill(0)
+        }
+    }
     private fun cleanup() {
         listOf(registration.serverId, secondary.serverId).forEach { notifications.cancelServer(it); keys.remove(it) }
         notifications.visibility(this, registration.serverId, emptySet())

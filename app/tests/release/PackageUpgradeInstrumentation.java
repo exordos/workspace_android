@@ -2,9 +2,11 @@ package com.exordos.workspace.cassi.releasetest;
 
 import android.app.Activity;
 import android.app.Instrumentation;
+import android.app.NotificationManager;
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
 import android.os.Bundle;
+import android.os.SystemClock;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -24,12 +26,27 @@ public final class PackageUpgradeInstrumentation extends Instrumentation {
             Context context = getTargetContext();
             require("com.exordos.workspace".equals(context.getPackageName()), "Wrong target application");
             File record = new File(context.getFilesDir(), "cassi-package-upgrade.json");
+            boolean checkPushDisabled = "true".equals(arguments.getString("checkPushDisabled"));
             if ("seed".equals(arguments.getString("mode"))) {
                 require((context.getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0,
                     "Seeding is restricted to the old debug fixture");
                 require(!context.getApplicationInfo().className.equals("com.exordos.workspace.WorkspaceApplication"),
                     "Seed must run before the package migration");
                 JSONObject state = new JSONObject();
+                if (checkPushDisabled) {
+                    ClassLoader loader = context.getClassLoader();
+                    Class<?> messaging = loader.loadClass("com.google.firebase.messaging.FirebaseMessaging");
+                    Object sdk = messaging.getMethod("getInstance").invoke(null);
+                    Object task = messaging.getMethod("setNotificationDelegationEnabled", boolean.class).invoke(sdk, true);
+                    Class<?> taskType = loader.loadClass("com.google.android.gms.tasks.Task");
+                    long deadline = SystemClock.uptimeMillis() + 5000;
+                    while (!Boolean.TRUE.equals(taskType.getMethod("isComplete").invoke(task)) && SystemClock.uptimeMillis() < deadline)
+                        SystemClock.sleep(25);
+                    require(Boolean.TRUE.equals(taskType.getMethod("isSuccessful").invoke(task)), "Could not seed SDK notification delegation");
+                    require("com.google.android.gms".equals(context.getSystemService(NotificationManager.class).getNotificationDelegate()),
+                        "Old fixture did not enable the Google Play services delegate");
+                    state.put("notificationDelegateSeeded", true);
+                }
                 state.put("uid", context.getApplicationInfo().uid);
                 state.put("firstInstallTime", context.getPackageManager().getPackageInfo(context.getPackageName(), 0).firstInstallTime);
                 state.put("settings", digest(settings(context)));
@@ -41,7 +58,14 @@ public final class PackageUpgradeInstrumentation extends Instrumentation {
                     "Verification requires the optimized release APK");
                 require(context.getApplicationInfo().className.equals("com.exordos.workspace.WorkspaceApplication"),
                     "Candidate source namespace was not migrated");
+                if (checkPushDisabled) {
+                    NotificationManager manager = context.getSystemService(NotificationManager.class);
+                    long deadline = SystemClock.uptimeMillis() + 5000;
+                    while (manager.getNotificationDelegate() != null && SystemClock.uptimeMillis() < deadline) SystemClock.sleep(25);
+                    require(manager.getNotificationDelegate() == null, "Old notification delegate survived update: " + manager.getNotificationDelegate());
+                }
                 JSONObject state = new JSONObject(new String(Files.readAllBytes(record.toPath()), StandardCharsets.UTF_8));
+                if (checkPushDisabled) require(state.optBoolean("notificationDelegateSeeded"), "Seed the old SDK delegate before replacement");
                 require(state.getInt("uid") == context.getApplicationInfo().uid, "Update changed application UID");
                 require(state.getLong("firstInstallTime") == context.getPackageManager().getPackageInfo(context.getPackageName(), 0).firstInstallTime,
                     "Update changed first install time");

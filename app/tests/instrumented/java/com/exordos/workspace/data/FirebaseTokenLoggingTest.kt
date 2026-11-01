@@ -28,8 +28,14 @@ class FirebaseTokenLoggingTest {
     fun tokenRefreshDoesNotWriteTheRegistrationTokenToLogcat() {
         val previous = FCMTokenHolder.token
         val token = "cassi-synthetic-token-${UUID.randomUUID()}"
+        val service = MyFirebaseMessagingService()
+        // Push-disabled startup no longer initializes WorkManager before this callback.
+        ContextWrapper::class.java.getDeclaredMethod("attachBaseContext", Context::class.java).apply {
+            isAccessible = true
+            invoke(service, InstrumentationRegistry.getInstrumentation().targetContext)
+        }
         try {
-            MyFirebaseMessagingService().onNewToken(token)
+            service.onNewToken(token)
             val output = serviceLogs()
             assertFalse("FCM registration tokens must not enter logcat", output.contains(token))
         } finally {
