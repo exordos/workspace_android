@@ -15,6 +15,10 @@
 package com.exordos.workspace.data.push
 
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.lifecycle.viewModelScope
+import com.exordos.workspace.UserViewModel
+import com.exordos.workspace.data.remote.WorkspaceAPIClient
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.withLock
@@ -55,6 +59,10 @@ class PushLogoutNetworkTest {
             release.await(responseDelayMillis, TimeUnit.MILLISECONDS)
             LoopbackWorkspaceServer.Response("{}")
         }.use { server ->
+            val previousUnregister = repository.unregisterPush
+            val user = UserViewModel(repository)
+            val api = WorkspaceAPIClient(app.workspaceApiClient.client).apply { attachUserViewModel(user) }
+            repository.unregisterPush = { PushRegistrationWorker.unregister(context, it, api, repository) }
             try {
                 repository.addServer(ServerConfig(id, server.url, "", "Push logout fixture", projectUuid = UUID.randomUUID().toString()),
                     TokenPair("synthetic-logout-access", "synthetic-logout-refresh"))
@@ -76,6 +84,8 @@ class PushLogoutNetworkTest {
                 keys.remove(id)
                 repository.setSelectedServerId(selected)
                 repository.onPushRegistrationNeeded = schedule
+                repository.unregisterPush = previousUnregister
+                user.viewModelScope.cancel()
                 schedule?.invoke()
             }
         }

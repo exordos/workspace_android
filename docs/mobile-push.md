@@ -1,5 +1,16 @@
 # Native encrypted Workspace notifications
 
+Push is temporarily disabled by `@bool/push_enabled` in `values/push.xml`.
+The flag disables Firebase token auto-initialization, Analytics collection and
+notification delegation, the FCM broadcast receiver,
+the messaging service and dismiss receiver, application push callbacks/work,
+notification permission requests. Deep-link navigation remains available with
+push delivery disabled and retains its account and access checks. The implementation and its
+protocol tests remain available for the later rollout. Crashlytics stays enabled.
+Push-specific chat visibility updates and notification settings are also off.
+Application startup also applies the delegation flag through the Firebase SDK,
+so a delegate saved by an earlier installation is cleared when push is off.
+
 Android registers its Firebase token and a separate X25519 push public key with
 Workspace. Workspace prepares the preview, encrypts one content envelope per
 device, and sends it through local Notification → upstream Notification → FCM.

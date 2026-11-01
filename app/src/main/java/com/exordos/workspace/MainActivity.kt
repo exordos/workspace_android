@@ -171,6 +171,9 @@ class WorkspaceApplication : Application(), Configuration.Provider {
 
     override fun onCreate() {
         super.onCreate()
+        val pushEnabled = resources.getBoolean(R.bool.push_enabled)
+        // A previous SDK initialization may have left Play services as the notification delegate.
+        FirebaseMessaging.getInstance().setNotificationDelegationEnabled(pushEnabled)
         val httpClient = workspaceHttpClient {
             install(WebSockets)
             install(HttpTimeout) {
@@ -195,6 +198,7 @@ class WorkspaceApplication : Application(), Configuration.Provider {
         pushApiClient = WorkspaceAPIClient(httpClient).apply {
             attachUserViewModel(UserViewModel(serverRepository))
         }
+        if (!pushEnabled) return
         eventsRepositoryStore.onPushMessagesKnown = { serverId, owner, messages ->
             if (messages.any { it.read }) appScope.launch(Dispatchers.IO) {
                 WorkspacePushNotifications(this@WorkspaceApplication)
@@ -297,6 +301,7 @@ fun WorkspaceApp(
 @Composable
 fun RequestNotificationPermissionIfNeeded() {
     val context = LocalContext.current
+    if (!context.resources.getBoolean(R.bool.push_enabled)) return
     val activity = context as? Activity ?: return
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -439,7 +444,7 @@ fun WorkspaceApp(
     }
 
     LaunchedEffect(lifecycleOwner) {
-        PushRegistrationWorker.schedule(context)
+        if (context.resources.getBoolean(R.bool.push_enabled)) PushRegistrationWorker.schedule(context)
     }
 
 

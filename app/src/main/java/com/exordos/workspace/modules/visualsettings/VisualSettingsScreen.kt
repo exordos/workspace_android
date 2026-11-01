@@ -194,6 +194,7 @@ fun VisualSettingsScreen(
 @Composable
 private fun PushNotificationLimits() {
     val context = LocalContext.current
+    if (!context.resources.getBoolean(R.bool.push_enabled)) return
     val scope = rememberCoroutineScope()
     var limits by remember { mutableStateOf(WorkspacePushNotifications(context).limits()) }
     fun save() { scope.launch(Dispatchers.IO) { WorkspacePushNotifications(context).setLimits(limits.conversations, limits.messages) } }

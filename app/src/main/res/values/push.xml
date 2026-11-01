@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Keep push delivery off until the native push rollout is ready. -->
+    <bool name="push_enabled">false</bool>
+</resources>

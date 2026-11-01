@@ -15,6 +15,10 @@
 package com.exordos.workspace.data.push
 
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.lifecycle.viewModelScope
+import com.exordos.workspace.UserViewModel
+import com.exordos.workspace.data.remote.WorkspaceAPIClient
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.delay
@@ -40,6 +44,10 @@ class PushAccountAndRecoveryTest {
         val keys = PushKeyStore(context)
         repository.onPushRegistrationNeeded = null
         LoopbackWorkspaceServer { requests += it; LoopbackWorkspaceServer.Response("{}") }.use { server ->
+            val previousUnregister = repository.unregisterPush
+            val user = UserViewModel(repository)
+            val api = WorkspaceAPIClient(app.workspaceApiClient.client).apply { attachUserViewModel(user) }
+            repository.unregisterPush = { PushRegistrationWorker.unregister(context, it, api, repository) }
             try {
                 repository.addServer(ServerConfig(id, server.url, "", "Push owner fixture", projectUuid = project),
                     TokenPair("cassi-old-access", "cassi-old-refresh"))
@@ -58,6 +66,8 @@ class PushAccountAndRecoveryTest {
                 repository.removeServer(id)
                 repository.setSelectedServerId(selected)
                 repository.onPushRegistrationNeeded = schedule
+                repository.unregisterPush = previousUnregister
+                user.viewModelScope.cancel()
             }
         }
     }
