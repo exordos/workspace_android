@@ -27,6 +27,19 @@ is tracked separately. Source paths refer to the main Kotlin package
 | Push | Firebase service, Android notification channel, navigation through notification intents | `data/MyFirebaseMessagingService.kt`, `MainActivity.kt` |
 | Calls | Create a link/room, launch the Jitsi SDK from a chat/channel information screen, send a call-link message | `CallMessageView.kt`, `ChatDialogScreen.kt`, `streaminfo` |
 
+## Selecting message text
+
+Long-press a word in a message body to select text, adjust the native Android
+selection handles, then choose **Copy**. The clipboard receives the selected
+rendered text, including Unicode characters, without Markdown formatting markers.
+The same behavior is available in rendered quotes and decrypted message bodies.
+Each rendered text block has its own selection; attachments and locked encrypted
+placeholders do not expose selectable plaintext.
+
+Links still open with a tap. Long-press the bubble's author or timestamp area to
+open message actions such as reply, edit, forward, delete or message selection.
+Message selection continues to intercept body taps for selecting whole messages.
+
 ## Encrypted chats
 
 The client supports encrypted stream creation, `e2ee` ciphertext, key requests,
