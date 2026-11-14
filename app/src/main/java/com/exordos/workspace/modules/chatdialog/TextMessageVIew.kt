@@ -304,7 +304,8 @@ fun TextMessageView(
                                                     fontFamily = InterFontFamily,
                                                 ),
                                                 navController = navController,
-                                                viewModel = viewModel
+                                                viewModel = viewModel,
+                                                isTextSelectable = true,
                                             )
                                         }
                                     }
