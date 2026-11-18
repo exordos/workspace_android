@@ -1,6 +1,6 @@
 package com.exordos.workspace.data
 
-import com.exordos.workspace.data.remote.dto.MessageResponse
+import com.exordos.workspace.data.uio.MessageUIO
 
 import io.ktor.client.HttpClient
 import com.exordos.workspace.UserViewModel
@@ -11,7 +11,7 @@ class EventsRepositoryStore(
     var client: WorkspaceAPIClient
 ) {
     private val repos = mutableMapOf<String, EventsRepository>()
-    var onPushMessagesKnown: (String, String?, List<MessageResponse>) -> Unit = { _, _, _ -> }
+    var onPushMessagesKnown: (String, String?, List<MessageUIO>) -> Unit = { _, _, _ -> }
     var onPushMessageRemoved: (String, String?, String) -> Unit = { _, _, _ -> }
     var onPushRead: (String, String?, List<String>) -> Unit = { _, _, _ -> }
     var onPushRefreshNeeded: () -> Unit = {}

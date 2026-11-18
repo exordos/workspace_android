@@ -29,11 +29,11 @@ import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
-import com.exordos.workspace.data.remote.dto.FolderItem
+import com.exordos.workspace.data.uio.FolderItemUIO
 import com.exordos.workspace.R
-import com.exordos.workspace.data.remote.dto.FolderResponseData
-import com.exordos.workspace.data.remote.dto.Stream
-import com.exordos.workspace.data.remote.dto.TopicsResponseData
+import com.exordos.workspace.data.uio.FolderUIO
+import com.exordos.workspace.data.uio.StreamUIO
+import com.exordos.workspace.data.uio.TopicUIO
 import com.exordos.workspace.ui.theme.WokspaceTheme
 import java.io.File
 
@@ -115,10 +115,10 @@ class ForwardMessagesUiTest {
         compose.setContent {
             var query by remember { mutableStateOf("") }
             var folder by remember { mutableStateOf<String?>(null) }
-            var selected by remember { mutableStateOf<Stream?>(null) }
+            var selected by remember { mutableStateOf<StreamUIO?>(null) }
             WokspaceTheme(darkTheme = true, dynamicColor = false) {
                 ForwardRecipientPicker(listOf(stream(FIRST, "CASSI Design"), stream(SECOND, "CASSI General")),
-                    listOf(FolderResponseData("folder", "Design", 0, "custom", "2026-09-07T12:00:00Z", listOf(FolderItem("item", FIRST, "stream", 0)))),
+                    listOf(FolderUIO("folder", "Design", 0, "custom", "2026-09-07T12:00:00Z", listOf(FolderItemUIO("item", FIRST, "stream", 0)))),
                     emptyList(), selected, listOf(topic()), query, folder, false, true, null, "", null,
                     onCancel = {}, onBack = { selected = null }, onSearch = { query = it }, onFolder = { folder = it },
                     onStream = { selected = it; query = "" }, onTopic = { chosen = it.uuid }, onRetry = {})
@@ -192,7 +192,7 @@ class ForwardMessagesUiTest {
         private const val FIRST = "00000000-0000-0000-0000-000000000001"
         private const val SECOND = "00000000-0000-0000-0000-000000000002"
         private const val TOPIC = "00000000-0000-0000-0000-000000000003"
-        private fun stream(uuid: String, name: String) = Stream(uuid, 0, 0, 0, "2026-09-07T12:00:00Z", name, false, 0x7087FF, notificationMode = "all")
-        private fun topic() = TopicsResponseData(TOPIC, "General topic", 0x7087FF, SECOND, "2026-09-07T12:00:00Z", 0, 0, false, true, notificationMode = "all")
+        private fun stream(uuid: String, name: String) = StreamUIO(uuid, 0, 0, 0, "2026-09-07T12:00:00Z", name, false, 0x7087FF, notificationMode = "all")
+        private fun topic() = TopicUIO(TOPIC, "General topic", 0x7087FF, SECOND, "2026-09-07T12:00:00Z", 0, 0, false, true, notificationMode = "all")
     }
 }

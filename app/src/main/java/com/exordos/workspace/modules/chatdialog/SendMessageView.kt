@@ -80,7 +80,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import com.exordos.workspace.data.WorkspaceDateTime
 import com.exordos.workspace.R
-import com.exordos.workspace.data.remote.dto.MessageResponse
+import com.exordos.workspace.data.uio.MessageUIO
 import com.exordos.workspace.ui.ReferenceMessage
 import com.exordos.workspace.ui.ReferenceMessageBase
 import com.exordos.workspace.ui.theme.InterFontFamily

@@ -42,24 +42,24 @@ import com.exordos.workspace.data.remote.WorkspaceAPIClient
 import com.exordos.workspace.data.remote.dto.AddMessageReactionRequest
 import com.exordos.workspace.data.remote.dto.DeleteDraftRequest
 import com.exordos.workspace.data.remote.dto.DeleteMessageRequest
-import com.exordos.workspace.data.remote.dto.Draft
+import com.exordos.workspace.data.uio.DraftUIO
 import com.exordos.workspace.data.remote.dto.parseCanonicalUuid
 import com.exordos.workspace.data.remote.dto.EditMessageRequest
 import com.exordos.workspace.data.remote.dto.MarkMessagesReadRequest
 import com.exordos.workspace.data.remote.dto.MarkMessagesReadUpToRequest
-import com.exordos.workspace.data.remote.dto.MessageElement
-import com.exordos.workspace.data.remote.dto.MessageReaction
-import com.exordos.workspace.data.remote.dto.MessageResponse
-import com.exordos.workspace.data.remote.dto.MessageResponsePayload
+import com.exordos.workspace.data.uio.MessageElement
+import com.exordos.workspace.data.uio.MessageReactionUIO
+import com.exordos.workspace.data.uio.MessageUIO
+import com.exordos.workspace.data.uio.MessagePayloadUIO
 import com.exordos.workspace.data.remote.dto.MessagesByIdsRequest
 import com.exordos.workspace.data.remote.dto.RemoveMessageReactionRequest
 import com.exordos.workspace.data.remote.dto.SendMessageRequest
-import com.exordos.workspace.data.remote.dto.Stream
-import com.exordos.workspace.data.remote.dto.StreamBindingResponseData
+import com.exordos.workspace.data.uio.StreamUIO
+import com.exordos.workspace.data.uio.StreamBindingUIO
 import com.exordos.workspace.data.remote.dto.StreamBindingsRequest
-import com.exordos.workspace.data.remote.dto.TopicsResponseData
+import com.exordos.workspace.data.uio.TopicUIO
 import com.exordos.workspace.data.remote.dto.UsersRequest
-import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.uio.UserUIO
 import java.io.File
 import kotlin.collections.filter
 import kotlin.collections.first
@@ -107,7 +107,7 @@ class ChatDialogViewModel(
         }
         encryptionRuntime.requestKey(keyUuid, recovery)
     }
-    fun requestEncryptionKeyForMessage(message: MessageResponse) = encryptionAction {
+    fun requestEncryptionKeyForMessage(message: MessageUIO) = encryptionAction {
         // Resolve the current wire snapshot by message UUID rather than using a plaintext projection.
         val raw = (repo.streamTopicMessages.value["$chatId.$topicUuid"].orEmpty() + repo.messagesPool.value)
             .firstOrNull { it.uuid == message.uuid && it.streamUuid == chatId && it.topicUuid == topicUuid && it.payload.kind == "e2ee" }
@@ -131,13 +131,13 @@ class ChatDialogViewModel(
     }
     fun clearEncryptedError() = encryptionRuntime.clearError()
 
-    val streamTopicMessages: StateFlow<Map<String, List<MessageResponse>>> = combine(
+    val streamTopicMessages: StateFlow<Map<String, List<MessageUIO>>> = combine(
         repo.streamTopicMessages, encryptedPresentations,
     ) { conversations, presentations ->
         conversations.mapValues { (_, messages) -> messages.map { message ->
             val presentation = presentations[message.uuid]
             if (message.streamUuid == chatId && presentation is EncryptedChatPresentation.Text)
-                message.copy(payload = MessageResponsePayload("markdown", presentation.text), originalEncryptedPayload = message.payload.copy())
+                message.copy(payload = MessagePayloadUIO("markdown", presentation.text), originalEncryptedPayload = message.payload.copy())
             else message
         } }
     }.stateIn(
@@ -146,13 +146,13 @@ class ChatDialogViewModel(
             initialValue = emptyMap()
         )
 
-    val streamBindings: StateFlow<Map<String, List<StreamBindingResponseData>>> = repo.streamBindings
+    val streamBindings: StateFlow<Map<String, List<StreamBindingUIO>>> = repo.streamBindings
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = emptyMap()
         )
-    val stream: StateFlow<Stream?> = repo.streams
+    val stream: StateFlow<StreamUIO?> = repo.streams
         .map { list -> list.firstOrNull { it.uuid == chatId } }
         .stateIn(
             scope = viewModelScope,
@@ -160,7 +160,7 @@ class ChatDialogViewModel(
             initialValue = repo.streams.value.firstOrNull { it.uuid == chatId }
         )
 
-    val directUser: StateFlow<UserResponseData?> = combine(repo.users, stream) { users, currentStream ->
+    val directUser: StateFlow<UserUIO?> = combine(repo.users, stream) { users, currentStream ->
         users.firstOrNull { it.uuid == currentStream?.directUserUuid }
     }
         .stateIn(
@@ -169,21 +169,21 @@ class ChatDialogViewModel(
             initialValue = null
         )
 
-    val users: StateFlow<List<UserResponseData>> = repo.users
+    val users: StateFlow<List<UserUIO>> = repo.users
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = emptyList()
         )
 
-    val drafts: StateFlow<List<Draft>> = repo.draftsPool
+    val drafts: StateFlow<List<DraftUIO>> = repo.draftsPool
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = repo.draftsPool.value
         )
 
-    private var possibleMessage: MessageResponse? = null
+    private var possibleMessage: MessageUIO? = null
     private var encryptedSendIntent: Pair<String, String>? = null
     private val uploadedAttachments = mutableMapOf<String, UploadFileResponseData>()
 
@@ -201,11 +201,11 @@ class ChatDialogViewModel(
     )
     internal val quoteStates: StateFlow<Map<String, MessageQuoteState>> = quoteResolver.states
 
-    private suspend fun presentQuote(message: MessageResponse): MessageResponse? {
+    private suspend fun presentQuote(message: MessageUIO): MessageUIO? {
         if (message.payload.kind == "markdown") return message
         if (message.payload.kind != "e2ee" || message.streamUuid != chatId) return null
         return when (val text = encryptionRuntime.presentation(message)) {
-            is EncryptedChatPresentation.Text -> message.copy(payload = MessageResponsePayload("markdown", text.text), originalEncryptedPayload = message.payload.copy())
+            is EncryptedChatPresentation.Text -> message.copy(payload = MessagePayloadUIO("markdown", text.text), originalEncryptedPayload = message.payload.copy())
             else -> null
         }
     }
@@ -234,18 +234,18 @@ class ChatDialogViewModel(
     val canDeleteSelectedMessages: StateFlow<Boolean> = messageSelection.canDeleteSelectedMessages
     val deletingSelectedMessages: StateFlow<Boolean> = messageSelection.deletingSelectedMessages
 
-    fun canSelectMessage(message: MessageResponse): Boolean = canSelectMessage(
+    fun canSelectMessage(message: MessageUIO): Boolean = canSelectMessage(
         message = message,
         streamUuid = chatId,
         topicUuid = topicUuid,
         pendingMessageUuid = possibleMessage?.uuid,
     )
 
-    fun selectedMessages(): List<MessageResponse> = messageSelection.selectedMessages()
+    fun selectedMessages(): List<MessageUIO> = messageSelection.selectedMessages()
 
-    fun startMessageSelection(message: MessageResponse) = messageSelection.startMessageSelection(message)
+    fun startMessageSelection(message: MessageUIO) = messageSelection.startMessageSelection(message)
 
-    fun toggleMessageSelection(message: MessageResponse) = messageSelection.toggleMessageSelection(message)
+    fun toggleMessageSelection(message: MessageUIO) = messageSelection.toggleMessageSelection(message)
 
     fun clearMessageSelection() = messageSelection.clearMessageSelection()
 
@@ -298,14 +298,14 @@ class ChatDialogViewModel(
         }
     }
 
-    fun canDeleteMessage(message: MessageResponse): Boolean = canDeleteMessage(
+    fun canDeleteMessage(message: MessageUIO): Boolean = canDeleteMessage(
         message = message,
         streamUuid = chatId,
         topicUuid = topicUuid,
         pendingMessageUuid = possibleMessage?.uuid,
     )
 
-    fun deleteMessage(message: MessageResponse) {
+    fun deleteMessage(message: MessageUIO) {
         if (deletingSelectedMessages.value) return
         viewModelScope.launch {
             messageDeletion.delete(message)
@@ -325,7 +325,7 @@ class ChatDialogViewModel(
         }
     }
 
-    var user: UserResponseData? = null
+    var user: UserUIO? = null
 
     private val _isLoading = MutableStateFlow(firstUnreadMessageUuid != null)
     val isLoading: StateFlow<Boolean> = _isLoading
@@ -361,7 +361,7 @@ class ChatDialogViewModel(
         encryptionRuntime.close()
         super.onCleared()
     }
-    var editingMessage: MessageResponse? = null
+    var editingMessage: MessageUIO? = null
     private val _editingMessageBackupText = MutableStateFlow<String?>(null)
     val editingMessageBackupText: StateFlow<String?> = _editingMessageBackupText
 
@@ -384,7 +384,7 @@ class ChatDialogViewModel(
     private val _uriList = MutableStateFlow<List<AttachedUri>>(emptyList())
     val uriList: StateFlow<List<AttachedUri>> = _uriList
 
-    fun initialMessageIndex(messages: List<MessageResponse>): Int =
+    fun initialMessageIndex(messages: List<MessageUIO>): Int =
         initialChatMessageIndex(messages, firstUnreadMessageUuid) { message ->
             val streamMode = repo.streams.value.firstOrNull { it.uuid == chatId }?.notificationMode ?: "all_messages"
             val topicMode = repo.streamTopics.value[chatId]?.firstOrNull { it.uuid == topicUuid }?.notificationMode ?: "default"
@@ -402,9 +402,9 @@ class ChatDialogViewModel(
         _uriList.update { current -> current - attachedUri }
     }
 
-    fun nextMessageByUuid(currentUuid: String): MessageResponse? {
+    fun nextMessageByUuid(currentUuid: String): MessageUIO? {
         val streamTopicKey = "${chatId}.${topicUuid}"
-        val messages = streamTopicMessages.value[streamTopicKey]?.sortedWith(compareBy<MessageResponse> { WorkspaceDateTime.parse(it.createdAt) }.thenBy { it.uuid })
+        val messages = streamTopicMessages.value[streamTopicKey]?.sortedWith(compareBy<MessageUIO> { WorkspaceDateTime.parse(it.createdAt) }.thenBy { it.uuid })
         if (messages != null) {
             val i =
                 messages.indexOfFirst { it.uuid == currentUuid }
@@ -414,9 +414,9 @@ class ChatDialogViewModel(
         }
     }
 
-    fun previousMessageByUuid(currentUuid: String): MessageResponse? {
+    fun previousMessageByUuid(currentUuid: String): MessageUIO? {
         val streamTopicKey = "${chatId}.${topicUuid}"
-        val messages = streamTopicMessages.value[streamTopicKey]?.sortedWith(compareBy<MessageResponse> { WorkspaceDateTime.parse(it.createdAt) }.thenBy { it.uuid })
+        val messages = streamTopicMessages.value[streamTopicKey]?.sortedWith(compareBy<MessageUIO> { WorkspaceDateTime.parse(it.createdAt) }.thenBy { it.uuid })
         if (messages != null) {
             val i =
                 messages.indexOfFirst { it.uuid == currentUuid }
@@ -426,7 +426,7 @@ class ChatDialogViewModel(
         }
     }
 
-    fun getUser(userUuid: String): UserResponseData? {
+    fun getUser(userUuid: String): UserUIO? {
         return repo.users.value.firstOrNull { it.uuid == userUuid }
     }
 
@@ -452,7 +452,7 @@ class ChatDialogViewModel(
         }
     }
 
-    fun onEditMessageClicked(message: MessageResponse) {
+    fun onEditMessageClicked(message: MessageUIO) {
         _currentQuotedMessage.update { null }
         _quotedMessages.update { emptyList() }
         if (message.uuid != "") {
@@ -462,7 +462,7 @@ class ChatDialogViewModel(
         }
     }
 
-    fun onQuoteMessageClicked(message: MessageResponse) {
+    fun onQuoteMessageClicked(message: MessageUIO) {
         editingMessage = null
         _editingMessageBackupText.value = null
         val newQuotedMessage = QuotedMessage(message, mentions.text)
@@ -470,7 +470,7 @@ class ChatDialogViewModel(
         _currentQuotedMessage.update { newQuotedMessage }
     }
 
-    fun onAddQuoteMessageClicked(message: MessageResponse) {
+    fun onAddQuoteMessageClicked(message: MessageUIO) {
         editingMessage = null
         _editingMessageBackupText.value = null
         val newQuotedMessage = QuotedMessage(message, "")
@@ -617,7 +617,7 @@ class ChatDialogViewModel(
         val userId = repo.currentUser.value?.uuid
         val uuid: Uuid = Uuid.random()
         val timestamp = WorkspaceDateTime.apiTimestamp()
-        var newMessage = MessageResponse(
+        var newMessage = MessageUIO(
             uuid.toString(),
             timestamp,
             timestamp,
@@ -625,7 +625,7 @@ class ChatDialogViewModel(
             topicUuid,
             userId ?: "",
             userId ?: "",
-            MessageResponsePayload("markdown", messageText),
+            MessagePayloadUIO("markdown", messageText),
             true,
             emptyMap(),
             false
@@ -722,7 +722,7 @@ class ChatDialogViewModel(
                         uploadedAttachments.clear()
                         _currentQuotedMessage.value = null
                     }
-                    val unavailable: (MessageResponse) -> Boolean = { message ->
+                    val unavailable: (MessageUIO) -> Boolean = { message ->
                         message.originalEncryptedPayload?.keyUuid?.let { it !in available } == true || error == EncryptedChatFailure.STALE
                     }
                     if (editingMessage?.let(unavailable) == true) clearEditingMessage()
@@ -747,7 +747,7 @@ class ChatDialogViewModel(
         val messagesResponse = repo.refreshConversation(chatId, topicUuid)
         when(messagesResponse) {
             is ApiResult.Success -> {
-                val lastMessage = messagesResponse.value.maxWithOrNull(compareBy<MessageResponse> { WorkspaceDateTime.parse(it.createdAt) }.thenBy { it.uuid })
+                val lastMessage = messagesResponse.value.maxWithOrNull(compareBy<MessageUIO> { WorkspaceDateTime.parse(it.createdAt) }.thenBy { it.uuid })
                 if (lastMessage != null && firstUnreadMessageUuid == null) {
                     markMessagesReadUpTo(lastMessage.uuid)
                 }
@@ -851,9 +851,8 @@ class ChatDialogViewModel(
     }
 }
 
-@Serializable
 data class QuotedMessage(
-    val message: MessageResponse,
+    val message: MessageUIO,
     var text: String
 )
 

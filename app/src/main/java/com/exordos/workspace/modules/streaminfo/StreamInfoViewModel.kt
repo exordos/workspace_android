@@ -24,22 +24,23 @@ import com.exordos.workspace.data.ConfirmedAccountContext
 import com.exordos.workspace.data.confirmedAccountContext
 import com.exordos.workspace.data.remote.ApiError
 import com.exordos.workspace.data.remote.ApiResult
+import com.exordos.workspace.data.remote.UIORequest
 import com.exordos.workspace.data.remote.ApiRequest
 import com.exordos.workspace.data.remote.ProtectedRequestAuthentication
 import com.exordos.workspace.data.remote.WorkspaceAPIClient
-import com.exordos.workspace.data.remote.dto.Stream
-import com.exordos.workspace.data.remote.dto.StreamBindingResponseData
-import com.exordos.workspace.data.remote.dto.TopicsResponseData
+import com.exordos.workspace.data.uio.StreamUIO
+import com.exordos.workspace.data.uio.StreamBindingUIO
+import com.exordos.workspace.data.uio.TopicUIO
 import com.exordos.workspace.data.remote.dto.UpdateStreamNotificationModeRequest
 import com.exordos.workspace.data.remote.dto.UpdateStreamNotificationModeRequestData
 import com.exordos.workspace.data.remote.dto.UpdateStreamNotificationModeResponseData
 import com.exordos.workspace.data.remote.dto.UpdateTopicNotificationModeRequest
-import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.uio.UserUIO
 import com.exordos.workspace.data.remote.dto.ProtectedStreamDetailsRequest
 import com.exordos.workspace.data.remote.dto.UpdateProtectedStreamRequest
 import com.exordos.workspace.data.remote.dto.UpdateProtectedStreamRequestData
 import com.exordos.workspace.data.remote.dto.DeleteProtectedStreamRequest
-import com.exordos.workspace.data.remote.dto.MessageResponse
+import com.exordos.workspace.data.uio.MessageUIO
 import com.exordos.workspace.modules.chatdialog.JitsiStyleRoomNameGenerator
 import java.net.URI
 import java.util.UUID
@@ -98,7 +99,7 @@ class StreamInfoViewModel(
         },
         currentDeletionAccount = { protectedStreamAccountCurrent(client, repo, it) },
     )
-    val protectedStreamDetails: StateFlow<Stream?> = protectedStreamEditor.details
+    val protectedStreamDetails: StateFlow<StreamUIO?> = protectedStreamEditor.details
     val protectedStreamUpdateState: StateFlow<ProtectedStreamUpdateState> = protectedStreamEditor.state
     fun loadProtectedStreamDetails() { viewModelScope.launch { protectedStreamEditor.load() } }
     fun updateProtectedStream(name: String, description: String) {
@@ -152,7 +153,7 @@ class StreamInfoViewModel(
     fun clearEncryptedError() = encryptionRuntime?.clearError()
     override fun onCleared() { encryptionRuntime?.close(); super.onCleared() }
 
-    val stream: StateFlow<Stream?> = repo.streams
+    val stream: StateFlow<StreamUIO?> = repo.streams
         .map { list -> list.firstOrNull { it.uuid == streamUuid }?.also { if (it.encryption) mountedProtectedStream = true } }
         .stateIn(
             scope = viewModelScope,
@@ -160,7 +161,7 @@ class StreamInfoViewModel(
             initialValue = repo.streams.value.firstOrNull { it.uuid == streamUuid }
         )
 
-    val topic: StateFlow<TopicsResponseData?> = repo.streamTopics
+    val topic: StateFlow<TopicUIO?> = repo.streamTopics
         .map { map -> map[streamUuid] }
         .map { list -> list?.firstOrNull { it.uuid == topicUuid } }
         .stateIn(
@@ -169,14 +170,14 @@ class StreamInfoViewModel(
             initialValue = repo.streamTopics.value[streamUuid]?.firstOrNull { it.uuid == topicUuid }
         )
 
-    val streamBindings: StateFlow<Map<String, List<StreamBindingResponseData>>> = repo.streamBindings
+    val streamBindings: StateFlow<Map<String, List<StreamBindingUIO>>> = repo.streamBindings
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = emptyMap()
         )
 
-    val users: StateFlow<List<UserResponseData>> = repo.users
+    val users: StateFlow<List<UserUIO>> = repo.users
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
@@ -230,13 +231,16 @@ data class ProtectedStreamDeleteState(
 
 data class ProtectedStreamCallState(val busy: Boolean = false, val error: ProtectedStreamUpdateFailure? = null)
 
-internal data class ProtectedStreamEditContext(val server: ServerConfig, val userUuid: String, val stream: Stream,
+internal data class ProtectedStreamEditContext(val server: ServerConfig, val userUuid: String, val stream: StreamUIO,
                                                val authentication: ProtectedRequestAuthentication? = null,
                                                val confirmedAccount: ConfirmedAccountContext? = null) {
     fun owner() = ProtectedStreamEditOwner(server.id, server.baseUrl, server.projectUuid, userUuid, stream.uuid)
     fun sameAuthorization(other: ProtectedStreamEditContext?): Boolean = if (confirmedAccount != null)
         confirmedAccount.matches(other?.confirmedAccount)
     else authentication == null || authentication.matches(other?.authentication)
+    fun <D, R, U, E> pin(request: UIORequest<D, R, U, E>): UIORequest<D, R, U, E> =
+        confirmedAccount?.pin(request) ?: requireNotNull(authentication).pin(request)
+
     fun <D, R, E> pin(request: ApiRequest<D, R, E>): ApiRequest<D, R, E> =
         confirmedAccount?.pin(request) ?: requireNotNull(authentication).pin(request)
 }
@@ -320,9 +324,9 @@ internal fun protectedNotificationRequest(streamUuid: String, mode: String, auth
 /** Testable owner/role/response boundary for the mounted protected-chat editor. */
 internal class ProtectedStreamEditor(
     private val currentContext: () -> ProtectedStreamEditContext?,
-    private val readDetails: suspend (ProtectedStreamEditContext) -> ApiResult<Stream, ApiError>,
-    private val writeDetails: suspend (ProtectedStreamEditContext, UpdateProtectedStreamRequestData) -> ApiResult<Stream, ApiError>,
-    private val commit: (ProtectedStreamEditContext, Stream) -> Unit,
+    private val readDetails: suspend (ProtectedStreamEditContext) -> ApiResult<StreamUIO, ApiError>,
+    private val writeDetails: suspend (ProtectedStreamEditContext, UpdateProtectedStreamRequestData) -> ApiResult<StreamUIO, ApiError>,
+    private val commit: (ProtectedStreamEditContext, StreamUIO) -> Unit,
     private val deleteDetails: suspend (ProtectedStreamEditContext) -> ApiResult<String, ApiError> = {
         ApiResult.Error(ApiError("Delete transport unavailable", "UNAVAILABLE"))
     },
@@ -337,7 +341,7 @@ internal class ProtectedStreamEditor(
     private var revision = 0L
     private val mutableState = MutableStateFlow(ProtectedStreamUpdateState())
     val state = mutableState.asStateFlow()
-    private val mutableDetails = MutableStateFlow<Stream?>(null)
+    private val mutableDetails = MutableStateFlow<StreamUIO?>(null)
     val details = mutableDetails.asStateFlow()
     private val mutableDeleteState = MutableStateFlow(ProtectedStreamDeleteState())
     val deleteState = mutableDeleteState.asStateFlow()
@@ -492,14 +496,14 @@ internal class ProtectedStreamEditor(
             fail(ProtectedStreamUpdateFailure.STALE)
     }
 
-    private fun validateResponse(response: Stream, captured: ProtectedStreamEditContext) {
+    private fun validateResponse(response: StreamUIO, captured: ProtectedStreamEditContext) {
         if (response.uuid != captured.stream.uuid || response.projectId != captured.server.projectUuid ||
             response.userUuid != captured.userUuid || !response.encryption ||
             response.isPrivate != captured.stream.isPrivate || response.directUserUuid != captured.stream.directUserUuid)
             fail(ProtectedStreamUpdateFailure.INVALID_RESPONSE)
     }
 
-    private fun ApiResult<Stream, ApiError>.unwrap(): Stream = when (this) {
+    private fun ApiResult<StreamUIO, ApiError>.unwrap(): StreamUIO = when (this) {
         is ApiResult.Success -> value
         is ApiResult.Error -> fail(if (error.httpStatusCode == 403) ProtectedStreamUpdateFailure.FORBIDDEN
             else ProtectedStreamUpdateFailure.REQUEST_FAILED)
@@ -516,7 +520,7 @@ internal class ProtectedCallStarter(
     private val serverUrl: () -> String,
     private val topicUuid: String,
     private val createRoom: () -> String,
-    private val sendEncrypted: suspend (ProtectedStreamEditContext, String, String) -> MessageResponse,
+    private val sendEncrypted: suspend (ProtectedStreamEditContext, String, String) -> MessageUIO,
 ) {
     private val mutex = Mutex()
     private var boundOwner: ProtectedStreamEditOwner? = null

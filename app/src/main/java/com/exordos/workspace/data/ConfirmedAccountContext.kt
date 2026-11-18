@@ -3,6 +3,7 @@ package com.exordos.workspace.data
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import com.exordos.workspace.data.crypto.ChatKeyOwner
+import com.exordos.workspace.data.remote.UIORequest
 import com.exordos.workspace.data.remote.ApiRequest
 import com.exordos.workspace.data.remote.WorkspaceAPIClient
 
@@ -28,6 +29,8 @@ class ConfirmedAccountContext private constructor(
         proof.authentication.matches(other.proof.authentication)
 
     fun isCurrent(client: WorkspaceAPIClient, repo: EventsRepository): Boolean = matches(confirmedAccountContext(client, repo))
+    fun <D, R, U, E> pin(request: UIORequest<D, R, U, E>): UIORequest<D, R, U, E> = proof.authentication.pin(request)
+
     fun <D, R, E> pin(request: ApiRequest<D, R, E>): ApiRequest<D, R, E> = proof.authentication.pin(request)
 
     /** Revoke before the asynchronous logout/purge starts, including observers waiting on IO. */

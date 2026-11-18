@@ -14,11 +14,11 @@ import com.exordos.workspace.data.EventsRepositoryStore
 import com.exordos.workspace.data.remote.ApiResult
 import com.exordos.workspace.data.remote.WorkspaceAPIClient
 import com.exordos.workspace.data.remote.dto.AddStreamRequest
-import com.exordos.workspace.data.remote.dto.MessageResponse
-import com.exordos.workspace.data.remote.dto.MessageResponsePayload
+import com.exordos.workspace.data.uio.MessageUIO
+import com.exordos.workspace.data.uio.MessagePayloadUIO
 import com.exordos.workspace.data.remote.dto.SendMessageRequest
-import com.exordos.workspace.data.remote.dto.Stream
-import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.uio.StreamUIO
+import com.exordos.workspace.data.uio.UserUIO
 import com.exordos.workspace.modules.chooseserver.QueryState
 import kotlin.collections.first
 
@@ -32,7 +32,7 @@ class ChatUserInfoViewModel(
 ): ViewModel() {
     val repo = eventsRepositoryStore.get(client.getCurrentServerId()) ?: error("Cannot get current event repository")
 
-    val user: StateFlow<UserResponseData> = repo.users
+    val user: StateFlow<UserUIO> = repo.users
         .map { list -> list.first { it.uuid == userUuid } }
         .stateIn(
             scope = viewModelScope,
@@ -42,11 +42,11 @@ class ChatUserInfoViewModel(
     private val _createQueryState = MutableStateFlow<QueryState>(QueryState.Idle)
     val createQueryState: StateFlow<QueryState> = _createQueryState
 
-    var createdStream: Stream? = null
+    var createdStream: StreamUIO? = null
 
     var shouldSendMessage = false
 
-    suspend fun createPrivateStream(user: UserResponseData) {
+    suspend fun createPrivateStream(user: UserUIO) {
         _createQueryState.value = QueryState.Loading
         val response = client.performRequest(AddStreamRequest("Direct", "Private workspace", user.uuid))
         when(response) {
@@ -61,7 +61,7 @@ class ChatUserInfoViewModel(
         }
     }
 
-    suspend fun sendTextMessage(messageText: String, stream: Stream) {
+    suspend fun sendTextMessage(messageText: String, stream: StreamUIO) {
 
         val sendMessageRequest = SendMessageRequest(
             stream.uuid,

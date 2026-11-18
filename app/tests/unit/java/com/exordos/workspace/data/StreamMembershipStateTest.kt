@@ -16,15 +16,15 @@ package com.exordos.workspace.data
 
 import org.junit.Assert.*
 import org.junit.Test
-import com.exordos.workspace.data.remote.dto.StreamBindingResponseData
+import com.exordos.workspace.data.uio.StreamBindingUIO
 
 class StreamMembershipStateTest {
     private val state = StreamMembershipState()
     private val owner = binding("owner", "owner")
     private val member = binding("member")
     private fun binding(id: String, role: String = "member", stream: String = "stream") =
-        StreamBindingResponseData(id, role, stream, id)
-    private fun snapshot(vararg bindings: StreamBindingResponseData) =
+        StreamBindingUIO(id, role, stream, id)
+    private fun snapshot(vararg bindings: StreamBindingUIO) =
         state.beginRequest("stream").use { assertTrue(state.replaceSnapshot(it, bindings.toList())) }
     private fun current() = state.bindings.value.getValue("stream")
 

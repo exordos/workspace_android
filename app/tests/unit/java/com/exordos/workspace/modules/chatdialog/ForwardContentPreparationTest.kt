@@ -11,8 +11,8 @@ import com.exordos.workspace.data.remote.ApiError
 import com.exordos.workspace.data.remote.ApiResult
 import com.exordos.workspace.data.remote.HTTPMethod
 import com.exordos.workspace.data.remote.dto.ForwardFileUploadRequest
-import com.exordos.workspace.data.remote.dto.MessageResponse
-import com.exordos.workspace.data.remote.dto.MessageResponsePayload
+import com.exordos.workspace.data.uio.MessageUIO
+import com.exordos.workspace.data.uio.MessagePayloadUIO
 import java.io.File
 
 class ForwardContentPreparationTest {
@@ -204,7 +204,7 @@ class ForwardContentPreparationTest {
         private val TARGET = ForwardDestination(STREAM, TOPIC)
         private fun preparedFile() = PreparedForwardFile(File("unused-fixture.pdf"), "report.pdf", "hash")
         private fun record() = ForwardFileRecord(COPIED, "report.pdf", "hash", STREAM, AUTHOR)
-        private fun message(uuid: String, content: String) = MessageResponse(uuid, "2026-09-07T12:00:00Z", "2026-09-07T12:00:00Z",
-            SOURCE, TOPIC, AUTHOR, AUTHOR, MessageResponsePayload("markdown", content), true, emptyMap(), true)
+        private fun message(uuid: String, content: String) = MessageUIO(uuid, "2026-09-07T12:00:00Z", "2026-09-07T12:00:00Z",
+            SOURCE, TOPIC, AUTHOR, AUTHOR, MessagePayloadUIO("markdown", content), true, emptyMap(), true)
     }
 }

@@ -41,7 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.uio.UserUIO
 import com.exordos.workspace.ui.theme.LocalWorkspaceColorsPalette
 import com.exordos.workspace.ui.Avatar
 import com.exordos.workspace.ui.theme.InterFontFamily
@@ -49,7 +49,7 @@ import com.exordos.workspace.ui.theme.InterFontFamily
 @Composable
 fun UsersScreen(
     viewModel: UsersViewModel,
-    onUserSelected: (UserResponseData) -> Unit,
+    onUserSelected: (UserUIO) -> Unit,
     onDismiss: () -> Unit
 ) {
     val users by viewModel.users.collectAsState()
@@ -152,8 +152,8 @@ fun UsersScreen(
 
 @Composable
 fun UserCell(
-    item: UserResponseData,
-    onUserSelected: (UserResponseData) -> Unit,
+    item: UserUIO,
+    onUserSelected: (UserUIO) -> Unit,
     viewModel: UsersViewModel
 ) {
     Column(

@@ -52,7 +52,7 @@ import kotlinx.coroutines.launch
 import com.exordos.workspace.data.WorkspaceDateTime
 import com.exordos.workspace.ChatFlow
 import com.exordos.workspace.data.UrnParser
-import com.exordos.workspace.data.remote.dto.MessageResponse
+import com.exordos.workspace.data.uio.MessageUIO
 import com.exordos.workspace.ui.Avatar
 import com.exordos.workspace.ui.theme.InterFontFamily
 import com.exordos.workspace.ui.theme.LocalWorkspaceColorsPalette
@@ -63,10 +63,10 @@ fun ImageMessageView(
     text: String,
     imageUrn: String?,
     viewModel: ChatDialogViewModel,
-    item: MessageResponse,
+    item: MessageUIO,
     navController: NavHostController,
     onImageLoad: () -> Unit,
-    onForwardMessage: ((MessageResponse) -> Unit)? = null,
+    onForwardMessage: ((MessageUIO) -> Unit)? = null,
 ) {
     var menuExpanded by remember(item.uuid) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()

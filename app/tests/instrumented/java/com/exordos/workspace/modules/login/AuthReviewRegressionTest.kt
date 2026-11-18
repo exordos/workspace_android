@@ -35,7 +35,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import com.exordos.workspace.LoginFlow
-import com.exordos.workspace.data.remote.dto.ProjectResponseData
+import com.exordos.workspace.data.uio.ProjectUIO
 import com.exordos.workspace.modules.chooseserver.ChooseServerContent
 import com.exordos.workspace.modules.chooseserver.QueryState
 import com.exordos.workspace.modules.projects.ProjectsContent
@@ -73,8 +73,8 @@ class AuthReviewRegressionTest {
 
     @Test
     fun largeProjectListComposesOnlyVisibleRowsAndCanSelectTheLastProject() {
-        val projects = (0 until 200).map { ProjectResponseData("project-$it", "Project $it", "Description") }
-        var selected: ProjectResponseData? by mutableStateOf(projects.first())
+        val projects = (0 until 200).map { ProjectUIO("project-$it", "Project $it", "Description") }
+        var selected: ProjectUIO? by mutableStateOf(projects.first())
         compose.setContent {
             WokspaceTheme(darkTheme = true, dynamicColor = false) {
                 ProjectsContent(projects, selected, QueryState.Success, QueryState.Idle,

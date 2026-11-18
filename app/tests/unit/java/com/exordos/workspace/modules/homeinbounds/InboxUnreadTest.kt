@@ -3,16 +3,20 @@ package com.exordos.workspace.modules.homeinbounds
 import org.junit.Assert.*
 import org.junit.Test
 import com.exordos.workspace.data.remote.dto.*
+import com.exordos.workspace.data.uio.StreamUIO
+import com.exordos.workspace.data.uio.TopicUIO
+import com.exordos.workspace.data.uio.MessageUIO
+import com.exordos.workspace.data.uio.MessagePayloadUIO
 import com.exordos.workspace.modules.chatdialog.initialChatMessageIndex
 
 class InboxUnreadTest {
     private fun stream(mode: String = "all_messages", active: Int = 2, encrypted: Boolean = false) =
-        Stream("stream", 3, active, 3 - active, "2026-10-16T10:00:00Z", "Stream", false, 0,
+        StreamUIO("stream", 3, active, 3 - active, "2026-10-16T10:00:00Z", "Stream", false, 0,
             notificationMode = mode, encryption = encrypted)
     private fun topic(mode: String = "default", active: Int = 0) =
-        TopicsResponseData("topic", "Topic", 0, "stream", "2026-10-16T10:00:00Z", 3, active, false, true, notificationMode = mode)
+        TopicUIO("topic", "Topic", 0, "stream", "2026-10-16T10:00:00Z", 3, active, false, true, notificationMode = mode)
     private fun message(id: String, time: String, read: Boolean = false, topic: String = "topic", kind: String = "markdown") =
-        MessageResponse(id, time, time, "stream", topic, "user", "author", MessageResponsePayload(kind, "Synthetic"), false, emptyMap(), read)
+        MessageUIO(id, time, time, "stream", topic, "user", "author", MessagePayloadUIO(kind, "Synthetic"), false, emptyMap(), read)
 
     @Test fun `stream visibility follows active counters including followed topics in muted streams`() {
         assertFalse(stream("muted", active = 0).hasInboxUnread)

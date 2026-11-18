@@ -37,8 +37,8 @@ import com.exordos.workspace.data.ServerConfig
 import com.exordos.workspace.data.TokenPair
 import com.exordos.workspace.data.EventsRepository
 import com.exordos.workspace.data.remote.dto.DeleteMessageRequest
-import com.exordos.workspace.data.remote.dto.MessageResponse
-import com.exordos.workspace.data.remote.dto.MessageResponsePayload
+import com.exordos.workspace.data.uio.MessageUIO
+import com.exordos.workspace.data.uio.MessagePayloadUIO
 import com.exordos.workspace.modules.chatdialog.MessageDeletion
 import com.exordos.workspace.modules.chatdialog.MessageSelection
 import com.exordos.workspace.modules.chatdialog.canSelectMessage
@@ -234,7 +234,7 @@ class DeleteMessageHttpContractTest {
         assertNull(request.headers["transfer-encoding"])
     }
 
-    private fun message(uuid: String) = MessageResponse(
+    private fun message(uuid: String) = MessageUIO(
         uuid = uuid,
         updatedAt = "2026-09-07T12:00:00Z",
         createdAt = "2026-09-07T12:00:00Z",
@@ -242,7 +242,7 @@ class DeleteMessageHttpContractTest {
         topicUuid = TOPIC_UUID,
         userUuid = "current-user",
         authorUuid = "current-user",
-        payload = MessageResponsePayload("markdown", "Delete contract fixture"),
+        payload = MessagePayloadUIO("markdown", "Delete contract fixture"),
         isOwn = true,
         reactions = emptyMap(),
         read = true,

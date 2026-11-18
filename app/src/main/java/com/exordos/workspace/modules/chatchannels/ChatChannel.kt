@@ -47,10 +47,10 @@ import dev.jeziellago.compose.markdowntext.MarkdownText
 import kotlinx.coroutines.launch
 import com.exordos.workspace.data.WorkspaceDateTime
 import com.exordos.workspace.R
-import com.exordos.workspace.data.remote.dto.MessageResponsePayload
-import com.exordos.workspace.data.remote.dto.FolderResponseData
-import com.exordos.workspace.data.remote.dto.MessageResponse
-import com.exordos.workspace.data.remote.dto.Stream
+import com.exordos.workspace.data.uio.MessagePayloadUIO
+import com.exordos.workspace.data.uio.FolderUIO
+import com.exordos.workspace.data.uio.MessageUIO
+import com.exordos.workspace.data.uio.StreamUIO
 import com.exordos.workspace.modules.encryptedchat.EncryptedChatAvatarBadge
 import com.exordos.workspace.ui.Avatar
 import com.exordos.workspace.ui.theme.InterFontFamily
@@ -58,12 +58,12 @@ import com.exordos.workspace.ui.theme.LocalWorkspaceColorsPalette
 
 @Composable
 fun ChatChannel(
-    item: Stream,
+    item: StreamUIO,
     viewModel: ChatViewModel,
     showDetail: Boolean,
-    currentlySelectedFolder: FolderResponseData?,
-    currentlySelectedStream: Stream?,
-    onChatNumberToAddChange: (Stream?) -> Unit,
+    currentlySelectedFolder: FolderUIO?,
+    currentlySelectedStream: StreamUIO?,
+    onChatNumberToAddChange: (StreamUIO?) -> Unit,
     onClick: () -> Unit
 ) {
     val previewContext = LocalContext.current
@@ -157,7 +157,7 @@ fun ChatChannel(
                         }
                         val previewDescription = when {
                             !item.encryption -> lastMessage.description(stringResource(R.string.quote_forwarded_message))
-                            encryptedPreview != null -> lastMessage.copy(payload = MessageResponsePayload("markdown", encryptedPreview.text))
+                            encryptedPreview != null -> lastMessage.copy(payload = MessagePayloadUIO("markdown", encryptedPreview.text))
                                 .description(stringResource(R.string.quote_forwarded_message))
                             lastMessage.payload.kind in setOf("key_request", "key_grant", "key_reject", "key_announced") -> lastMessage.description()
                             else -> stringResource(R.string.encrypted_chat_locked)

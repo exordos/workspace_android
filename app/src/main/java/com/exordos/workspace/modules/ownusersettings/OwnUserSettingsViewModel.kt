@@ -14,7 +14,7 @@ import com.exordos.workspace.data.EventsRepositoryStore
 import com.exordos.workspace.data.remote.ApiResult
 import com.exordos.workspace.data.remote.WorkspaceAPIClient
 import com.exordos.workspace.data.remote.dto.ResetAvatarRequest
-import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.uio.UserUIO
 
 class OwnUserSettingsViewModel(
     val client: WorkspaceAPIClient,
@@ -22,7 +22,7 @@ class OwnUserSettingsViewModel(
 ): ViewModel() {
     val repo = eventsRepositoryStore.get(client.getCurrentServerId()) ?: error("Cannot get current event repository")
 
-    val user: StateFlow<UserResponseData?> = repo.currentUser
+    val user: StateFlow<UserUIO?> = repo.currentUser
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),

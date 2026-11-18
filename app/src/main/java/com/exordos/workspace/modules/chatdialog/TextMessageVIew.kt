@@ -66,9 +66,9 @@ import com.exordos.workspace.R
 import com.exordos.workspace.data.UrnParser
 import com.exordos.workspace.data.remote.ApiError
 import com.exordos.workspace.data.remote.ApiResult
-import com.exordos.workspace.data.remote.dto.MessageElement
-import com.exordos.workspace.data.remote.dto.MessageResponse
-import com.exordos.workspace.data.remote.dto.QuotedMessagePart
+import com.exordos.workspace.data.uio.MessageElement
+import com.exordos.workspace.data.uio.MessageUIO
+import com.exordos.workspace.data.uio.QuotedMessagePart
 import com.exordos.workspace.ui.Avatar
 import com.exordos.workspace.ui.EnhancedMarkdown
 import com.exordos.workspace.ui.ReferenceMessageBase
@@ -83,11 +83,11 @@ import kotlin.context
 
 @Composable
 fun TextMessageView(
-    item: MessageResponse,
+    item: MessageUIO,
     viewModel: ChatDialogViewModel,
     navController: NavHostController,
     onImageLoad: () -> Unit,
-    onForwardMessage: ((MessageResponse) -> Unit)? = null,
+    onForwardMessage: ((MessageUIO) -> Unit)? = null,
     lockedPresentation: EncryptedChatPresentation.Locked? = null,
 ) {
     val encrypted = lockedPresentation != null || item.originalEncryptedPayload != null

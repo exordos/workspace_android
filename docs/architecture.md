@@ -125,6 +125,31 @@ uncompressed response, and atomically replaces the destination. Cancellation or
 failure removes the temporary file. Uploads differ: their source bytes may be
 held in memory.
 
+## DTO and UIO boundaries
+
+Entity responses follow `HTTP JSON -> response DTO -> UIO`. Wire DTOs in
+`data/remote/dto/` contain immutable API fields and serialization annotations.
+Plain Kotlin models in `data/uio/` own presentation methods and mutable screen
+state, including resolved users, last messages and encrypted-message projections.
+Nested payloads and folder items are UIOs too; mappers copy mutable collections
+and nested objects so presentation changes cannot mutate the decoded response.
+
+`UIORequest` specifies a DTO-to-UIO mapper. The typed `performRequest` overload
+uses the existing HTTP, error and refresh path to decode the DTO, then returns
+`ApiResult<UIO, ApiError>`. Authentication pinning preserves this request type.
+The raw `ApiRequest` overload remains the transport path for protocol responses
+such as tokens, cursor metadata and mutation acknowledgements. Do not erase an
+entity request to `ApiRequest` in a wrapper; preserve `UIORequest` to retain its
+mapped return type.
+
+The mapped entities are users (including `/me`), streams, topics, messages,
+message reactions, folders and their items, stream bindings, drafts, projects,
+and server settings. Full-entity mutation responses use the same boundary.
+Realtime events decode the corresponding DTO and invoke the same `toUio`
+mapper before repository updates. Repository flows, message caches, ViewModels,
+push reconciliation and screens use UIOs. Message payloads convert back to a
+wire DTO only when constructing an outgoing encrypted request.
+
 ## Events and HTTP snapshot reconciliation
 
 `EventsRepository.kt` loads server settings and entities, applies events, and

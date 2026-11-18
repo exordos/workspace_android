@@ -13,8 +13,8 @@ import com.exordos.workspace.data.EventsRepositoryStore
 import com.exordos.workspace.data.remote.ApiResult
 import com.exordos.workspace.data.remote.WorkspaceAPIClient
 import com.exordos.workspace.data.remote.dto.AddStreamRequest
-import com.exordos.workspace.data.remote.dto.Stream
-import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.uio.StreamUIO
+import com.exordos.workspace.data.uio.UserUIO
 import com.exordos.workspace.modules.chooseserver.QueryState
 import com.exordos.workspace.modules.creationbase.streamActionAccount
 
@@ -24,7 +24,7 @@ class CreateDirectStreamViewModel(
 ): ViewModel() {
     val eventsRepository = eventsRepositoryStore.get(client.getCurrentServerId()) ?: error("Cannot get current event repository")
 
-    val users: StateFlow<List<UserResponseData>> = combine(eventsRepository.users, eventsRepository.currentUser) { users, current ->
+    val users: StateFlow<List<UserUIO>> = combine(eventsRepository.users, eventsRepository.currentUser) { users, current ->
         users.filter { it.uuid != current?.uuid }
     }
         .stateIn(
@@ -36,11 +36,11 @@ class CreateDirectStreamViewModel(
     private val _createQueryState = MutableStateFlow<QueryState>(QueryState.Idle)
     val createQueryState: StateFlow<QueryState> = _createQueryState
 
-    var createdStream: Stream? = null
+    var createdStream: StreamUIO? = null
 
-    fun submitPrivateStream(user: UserResponseData) { viewModelScope.launch { createPrivateStream(user) } }
+    fun submitPrivateStream(user: UserUIO) { viewModelScope.launch { createPrivateStream(user) } }
 
-    suspend fun createPrivateStream(user: UserResponseData) {
+    suspend fun createPrivateStream(user: UserUIO) {
         if (_createQueryState.value is QueryState.Loading || _createQueryState.value is QueryState.Success ||
             user.uuid == eventsRepository.currentUser.value?.uuid) return
         val account = streamActionAccount(client, eventsRepository) ?: run {

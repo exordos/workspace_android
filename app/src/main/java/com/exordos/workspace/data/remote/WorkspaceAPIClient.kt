@@ -87,6 +87,17 @@ class WorkspaceAPIClient(
     fun requireUserViewModel(): UserViewModel =
         userViewModel ?: error("UserViewModel not attached. Call attachUserState() first.")
 
+    suspend inline fun <reified RequestData : Any, reified ResponseDTO : Any, UIO, reified ResponseError : Any> performRequest(
+        request: UIORequest<RequestData, ResponseDTO, UIO, ResponseError>,
+        serverId: String? = null,
+        serverConfig: ServerConfig? = null,
+    ): ApiResult<UIO, ApiError> = when (val result = performRequest(
+        request as ApiRequest<RequestData, ResponseDTO, ResponseError>, serverId, serverConfig,
+    )) {
+        is ApiResult.Success -> ApiResult.Success(request.toUio(result.value))
+        is ApiResult.Error -> result
+    }
+
     @OptIn(ExperimentalSerializationApi::class)
     suspend inline fun <reified RequestData : Any, reified Response : Any, reified ResponseError : Any> performRequest(
         request: ApiRequest<RequestData, Response, ResponseError>,

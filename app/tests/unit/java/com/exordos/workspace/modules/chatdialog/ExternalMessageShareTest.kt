@@ -3,9 +3,9 @@ package com.exordos.workspace.modules.chatdialog
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
-import com.exordos.workspace.data.remote.dto.MessageResponse
-import com.exordos.workspace.data.remote.dto.MessageResponsePayload
-import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.uio.MessageUIO
+import com.exordos.workspace.data.uio.MessagePayloadUIO
+import com.exordos.workspace.data.uio.UserUIO
 
 class ExternalMessageShareTest {
     @Test fun `external payload materializes quotes attachments and authors in source order`() = runBlocking {
@@ -79,9 +79,9 @@ class ExternalMessageShareTest {
         private const val SECOND = "00000000-0000-0000-0000-000000000002"
         private const val THIRD = "00000000-0000-0000-0000-000000000003"
         private const val FILE = "00000000-0000-0000-0000-000000000004"
-        private fun message(uuid: String, content: String, author: String) = MessageResponse(uuid,
+        private fun message(uuid: String, content: String, author: String) = MessageUIO(uuid,
             "2026-09-07T12:00:00Z", "2026-09-07T12:00:00Z", FIRST, SECOND, THIRD, THIRD,
-            MessageResponsePayload("markdown", content), true, emptyMap(), true,
-            UserResponseData(username = author, uuid = THIRD, status = "active", avatar = ""))
+            MessagePayloadUIO("markdown", content), true, emptyMap(), true,
+            UserUIO(username = author, uuid = THIRD, status = "active", avatar = ""))
     }
 }

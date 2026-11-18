@@ -9,15 +9,15 @@ import org.junit.Test
 import com.exordos.workspace.R
 import com.exordos.workspace.data.remote.ApiError
 import com.exordos.workspace.data.remote.ApiResult
-import com.exordos.workspace.data.remote.dto.MessageResponse
-import com.exordos.workspace.data.remote.dto.MessageResponsePayload
+import com.exordos.workspace.data.uio.MessageUIO
+import com.exordos.workspace.data.uio.MessagePayloadUIO
 import com.exordos.workspace.data.remote.dto.SendMessageResponse
-import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.uio.UserUIO
 
 class MessageForwardingTest {
     @Test fun `forward snapshots preserve body order and escape author markdown`() {
-        val first = source(FIRST).copy(user = UserResponseData(username = "A ](link)\\nB", uuid = AUTHOR, status = "active", avatar = ""))
-        val second = source(SECOND).copy(payload = MessageResponsePayload("markdown", "second source text"))
+        val first = source(FIRST).copy(user = UserUIO(username = "A ](link)\\nB", uuid = AUTHOR, status = "active", avatar = ""))
+        val second = source(SECOND).copy(payload = MessagePayloadUIO("markdown", "second source text"))
         val content = requireNotNull(buildWorkspaceForwardMarkdown(listOf(second, first)))
         assertTrue(content.indexOf("second source text") < content.lastIndexOf("source text"))
         assertTrue(content.contains("A \\]\\(link\\)\\\\nB"))
@@ -62,10 +62,10 @@ class MessageForwardingTest {
     }
 
     @Test fun `wrong stream author or content never count as success`() = runBlocking {
-        for (changed in listOf<(MessageResponse) -> MessageResponse>(
+        for (changed in listOf<(MessageUIO) -> MessageUIO>(
             { it.copy(streamUuid = FIRST) },
             { it.copy(authorUuid = FIRST) },
-            { it.copy(payload = MessageResponsePayload("markdown", "different")) },
+            { it.copy(payload = MessagePayloadUIO("markdown", "different")) },
         )) {
             val fixture = Fixture(transform = changed)
             fixture.sender.send(TARGET)
@@ -166,11 +166,11 @@ class MessageForwardingTest {
     private class Fixture(
         response: ApiResult<SendMessageResponse, ApiError> = ApiResult.Success(SendMessageResponse(RETURNED, TOPIC)),
         readable: Boolean = true,
-        transform: (MessageResponse) -> MessageResponse = { it },
+        transform: (MessageUIO) -> MessageUIO = { it },
     ) {
         var posts = 0
         val reads = mutableListOf<String>()
-        val confirmed = mutableListOf<MessageResponse>()
+        val confirmed = mutableListOf<MessageUIO>()
         val sender = MessageForwarding(listOf(source(FIRST), source(SECOND)), AUTHOR,
             post = { uuid, target, content ->
                 posts++
@@ -183,7 +183,7 @@ class MessageForwardingTest {
                 reads += id
                 ApiResult.Success(if (!readable) emptyList() else listOf(transform(source(id).copy(
                     streamUuid = STREAM, topicUuid = TOPIC,
-                    payload = MessageResponsePayload("markdown", requireNotNull(buildWorkspaceForwardMarkdown(listOf(source(FIRST), source(SECOND))))),
+                    payload = MessagePayloadUIO("markdown", requireNotNull(buildWorkspaceForwardMarkdown(listOf(source(FIRST), source(SECOND))))),
                 ))))
             }, onConfirmed = { confirmed += it }, newUuid = { REQUESTED })
     }
@@ -197,7 +197,7 @@ class MessageForwardingTest {
         private const val TOPIC = "00000000-0000-0000-0000-000000000006"
         private const val AUTHOR = "00000000-0000-0000-0000-000000000007"
         private val TARGET = ForwardDestination(STREAM, TOPIC)
-        private fun source(uuid: String) = MessageResponse(uuid, "2026-09-07T12:00:00Z", "2026-09-07T12:00:00Z",
-            STREAM, TOPIC, AUTHOR, AUTHOR, MessageResponsePayload("markdown", "source text"), true, emptyMap(), true)
+        private fun source(uuid: String) = MessageUIO(uuid, "2026-09-07T12:00:00Z", "2026-09-07T12:00:00Z",
+            STREAM, TOPIC, AUTHOR, AUTHOR, MessagePayloadUIO("markdown", "source text"), true, emptyMap(), true)
     }
 }

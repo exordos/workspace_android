@@ -41,9 +41,9 @@ import com.exordos.workspace.data.ServerRepository
 import com.exordos.workspace.data.TokenPair
 import com.exordos.workspace.modules.chatdialog.AttachmentStorage
 import com.exordos.workspace.modules.chatdialog.ChatDialogViewModel
-import com.exordos.workspace.data.remote.dto.Stream
-import com.exordos.workspace.data.remote.dto.MessageResponse
-import com.exordos.workspace.data.remote.dto.MessageResponsePayload
+import com.exordos.workspace.data.uio.StreamUIO
+import com.exordos.workspace.data.uio.MessageUIO
+import com.exordos.workspace.data.uio.MessagePayloadUIO
 import com.exordos.workspace.modules.chatdialog.ChatDialogScreen
 import com.exordos.workspace.LocalBottomBarVisible
 import com.exordos.workspace.ui.theme.WokspaceTheme
@@ -122,7 +122,7 @@ class AuthenticationRefreshInstrumentedTest {
 
             val result = api.performRequest(AuthenticationProbeRequest)
 
-            assertEquals(ApiResult.Success(AuthenticationProbeResponse("ok")), result)
+            assertEquals(ApiResult.Success(AuthenticationProbeUIO("ok")), result)
             assertEquals(1, server.protectedRequestCount.get())
             assertEquals(0, server.refreshRequestCount.get())
         }
@@ -144,8 +144,8 @@ class AuthenticationRefreshInstrumentedTest {
 
             assertEquals(
                 listOf(
-                    ApiResult.Success(AuthenticationProbeResponse("ok")),
-                    ApiResult.Success(AuthenticationProbeResponse("ok")),
+                    ApiResult.Success(AuthenticationProbeUIO("ok")),
+                    ApiResult.Success(AuthenticationProbeUIO("ok")),
                 ),
                 results,
             )
@@ -392,7 +392,7 @@ class AuthenticationRefreshInstrumentedTest {
             }
             try {
                 assertEquals(null, chat.stream.value)
-                val stream = Stream(uuid = "stream", unreadCount = 0, activeUnreadCount = 0,
+                val stream = StreamUIO(uuid = "stream", unreadCount = 0, activeUnreadCount = 0,
                     passiveUnreadCount = 0, updatedAt = "2026-10-07T12:00:00Z", name = "Fixture",
                     isPrivate = false, color = 0, lastMessageUuid = null, notificationMode = "all")
                 val loaded = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
@@ -421,9 +421,9 @@ class AuthenticationRefreshInstrumentedTest {
                 ChatDialogViewModel(api, user, "Fixture", "stream", "Topic", "topic",
                     false, eventsStore, null, AttachmentStorage(context, api))
             }
-            val message = MessageResponse("00000000-0000-0000-0000-000000000001",
+            val message = MessageUIO("00000000-0000-0000-0000-000000000001",
                 "2026-10-07T12:00:00Z", "2026-10-07T12:00:00Z", "stream", "topic", "author", "author",
-                MessageResponsePayload("markdown", "CASSI vitals regression"), false, emptyMap(), true)
+                MessagePayloadUIO("markdown", "CASSI vitals regression"), false, emptyMap(), true)
             chat.repo.addStreamTopicMessages("stream", "topic", listOf(message, message.copy()))
             val activity = instrumentation.startActivitySync(requireNotNull(
                 context.packageManager.getLaunchIntentForPackage(context.packageName))
@@ -447,7 +447,7 @@ class AuthenticationRefreshInstrumentedTest {
                 // Exercise a later list update and the production auto-scroll effect.
                 chat.repo.addStreamTopicMessages("stream", "topic", listOf(message,
                     message.copy(uuid = "00000000-0000-0000-0000-000000000002",
-                        payload = MessageResponsePayload("markdown", "CASSI next message"))))
+                        payload = MessagePayloadUIO("markdown", "CASSI next message"))))
                 withTimeout(10_000) {
                     while (instrumentation.uiAutomation.rootInActiveWindow
                             ?.findAccessibilityNodeInfosByText("CASSI next message").orEmpty().isEmpty()) {
@@ -566,13 +566,15 @@ class AuthenticationRefreshInstrumentedTest {
 }
 
 private object AuthenticationProbeRequest :
-    ApiRequest<EmptyRequestData, AuthenticationProbeResponse, ApiError> {
+    UIORequest<EmptyRequestData, AuthenticationProbeResponse, AuthenticationProbeUIO, ApiError> {
+    override fun toUio(dto: AuthenticationProbeResponse) = AuthenticationProbeUIO(dto.value)
     override val url = "/protected"
     override val method = HTTPMethod.GET
     override val data = EmptyRequestData()
 }
 
-private object ProtectedMutationProbeRequest : ApiRequest<EmptyRequestData, AuthenticationProbeResponse, ApiError> {
+private object ProtectedMutationProbeRequest : UIORequest<EmptyRequestData, AuthenticationProbeResponse, AuthenticationProbeUIO, ApiError> {
+    override fun toUio(dto: AuthenticationProbeResponse) = AuthenticationProbeUIO(dto.value)
     override val method = HTTPMethod.POST
     override val url = "/protected"
     override val data = EmptyRequestData()
@@ -580,6 +582,8 @@ private object ProtectedMutationProbeRequest : ApiRequest<EmptyRequestData, Auth
 
 @Serializable
 private data class AuthenticationProbeResponse(val value: String)
+
+private data class AuthenticationProbeUIO(val value: String)
 
 private class AuthenticationTestServer(
     private val acceptedAccessToken: String,

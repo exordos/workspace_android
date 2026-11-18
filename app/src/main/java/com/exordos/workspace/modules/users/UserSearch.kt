@@ -14,9 +14,9 @@
 
 package com.exordos.workspace.modules.users
 
-import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.uio.UserUIO
 
-internal fun UserResponseData.matchesUserSearch(query: String): Boolean {
+internal fun UserUIO.matchesUserSearch(query: String): Boolean {
     val term = query.trim()
     return term.isEmpty() || listOf(firstName, lastName, email, username)
         .any { it?.contains(term, ignoreCase = true) == true }

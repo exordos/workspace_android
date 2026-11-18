@@ -31,7 +31,7 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
 import kotlinx.coroutines.launch
 import com.exordos.workspace.LoginFlow
-import com.exordos.workspace.data.remote.dto.ProjectResponseData
+import com.exordos.workspace.data.uio.ProjectUIO
 import com.exordos.workspace.modules.chooseserver.QueryState
 import com.exordos.workspace.ui.AuthColors
 import com.exordos.workspace.ui.AuthLoadingOverlay
@@ -64,11 +64,11 @@ internal fun NavHostController.returnToCredentials() {
 
 @Composable
 internal fun ProjectsContent(
-    projects: List<ProjectResponseData>,
-    selectedProject: ProjectResponseData?,
+    projects: List<ProjectUIO>,
+    selectedProject: ProjectUIO?,
     state: QueryState,
     loginState: QueryState,
-    onProjectSelected: (ProjectResponseData) -> Unit,
+    onProjectSelected: (ProjectUIO) -> Unit,
     onRetry: () -> Unit,
     onOpenProject: () -> Unit,
     onReturnToLogin: () -> Unit,
@@ -91,7 +91,7 @@ internal fun ProjectsContent(
                 )
             }
         }
-        items(projects.distinctBy(ProjectResponseData::uuid), key = { it.uuid }, contentType = { "project" }) { project ->
+        items(projects.distinctBy(ProjectUIO::uuid), key = { it.uuid }, contentType = { "project" }) { project ->
             ProjectCell(project, project.uuid == selectedProject?.uuid, colors, !loading, onProjectSelected)
         }
         item(contentType = "projects-actions") {
@@ -129,11 +129,11 @@ internal fun ProjectsContent(
 
 @Composable
 fun ProjectCell(
-    project: ProjectResponseData,
+    project: ProjectUIO,
     isSelected: Boolean,
     colors: AuthColors = authColors(),
     enabled: Boolean = true,
-    onProjectSelected: (ProjectResponseData) -> Unit,
+    onProjectSelected: (ProjectUIO) -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp)

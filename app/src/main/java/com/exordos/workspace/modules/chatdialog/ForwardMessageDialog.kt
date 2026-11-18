@@ -72,16 +72,16 @@ import com.exordos.workspace.data.EventsRepository
 import com.exordos.workspace.data.remote.ApiResult
 import com.exordos.workspace.data.remote.ApiError
 import com.exordos.workspace.data.remote.WorkspaceAPIClient
-import com.exordos.workspace.data.remote.dto.FolderResponseData
+import com.exordos.workspace.data.uio.FolderUIO
 import com.exordos.workspace.data.remote.dto.ForwardMessageRequest
-import com.exordos.workspace.data.remote.dto.MessageResponse
+import com.exordos.workspace.data.uio.MessageUIO
 import com.exordos.workspace.data.remote.dto.SendMessageResponse
 import com.exordos.workspace.data.remote.dto.MessagesByIdsRequest
-import com.exordos.workspace.data.remote.dto.Stream
+import com.exordos.workspace.data.uio.StreamUIO
 import com.exordos.workspace.data.remote.dto.StreamsRequest
 import com.exordos.workspace.data.remote.dto.TopicsRequest
-import com.exordos.workspace.data.remote.dto.TopicsResponseData
-import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.uio.TopicUIO
+import com.exordos.workspace.data.uio.UserUIO
 import com.exordos.workspace.ui.Avatar
 import com.exordos.workspace.ui.theme.InterFontFamily
 import com.exordos.workspace.ui.theme.LocalWorkspaceColorsPalette
@@ -91,7 +91,7 @@ import com.exordos.workspace.modules.encryptedchat.encryptedMessagePlacementUuid
 
 @Composable
 internal fun ForwardMessagesDialog(
-    sources: List<MessageResponse>,
+    sources: List<MessageUIO>,
     client: WorkspaceAPIClient,
     repo: EventsRepository,
     userViewModel: UserViewModel,
@@ -112,8 +112,8 @@ internal fun ForwardMessagesDialog(
     var streams by remember { mutableStateOf(forwardableStreams(repo.streams.value)) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<Int?>(null) }
-    var selectedStream by remember { mutableStateOf<Stream?>(null) }
-    var topics by remember { mutableStateOf(emptyList<TopicsResponseData>()) }
+    var selectedStream by remember { mutableStateOf<StreamUIO?>(null) }
+    var topics by remember { mutableStateOf(emptyList<TopicUIO>()) }
     var topicsLoading by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     var selectedFolder by remember { mutableStateOf<String?>(null) }
@@ -188,7 +188,7 @@ internal fun ForwardMessagesDialog(
         loading = false
     }
 
-    fun chooseStream(stream: Stream) {
+    fun chooseStream(stream: StreamUIO) {
         if (!delivery.canEdit || topicsLoading) return
         selectedStream = stream
         topics = emptyList()
@@ -206,8 +206,8 @@ internal fun ForwardMessagesDialog(
                     is ApiResult.Success -> {
                         topics = response.value.filter {
                             it.streamUuid == stream.uuid && isCanonicalForwardUuid(it.uuid)
-                        }.distinctBy(TopicsResponseData::uuid).sortedWith(
-                            compareByDescending<TopicsResponseData> { it.isDefault }.thenBy { it.name.lowercase() },
+                        }.distinctBy(TopicUIO::uuid).sortedWith(
+                            compareByDescending<TopicUIO> { it.isDefault }.thenBy { it.name.lowercase() },
                         )
                         repo.addStreamTopics(stream.uuid, topics)
                         if (stream.isPrivate && !stream.directUserUuid.isNullOrBlank()) {
@@ -378,11 +378,11 @@ internal fun ForwardUncertainActions(onVerify: () -> Unit, onAbandon: () -> Unit
 
 @Composable
 internal fun ForwardRecipientPicker(
-    streams: List<Stream>,
-    folders: List<FolderResponseData>,
-    users: List<UserResponseData>,
-    selectedStream: Stream?,
-    topics: List<TopicsResponseData>,
+    streams: List<StreamUIO>,
+    folders: List<FolderUIO>,
+    users: List<UserUIO>,
+    selectedStream: StreamUIO?,
+    topics: List<TopicUIO>,
     query: String,
     selectedFolder: String?,
     loading: Boolean,
@@ -394,8 +394,8 @@ internal fun ForwardRecipientPicker(
     onBack: () -> Unit,
     onSearch: (String) -> Unit,
     onFolder: (String?) -> Unit,
-    onStream: (Stream) -> Unit,
-    onTopic: (TopicsResponseData) -> Unit,
+    onStream: (StreamUIO) -> Unit,
+    onTopic: (TopicUIO) -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
     participantCount: Int? = null,
@@ -409,7 +409,7 @@ internal fun ForwardRecipientPicker(
             (selectedStream != null || forwardStreamTitle(stream, users).contains(query, ignoreCase = true))
     }
     val railState = rememberLazyListState()
-    LaunchedEffect(selectedStream?.uuid, visibleStreams.map(Stream::uuid)) {
+    LaunchedEffect(selectedStream?.uuid, visibleStreams.map(StreamUIO::uuid)) {
         val selectedUuid = selectedStream?.uuid ?: return@LaunchedEffect
         val selectedIndex = visibleStreams.indexOfFirst { it.uuid == selectedUuid }
         if (selectedIndex >= 0 && railState.layoutInfo.visibleItemsInfo.none { it.key == selectedUuid }) {
@@ -482,7 +482,7 @@ internal fun ForwardRecipientPicker(
                 Modifier.fillMaxWidth().weight(1f).padding(horizontal = 20.dp),
                 contentPadding = PaddingValues(vertical = 20.dp),
             ) {
-                items(visibleStreams, key = Stream::uuid) { stream ->
+                items(visibleStreams, key = StreamUIO::uuid) { stream ->
                     Row(
                         Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(enabled = enabled, role = Role.Button) { onStream(stream) }
                             .testTag("forward-stream-${stream.uuid}"),
@@ -500,7 +500,7 @@ internal fun ForwardRecipientPicker(
         } else {
             Row(Modifier.fillMaxWidth().weight(1f)) {
                 LazyColumn(Modifier.width(74.dp), state = railState, contentPadding = PaddingValues(vertical = 20.dp)) {
-                    items(visibleStreams, key = Stream::uuid) { stream ->
+                    items(visibleStreams, key = StreamUIO::uuid) { stream ->
                         Box(
                             Modifier.padding(horizontal = 12.dp).size(52.dp, 64.dp)
                                 .background(if (stream.uuid == selectedStream.uuid) colors.messageBackground else Color.Transparent, RoundedCornerShape(8.dp))
@@ -525,7 +525,7 @@ internal fun ForwardRecipientPicker(
                 val visibleTopics = topics.filter { it.name.contains(query, ignoreCase = true) }
                 if (visibleTopics.isEmpty()) ForwardEmpty(stringResource(R.string.forward_no_topics), Modifier.weight(1f))
                 else LazyColumn(Modifier.weight(1f).padding(horizontal = 8.dp, vertical = 20.dp)) {
-                    items(visibleTopics, key = TopicsResponseData::uuid) { topic ->
+                    items(visibleTopics, key = TopicUIO::uuid) { topic ->
                         Row(
                             Modifier.fillMaxWidth().heightIn(min = 56.dp)
                                 .background(if (topic.isDefault) colors.messageBackground else Color.Transparent, RoundedCornerShape(8.dp))
@@ -547,11 +547,11 @@ internal fun ForwardRecipientPicker(
     }
 }
 
-internal fun forwardStreamTitle(stream: Stream, users: List<UserResponseData>): String =
+internal fun forwardStreamTitle(stream: StreamUIO, users: List<UserUIO>): String =
     users.firstOrNull { it.uuid == stream.directUserUuid }?.displayableName() ?: stream.name
 
 @Composable
-private fun ForwardAvatar(stream: Stream, users: List<UserResponseData>, baseUrl: String, client: WorkspaceAPIClient?, modifier: Modifier) {
+private fun ForwardAvatar(stream: StreamUIO, users: List<UserUIO>, baseUrl: String, client: WorkspaceAPIClient?, modifier: Modifier) {
     val user = users.firstOrNull { it.uuid == stream.directUserUuid }
     Avatar(user?.avatar?.takeIf { client != null }, baseUrl, client?.authHeaders().orEmpty(),
         stream.color, forwardStreamTitle(stream, users), modifier)

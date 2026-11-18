@@ -10,7 +10,7 @@ import com.exordos.workspace.data.ServerConfig
 import com.exordos.workspace.data.remote.ApiError
 import com.exordos.workspace.data.remote.ApiResult
 import com.exordos.workspace.data.remote.ProtectedRequestAuthentication
-import com.exordos.workspace.data.remote.dto.Stream
+import com.exordos.workspace.data.uio.StreamUIO
 import com.exordos.workspace.data.remote.dto.UpdateProtectedStreamRequestData
 
 class ProtectedStreamEditorTest {
@@ -62,7 +62,7 @@ class ProtectedStreamEditorTest {
     }
 
     @Test fun `wrong server projection cannot become an edit baseline`() = runBlocking {
-        val changes: List<(Stream) -> Stream> = listOf(
+        val changes: List<(StreamUIO) -> StreamUIO> = listOf(
             { it.copy(uuid = "other-stream") }, { it.copy(projectId = "other-project") },
             { it.copy(userUuid = "other-user") }, { it.copy(encryption = false) },
             { it.copy(isPrivate = true) }, { it.copy(directUserUuid = "other-peer") },
@@ -167,13 +167,13 @@ class ProtectedStreamEditorTest {
             ServerConfig("server-a", "https://workspace.example", "", "Workspace", projectUuid = "project-a"),
             "user-a", stream(role),
         )
-        var readResponse: ApiResult<Stream, ApiError>? = null
-        var writeResponse: ApiResult<Stream, ApiError>? = null
+        var readResponse: ApiResult<StreamUIO, ApiError>? = null
+        var writeResponse: ApiResult<StreamUIO, ApiError>? = null
         var beforeRead: (suspend () -> Unit)? = null
         var beforeWrite: (suspend () -> Unit)? = null
         val reads = mutableListOf<ProtectedStreamEditContext>()
         val writes = mutableListOf<Pair<ProtectedStreamEditContext, UpdateProtectedStreamRequestData>>()
-        val commits = mutableListOf<Stream>()
+        val commits = mutableListOf<StreamUIO>()
         val editor = ProtectedStreamEditor(
             currentContext = { context },
             readDetails = { captured ->
@@ -191,7 +191,7 @@ class ProtectedStreamEditorTest {
     }
 
     companion object {
-        private fun stream(role: String) = Stream(
+        private fun stream(role: String) = StreamUIO(
             uuid = "00000000-0000-0000-0000-000000000001", unreadCount = 0,
             activeUnreadCount = 0, passiveUnreadCount = 0, updatedAt = "2026-10-15T12:00:00Z",
             name = "Original", isPrivate = false, color = 0, notificationMode = "all_messages",

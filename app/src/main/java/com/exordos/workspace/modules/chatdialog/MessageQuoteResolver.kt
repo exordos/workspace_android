@@ -10,19 +10,19 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.yield
 import com.exordos.workspace.data.remote.ApiError
 import com.exordos.workspace.data.remote.ApiResult
-import com.exordos.workspace.data.remote.dto.MessageResponse
+import com.exordos.workspace.data.uio.MessageUIO
 import com.exordos.workspace.data.remote.dto.parseCanonicalUuid
 
 internal sealed interface MessageQuoteState {
     data object Loading : MessageQuoteState
-    data class Ready(val message: MessageResponse) : MessageQuoteState
+    data class Ready(val message: MessageUIO) : MessageQuoteState
     data object Unavailable : MessageQuoteState
     data object Error : MessageQuoteState
 }
 
 internal class MessageQuoteResolver(
     private val scope: CoroutineScope,
-    private val request: suspend (List<String>) -> ApiResult<List<MessageResponse>, ApiError>,
+    private val request: suspend (List<String>) -> ApiResult<List<MessageUIO>, ApiError>,
 ) {
     private val lock = Any()
     private var generation = 0
@@ -85,7 +85,7 @@ internal class MessageQuoteResolver(
         }
     }
 
-    fun update(message: MessageResponse) {
+    fun update(message: MessageUIO) {
         val uuid = parseCanonicalUuid(message.uuid) ?: return
         synchronized(lock) {
             if (uuid !in _states.value || uuid in deleted) return

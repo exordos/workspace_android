@@ -11,7 +11,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import com.exordos.workspace.data.remote.ApiError
 import com.exordos.workspace.data.remote.ApiResult
-import com.exordos.workspace.data.remote.dto.MessageResponse
+import com.exordos.workspace.data.uio.MessageUIO
 import com.exordos.workspace.data.remote.dto.parseCanonicalUuid
 import com.exordos.workspace.R
 import java.util.concurrent.atomic.AtomicLong
@@ -24,7 +24,7 @@ data class MessageActionError(
 )
 
 internal fun canDeleteMessage(
-    message: MessageResponse,
+    message: MessageUIO,
     streamUuid: String,
     topicUuid: String,
     pendingMessageUuid: String? = null,
@@ -35,7 +35,7 @@ internal fun canDeleteMessage(
     message.uuid != pendingMessageUuid
 
 internal class MessageDeletion(
-    private val canDelete: (MessageResponse) -> Boolean,
+    private val canDelete: (MessageUIO) -> Boolean,
     private val request: suspend (String) -> ApiResult<String, ApiError>,
     private val onDeleted: (String) -> Unit,
 ) {
@@ -54,7 +54,7 @@ internal class MessageDeletion(
         _actionError.value = MessageActionError(resourceId, formatArgs.toList(), errorTokens.incrementAndGet())
     }
 
-    suspend fun delete(message: MessageResponse): Boolean {
+    suspend fun delete(message: MessageUIO): Boolean {
         if (!canDelete(message)) {
             showActionError(R.string.message_delete_not_allowed)
             return false
