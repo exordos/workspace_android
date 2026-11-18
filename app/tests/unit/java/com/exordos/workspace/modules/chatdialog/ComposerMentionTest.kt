@@ -7,7 +7,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.uio.UserUIO
 
 class ComposerMentionTest {
     @Test
@@ -172,7 +172,7 @@ class ComposerMentionTest {
         email: String? = "$username@example.com",
         status: String = "active",
         avatar: String = "",
-    ) = UserResponseData(
+    ) = UserUIO(
         email = email,
         firstName = firstName,
         lastName = null,

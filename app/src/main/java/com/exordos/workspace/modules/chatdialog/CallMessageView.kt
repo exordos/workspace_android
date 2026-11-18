@@ -34,7 +34,7 @@ import org.jitsi.meet.sdk.JitsiMeetConferenceOptions
 import com.exordos.workspace.data.WorkspaceDateTime
 import com.exordos.workspace.ChatFlow
 import com.exordos.workspace.R
-import com.exordos.workspace.data.remote.dto.MessageResponse
+import com.exordos.workspace.data.uio.MessageUIO
 import com.exordos.workspace.ui.Avatar
 import com.exordos.workspace.ui.theme.InterFontFamily
 import com.exordos.workspace.ui.theme.LocalWorkspaceColorsPalette
@@ -44,10 +44,10 @@ import kotlin.time.ExperimentalTime
 @OptIn(ExperimentalTime::class)
 @Composable
 fun CallMessageView(
-    item: MessageResponse,
+    item: MessageUIO,
     viewModel: ChatDialogViewModel,
     navController: NavHostController,
-    onForwardMessage: ((MessageResponse) -> Unit)? = null,
+    onForwardMessage: ((MessageUIO) -> Unit)? = null,
 ) {
     var menuExpanded by remember(item.uuid) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()

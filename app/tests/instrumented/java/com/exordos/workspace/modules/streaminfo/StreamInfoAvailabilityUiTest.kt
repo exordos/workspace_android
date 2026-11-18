@@ -1,5 +1,6 @@
 package com.exordos.workspace.modules.streaminfo
 
+import com.exordos.workspace.data.uio.toUio
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.material3.Text
@@ -102,14 +103,14 @@ class StreamInfoAvailabilityUiTest {
             val context = InstrumentationRegistry.getInstrumentation().targetContext
             val repo = fixture.repo
             val viewModel = fixture.info
-            repo.addStreamTopics(STREAM, listOf(topic(OTHER_TOPIC)))
+            repo.addStreamTopics(STREAM, listOf(topic(OTHER_TOPIC)).map { it.toUio() })
             show(viewModel)
             compose.onNodeWithText(context.getString(R.string.stream_info_unavailable)).assertIsDisplayed()
             compose.onNodeWithContentDescription(context.getString(R.string.stream_info_back)).assertIsDisplayed().assertHasClickAction()
             compose.runOnIdle { assertNull(protectedBottomBarStyle.get()) }
 
-            repo.setInitialStreams(listOf(fixture.peer.stream))
-            repo.addStreamTopics(STREAM, listOf(topic(TOPIC)))
+            repo.setInitialStreams(listOf(fixture.peer.stream).map { it.toUio() })
+            repo.addStreamTopics(STREAM, listOf(topic(TOPIC)).map { it.toUio() })
             compose.waitUntil(5_000) { viewModel.stream.value != null && viewModel.topic.value != null &&
                 viewModel.protectedStreamDetails.value != null && !viewModel.protectedStreamUpdateState.value.busy }
             compose.onNodeWithText("CASSI protected chat").assertIsDisplayed()
@@ -121,13 +122,13 @@ class StreamInfoAvailabilityUiTest {
             compose.onNodeWithText(context.getString(R.string.encrypted_chat_key_screen_title)).assertIsDisplayed()
 
             repo.setInitialStreams(emptyList())
-            repo.addStreamTopics(STREAM, listOf(topic(OTHER_TOPIC)))
+            repo.addStreamTopics(STREAM, listOf(topic(OTHER_TOPIC)).map { it.toUio() })
             compose.waitUntil(5_000) { viewModel.stream.value == null && viewModel.topic.value == null }
             compose.onNodeWithTag("encrypted-chat-keys-screen").assertDoesNotExist()
             compose.runOnIdle { assertNull(protectedBottomBarStyle.get()) }
             compose.onNodeWithText(context.getString(R.string.stream_info_unavailable)).assertIsDisplayed()
             compose.onNodeWithContentDescription(context.getString(R.string.stream_info_back)).assertIsDisplayed().assertHasClickAction()
-            repo.setInitialStreams(listOf(fixture.peer.stream))
+            repo.setInitialStreams(listOf(fixture.peer.stream).map { it.toUio() })
             compose.waitUntil(5_000) { viewModel.stream.value != null }
             compose.onNodeWithText("CASSI protected chat").assertIsDisplayed()
             compose.onNodeWithTag("protected-stream-info").assertIsDisplayed()
@@ -323,13 +324,13 @@ class StreamInfoAvailabilityUiTest {
                     "storedAccessMatches=${preferences.tokensFor(serverId)?.accessToken == expectedAccess}", timeout)
             }
             val repo = events.getOrCreate(config)
-            repo.updateCurrentUser(peer.viewer)
+            repo.updateCurrentUser(peer.viewer.toUio())
             repo.loadUserInfo()
             assertTrue(repo.verifiedOwnerAuthentication.value != null)
-            repo.setInitialUsers(listOf(peer.viewer, peer.partner))
-            repo.addStreamBindings(STREAM, peer.bindings)
-            repo.addStreamTopics(STREAM, listOf(topic(TOPIC)))
-            if (initialStream) repo.setInitialStreams(listOf(peer.stream))
+            repo.setInitialUsers(listOf(peer.viewer, peer.partner).map { it.toUio() })
+            repo.addStreamBindings(STREAM, peer.bindings.map { it.toUio() })
+            repo.addStreamTopics(STREAM, listOf(topic(TOPIC)).map { it.toUio() })
+            if (initialStream) repo.setInitialStreams(listOf(peer.stream).map { it.toUio() })
             val viewModel = withContext(Dispatchers.Main) { StreamInfoViewModel(STREAM, TOPIC, api, events) }
             info = viewModel
             block(Fixture(viewModel, repo, peer))

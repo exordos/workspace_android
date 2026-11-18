@@ -23,6 +23,7 @@ This map describes covered contracts; it does not establish full line coverage.
 
 | Contract / risk | Checks |
 | --- | --- |
+| Startup entity JSON to DTO to UIO, nested payload/item isolation, typed HTTP and pinned requests, shared realtime mapping | `WorkspaceUioMappingTest`, `StartupUioInstrumentedTest`, `AuthenticationRefreshInstrumentedTest` |
 | Duplicate project UUIDs after password/OTP login, first-record metadata, retry, project scope and return to login | `ProjectsDuplicateIdentityTest` |
 | Crashlytics initialized with debug collection disabled | `CrashlyticsConfigurationTest`, `CrashlyticsReleaseInstrumentation`; separate synthetic crash/restart acceptance in Firebase |
 | HTTP status, refresh/relogin, credential replacement | `AuthenticationReloginPolicyTest`, `ProtectedRequestAuthenticationTest`, `AuthenticationRefreshInstrumentedTest` |

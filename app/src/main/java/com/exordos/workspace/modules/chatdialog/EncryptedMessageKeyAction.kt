@@ -1,15 +1,15 @@
 package com.exordos.workspace.modules.chatdialog
 
-import com.exordos.workspace.data.remote.dto.MessageResponse
+import com.exordos.workspace.data.uio.MessageUIO
 import com.exordos.workspace.modules.encryptedchat.EncryptedChatFailure
 import com.exordos.workspace.modules.encryptedchat.EncryptedChatRequestStatus
 import com.exordos.workspace.modules.encryptedchat.EncryptedChatSessionState
 
-internal data class EncryptedMessageKeyTarget(val keyUuid: String, val rawMessage: MessageResponse)
+internal data class EncryptedMessageKeyTarget(val keyUuid: String, val rawMessage: MessageUIO)
 
 /** A message action always targets that message's generation, including historical generations. */
 internal fun encryptedMessageKeyTarget(
-    message: MessageResponse,
+    message: MessageUIO,
     streamUuid: String,
     topicUuid: String,
     projectUuid: String?,

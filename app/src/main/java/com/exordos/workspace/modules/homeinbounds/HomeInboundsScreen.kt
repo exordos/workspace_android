@@ -38,7 +38,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.testTag
-import com.exordos.workspace.data.remote.dto.TopicsResponseData
+import com.exordos.workspace.data.uio.TopicUIO
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
@@ -49,7 +49,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import kotlinx.coroutines.launch
 import com.exordos.workspace.R
-import com.exordos.workspace.data.remote.dto.Stream
+import com.exordos.workspace.data.uio.StreamUIO
 import com.exordos.workspace.modules.chooseserver.QueryState
 import com.exordos.workspace.ui.AnimatedGif
 import com.exordos.workspace.ui.Avatar
@@ -70,7 +70,7 @@ fun HomeInboundsScreen(
     val snackbar = remember { SnackbarHostState() }
     var opening by remember { mutableStateOf(false) }
     val openFailed = stringResource(R.string.inbox_open_failed)
-    fun open(stream: Stream, topic: TopicsResponseData) {
+    fun open(stream: StreamUIO, topic: TopicUIO) {
         if (opening) return
         opening = true
         scope.launch {
@@ -156,10 +156,10 @@ fun HomeInboundsScreen(
 
 @Composable
 fun StreamInboundView(
-    stream: Stream,
+    stream: StreamUIO,
     viewModel: HomeInboundsViewModel,
-    topics: List<TopicsResponseData>,
-    onOpen: (TopicsResponseData) -> Unit
+    topics: List<TopicUIO>,
+    onOpen: (TopicUIO) -> Unit
 ) {
     Column(
         verticalArrangement = Arrangement.spacedBy(4.dp),

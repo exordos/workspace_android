@@ -22,7 +22,7 @@ import com.exordos.workspace.data.remote.ApiResult
 import com.exordos.workspace.data.remote.WorkspaceAPIClient
 import com.exordos.workspace.data.remote.dto.ServerSettingsRequest
 import com.exordos.workspace.data.remote.dto.ProjectsRequest
-import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.uio.UserUIO
 import com.exordos.workspace.modules.chooseserver.QueryState
 
 class ProfileViewModel(
@@ -62,7 +62,7 @@ class ProfileViewModel(
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
 
-    val user: StateFlow<UserResponseData?> = eventsRepo
+    val user: StateFlow<UserUIO?> = eventsRepo
         .flatMapLatest { repo ->
             repo?.currentUser ?: flowOf(null)
         }

@@ -1,5 +1,8 @@
 package com.exordos.workspace.data.remote.dto
 
+import com.exordos.workspace.data.remote.UIORequest
+import com.exordos.workspace.data.uio.toUio
+import com.exordos.workspace.data.uio.DraftUIO
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import com.exordos.workspace.data.remote.ApiError
@@ -11,7 +14,8 @@ class CreateDraftRequest(
     streamUuid: String,
     topicUuid: String,
     content: String
-): ApiRequest<CreateDraftRequestData, Draft, ApiError> {
+): UIORequest<CreateDraftRequestData, Draft, DraftUIO, ApiError> {
+    override fun toUio(dto: Draft): DraftUIO = dto.toUio()
     override val method: HTTPMethod = HTTPMethod.POST
     override val requiresApiKey: Boolean = true
     override val url: String = "/api/workspace/v1/messenger/drafts/"

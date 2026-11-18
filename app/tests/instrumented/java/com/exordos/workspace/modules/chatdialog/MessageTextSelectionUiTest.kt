@@ -34,10 +34,10 @@ import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.exordos.workspace.LocalBottomBarVisible
-import com.exordos.workspace.data.remote.dto.MessageResponse
-import com.exordos.workspace.data.remote.dto.MessageResponsePayload
-import com.exordos.workspace.data.remote.dto.Stream
-import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.uio.MessageUIO
+import com.exordos.workspace.data.uio.MessagePayloadUIO
+import com.exordos.workspace.data.uio.StreamUIO
+import com.exordos.workspace.data.uio.UserUIO
 import com.exordos.workspace.fixtures.LoopbackWorkspaceServer
 import com.exordos.workspace.fixtures.WorkspaceTestAccount
 import com.exordos.workspace.ui.EnhancedMarkdown
@@ -230,15 +230,15 @@ class MessageTextSelectionUiTest {
     private suspend fun showChat(own: Boolean, content: String = "Начало **выделение** конец") {
         server = LoopbackWorkspaceServer { LoopbackWorkspaceServer.Response("[]") }
         account = WorkspaceTestAccount.create(server.url)
-        val owner = UserResponseData(username = "cassi", uuid = OWNER, status = "active", avatar = "")
+        val owner = UserUIO(username = "cassi", uuid = OWNER, status = "active", avatar = "")
         val author = if (own) owner else owner.copy(uuid = AUTHOR, username = "Other")
         account.repo.updateCurrentUser(owner)
         account.repo.setInitialUsers(listOf(owner, author).distinctBy { it.uuid })
-        account.repo.setInitialStreams(listOf(Stream(STREAM, 0, 0, 0, TIME,
+        account.repo.setInitialStreams(listOf(StreamUIO(STREAM, 0, 0, 0, TIME,
             "CASSI selection", false, 0, defaultTopicUuid = TOPIC, notificationMode = "all_messages")))
-        account.repo.addStreamTopicMessages(STREAM, TOPIC, listOf(MessageResponse(MESSAGE, TIME, TIME,
+        account.repo.addStreamTopicMessages(STREAM, TOPIC, listOf(MessageUIO(MESSAGE, TIME, TIME,
             STREAM, TOPIC, author.uuid, author.uuid,
-            MessageResponsePayload("markdown", content), own, emptyMap(), true)))
+            MessagePayloadUIO("markdown", content), own, emptyMap(), true)))
         chat = withContext(Dispatchers.Main) {
             ChatDialogViewModel(account.api, account.user, "CASSI selection", STREAM, "Topic", TOPIC,
                 false, account.events, null, AttachmentStorage(context, account.api))

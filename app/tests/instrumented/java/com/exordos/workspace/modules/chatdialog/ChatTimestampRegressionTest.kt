@@ -1,5 +1,6 @@
 package com.exordos.workspace.modules.chatdialog
 
+import com.exordos.workspace.data.uio.toUio
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -70,7 +71,7 @@ class ChatTimestampRegressionTest {
         val offset = message("b", "2026-10-30T11:39:50.168+03:00")
         val sameInstant = message("a", "2026-10-30T08:39:50.168Z")
         val earlier = message("c", "2026-10-30T03:39:49.168-05:00")
-        val history = deriveChatHistoryPresentation(listOf(offset, earlier, sameInstant, offset), emptyList(),
+        val history = deriveChatHistoryPresentation(listOf(offset, earlier, sameInstant, offset).map { it.toUio() }, emptyList(),
             emptyMap(), STREAM, false, OWNER, EncryptedChatSessionState())
         assertEquals(listOf("c", "a", "b"), history.orderedMessages!!.map { it.uuid })
     }
@@ -79,7 +80,7 @@ class ChatTimestampRegressionTest {
         val request = message("request", "2026-10-30T11:39:50.168+03:00").copy(
             payload = MessageResponsePayload("key_request", keyUuid = "generation", deviceId = "device"),
         )
-        val history = deriveChatHistoryPresentation(emptyList(), listOf(request), emptyMap(), STREAM, true,
+        val history = deriveChatHistoryPresentation(emptyList(), listOf(request).map { it.toUio() }, emptyMap(), STREAM, true,
             OWNER, EncryptedChatSessionState(currentKeyUuid = "generation", deviceId = "device"))
         assertEquals("request", history.latestOwnRequestUuids[history.requestKey(STREAM, "generation")])
         assertEquals(true, history.showInitialKeyRequest)
@@ -164,11 +165,11 @@ class ChatTimestampRegressionTest {
         }
         account = WorkspaceTestAccount.create(server.url)
         val owner = UserResponseData(username = "cassi", uuid = OWNER, status = "active", avatar = "")
-        account.repo.updateCurrentUser(owner)
-        account.repo.setInitialUsers(listOf(owner))
+        account.repo.updateCurrentUser(owner.toUio())
+        account.repo.setInitialUsers(listOf(owner).map { it.toUio() })
         account.repo.setInitialStreams(listOf(Stream(STREAM, 0, 0, 0, history.first().createdAt,
-            "CASSI timestamps", false, 0, defaultTopicUuid = TOPIC, notificationMode = "all_messages")))
-        account.repo.addStreamTopicMessages(STREAM, TOPIC, history)
+            "CASSI timestamps", false, 0, defaultTopicUuid = TOPIC, notificationMode = "all_messages")).map { it.toUio() })
+        account.repo.addStreamTopicMessages(STREAM, TOPIC, history.map { it.toUio() })
         chat = withContext(Dispatchers.Main) {
             ChatDialogViewModel(account.api, account.user, "CASSI timestamps", STREAM, "Topic", TOPIC,
                 false, account.events, null,

@@ -124,7 +124,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import net.fellbaum.jemoji.EmojiManager
 import com.exordos.workspace.ChatFlow
 import com.exordos.workspace.LocalBottomBarVisible
-import com.exordos.workspace.data.remote.dto.MessageResponse
+import com.exordos.workspace.data.uio.MessageUIO
 import com.exordos.workspace.modules.encryptedchat.EncryptedChatPresentation
 import com.exordos.workspace.modules.encryptedchat.EncryptedChatRequestStatus
 import com.exordos.workspace.modules.encryptedchat.EncryptedChatServiceMessage
@@ -163,7 +163,7 @@ fun ChatDialogScreen(
     val selectionMode by viewModel.isSelectionMode.collectAsStateWithLifecycle()
     val canDeleteSelected by viewModel.canDeleteSelectedMessages.collectAsStateWithLifecycle()
     val deletingSelected by viewModel.deletingSelectedMessages.collectAsStateWithLifecycle()
-    var forwardingMessages by remember { mutableStateOf<List<MessageResponse>?>(null) }
+    var forwardingMessages by remember { mutableStateOf<List<MessageUIO>?>(null) }
     var forwardingSelection by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -648,12 +648,12 @@ fun String.parseUserUploadMarkdownOrNull(): UserUploadMarkdownParts? {
 
 @Composable
 internal fun ChatMessage(
-    item: MessageResponse,
+    item: MessageUIO,
     viewModel: ChatDialogViewModel,
     navController: NavHostController,
     history: ChatHistoryPresentation,
     onImageLoad: () -> Unit,
-    onForwardMessage: ((MessageResponse) -> Unit)? = null,
+    onForwardMessage: ((MessageUIO) -> Unit)? = null,
 ) {
     val selectedMessageUuids by viewModel.selectedMessageUuids.collectAsStateWithLifecycle()
     val selectionMode by viewModel.isSelectionMode.collectAsStateWithLifecycle()

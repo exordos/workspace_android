@@ -1,5 +1,6 @@
 package com.exordos.workspace.modules.projects
 
+import com.exordos.workspace.data.uio.toUio
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.test.assertCountEquals
@@ -54,8 +55,8 @@ class ProjectsDuplicateIdentityTest {
         compose.setContent {
             WokspaceTheme(darkTheme = false, dynamicColor = false) {
                 ProjectsContent(
-                    projects = listOf(first, first.copy(name = "Ignored duplicate metadata"), second),
-                    selectedProject = first,
+                    projects = listOf(first, first.copy(name = "Ignored duplicate metadata"), second).map { it.toUio() },
+                    selectedProject = first.toUio(),
                     state = QueryState.Success,
                     loginState = QueryState.Idle,
                     onProjectSelected = {},

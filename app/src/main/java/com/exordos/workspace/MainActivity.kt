@@ -77,7 +77,7 @@ import com.exordos.workspace.data.remote.workspaceHttpClient
 import io.ktor.client.plugins.HttpTimeout
 import com.exordos.workspace.data.remote.WorkspaceAPIClient
 import com.exordos.workspace.data.remote.AuthHeader
-import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.uio.UserUIO
 import com.exordos.workspace.modules.chatchannels.ChatScreen
 import com.exordos.workspace.modules.chatchannels.ChatViewModel
 import com.exordos.workspace.modules.chatdialog.ChatDialogScreen
@@ -563,7 +563,7 @@ fun WorkspaceApp(
 @Composable
 private fun DestinationIcon(
     destination: Destinations,
-    profile: UserResponseData?,
+    profile: UserUIO?,
     baseUrl: String,
     authHeaders: List<AuthHeader>,
     avatarSize: Dp,

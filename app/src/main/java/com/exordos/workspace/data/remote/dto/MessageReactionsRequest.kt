@@ -1,5 +1,8 @@
 package com.exordos.workspace.data.remote.dto
 
+import com.exordos.workspace.data.remote.UIORequest
+import com.exordos.workspace.data.uio.toUio
+import com.exordos.workspace.data.uio.MessageReactionUIO
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import com.exordos.workspace.data.remote.ApiError
@@ -9,7 +12,8 @@ import com.exordos.workspace.data.remote.HTTPMethod
 
 class MessageReactionsRequest(
     userUuid: String
-): ApiRequest<MessageReactionsRequestData, List<MessageReaction>, ApiError> {
+): UIORequest<MessageReactionsRequestData, List<MessageReaction>, List<MessageReactionUIO>, ApiError> {
+    override fun toUio(dto: List<MessageReaction>): List<MessageReactionUIO> = dto.map { it.toUio() }
     override val method: HTTPMethod = HTTPMethod.GET
     override val requiresApiKey: Boolean = true
     override val url: String = "/api/workspace/v1/messenger/message_reactions/"

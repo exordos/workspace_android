@@ -12,20 +12,20 @@ import com.exordos.workspace.data.WorkspaceDateTime
 import com.exordos.workspace.R
 import com.exordos.workspace.data.remote.ApiError
 import com.exordos.workspace.data.remote.ApiResult
-import com.exordos.workspace.data.remote.dto.MessageResponse
+import com.exordos.workspace.data.uio.MessageUIO
 import com.exordos.workspace.data.remote.dto.SendMessageResponse
-import com.exordos.workspace.data.remote.dto.Stream
+import com.exordos.workspace.data.uio.StreamUIO
 import com.exordos.workspace.data.remote.dto.parseCanonicalUuid
 
 internal const val MAX_FORWARD_SOURCE_MESSAGES = 32
 
 internal fun isCanonicalForwardUuid(value: String): Boolean = parseCanonicalUuid(value) != null
 
-internal fun canForwardMessage(message: MessageResponse): Boolean =
+internal fun canForwardMessage(message: MessageUIO): Boolean =
     isCanonicalForwardUuid(message.uuid) && message.authorUuid.isNotBlank() && message.payload.kind == "markdown"
 
 /** Keep the supplied (conversation) order, never merge or silently discard sources. */
-internal fun buildWorkspaceForwardMarkdown(messages: List<MessageResponse>): String? {
+internal fun buildWorkspaceForwardMarkdown(messages: List<MessageUIO>): String? {
     if (messages.isEmpty() || messages.size > MAX_FORWARD_SOURCE_MESSAGES ||
         messages.any { !canForwardMessage(it) } ||
         messages.map { parseCanonicalUuid(it.uuid) }.distinct().size != messages.size
@@ -41,7 +41,7 @@ internal fun buildForwardSnapshotBlock(author: String, content: String): String 
     "> **${escapeWorkspaceMarkdownInline(author)}**:\n" +
         content.lineSequence().joinToString("\n") { if (it.isEmpty()) ">" else "> $it" } + "\n\n"
 
-internal fun buildWorkspaceForwardMarkdown(message: MessageResponse): String? =
+internal fun buildWorkspaceForwardMarkdown(message: MessageUIO): String? =
     buildWorkspaceForwardMarkdown(listOf(message))
 
 internal fun escapeWorkspaceMarkdownInline(value: String): String = buildString {
@@ -51,9 +51,9 @@ internal fun escapeWorkspaceMarkdownInline(value: String): String = buildString 
     }
 }
 
-internal fun forwardableStreams(streams: List<Stream>): List<Stream> = streams
+internal fun forwardableStreams(streams: List<StreamUIO>): List<StreamUIO> = streams
     .filter { !it.isArchived && isCanonicalForwardUuid(it.uuid) }
-    .distinctBy(Stream::uuid)
+    .distinctBy(StreamUIO::uuid)
     .sortedByDescending { WorkspaceDateTime.parse(it.updatedAt) }
 
 internal data class ForwardDestination(val streamUuid: String, val topicUuid: String)
@@ -70,15 +70,15 @@ internal data class ForwardDeliveryState(
 
 /** No optimistic success and no second POST after an ambiguous first attempt. */
 internal class MessageForwarding(
-    val sources: List<MessageResponse>,
+    val sources: List<MessageUIO>,
     private val currentUserUuid: String,
     private val post: suspend (String, ForwardDestination, String) -> ApiResult<SendMessageResponse, ApiError>,
-    private val read: suspend (String) -> ApiResult<List<MessageResponse>, ApiError>,
-    private val onConfirmed: (MessageResponse) -> Unit,
+    private val read: suspend (String) -> ApiResult<List<MessageUIO>, ApiError>,
+    private val onConfirmed: (MessageUIO) -> Unit,
     private val newUuid: () -> String = { UUID.randomUUID().toString() },
     private val prepare: suspend (ForwardDestination) -> String = { requireNotNull(buildWorkspaceForwardMarkdown(sources)) },
     private val verificationUuid: (String, ForwardDestination) -> String = { canonical, _ -> canonical },
-    private val verifyContent: suspend (MessageResponse, ForwardDestination, String) -> Boolean = { message, _, expected ->
+    private val verifyContent: suspend (MessageUIO, ForwardDestination, String) -> Boolean = { message, _, expected ->
         message.payload.kind == "markdown" && message.payload.content == expected
     },
 ) {

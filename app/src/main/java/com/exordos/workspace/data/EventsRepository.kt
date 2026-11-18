@@ -1,5 +1,13 @@
 package com.exordos.workspace.data
 
+import com.exordos.workspace.data.uio.toUio
+import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.remote.dto.Stream
+import com.exordos.workspace.data.remote.dto.TopicsResponseData
+import com.exordos.workspace.data.remote.dto.MessageResponse
+import com.exordos.workspace.data.remote.dto.MessageReaction
+import com.exordos.workspace.data.remote.dto.FolderResponseData
+import com.exordos.workspace.data.remote.dto.StreamBindingResponseData
 import android.util.Log
 import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.client.plugins.websocket.webSocket
@@ -47,26 +55,26 @@ import com.exordos.workspace.data.remote.ApiResult
 import com.exordos.workspace.data.remote.ApiError
 import com.exordos.workspace.data.remote.WorkspaceAPIClient
 import com.exordos.workspace.data.remote.dto.DeletedMessageReaction
-import com.exordos.workspace.data.remote.dto.Draft
+import com.exordos.workspace.data.uio.DraftUIO
 import com.exordos.workspace.data.remote.dto.DraftsRequest
 import com.exordos.workspace.data.remote.dto.EpochRequest
 import com.exordos.workspace.data.remote.dto.EventsProbeRequest
-import com.exordos.workspace.data.remote.dto.FolderResponseData
+import com.exordos.workspace.data.uio.FolderUIO
 import com.exordos.workspace.data.remote.dto.FoldersRequest
-import com.exordos.workspace.data.remote.dto.MessageReaction
+import com.exordos.workspace.data.uio.MessageReactionUIO
 import com.exordos.workspace.data.remote.dto.MessageReactionsRequest
-import com.exordos.workspace.data.remote.dto.MessageResponse
+import com.exordos.workspace.data.uio.MessageUIO
 import com.exordos.workspace.data.remote.dto.MessagesByIdsRequest
 import com.exordos.workspace.data.remote.dto.MessagesRequest
 import com.exordos.workspace.data.remote.dto.OwnUserRequest
 import com.exordos.workspace.data.remote.ProtectedRequestAuthentication
 import com.exordos.workspace.data.remote.dto.PresenceRequest
 import com.exordos.workspace.data.remote.dto.ServerSettingsRequest
-import com.exordos.workspace.data.remote.dto.Stream
-import com.exordos.workspace.data.remote.dto.StreamBindingResponseData
+import com.exordos.workspace.data.uio.StreamUIO
+import com.exordos.workspace.data.uio.StreamBindingUIO
 import com.exordos.workspace.data.remote.dto.StreamsRequest
-import com.exordos.workspace.data.remote.dto.TopicsResponseData
-import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.uio.TopicUIO
+import com.exordos.workspace.data.uio.UserUIO
 import com.exordos.workspace.data.remote.dto.UsersRequest
 import com.exordos.workspace.modules.chooseserver.QueryState
 import java.net.URI
@@ -88,10 +96,10 @@ class EventsRepository(
 ) {
 
     private val originalServer = config.copy()
-    internal var onPushMessagesKnown: (List<MessageResponse>) -> Unit = {}
+    internal var onPushMessagesKnown: (List<MessageUIO>) -> Unit = {}
     internal var onPushMessageRemoved: (String) -> Unit = {}
     internal var onPushRead: (List<String>) -> Unit = {}
-    internal var onPushTopicUpdated: (TopicsResponseData, Long, String) -> Unit = { _, _, _ -> }
+    internal var onPushTopicUpdated: (TopicUIO, Long, String) -> Unit = { _, _, _ -> }
     internal var onPushRefreshNeeded: () -> Unit = {}
     fun notificationRead(messageUuids: List<String>) { onPushRead(messageUuids) }
 
@@ -149,8 +157,8 @@ class EventsRepository(
 
 
 
-    private val _currentUser = MutableStateFlow<UserResponseData?>(null)
-    val currentUser: StateFlow<UserResponseData?> = _currentUser.asStateFlow()
+    private val _currentUser = MutableStateFlow<UserUIO?>(null)
+    val currentUser: StateFlow<UserUIO?> = _currentUser.asStateFlow()
     private val _verifiedOwnerAuthentication = MutableStateFlow<VerifiedOwnerAuthentication?>(null)
     val verifiedOwnerAuthentication: StateFlow<VerifiedOwnerAuthentication?> = _verifiedOwnerAuthentication.asStateFlow()
     @Volatile private var ownerVerificationRevision = 0L
@@ -161,7 +169,7 @@ class EventsRepository(
         _verifiedOwnerAuthentication.value = null
     }
 
-    fun updateCurrentUser(newValue: UserResponseData) {
+    fun updateCurrentUser(newValue: UserUIO) {
         _currentUser.update { newValue }
     }
 
@@ -171,22 +179,22 @@ class EventsRepository(
     val streamsQueryState: StateFlow<QueryState> = _streamsQueryState
 
 
-    private val _currentlySelectedFolder = MutableStateFlow<FolderResponseData?>(null)
-    var currentlySelectedFolder: StateFlow<FolderResponseData?> = _currentlySelectedFolder
+    private val _currentlySelectedFolder = MutableStateFlow<FolderUIO?>(null)
+    var currentlySelectedFolder: StateFlow<FolderUIO?> = _currentlySelectedFolder
 
-    private val _streamTopicMessages = MutableStateFlow<Map<String, List<MessageResponse>>>(emptyMap())
-    val streamTopicMessages: StateFlow<Map<String, List<MessageResponse>>> = _streamTopicMessages.asStateFlow()
+    private val _streamTopicMessages = MutableStateFlow<Map<String, List<MessageUIO>>>(emptyMap())
+    val streamTopicMessages: StateFlow<Map<String, List<MessageUIO>>> = _streamTopicMessages.asStateFlow()
     private val _messageDeletedEvents = MutableSharedFlow<String>(extraBufferCapacity = 64)
     val messageDeletedEvents = _messageDeletedEvents.asSharedFlow()
-    private val _messageUpdatedEvents = MutableSharedFlow<MessageResponse>(extraBufferCapacity = 64)
+    private val _messageUpdatedEvents = MutableSharedFlow<MessageUIO>(extraBufferCapacity = 64)
     val messageUpdatedEvents = _messageUpdatedEvents.asSharedFlow()
     private val _streamDeletedEvents = MutableSharedFlow<String>(extraBufferCapacity = 64)
     val streamDeletedEvents = _streamDeletedEvents.asSharedFlow()
 
-    fun updateCurrentlySelectedFolder(newFolder: FolderResponseData?) {
+    fun updateCurrentlySelectedFolder(newFolder: FolderUIO?) {
         _currentlySelectedFolder.update { newFolder }
     }
-    fun addStreamTopicMessages(streamUuid: String, topicUuid: String, messages: List<MessageResponse>) {
+    fun addStreamTopicMessages(streamUuid: String, topicUuid: String, messages: List<MessageUIO>) {
         onPushMessagesKnown(messages)
         val messagesWithUser = messages.map { message ->
             message.user = users.value.firstOrNull { it.uuid == message.authorUuid }
@@ -218,13 +226,13 @@ class EventsRepository(
     suspend fun refreshConversation(
         streamUuid: String,
         topicUuid: String,
-    ): ApiResult<List<MessageResponse>, ApiError> = refreshConversation(streamUuid, topicUuid, false)
+    ): ApiResult<List<MessageUIO>, ApiError> = refreshConversation(streamUuid, topicUuid, false)
 
     private suspend fun refreshConversation(
         streamUuid: String,
         topicUuid: String,
         coveredByRecoveryCursor: Boolean,
-    ): ApiResult<List<MessageResponse>, ApiError> {
+    ): ApiResult<List<MessageUIO>, ApiError> {
         val key = "$streamUuid.$topicUuid"
         // Events can arrive before the first history request completes.
         _streamTopicMessages.update { current ->
@@ -264,12 +272,12 @@ class EventsRepository(
         return response
     }
 
-    fun addPendingMessage(message: MessageResponse) {
+    fun addPendingMessage(message: MessageUIO) {
         pendingMessageUuids.update { it + message.uuid }
         updateMessagesPool(listOf(message))
         addMessageToStreamTopic(message)
     }
-    fun addMessageToStreamTopic(message: MessageResponse) {
+    fun addMessageToStreamTopic(message: MessageUIO) {
         val key = "${message.streamUuid}.${message.topicUuid}"
         message.user = users.value.firstOrNull { it.uuid == message.authorUuid }
 
@@ -291,7 +299,7 @@ class EventsRepository(
         }
     }
 
-    fun updateMessage(updatedMessage: MessageResponse) {
+    fun updateMessage(updatedMessage: MessageUIO) {
         val key = "${updatedMessage.streamUuid}.${updatedMessage.topicUuid}"
         _streamTopicMessages.update { current ->
             val messages = current[key] ?: return@update current
@@ -318,7 +326,7 @@ class EventsRepository(
     }
 
     /** Reconcile HTTP confirmation with either ordering of the matching WS event. */
-    fun reconcileSentMessage(pendingUuid: String, confirmed: MessageResponse) {
+    fun reconcileSentMessage(pendingUuid: String, confirmed: MessageUIO) {
         val key = "${confirmed.streamUuid}.${confirmed.topicUuid}"
         _streamTopicMessages.update { current ->
             val hadPending = current.values.any { messages -> messages.any { it.uuid == pendingUuid } }
@@ -398,23 +406,23 @@ class EventsRepository(
         }
     }
 
-    private fun TopicsResponseData.withoutDeletedMessage(messageUuid: String): TopicsResponseData =
+    private fun TopicUIO.withoutDeletedMessage(messageUuid: String): TopicUIO =
         if (lastMessageUuid == messageUuid) {
             copy(lastMessageUuid = null, lastMessage = null)
         } else {
             this
         }
 
-    private val _streamTopics = MutableStateFlow<Map<String, List<TopicsResponseData>>>(emptyMap())
-    val streamTopics: StateFlow<Map<String, List<TopicsResponseData>>> = _streamTopics.asStateFlow()
+    private val _streamTopics = MutableStateFlow<Map<String, List<TopicUIO>>>(emptyMap())
+    val streamTopics: StateFlow<Map<String, List<TopicUIO>>> = _streamTopics.asStateFlow()
 
-    fun addStreamTopics(streamUuid: String, topics: List<TopicsResponseData>) {
+    fun addStreamTopics(streamUuid: String, topics: List<TopicUIO>) {
         _streamTopics.update { current ->
             current + (streamUuid to topics)
         }
         appendItemsToTopicsPool(topics)
     }
-    fun addTopicToStream(topic: TopicsResponseData) {
+    fun addTopicToStream(topic: TopicUIO) {
         _streamTopics.update { current ->
             if (current[topic.streamUuid] != null) {
                 val existingTopics = current[topic.streamUuid].orEmpty()
@@ -426,7 +434,7 @@ class EventsRepository(
         appendItemsToTopicsPool(listOf(topic))
     }
 
-    fun updateTopic(updatedTopic: TopicsResponseData) {
+    fun updateTopic(updatedTopic: TopicUIO) {
         val message = messagesPool.value.firstOrNull { it.uuid == updatedTopic.lastMessageUuid }
         _streamTopics.update { current ->
             val topics = current[updatedTopic.streamUuid] ?: return@update current
@@ -454,33 +462,33 @@ class EventsRepository(
     }
 
     private val membership = StreamMembershipState(realtimeStateLock)
-    val streamBindings: StateFlow<Map<String, List<StreamBindingResponseData>>> = membership.bindings
+    val streamBindings: StateFlow<Map<String, List<StreamBindingUIO>>> = membership.bindings
 
     internal fun beginStreamBindingsRequest(streamUuid: String) = membership.beginRequest(streamUuid)
 
-    internal fun applyStreamBindingsSnapshot(request: StreamMembershipState.Request, bindings: List<StreamBindingResponseData>): Boolean =
+    internal fun applyStreamBindingsSnapshot(request: StreamMembershipState.Request, bindings: List<StreamBindingUIO>): Boolean =
         membership.replaceSnapshot(request, bindings)
 
-    internal fun applyStreamBindingsResponse(request: StreamMembershipState.Request, bindings: List<StreamBindingResponseData>): Boolean =
+    internal fun applyStreamBindingsResponse(request: StreamMembershipState.Request, bindings: List<StreamBindingUIO>): Boolean =
         membership.mergeResponse(request, bindings)
 
     /** Immediate authoritative setup; HTTP callers must capture a request before starting I/O. */
-    fun addStreamBindings(streamUuid: String, streamBindings: List<StreamBindingResponseData>) {
+    fun addStreamBindings(streamUuid: String, streamBindings: List<StreamBindingUIO>) {
         beginStreamBindingsRequest(streamUuid).use { applyStreamBindingsSnapshot(it, streamBindings) }
     }
 
-    fun addBindingToStream(streamBinding: StreamBindingResponseData) =
+    fun addBindingToStream(streamBinding: StreamBindingUIO) =
         mergeStreamBindings(streamBinding.streamUuid, listOf(streamBinding))
 
-    fun updateStreamBindings(updatedStreamBinding: StreamBindingResponseData) =
+    fun updateStreamBindings(updatedStreamBinding: StreamBindingUIO) =
         mergeStreamBindings(updatedStreamBinding.streamUuid, listOf(updatedStreamBinding))
 
-    fun mergeStreamBindings(streamUuid: String, bindings: List<StreamBindingResponseData>) = synchronized(realtimeStateLock) {
+    fun mergeStreamBindings(streamUuid: String, bindings: List<StreamBindingUIO>) = synchronized(realtimeStateLock) {
         membership.upsert(streamUuid, bindings)
         updateOwnStreamRole(streamUuid, bindings)
     }
 
-    private fun updateOwnStreamRole(streamUuid: String, changes: List<StreamBindingResponseData> = emptyList()) {
+    private fun updateOwnStreamRole(streamUuid: String, changes: List<StreamBindingUIO> = emptyList()) {
         val ownBinding = (membership.bindings.value[streamUuid] ?: changes)
             .firstOrNull { it.userUuid == _currentUser.value?.uuid } ?: return
         _streams.update { streams -> streams.map { stream ->
@@ -488,9 +496,9 @@ class EventsRepository(
         } }
     }
 
-    private val _messagesPool = MutableStateFlow<List<MessageResponse>>(emptyList())
-    val messagesPool: StateFlow<List<MessageResponse>> = _messagesPool.asStateFlow()
-    fun setInitialMessagesPool(newList: List<MessageResponse>) {
+    private val _messagesPool = MutableStateFlow<List<MessageUIO>>(emptyList())
+    val messagesPool: StateFlow<List<MessageUIO>> = _messagesPool.asStateFlow()
+    fun setInitialMessagesPool(newList: List<MessageUIO>) {
         val messagesWithUser = newList.map { message ->
             message.user = users.value.firstOrNull { it.uuid == message.authorUuid }
             message
@@ -500,7 +508,7 @@ class EventsRepository(
         }
     }
 
-    fun updateMessagesPool(newList: List<MessageResponse>) {
+    fun updateMessagesPool(newList: List<MessageUIO>) {
         onPushMessagesKnown(newList)
         val currentPoolIds = _messagesPool.value.map { it.uuid }
         val filteredMessages = newList.filter { !currentPoolIds.contains(it.uuid) }
@@ -513,10 +521,10 @@ class EventsRepository(
         }
     }
 
-    private val _topicsPool = MutableStateFlow<List<TopicsResponseData>>(emptyList())
-    val topicsPool: StateFlow<List<TopicsResponseData>> = _topicsPool.asStateFlow()
+    private val _topicsPool = MutableStateFlow<List<TopicUIO>>(emptyList())
+    val topicsPool: StateFlow<List<TopicUIO>> = _topicsPool.asStateFlow()
 
-    fun appendItemsToTopicsPool(newList: List<TopicsResponseData>) {
+    fun appendItemsToTopicsPool(newList: List<TopicUIO>) {
         val currentPoolIds = _messagesPool.value.map { it.uuid }
         val filteredTopics = newList.filter { !currentPoolIds.contains(it.uuid) }
 
@@ -525,7 +533,7 @@ class EventsRepository(
         }
     }
 
-    fun updateTopicInTopicsPool(updatedTopic: TopicsResponseData) {
+    fun updateTopicInTopicsPool(updatedTopic: TopicUIO) {
         _topicsPool.update { current ->
             current.map { topic ->
                 if (topic.uuid == updatedTopic.uuid) {
@@ -545,22 +553,22 @@ class EventsRepository(
         }
     }
 
-    private val _draftsPool = MutableStateFlow<List<Draft>>(emptyList())
-    val draftsPool: StateFlow<List<Draft>> = _draftsPool.asStateFlow()
+    private val _draftsPool = MutableStateFlow<List<DraftUIO>>(emptyList())
+    val draftsPool: StateFlow<List<DraftUIO>> = _draftsPool.asStateFlow()
 
-    fun setInitialDraftsPool(newList: List<Draft>) {
+    fun setInitialDraftsPool(newList: List<DraftUIO>) {
         _draftsPool.update {
             newList
         }
     }
 
-    fun addDraft(newValue: Draft) {
+    fun addDraft(newValue: DraftUIO) {
         _draftsPool.update { current ->
             current + newValue
         }
     }
 
-    fun updateDraft(updatedDraft: Draft) {
+    fun updateDraft(updatedDraft: DraftUIO) {
         _draftsPool.update { current ->
             current.map { draft ->
                 if (draft.uuid == updatedDraft.uuid) {
@@ -574,23 +582,23 @@ class EventsRepository(
         }
     }
 
-    fun removeDraft(valueToRemove: Draft) {
+    fun removeDraft(valueToRemove: DraftUIO) {
         _draftsPool.update { current ->
             current - valueToRemove
         }
     }
 
-    private val _userReactions = MutableStateFlow<List<MessageReaction>>(emptyList())
+    private val _userReactions = MutableStateFlow<List<MessageReactionUIO>>(emptyList())
 
-    val userReactions: StateFlow<List<MessageReaction>> = _userReactions.asStateFlow()
+    val userReactions: StateFlow<List<MessageReactionUIO>> = _userReactions.asStateFlow()
 
-    fun setInitialMessageReactions(newList: List<MessageReaction>) {
+    fun setInitialMessageReactions(newList: List<MessageReactionUIO>) {
         _userReactions.update {
             newList
         }
     }
 
-    fun addReaction(reaction: MessageReaction) {
+    fun addReaction(reaction: MessageReactionUIO) {
         val user = _currentUser.value
         if (user != null) {
             if (reaction.userUuid == user.uuid)
@@ -609,10 +617,10 @@ class EventsRepository(
         }
     }
 
-    private val _users = MutableStateFlow<List<UserResponseData>>(emptyList())
-    val users: StateFlow<List<UserResponseData>> = _users.asStateFlow()
+    private val _users = MutableStateFlow<List<UserUIO>>(emptyList())
+    val users: StateFlow<List<UserUIO>> = _users.asStateFlow()
 
-    fun updateUser(updatedUser: UserResponseData) {
+    fun updateUser(updatedUser: UserUIO) {
         _users.update { current ->
             current.map { user ->
                 if (user.uuid == updatedUser.uuid) {
@@ -632,26 +640,26 @@ class EventsRepository(
         }
     }
 
-    fun addUser(newUser: UserResponseData) {
+    fun addUser(newUser: UserUIO) {
         _users.update { current ->
             current + newUser
         }
     }
 
-    fun setInitialUsers(newList: List<UserResponseData>) {
+    fun setInitialUsers(newList: List<UserUIO>) {
         _users.update {
             newList
         }
     }
 
-    fun poolMessage(uuid: String?): MessageResponse? {
+    fun poolMessage(uuid: String?): MessageUIO? {
         return messagesPool.value.firstOrNull { it.uuid == uuid }
     }
 
-    private val _streams = MutableStateFlow<List<Stream>>(emptyList())
-    val streams: StateFlow<List<Stream>> = _streams.asStateFlow()
+    private val _streams = MutableStateFlow<List<StreamUIO>>(emptyList())
+    val streams: StateFlow<List<StreamUIO>> = _streams.asStateFlow()
 
-    fun updateStream(updatedStream: Stream) {
+    fun updateStream(updatedStream: StreamUIO) {
         val message = messagesPool.value.firstOrNull { it.uuid == updatedStream.lastMessageUuid }
         _streams.update { current ->
             current.map { stream ->
@@ -681,7 +689,7 @@ class EventsRepository(
         }
     }
 
-    fun addStream(newStream: Stream) {
+    fun addStream(newStream: StreamUIO) {
         var streamWithUser = newStream
         val directUserUuid = newStream.directUserUuid
         if (directUserUuid != null) {
@@ -693,7 +701,7 @@ class EventsRepository(
         }
     }
 
-    fun setInitialStreams(newList: List<Stream>) {
+    fun setInitialStreams(newList: List<StreamUIO>) {
         val streamsWithUsers  = newList.map { newStream ->
             var streamWithUser = newStream
             val directUserUuid = newStream.directUserUuid
@@ -708,9 +716,9 @@ class EventsRepository(
         }
     }
 
-    private val _folders = MutableStateFlow<List<FolderResponseData>>(emptyList())
-    val folders: StateFlow<List<FolderResponseData>> = _folders.asStateFlow()
-    fun updateFolder(updatedFolder: FolderResponseData) {
+    private val _folders = MutableStateFlow<List<FolderUIO>>(emptyList())
+    val folders: StateFlow<List<FolderUIO>> = _folders.asStateFlow()
+    fun updateFolder(updatedFolder: FolderUIO) {
         _folders.update { current ->
             current.map { folder ->
                 if (folder.uuid == updatedFolder.uuid) {
@@ -739,13 +747,13 @@ class EventsRepository(
         }
     }
 
-    fun addFolder(newFolder: FolderResponseData) {
+    fun addFolder(newFolder: FolderUIO) {
         _folders.update { current ->
             current + newFolder
         }
     }
 
-    fun setInitialFolders(newList: List<FolderResponseData>) {
+    fun setInitialFolders(newList: List<FolderUIO>) {
         _folders.update {
             newList
         }
@@ -1086,9 +1094,9 @@ class EventsRepository(
         when (action) {
             "created" -> {
                 val batch = json.decodeFromString<CreatedStreamBindingsEvent>(payload)
-                mergeStreamBindings(batch.uuid, batch.items)
+                mergeStreamBindings(batch.uuid, batch.items.map { it.toUio() })
             }
-            "updated" -> updateStreamBindings(json.decodeFromString<StreamBindingResponseData>(payload))
+            "updated" -> updateStreamBindings(json.decodeFromString<StreamBindingResponseData>(payload).toUio())
             "deleted" -> {
                 val deleted = json.decodeFromString<DeletedStreamBindingEvent>(payload)
                 synchronized(realtimeStateLock) {
@@ -1104,11 +1112,11 @@ class EventsRepository(
     fun didReceiveUserEvent(payload: String, action: String) {
         when(action) {
             "created" -> {
-                val user = json.decodeFromString<UserResponseData>(payload)
+                val user = json.decodeFromString<UserResponseData>(payload).toUio()
                 addUser(user)
             }
             "updated" -> {
-                val user = json.decodeFromString<UserResponseData>(payload)
+                val user = json.decodeFromString<UserResponseData>(payload).toUio()
                 val currentUser = _currentUser.value
                 if (currentUser?.uuid == user.uuid) {
                     updateCurrentUser(user)
@@ -1124,12 +1132,12 @@ class EventsRepository(
     fun didReceiveMessageEvent(payload: String, action: String) {
         when(action) {
             "created" -> {
-                val message = json.decodeFromString<MessageResponse>(payload)
+                val message = json.decodeFromString<MessageResponse>(payload).toUio()
                 updateMessagesPool(listOf(message))
                 addMessageToStreamTopic(message)
             }
             "updated" -> {
-                val message = json.decodeFromString<MessageResponse>(payload)
+                val message = json.decodeFromString<MessageResponse>(payload).toUio()
                 updateMessagesPool(listOf(message))
                 updateMessage(message)
             }
@@ -1143,11 +1151,11 @@ class EventsRepository(
     fun didReceiveFolderEvent(payload: String, action: String) {
         when(action) {
             "created" -> {
-                val folder = json.decodeFromString<FolderResponseData>(payload)
+                val folder = json.decodeFromString<FolderResponseData>(payload).toUio()
                 addFolder(folder)
             }
             "updated" -> {
-                val folder = json.decodeFromString<FolderResponseData>(payload)
+                val folder = json.decodeFromString<FolderResponseData>(payload).toUio()
                 updateFolder(folder)
             }
             "deleted" -> {
@@ -1159,7 +1167,7 @@ class EventsRepository(
     fun didReceiveReactionEvent(payload: String, action: String) {
         when(action) {
             "created" -> {
-                val reaction = json.decodeFromString<MessageReaction>(payload)
+                val reaction = json.decodeFromString<MessageReaction>(payload).toUio()
                 addReaction(reaction)
             }
             "deleted" -> {
@@ -1172,11 +1180,11 @@ class EventsRepository(
     fun didReceiveStreamEvent(payload: String, action: String) {
         when(action) {
             "created" -> {
-                val stream = json.decodeFromString<Stream>(payload)
+                val stream = json.decodeFromString<Stream>(payload).toUio()
                 addStream(stream)
             }
             "updated" -> {
-                val stream = json.decodeFromString<Stream>(payload)
+                val stream = json.decodeFromString<Stream>(payload).toUio()
                 updateStream(stream)
             }
             "deleted" -> {
@@ -1189,11 +1197,11 @@ class EventsRepository(
         onPushRefreshNeeded()
         when(action) {
             "created" -> {
-                val topic = json.decodeFromString< TopicsResponseData>(payload)
+                val topic = json.decodeFromString<TopicsResponseData>(payload).toUio()
                 addTopicToStream(topic)
             }
             "updated" -> {
-                val topic = json.decodeFromString< TopicsResponseData>(payload)
+                val topic = json.decodeFromString<TopicsResponseData>(payload).toUio()
                 updateTopic(topic)
                 if (epochVersion != null && generation != null) onPushTopicUpdated(topic, epochVersion, generation)
             }

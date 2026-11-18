@@ -1,5 +1,6 @@
 package com.exordos.workspace.data
 
+import com.exordos.workspace.data.uio.toUio
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.lifecycle.viewModelScope
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -192,10 +193,10 @@ class RealtimeRecoveryInstrumentedTest {
                 sessions.addServer(config, TokenPair("synthetic-access", "synthetic-refresh"))
                 withTimeout(5_000) { user.selectedServer.first { it?.id == serverId } }
                 val events = eventsStore.getOrCreate(config)
-                events.addStreamTopicMessages("stream", "topic", listOf(recoveryMessage("baseline")))
-                events.addPendingMessage(recoveryMessage("pending-send").copy(isOwn = true))
+                events.addStreamTopicMessages("stream", "topic", listOf(recoveryMessage("baseline")).map { it.toUio() })
+                events.addPendingMessage(recoveryMessage("pending-send").copy(isOwn = true).toUio())
                 if (!preExpiryHistory) {
-                    events.addStreamTopicMessages("stream", "inactive", listOf(recoveryMessage("cached-inactive").copy(topicUuid = "inactive")))
+                    events.addStreamTopicMessages("stream", "inactive", listOf(recoveryMessage("cached-inactive").copy(topicUuid = "inactive")).map { it.toUio() })
                 }
                 val olderLoad = if (preExpiryHistory) storeScope.async {
                     events.refreshConversation("stream", "inactive")

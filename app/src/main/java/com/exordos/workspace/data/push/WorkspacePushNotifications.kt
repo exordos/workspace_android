@@ -28,7 +28,7 @@ import com.exordos.workspace.MainActivity
 import com.exordos.workspace.R
 import com.exordos.workspace.data.crypto.WorkspacePushCrypto
 import com.exordos.workspace.data.crypto.WorkspacePushPayload
-import com.exordos.workspace.data.remote.dto.MessageResponse
+import com.exordos.workspace.data.uio.MessageUIO
 import java.util.Base64
 import java.util.UUID
 
@@ -146,7 +146,7 @@ internal class WorkspacePushNotifications(private val context: Context, private 
         render()
     }
 
-    fun knownMessages(serverId: String, userUuid: String?, messages: List<MessageResponse>) = synchronized(lock) {
+    fun knownMessages(serverId: String, userUuid: String?, messages: List<MessageUIO>) = synchronized(lock) {
         val registration = keys.get(serverId)?.takeIf { !it.disabled && it.userUuid == userUuid } ?: return
         val cutoff = now() - PushInbox.DELIVERY_WINDOW_MILLIS
         val (recent, history) = messages.filter {

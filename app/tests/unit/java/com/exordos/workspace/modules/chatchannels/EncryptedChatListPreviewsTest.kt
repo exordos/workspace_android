@@ -10,6 +10,9 @@ import com.exordos.workspace.data.VerifiedOwnerAuthentication
 import com.exordos.workspace.data.crypto.*
 import com.exordos.workspace.data.remote.ProtectedRequestAuthentication
 import com.exordos.workspace.data.remote.dto.*
+import com.exordos.workspace.data.uio.StreamUIO
+import com.exordos.workspace.data.uio.MessageUIO
+import com.exordos.workspace.data.uio.MessagePayloadUIO
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
@@ -177,7 +180,7 @@ class EncryptedChatListPreviewsTest {
 
     @Test fun `service last message selects newest loaded regular message and edited wire replaces old ciphertext`() = runBlocking {
         val f = Fixture()
-        val service = f.message.copy(uuid = "grant", createdAt = "2026-10-15T12:01:00Z", payload = MessageResponsePayload("key_grant", keyUuid = "current"))
+        val service = f.message.copy(uuid = "grant", createdAt = "2026-10-15T12:01:00Z", payload = MessagePayloadUIO("key_grant", keyUuid = "current"))
         val stream = f.stream.copy(lastMessageUuid = service.uuid, lastMessage = service)
         val old = f.message.copy(uuid = "older", createdAt = "2026-10-15T11:59:00Z")
         assertEquals(f.message.uuid, latestLoadedEncryptedPreviewMessage(stream, listOf(old, f.message), emptyList())?.uuid)
@@ -210,10 +213,10 @@ class EncryptedChatListPreviewsTest {
         val device = if (identity) store.ensureDeviceIdentity(owner) else ChatDeviceIdentity("unused", "unused")
         val address = ChatKeyAddress(ChatKeyScope(owner, device.deviceId), "stream", "historical")
         val key = crypto.createGroupKey()
-        val message = MessageResponse("message", "2026-10-15T12:00:00Z", "2026-10-15T12:00:00Z", "stream", "topic", "owner", "author",
-            MessageResponsePayload("e2ee", WorkspaceChatCrypto.toBase64(crypto.encryptMessage(key, "private **preview**".toByteArray(),
+        val message = MessageUIO("message", "2026-10-15T12:00:00Z", "2026-10-15T12:00:00Z", "stream", "topic", "owner", "author",
+            MessagePayloadUIO("e2ee", WorkspaceChatCrypto.toBase64(crypto.encryptMessage(key, "private **preview**".toByteArray(),
                 ChatMessageContext("stream", "historical"))), "historical"), false, emptyMap(), true, projectId = "project")
-        val stream = Stream("stream", 0, 0, 0, "2026-10-15T12:00:00Z", "Protected", false, 0,
+        val stream = StreamUIO("stream", 0, 0, 0, "2026-10-15T12:00:00Z", "Protected", false, 0,
             lastMessageUuid = message.uuid, notificationMode = "all_messages", lastMessage = message,
             encryption = true, currentEncryptionKeyUuid = "current", projectId = "project", userUuid = "owner", role = "member")
         val source = requireNotNull(encryptedPreviewSource(stream, message, "owner", "project", null))

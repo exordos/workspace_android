@@ -53,7 +53,7 @@ import androidx.navigation.NavHostController
 import com.exordos.workspace.ChatFlow
 import com.exordos.workspace.R
 import com.exordos.workspace.data.remote.AuthHeader
-import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.uio.UserUIO
 import com.exordos.workspace.modules.chooseserver.QueryState
 import com.exordos.workspace.modules.users.matchesUserSearch
 import com.exordos.workspace.modules.users.UserSearchField
@@ -243,8 +243,8 @@ fun CreateStreamView(
 
 @Composable
 fun UserWithCheckboxCell(
-    item: UserResponseData,
-    onUserSelected: (UserResponseData) -> Unit,
+    item: UserUIO,
+    onUserSelected: (UserUIO) -> Unit,
     isSelected: Boolean,
     baseUrl: String?,
     authHeaders: List<AuthHeader>,

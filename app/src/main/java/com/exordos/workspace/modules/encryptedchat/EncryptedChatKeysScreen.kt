@@ -62,7 +62,7 @@ import kotlinx.coroutines.launch
 import com.exordos.workspace.data.WorkspaceDateTime
 import com.exordos.workspace.R
 import com.exordos.workspace.data.remote.AuthHeader
-import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.uio.UserUIO
 import com.exordos.workspace.ui.Avatar
 import com.exordos.workspace.ui.theme.InterFontFamily
 
@@ -75,7 +75,7 @@ private val KeyDivider = Color(0xFF333333)
 @Composable
 fun EncryptedChatKeysScreen(
     state: EncryptedChatSessionState,
-    users: List<UserResponseData>,
+    users: List<UserUIO>,
     onBack: () -> Unit,
     onRequestKey: (String) -> Unit,
     onGrantRequest: (String) -> Unit,
@@ -279,7 +279,7 @@ private fun KeyScreenHeader(title: String, onBack: () -> Unit, onClose: () -> Un
 
 @Composable
 private fun EncryptedChatRequestRow(
-    request: EncryptedChatKeyRequest, user: UserResponseData?, role: String?, baseUrl: String, authHeaders: List<AuthHeader>,
+    request: EncryptedChatKeyRequest, user: UserUIO?, role: String?, baseUrl: String, authHeaders: List<AuthHeader>,
     canManage: Boolean, hasKey: Boolean, pending: Boolean, onGrant: (String) -> Unit, onReject: (String) -> Unit,
 ) {
     val name = user?.displayableName() ?: stringResource(R.string.encrypted_chat_member)

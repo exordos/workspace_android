@@ -1,5 +1,6 @@
 package com.exordos.workspace.modules.encryptedchat
 
+import com.exordos.workspace.data.uio.toDto
 import android.content.Context
 import android.os.Build
 import kotlinx.coroutines.CancellationException
@@ -27,8 +28,8 @@ import com.exordos.workspace.data.remote.ApiResult
 import com.exordos.workspace.data.remote.WorkspaceAPIClient
 import com.exordos.workspace.data.remote.dto.EncryptedEditMessageRequest
 import com.exordos.workspace.data.remote.dto.EncryptedSendMessageRequest
-import com.exordos.workspace.data.remote.dto.MessageResponse
-import com.exordos.workspace.data.remote.dto.MessageResponsePayload
+import com.exordos.workspace.data.uio.MessageUIO
+import com.exordos.workspace.data.uio.MessagePayloadUIO
 import com.exordos.workspace.data.remote.dto.MessagesByIdsRequest
 import com.exordos.workspace.data.remote.dto.MessagesRequest
 import com.exordos.workspace.data.remote.dto.StreamBindingsRequest
@@ -70,7 +71,7 @@ class EncryptedChatRuntime(
     private var sessionStateJob: Job? = null
     private var defaultTopic: String? = null
     private var rolesLoaded = false
-    private var rawSignature: List<Pair<String, MessageResponsePayload>>? = null
+    private var rawSignature: List<Pair<String, MessagePayloadUIO>>? = null
     private var presentationRevision = -1L
     private class PreparedSend(val topicUuid: String, val textHash: ByteArray, val payload: EncryptedChatPayload)
     private val preparedSends = ConcurrentHashMap<String, PreparedSend>()
@@ -278,7 +279,7 @@ class EncryptedChatRuntime(
         created
     }
 
-    private fun wireMessages(): List<MessageResponse> = latestEncryptedChatWireMessages(
+    private fun wireMessages(): List<MessageUIO> = latestEncryptedChatWireMessages(
         repo.messagesPool.value, repo.streamTopicMessages.value.values.flatten(), streamId)
 
     internal suspend fun refresh(force: Boolean = false) = refreshMutex.withLock {
@@ -308,7 +309,7 @@ class EncryptedChatRuntime(
     }
 
     private suspend fun postPayload(payload: EncryptedChatPayload, targetTopic: String, canonical: String,
-                                    guard: () -> Boolean): MessageResponse {
+                                    guard: () -> Boolean): MessageUIO {
         val confirmed = account ?: throw EncryptedChatException(EncryptedChatFailure.STALE)
         val authenticatedGuard = { guard() && boundCurrent(confirmed) }
         requireBound()
@@ -316,7 +317,7 @@ class EncryptedChatRuntime(
         val captured = confirmed.serverConfig()
         val expectedUuid = encryptedMessagePlacementUuid(targetTopic, canonical)
         val response = try {
-            client.performRequest(confirmed.pin(EncryptedSendMessageRequest(streamId, targetTopic, payload.asMessageResponsePayload(), canonical)), serverId, captured)
+            client.performRequest(confirmed.pin(EncryptedSendMessageRequest(streamId, targetTopic, payload.asMessagePayloadUIO().toDto(), canonical)), serverId, captured)
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { null }
         requireBound()
@@ -334,7 +335,7 @@ class EncryptedChatRuntime(
         requireBound()
         if (!authenticatedGuard() || raw.uuid != expectedUuid || raw.streamUuid != streamId || raw.topicUuid != targetTopic ||
             raw.authorUuid != ownerUuid || (raw.projectId != null && raw.projectId != confirmed.projectUuid) ||
-            raw.payload != payload.asMessageResponsePayload())
+            raw.payload != payload.asMessagePayloadUIO())
             throw EncryptedChatException(EncryptedChatFailure.INVALID_MESSAGE)
         repo.reconcileSentMessage(canonical, raw)
         return raw
@@ -352,7 +353,7 @@ class EncryptedChatRuntime(
         catch (error: Exception) { report(error); throw error }
     }
 
-    suspend fun sendText(text: String, topicId: String = this.topicId, canonicalUuid: String? = null): MessageResponse = action { active ->
+    suspend fun sendText(text: String, topicId: String = this.topicId, canonicalUuid: String? = null): MessageUIO = action { active ->
         val canonical = canonicalUuid ?: UUID.randomUUID().toString()
         val textBytes = text.toByteArray(Charsets.UTF_8)
         val textHash = try { MessageDigest.getInstance("SHA-256").digest(textBytes) } finally { textBytes.fill(0) }
@@ -368,7 +369,7 @@ class EncryptedChatRuntime(
         }
     }
 
-    suspend fun editText(uuid: String, text: String): MessageResponse = action { active ->
+    suspend fun editText(uuid: String, text: String): MessageUIO = action { active ->
         val original = wireMessages().firstOrNull { it.uuid == uuid && it.authorUuid == ownerUuid && it.payload.kind == "e2ee" }
             ?: throw EncryptedChatException(EncryptedChatFailure.FORBIDDEN)
         active.send(text) { payload, guard ->
@@ -376,7 +377,7 @@ class EncryptedChatRuntime(
             val authenticatedGuard = { guard() && boundCurrent(confirmed) }
             requireBound()
             if (!authenticatedGuard()) throw EncryptedChatException(EncryptedChatFailure.STALE)
-            val response = client.performRequest(confirmed.pin(EncryptedEditMessageRequest(uuid, payload.asMessageResponsePayload())), serverId, confirmed.serverConfig())
+            val response = client.performRequest(confirmed.pin(EncryptedEditMessageRequest(uuid, payload.asMessagePayloadUIO().toDto())), serverId, confirmed.serverConfig())
             requireBound()
             if (!authenticatedGuard()) throw EncryptedChatException(EncryptedChatFailure.STALE)
             val raw = when (response) {
@@ -385,14 +386,14 @@ class EncryptedChatRuntime(
             }
             if (raw.uuid != uuid || raw.streamUuid != streamId || raw.topicUuid != original.topicUuid ||
                 raw.authorUuid != ownerUuid || (raw.projectId != null && raw.projectId != confirmed.projectUuid) ||
-            raw.payload != payload.asMessageResponsePayload())
+            raw.payload != payload.asMessagePayloadUIO())
                 throw EncryptedChatException(EncryptedChatFailure.INVALID_MESSAGE)
             repo.updateMessage(raw)
             raw
         }
     }
 
-    suspend fun presentation(message: MessageResponse): EncryptedChatPresentation {
+    suspend fun presentation(message: MessageUIO): EncryptedChatPresentation {
         lateinit var expectedAccount: ConfirmedAccountContext
         lateinit var expectedSession: EncryptedChatSession
         val projected = action { active ->
@@ -407,7 +408,7 @@ class EncryptedChatRuntime(
             projected
         }
     }
-    suspend fun requestKey(keyUuid: String? = null, recoveryMessage: MessageResponse? = null) = action { active ->
+    suspend fun requestKey(keyUuid: String? = null, recoveryMessage: MessageUIO? = null) = action { active ->
         active.requestKey(keyUuid, recoveryMessage?.asEncryptedChatWire(active.scope.projectId))
     }
     suspend fun grantKey(requestMessageUuid: String) = action { it.grantKey(requestMessageUuid) }
@@ -427,11 +428,11 @@ class EncryptedChatRuntime(
     }
 }
 
-fun MessageResponse.asEncryptedChatWire(projectId: String) = EncryptedChatWireMessage(uuid, this.projectId ?: projectId, streamUuid, authorUuid,
+fun MessageUIO.asEncryptedChatWire(projectId: String) = EncryptedChatWireMessage(uuid, this.projectId ?: projectId, streamUuid, authorUuid,
     EncryptedChatPayload(payload.kind, payload.keyUuid.orEmpty(), payload.content, payload.deviceId, payload.deviceName,
         payload.publicKey, payload.requestMessageUuid, payload.senderDeviceId, payload.recipientDeviceId))
 
-fun EncryptedChatPayload.asMessageResponsePayload() = MessageResponsePayload(kind, content, keyUuid, deviceId,
+fun EncryptedChatPayload.asMessagePayloadUIO() = MessagePayloadUIO(kind, content, keyUuid, deviceId,
     deviceName, publicKey, requestMessageUuid, senderDeviceId, recipientDeviceId)
 
 /** Backend v2_store uses UUIDv5(topic UUID, canonical UUID's standard string). */
@@ -452,9 +453,9 @@ internal fun encryptedChatStorageScopeMatches(left: EncryptedChatScope, right: E
         left.deviceId == right.deviceId && left.streamId == right.streamId
 
 /** Pool and open-conversation snapshots may arrive in either order; edits must beat old ciphertext. */
-internal fun latestEncryptedChatWireMessages(pool: List<MessageResponse>, conversations: List<MessageResponse>,
-                                             streamId: String): List<MessageResponse> {
-    val latest = linkedMapOf<String, MessageResponse>()
+internal fun latestEncryptedChatWireMessages(pool: List<MessageUIO>, conversations: List<MessageUIO>,
+                                             streamId: String): List<MessageUIO> {
+    val latest = linkedMapOf<String, MessageUIO>()
     for (message in pool + conversations) {
         if (message.streamUuid != streamId || message.payload.kind == "markdown") continue
         val previous = latest[message.uuid]

@@ -8,13 +8,13 @@ import kotlinx.coroutines.launch
 import com.exordos.workspace.data.remote.ApiResult
 import com.exordos.workspace.data.remote.WorkspaceAPIClient
 import com.exordos.workspace.data.remote.dto.UsersRequest
-import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.uio.UserUIO
 
 class UsersViewModel(
     val client: WorkspaceAPIClient
 ): ViewModel() {
-    private val _users = MutableStateFlow<List<UserResponseData>>(emptyList())
-    val users: StateFlow<List<UserResponseData>> = _users
+    private val _users = MutableStateFlow<List<UserUIO>>(emptyList())
+    val users: StateFlow<List<UserUIO>> = _users
 
     init {
         viewModelScope.launch {

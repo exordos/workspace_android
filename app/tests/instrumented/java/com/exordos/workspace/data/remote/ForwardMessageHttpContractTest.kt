@@ -1,5 +1,7 @@
 package com.exordos.workspace.data.remote
 
+import com.exordos.workspace.data.uio.toUio
+import com.exordos.workspace.data.uio.MessageUIO
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.lifecycle.viewModelScope
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -107,20 +109,20 @@ class ForwardMessageHttpContractTest {
             user.accessToken.first { it == "cassi-forward-contract-fixture" }
         }
         eventsStore.getOrCreate(config).updateCurrentUser(
-            UserResponseData(username = "cassi-fixture", uuid = AUTHOR, status = "active", avatar = ""),
+            UserResponseData(username = "cassi-fixture", uuid = AUTHOR, status = "active", avatar = "").toUio(),
         )
     }
 
     @Test fun postAndReadbackConfirmTheReturnedMessageWithoutOptimisticSuccess() = runBlocking {
-        val content = requireNotNull(buildWorkspaceForwardMarkdown(listOf(message(SOURCE))))
+        val content = requireNotNull(buildWorkspaceForwardMarkdown(listOf(message(SOURCE).toUio())))
         val persisted = message(RETURNED).copy(payload = MessageResponsePayload("markdown", content))
         ForwardLoopbackServer(listOf(201 to """{"uuid":"$RETURNED","topic_uuid":"$TOPIC"}""", 200 to Json.encodeToString(listOf(persisted)))).use { server ->
             saveSession(server.baseUrl)
-            val confirmed = mutableListOf<MessageResponse>()
+            val confirmed = mutableListOf<MessageUIO>()
             val forwarding = sender { confirmed += it }
             forwarding.send(ForwardDestination(STREAM, TOPIC))
             assertEquals(ForwardDeliveryStatus.COMPLETED, forwarding.state.value.status)
-            assertEquals(listOf(persisted), confirmed)
+            assertEquals(listOf(persisted.toUio()), confirmed)
             val requests = server.awaitRequests()
             assertEquals("POST /api/workspace/v1/messenger/messages/ HTTP/1.1", requests[0].line)
             assertEquals("Bearer cassi-forward-contract-fixture", requests[0].authorization)
@@ -151,7 +153,7 @@ class ForwardMessageHttpContractTest {
 
     @Test fun legacySessionWithoutProjectPreparesAndConfirmsOrdinaryInternalForward() = runBlocking {
         val source = message(SOURCE).copy(projectId = PROJECT)
-        val content = requireNotNull(buildWorkspaceForwardMarkdown(listOf(source)))
+        val content = requireNotNull(buildWorkspaceForwardMarkdown(listOf(source.toUio())))
         val persisted = message(RETURNED).copy(projectId = PROJECT, payload = MessageResponsePayload("markdown", content))
         ForwardLoopbackServer(listOf(201 to """{"uuid":"$RETURNED","topic_uuid":"$TOPIC"}""",
             200 to Json.encodeToString(listOf(persisted)))).use { server ->
@@ -159,9 +161,9 @@ class ForwardMessageHttpContractTest {
             val repo = requireNotNull(eventsStore.get(serverId))
             val access = ForwardEncryptedAccess(InstrumentationRegistry.getInstrumentation().targetContext, api, repo, AUTHOR)
             val preparation = createForwardPreparation(InstrumentationRegistry.getInstrumentation().targetContext,
-                listOf(source), api, AUTHOR, repo, access)
-            var confirmed: MessageResponse? = null
-            val forwarding = MessageForwarding(listOf(source), AUTHOR,
+                listOf(source).map { it.toUio() }, api, AUTHOR, repo, access)
+            var confirmed: MessageUIO? = null
+            val forwarding = MessageForwarding(listOf(source).map { it.toUio() }, AUTHOR,
                 post = { uuid, target, text ->
                     access.requireCurrent()
                     api.performRequest(ForwardMessageRequest(uuid, target.streamUuid, target.topicUuid, text), access.serverId, access.config)
@@ -170,7 +172,7 @@ class ForwardMessageHttpContractTest {
                 onConfirmed = { confirmed = it }, newUuid = { REQUESTED }, prepare = preparation::prepare)
             forwarding.send(ForwardDestination(STREAM, TOPIC))
             assertEquals(ForwardDeliveryStatus.COMPLETED, forwarding.state.value.status)
-            assertEquals(persisted, confirmed)
+            assertEquals(persisted.toUio(), confirmed)
             assertNull(access.config.projectUuid)
             val requests = server.awaitRequests()
             assertEquals(1, requests.count { it.line.startsWith("POST ") })
@@ -188,7 +190,7 @@ class ForwardMessageHttpContractTest {
             access.requireCurrent()
             val source = message(SOURCE).copy(projectId = PROJECT,
                 payload = MessageResponsePayload("markdown", "Visible text\n[report.pdf](urn:file:$RETURNED?name=ignored.pdf&size=123)"))
-            val shared = materializeExternalMessages(listOf(source), presentMessage = access::present) { null }
+            val shared = materializeExternalMessages(listOf(source).map { it.toUio() }, presentMessage = access::present) { null }
             assertTrue(shared.text.contains("Visible text"))
             assertFalse(shared.text.contains("urn:"))
             assertEquals(RETURNED, shared.files.single().uuid)
@@ -202,10 +204,10 @@ class ForwardMessageHttpContractTest {
             saveSession(server.baseUrl, projectUuid = null)
             val repo = requireNotNull(eventsStore.get(serverId))
             repo.setInitialStreams(listOf(Stream(STREAM, 0, 0, 0, "2026-10-15T12:00:00Z", "Protected", true, 0,
-                encryption = true, currentEncryptionKeyUuid = RETURNED, defaultTopicUuid = TOPIC, notificationMode = "all_messages")))
+                encryption = true, currentEncryptionKeyUuid = RETURNED, defaultTopicUuid = TOPIC, notificationMode = "all_messages")).map { it.toUio() })
             val access = ForwardEncryptedAccess(InstrumentationRegistry.getInstrumentation().targetContext, api, repo, AUTHOR)
             val encrypted = message(SOURCE).copy(payload = MessageResponsePayload("e2ee", "opaque", RETURNED))
-            assertTrue(runCatching { withTimeout(1_000) { access.present(encrypted) } }.exceptionOrNull() is ForwardPreparationFailure)
+            assertTrue(runCatching { withTimeout(1_000) { access.present(encrypted.toUio()) } }.exceptionOrNull() is ForwardPreparationFailure)
             assertTrue(runCatching { withTimeout(1_000) { access.send(ForwardDestination(STREAM, TOPIC), REQUESTED, "text") } }
                 .exceptionOrNull() is ForwardPreparationFailure)
             assertTrue(server.awaitRequests().isEmpty())
@@ -220,7 +222,7 @@ class ForwardMessageHttpContractTest {
         val fileHash = MessageDigest.getInstance("SHA-256").digest(fileContent.toByteArray()).joinToString("") { "%02x".format(it) }
         val source = message(SOURCE).copy(payload = MessageResponsePayload("markdown", "Private source text\n\n[specification](urn:file:$originalFile)"))
         val preparedSource = source.copy(payload = source.payload.copy(content = source.payload.content.replace(originalFile, destinationFile)))
-        val content = requireNotNull(buildWorkspaceForwardMarkdown(listOf(preparedSource)))
+        val content = requireNotNull(buildWorkspaceForwardMarkdown(listOf(preparedSource.toUio())))
         val persisted = message(RETURNED).copy(payload = MessageResponsePayload("markdown", content))
         val fileRecord = ForwardFileRecord(destinationFile, "report.pdf", fileHash, STREAM, AUTHOR, "application/pdf")
         ForwardLoopbackServer(listOf(
@@ -233,10 +235,10 @@ class ForwardMessageHttpContractTest {
             200 to Json.encodeToString(listOf(persisted)),
         )).use { server ->
             saveSession(server.baseUrl)
-            val preparation = createForwardPreparation(context, listOf(source), api, AUTHOR,
+            val preparation = createForwardPreparation(context, listOf(source).map { it.toUio() }, api, AUTHOR,
                 requireNotNull(eventsStore.get(serverId)))
             var confirmed = false
-            val forwarding = MessageForwarding(listOf(source), AUTHOR,
+            val forwarding = MessageForwarding(listOf(source).map { it.toUio() }, AUTHOR,
                 post = { uuid, target, text -> api.performRequest(ForwardMessageRequest(uuid, target.streamUuid, target.topicUuid, text)) },
                 read = { api.performRequest(MessagesByIdsRequest(listOf(it))) }, onConfirmed = { confirmed = true },
                 newUuid = { REQUESTED }, prepare = preparation::prepare)
@@ -261,7 +263,7 @@ class ForwardMessageHttpContractTest {
         }
     }
 
-    private fun sender(onConfirmed: (MessageResponse) -> Unit) = MessageForwarding(listOf(message(SOURCE)), AUTHOR,
+    private fun sender(onConfirmed: (MessageUIO) -> Unit) = MessageForwarding(listOf(message(SOURCE)).map { it.toUio() }, AUTHOR,
         post = { uuid, target, text -> api.performRequest(ForwardMessageRequest(uuid, target.streamUuid, target.topicUuid, text)) },
         read = { api.performRequest(MessagesByIdsRequest(listOf(it))) }, onConfirmed = onConfirmed, newUuid = { REQUESTED })
 

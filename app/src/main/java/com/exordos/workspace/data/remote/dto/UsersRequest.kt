@@ -1,6 +1,8 @@
 package com.exordos.workspace.data.remote.dto
 
-import android.text.EmojiConsistency
+import com.exordos.workspace.data.remote.UIORequest
+import com.exordos.workspace.data.uio.toUio
+import com.exordos.workspace.data.uio.UserUIO
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import com.exordos.workspace.data.remote.ApiError
@@ -8,7 +10,8 @@ import com.exordos.workspace.data.remote.ApiRequest
 import com.exordos.workspace.data.remote.EmptyRequestData
 import com.exordos.workspace.data.remote.HTTPMethod
 
-class UsersRequest(): ApiRequest<EmptyRequestData, List<UserResponseData>, ApiError> {
+class UsersRequest(): UIORequest<EmptyRequestData, List<UserResponseData>, List<UserUIO>, ApiError> {
+    override fun toUio(dto: List<UserResponseData>): List<UserUIO> = dto.map { it.toUio() }
     override val method: HTTPMethod = HTTPMethod.GET
     override val requiresApiKey: Boolean = true
     override val url: String = "/api/workspace/v1/messenger/users/"
@@ -17,41 +20,13 @@ class UsersRequest(): ApiRequest<EmptyRequestData, List<UserResponseData>, ApiEr
 
 @Serializable
 data class UserResponseData(
-    var email: String? = null,
-    @SerialName("first_name") var firstName: String? = null,
-    @SerialName("last_name") var lastName: String? = null,
+    val email: String? = null,
+    @SerialName("first_name") val firstName: String? = null,
+    @SerialName("last_name") val lastName: String? = null,
     val username: String,
     val uuid: String,
-    @SerialName("status_emoji") var statusEmoji: String? = null,
-    @SerialName("status_text") var statusText: String? = null,
-    var status: String,
-    var avatar: String
-) {
-    fun displayableName(): String {
-        var displayName = ""
-        if (firstName != null) {
-            displayName += firstName
-        }
-
-        if (lastName != null) {
-            if (!displayName.isEmpty()) {
-                displayName += " "
-            }
-            displayName += lastName
-        }
-
-        if (displayName.isEmpty()) {
-            displayName += username
-        }
-
-        return  displayName
-    }
-
-    fun statusDescription(): String {
-        if (status == "active") {
-            return "В сети"
-        } else {
-            return "Не в сети"
-        }
-    }
-}
+    @SerialName("status_emoji") val statusEmoji: String? = null,
+    @SerialName("status_text") val statusText: String? = null,
+    val status: String,
+    val avatar: String
+)

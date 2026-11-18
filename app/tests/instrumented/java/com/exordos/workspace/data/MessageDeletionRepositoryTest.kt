@@ -18,13 +18,13 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import com.exordos.workspace.data.remote.dto.MessageReaction
-import com.exordos.workspace.data.remote.dto.MessageResponse
-import com.exordos.workspace.data.remote.dto.MessageResponsePayload
-import com.exordos.workspace.data.remote.dto.Stream
-import com.exordos.workspace.data.remote.dto.StreamBindingResponseData
-import com.exordos.workspace.data.remote.dto.Draft
-import com.exordos.workspace.data.remote.dto.TopicsResponseData
+import com.exordos.workspace.data.uio.MessageReactionUIO
+import com.exordos.workspace.data.uio.MessageUIO
+import com.exordos.workspace.data.uio.MessagePayloadUIO
+import com.exordos.workspace.data.uio.StreamUIO
+import com.exordos.workspace.data.uio.StreamBindingUIO
+import com.exordos.workspace.data.uio.DraftUIO
+import com.exordos.workspace.data.uio.TopicUIO
 
 @RunWith(AndroidJUnit4::class)
 class MessageDeletionRepositoryTest {
@@ -60,8 +60,8 @@ class MessageDeletionRepositoryTest {
         repository.setInitialMessagesPool(listOf(kept, deleted))
         repository.setInitialMessageReactions(
             listOf(
-                MessageReaction("deleted-reaction", "user", "smile", deleted.uuid),
-                MessageReaction("kept-reaction", "user", "smile", kept.uuid),
+                MessageReactionUIO("deleted-reaction", "user", "smile", deleted.uuid),
+                MessageReactionUIO("kept-reaction", "user", "smile", kept.uuid),
             ),
         )
         repository.setInitialStreams(listOf(stream(deleted), stream(kept).copy(uuid = "other")))
@@ -95,8 +95,8 @@ class MessageDeletionRepositoryTest {
 
         repository.didReceiveMessageEvent("""{"uuid":"deleted"}""", "deleted")
 
-        assertEquals(emptyList<MessageResponse>(), repository.streamTopicMessages.value["stream.topic"])
-        assertEquals(emptyList<MessageResponse>(), repository.streamTopicMessages.value["stream.another-topic"])
+        assertEquals(emptyList<MessageUIO>(), repository.streamTopicMessages.value["stream.topic"])
+        assertEquals(emptyList<MessageUIO>(), repository.streamTopicMessages.value["stream.another-topic"])
     }
 
     @Test
@@ -128,7 +128,7 @@ class MessageDeletionRepositoryTest {
     @Test
     fun `WebSocket before HTTP confirmation leaves one message without mutating the pending snapshot`() {
         val pending = message("pending-client-id")
-        val server = message("server-id").copy(payload = MessageResponsePayload("markdown", "Server content"))
+        val server = message("server-id").copy(payload = MessagePayloadUIO("markdown", "Server content"))
         repository.addStreamTopicMessages("stream", "topic", listOf(pending))
         repository.setInitialMessagesPool(listOf(pending))
         repository.addMessageToStreamTopic(server)
@@ -161,15 +161,15 @@ class MessageDeletionRepositoryTest {
         val deleted = message("deleted")
         val kept = message("kept").copy(streamUuid = "other")
         repository.setInitialStreams(listOf(stream(deleted), stream(kept).copy(uuid = "other")))
-        repository.addStreamBindings("stream", listOf(StreamBindingResponseData("binding", "member", "stream", "user")))
-        repository.addStreamBindings("other", listOf(StreamBindingResponseData("other-binding", "member", "other", "user")))
+        repository.addStreamBindings("stream", listOf(StreamBindingUIO("binding", "member", "stream", "user")))
+        repository.addStreamBindings("other", listOf(StreamBindingUIO("other-binding", "member", "other", "user")))
         repository.addStreamTopicMessages("stream", "topic", listOf(deleted))
         repository.addStreamTopicMessages("other", "topic", listOf(kept))
         repository.setInitialMessagesPool(listOf(deleted, kept))
         repository.addStreamTopics("stream", listOf(topic(deleted)))
         repository.addStreamTopics("other", listOf(topic(kept).copy(streamUuid = "other")))
-        repository.setInitialDraftsPool(listOf(Draft("draft", "stream", "topic", deleted.updatedAt, deleted.payload, 1)))
-        repository.setInitialMessageReactions(listOf(MessageReaction("reaction", "user", "smile", deleted.uuid)))
+        repository.setInitialDraftsPool(listOf(DraftUIO("draft", "stream", "topic", deleted.updatedAt, deleted.payload, 1)))
+        repository.setInitialMessageReactions(listOf(MessageReactionUIO("reaction", "user", "smile", deleted.uuid)))
         val signal = async(start = CoroutineStart.UNDISPATCHED) {
             withTimeout(5_000) { repository.streamDeletedEvents.first() }
         }
@@ -187,7 +187,7 @@ class MessageDeletionRepositoryTest {
         assertEquals(listOf(kept), repository.messagesPool.value)
     }
 
-    private fun message(uuid: String) = MessageResponse(
+    private fun message(uuid: String) = MessageUIO(
         uuid = uuid,
         updatedAt = "2026-09-07T12:00:00Z",
         createdAt = "2026-09-07T12:00:00Z",
@@ -195,13 +195,13 @@ class MessageDeletionRepositoryTest {
         topicUuid = "topic",
         userUuid = "user",
         authorUuid = "user",
-        payload = MessageResponsePayload("markdown", uuid),
+        payload = MessagePayloadUIO("markdown", uuid),
         isOwn = true,
         reactions = emptyMap(),
         read = true,
     )
 
-    private fun stream(message: MessageResponse) = Stream(
+    private fun stream(message: MessageUIO) = StreamUIO(
         uuid = "stream",
         unreadCount = 0,
         activeUnreadCount = 0,
@@ -215,7 +215,7 @@ class MessageDeletionRepositoryTest {
         lastMessage = message,
     )
 
-    private fun topic(message: MessageResponse) = TopicsResponseData(
+    private fun topic(message: MessageUIO) = TopicUIO(
         uuid = "topic",
         name = "Topic",
         color = 0,

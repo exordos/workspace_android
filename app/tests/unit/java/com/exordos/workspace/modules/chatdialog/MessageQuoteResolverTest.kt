@@ -10,8 +10,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import com.exordos.workspace.data.remote.ApiError
 import com.exordos.workspace.data.remote.ApiResult
-import com.exordos.workspace.data.remote.dto.MessageResponse
-import com.exordos.workspace.data.remote.dto.MessageResponsePayload
+import com.exordos.workspace.data.uio.MessageUIO
+import com.exordos.workspace.data.uio.MessagePayloadUIO
 
 class MessageQuoteResolverTest {
     @Test
@@ -36,7 +36,7 @@ class MessageQuoteResolverTest {
     @Test
     fun `loading references are not requested twice`() = runBlocking {
         val started = CompletableDeferred<Unit>()
-        val result = CompletableDeferred<ApiResult<List<MessageResponse>, ApiError>>()
+        val result = CompletableDeferred<ApiResult<List<MessageUIO>, ApiError>>()
         var requests = 0
         val resolver = MessageQuoteResolver(this) {
             requests++
@@ -94,7 +94,7 @@ class MessageQuoteResolverTest {
     @Test
     fun `deleted reference cannot be restored by a late response or retry`() = runBlocking {
         val started = CompletableDeferred<Unit>()
-        val response = CompletableDeferred<ApiResult<List<MessageResponse>, ApiError>>()
+        val response = CompletableDeferred<ApiResult<List<MessageUIO>, ApiError>>()
         val resolver = MessageQuoteResolver(this) {
             started.complete(Unit)
             response.await()
@@ -113,7 +113,7 @@ class MessageQuoteResolverTest {
     @Test
     fun `reset discards old account response without overriding a new account lookup`() = runBlocking {
         val firstStarted = CompletableDeferred<Unit>()
-        val firstResponse = CompletableDeferred<ApiResult<List<MessageResponse>, ApiError>>()
+        val firstResponse = CompletableDeferred<ApiResult<List<MessageUIO>, ApiError>>()
         var requests = 0
         val resolver = MessageQuoteResolver(this) {
             requests++
@@ -121,7 +121,7 @@ class MessageQuoteResolverTest {
                 firstStarted.complete(Unit)
                 firstResponse.await()
             } else {
-                ApiResult.Success(listOf(message(FIRST_UUID).copy(payload = MessageResponsePayload("markdown", "new account"))))
+                ApiResult.Success(listOf(message(FIRST_UUID).copy(payload = MessagePayloadUIO("markdown", "new account"))))
             }
         }
         resolver.load(listOf(FIRST_UUID))
@@ -177,7 +177,7 @@ class MessageQuoteResolverTest {
         }
         resolver.load(listOf(FIRST_UUID))
         resolver.awaitSettled(FIRST_UUID)
-        val update = message(FIRST_UUID).copy(payload = MessageResponsePayload("markdown", "Edited source"))
+        val update = message(FIRST_UUID).copy(payload = MessagePayloadUIO("markdown", "Edited source"))
 
         resolver.update(update)
         update.payload.content = "Changed outside cache"
@@ -191,14 +191,14 @@ class MessageQuoteResolverTest {
     @Test
     fun `realtime edit cannot be overwritten by a preceding HTTP lookup`() = runBlocking {
         val started = CompletableDeferred<Unit>()
-        val response = CompletableDeferred<ApiResult<List<MessageResponse>, ApiError>>()
+        val response = CompletableDeferred<ApiResult<List<MessageUIO>, ApiError>>()
         val resolver = MessageQuoteResolver(this) {
             started.complete(Unit)
             response.await()
         }
         resolver.load(listOf(FIRST_UUID))
         started.await()
-        resolver.update(message(FIRST_UUID).copy(payload = MessageResponsePayload("markdown", "Edited source")))
+        resolver.update(message(FIRST_UUID).copy(payload = MessagePayloadUIO("markdown", "Edited source")))
         response.complete(ApiResult.Success(listOf(message(FIRST_UUID))))
         yield()
 
@@ -213,7 +213,7 @@ class MessageQuoteResolverTest {
         Unit
     }
 
-    private fun message(uuid: String) = MessageResponse(
+    private fun message(uuid: String) = MessageUIO(
         uuid = uuid,
         updatedAt = "2026-09-07T12:00:00Z",
         createdAt = "2026-09-07T12:00:00Z",
@@ -221,7 +221,7 @@ class MessageQuoteResolverTest {
         topicUuid = "source-topic",
         userUuid = "current-user",
         authorUuid = "source-author",
-        payload = MessageResponsePayload("markdown", "Source message"),
+        payload = MessagePayloadUIO("markdown", "Source message"),
         isOwn = false,
         reactions = emptyMap(),
         read = true,

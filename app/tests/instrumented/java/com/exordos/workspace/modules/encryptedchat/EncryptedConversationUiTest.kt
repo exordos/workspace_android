@@ -1,5 +1,6 @@
 package com.exordos.workspace.modules.encryptedchat
 
+import com.exordos.workspace.data.uio.toUio
 import android.graphics.Bitmap
 import android.widget.TextView
 import android.graphics.Canvas
@@ -227,13 +228,13 @@ class EncryptedConversationUiTest {
         address = ChatKeyAddress(ChatKeyScope(owner, identity.deviceId), STREAM, CURRENT)
         assertTrue(keys.writeChatKey(address, fixture.groupKey, forSending = true))
         val repo = events.getOrCreate(config)
-        repo.updateCurrentUser(fixture.owner)
+        repo.updateCurrentUser(fixture.owner.toUio())
         repo.loadUserInfo()
         assertTrue(repo.verifiedOwnerAuthentication.value != null)
-        repo.setInitialUsers(listOf(fixture.owner, fixture.participant))
-        repo.setInitialStreams(listOf(fixture.stream))
-        repo.addStreamBindings(STREAM, fixture.bindings)
-        repo.addStreamTopicMessages(STREAM, TOPIC, fixture.messages.toList())
+        repo.setInitialUsers(listOf(fixture.owner, fixture.participant).map { it.toUio() })
+        repo.setInitialStreams(listOf(fixture.stream).map { it.toUio() })
+        repo.addStreamBindings(STREAM, fixture.bindings.map { it.toUio() })
+        repo.addStreamTopicMessages(STREAM, TOPIC, fixture.messages.toList().map { it.toUio() })
         chat = withContext(Dispatchers.Main) {
             ChatDialogViewModel(api, user, "Команда продукта", STREAM, "Общий чат", TOPIC,
                 false, events, null, AttachmentStorage(context, api))
@@ -508,7 +509,7 @@ class EncryptedConversationUiTest {
                     kotlin.math.abs(Color.blue(actual) - Color.blue(expected)) <= 2
             } }
         }
-        val authorName = (if (message.isOwn) fixture.owner else fixture.participant).displayableName()
+        val authorName = (if (message.isOwn) fixture.owner else fixture.participant).toUio().displayableName()
         val authorNode = compose.onNode(hasText(authorName) and
             hasAnyAncestor(hasTestTag("message-bubble-${message.uuid}")), useUnmergedTree = true).assertIsDisplayed()
         val layouts = mutableListOf<TextLayoutResult>()
@@ -561,7 +562,7 @@ class EncryptedConversationUiTest {
         val bubbles = fixture.messages.take(4).map { message ->
             val row = hasTestTag("chat-message-${message.uuid}")
             val author = if (message.isOwn) fixture.owner else fixture.participant
-            compose.onNode(hasText(author.displayableName()) and hasAnyAncestor(row), useUnmergedTree = true)
+            compose.onNode(hasText(author.toUio().displayableName()) and hasAnyAncestor(row), useUnmergedTree = true)
                 .assertIsDisplayed()
             val time = Instant.parse(message.createdAt).atZone(ZoneId.systemDefault())
                 .format(DateTimeFormatter.ofPattern("HH:mm"))
@@ -662,7 +663,7 @@ class EncryptedConversationUiTest {
         val historyBounds = visibleNativeTextBounds(historyText)
         val duringHistoryText = "Входящее сообщение во время просмотра истории"
         val duringHistory = fixture.incomingEncryptedMessage(duringHistoryText)
-        withContext(Dispatchers.Main) { chat.repo.addMessageToStreamTopic(duringHistory) }
+        withContext(Dispatchers.Main) { chat.repo.addMessageToStreamTopic(duringHistory.toUio()) }
         compose.waitUntil(10_000) {
             (chat.encryptedPresentations.value[duringHistory.uuid] as? EncryptedChatPresentation.Text)?.text == duringHistoryText
         }
@@ -679,7 +680,7 @@ class EncryptedConversationUiTest {
         waitForText(duringHistoryText)
         val afterReturnText = "Новое сообщение после возврата вниз"
         val afterReturn = fixture.incomingEncryptedMessage(afterReturnText)
-        withContext(Dispatchers.Main) { chat.repo.addMessageToStreamTopic(afterReturn) }
+        withContext(Dispatchers.Main) { chat.repo.addMessageToStreamTopic(afterReturn.toUio()) }
         waitForText(afterReturnText)
         assertTrue(chat.shouldScrollToBottom)
         capture("11-follow-after-return")
@@ -697,7 +698,7 @@ class EncryptedConversationUiTest {
             assertEquals(R.string.chat_send_unavailable, chat.actionError.value?.resourceId)
         }
         assertEquals(postedBeforeMissingSnapshot, fixture.sentBodies.size)
-        chat.repo.setInitialStreams(listOf(fixture.stream))
+        chat.repo.setInitialStreams(listOf(fixture.stream).map { it.toUio() })
         } catch (failure: Throwable) {
             runCatching { diagnostics("full-chat-failure") }
             throw failure
@@ -708,7 +709,7 @@ class EncryptedConversationUiTest {
         val history = (1..14).map { index ->
             fixture.incomingEncryptedMessage(("Сообщение $index: " + "Длинная строка меняет переносы при выделении. ".repeat(4)).trimEnd())
         }
-        withContext(Dispatchers.Main) { chat.repo.addStreamTopicMessages(STREAM, TOPIC, fixture.messages.toList()) }
+        withContext(Dispatchers.Main) { chat.repo.addStreamTopicMessages(STREAM, TOPIC, fixture.messages.toList().map { it.toUio() }) }
         showConversation()
         compose.waitUntil(10_000) { chat.encryptedPresentations.value[history.last().uuid] is EncryptedChatPresentation.Text }
         val latestText = (chat.encryptedPresentations.value.getValue(history.last().uuid) as EncryptedChatPresentation.Text).text
@@ -800,7 +801,7 @@ class EncryptedConversationUiTest {
                     recipientDeviceId = request.payload.deviceId),
             )
             fixture.messages += rejection
-            chat.repo.addStreamTopicMessages(STREAM, TOPIC, fixture.messages.toList())
+            chat.repo.addStreamTopicMessages(STREAM, TOPIC, fixture.messages.toList().map { it.toUio() })
             chat.encryptionRuntime.refresh(force = true)
             assertTrue(chat.encryptedChatState.value.requestStatus[CURRENT] == EncryptedChatRequestStatus.REJECTED)
             val previous = chat
@@ -1043,7 +1044,7 @@ internal class EncryptedConversationServer : Closeable {
     val url = "http://127.0.0.1:${socket.localPort}"
     val owner = UserResponseData(firstName = "Касандра", lastName = "Волкова", username = "cassi", uuid = OWNER, status = "active", avatar = "")
     val participant = UserResponseData(firstName = "Анна", lastName = "Соколова", username = "anna", uuid = PARTICIPANT, status = "active", avatar = "")
-    val stream = Stream(STREAM, 0, 0, 0, TIME, "Команда продукта", true, 0, defaultTopicUuid = TOPIC,
+    var stream = Stream(STREAM, 0, 0, 0, TIME, "Команда продукта", true, 0, defaultTopicUuid = TOPIC,
         notificationMode = "all", encryption = true, currentEncryptionKeyUuid = CURRENT, ownerUuid = OWNER, projectId = PROJECT)
     val bindings = listOf(StreamBindingResponseData(UUID.randomUUID().toString(), "owner", STREAM, OWNER),
         StreamBindingResponseData(UUID.randomUUID().toString(), "member", STREAM, PARTICIPANT))
@@ -1193,7 +1194,7 @@ internal class EncryptedConversationServer : Closeable {
                 if (payload.kind == "e2ee" && payload.keyUuid == CURRENT) sentPlaintexts += decrypt(payload)
                 val canonical = request.getValue("uuid").jsonPrimitive.content
                 val created = message(encryptedMessagePlacementUuid(TOPIC, canonical), payload, requestingUser)
-                if (payload.kind == "key_announced") stream.currentEncryptionKeyUuid = payload.keyUuid
+                if (payload.kind == "key_announced") stream = stream.copy(currentEncryptionKeyUuid = payload.keyUuid)
                 messages += created
                 nextMessageResponseGate?.let { gate ->
                     nextMessageResponseGate = null

@@ -15,7 +15,7 @@ import com.exordos.workspace.UserViewModel
 import com.exordos.workspace.data.EventsRepository
 import com.exordos.workspace.data.EventsRepositoryStore
 import com.exordos.workspace.data.remote.WorkspaceAPIClient
-import com.exordos.workspace.data.remote.dto.Stream
+import com.exordos.workspace.data.uio.StreamUIO
 import com.exordos.workspace.modules.chooseserver.QueryState
 
 class HomeViewModel(
@@ -43,7 +43,7 @@ class HomeViewModel(
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = QueryState.Idle,
         )
-    val streams: StateFlow<List<Stream>> = eventsRepo
+    val streams: StateFlow<List<StreamUIO>> = eventsRepo
         .flatMapLatest { repo ->
             repo?.streams ?: flowOf(emptyList())
         }

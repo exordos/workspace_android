@@ -14,6 +14,7 @@
 
 package com.exordos.workspace.data.push
 
+import com.exordos.workspace.data.uio.toUio
 import android.app.Notification
 import android.app.NotificationManager
 import android.content.ComponentName
@@ -107,7 +108,7 @@ class EncryptedPushReceiptTest {
         inbox.accept(route, 1)
         val old = Instant.now().minusSeconds(15 * 86400L).toString()
         val messages = List(2000) { readSnapshot(UUID.randomUUID().toString(), old) } + readSnapshot(route.messageUuid, old)
-        notifications.knownMessages(registration.serverId, registration.userUuid, messages)
+        notifications.knownMessages(registration.serverId, registration.userUuid, messages.map { it.toUio() })
         assertEquals("Loaded history must only close the already received old push", 1, storedRows())
         assertNull(inbox.resolve(route.identity))
         assertFalse(inbox.accept(route, 2))
@@ -115,7 +116,7 @@ class EncryptedPushReceiptTest {
 
     @Test fun aRecentReadSnapshotBeforeThePushStillPreventsLateDisplay() {
         notifications.knownMessages(registration.serverId, registration.userUuid,
-            listOf(readSnapshot(route.messageUuid, Instant.now().toString())))
+            listOf(readSnapshot(route.messageUuid, Instant.now().toString())).map { it.toUio() })
         assertTrue(notifications.receive(create))
         assertAbsent()
         assertNull(notifications.resolve("workspace-push/${route.identity}"))

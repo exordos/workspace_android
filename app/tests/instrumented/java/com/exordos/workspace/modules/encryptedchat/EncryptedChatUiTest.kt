@@ -32,7 +32,7 @@ import org.junit.runner.RunWith
 import com.exordos.workspace.R
 import com.exordos.workspace.data.crypto.ChatMessageContext
 import com.exordos.workspace.data.crypto.WorkspaceChatCrypto
-import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.uio.UserUIO
 import com.exordos.workspace.ui.theme.LocalWorkspaceColorsPalette
 import com.exordos.workspace.ui.theme.WokspaceTheme
 import java.io.File
@@ -221,7 +221,7 @@ class EncryptedChatUiTest {
         )),
     )
 
-    private fun users() = listOf(UserResponseData(firstName = "Анна", lastName = "Соколова", username = "anna", uuid = USER, status = "active", avatar = ""))
+    private fun users() = listOf(UserUIO(firstName = "Анна", lastName = "Соколова", username = "anna", uuid = USER, status = "active", avatar = ""))
 
     companion object {
         private const val CURRENT = "11111111-1111-4111-8111-111111111111"
