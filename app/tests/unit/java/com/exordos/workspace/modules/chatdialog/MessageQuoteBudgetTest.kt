@@ -2,7 +2,7 @@ package com.exordos.workspace.modules.chatdialog
 
 import org.junit.Assert.*
 import org.junit.Test
-import com.exordos.workspace.data.remote.dto.MessageElement
+import com.exordos.workspace.data.uio.MessageElement
 
 class MessageQuoteBudgetTest {
     private val quote = MessageElement.Quote("Author", "00000000-0000-0000-0000-000000000001", "")

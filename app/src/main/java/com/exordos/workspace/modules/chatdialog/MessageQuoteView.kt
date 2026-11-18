@@ -32,9 +32,9 @@ import coil3.compose.AsyncImage
 import coil3.network.NetworkHeaders
 import coil3.network.httpHeaders
 import coil3.request.ImageRequest
-import com.exordos.workspace.data.remote.dto.MessageElement
+import com.exordos.workspace.data.uio.MessageElement
 import com.exordos.workspace.R
-import com.exordos.workspace.data.remote.dto.MessageResponse
+import com.exordos.workspace.data.uio.MessageUIO
 import com.exordos.workspace.ui.EnhancedMarkdown
 import com.exordos.workspace.ui.ReferenceMessageBase
 import com.exordos.workspace.ui.theme.InterFontFamily
@@ -158,7 +158,7 @@ internal fun MessageQuoteCard(
     authorLabel: String,
     isOwn: Boolean,
     onRetry: () -> Unit,
-    content: @Composable (MessageResponse) -> Unit,
+    content: @Composable (MessageUIO) -> Unit,
 ) {
     val colors = LocalWorkspaceColorsPalette.current
     ReferenceMessageBase(Modifier.padding(vertical = 4.dp), shouldClose = false, onCloseTap = {}) {

@@ -1,6 +1,6 @@
 package com.exordos.workspace.modules.chatdialog
 
-import com.exordos.workspace.data.remote.dto.MessageElement
+import com.exordos.workspace.data.uio.MessageElement
 
 internal const val MAX_RENDERED_QUOTE_NODES = 64
 

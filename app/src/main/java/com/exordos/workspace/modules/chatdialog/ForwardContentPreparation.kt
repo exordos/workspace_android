@@ -22,21 +22,21 @@ import com.exordos.workspace.data.remote.EmptyRequestData
 import com.exordos.workspace.data.remote.HTTPMethod
 import com.exordos.workspace.data.remote.WorkspaceAPIClient
 import com.exordos.workspace.data.remote.dto.ForwardFileUploadRequest
-import com.exordos.workspace.data.remote.dto.MessageElement
-import com.exordos.workspace.data.remote.dto.MessageResponse
-import com.exordos.workspace.data.remote.dto.MessageResponsePayload
+import com.exordos.workspace.data.uio.MessageElement
+import com.exordos.workspace.data.uio.MessageUIO
+import com.exordos.workspace.data.uio.MessagePayloadUIO
 import com.exordos.workspace.data.remote.dto.MessagesByIdsRequest
 import com.exordos.workspace.modules.encryptedchat.EncryptedChatPresentation
 import com.exordos.workspace.modules.encryptedchat.EncryptedChatRuntime
 
 /** A recipient receives the captured text and target-scoped file copies, never a source ACL dependency. */
 internal class ForwardContentPreparation(
-    private val sources: List<MessageResponse>,
-    private val resolve: suspend (String) -> MessageResponse?,
+    private val sources: List<MessageUIO>,
+    private val resolve: suspend (String) -> MessageUIO?,
     private val copyFile: suspend (String, String, String) -> String,
-    private val presentMessage: suspend (MessageResponse) -> MessageResponse = { requireForwardPlaintext(it) },
+    private val presentMessage: suspend (MessageUIO) -> MessageUIO = { requireForwardPlaintext(it) },
 ) {
-    private val resolved = mutableMapOf<String, MessageResponse>()
+    private val resolved = mutableMapOf<String, MessageUIO>()
     private val prepared = mutableMapOf<String, String>()
 
     suspend fun prepare(target: ForwardDestination): String {
@@ -181,7 +181,7 @@ internal data class ForwardFilesQuery(@SerialName("stream_uuid") val streamUuid:
 
 internal fun createForwardPreparation(
     context: Context,
-    sources: List<MessageResponse>,
+    sources: List<MessageUIO>,
     client: WorkspaceAPIClient,
     currentUserUuid: String,
     repo: EventsRepository,
@@ -253,22 +253,22 @@ private suspend fun uploadForwardFile(client: WorkspaceAPIClient, file: Prepared
 }
 
 /** Wire ciphertext is never meaningful text for a snapshot or an external share. */
-internal fun requireForwardPlaintext(message: MessageResponse): MessageResponse {
+internal fun requireForwardPlaintext(message: MessageUIO): MessageUIO {
     if (message.payload.kind != "markdown" || message.originalEncryptedPayload != null)
         throw ForwardPreparationFailure(R.string.forward_quoted_message_unavailable)
     return message
 }
 
 /** Re-authorize even an existing UI projection: deleting its key must invalidate captured previews. */
-internal suspend fun presentForwardMessage(message: MessageResponse,
-                                           decrypt: suspend (MessageResponse) -> String?): MessageResponse {
+internal suspend fun presentForwardMessage(message: MessageUIO,
+                                           decrypt: suspend (MessageUIO) -> String?): MessageUIO {
     val encrypted = message.originalEncryptedPayload
     if (encrypted == null && message.payload.kind == "markdown") return message
     val payload = encrypted ?: message.payload
     if (payload.kind != "e2ee") throw ForwardPreparationFailure(R.string.forward_quoted_message_unavailable)
     val wire = message.copy(payload = payload.copy(), originalEncryptedPayload = null)
     val text = decrypt(wire) ?: throw ForwardPreparationFailure(R.string.forward_quoted_message_unavailable)
-    return wire.copy(payload = MessageResponsePayload("markdown", text), originalEncryptedPayload = payload.copy())
+    return wire.copy(payload = MessagePayloadUIO("markdown", text), originalEncryptedPayload = payload.copy())
 }
 
 /** One account boundary shared by target sends, read-back and source quote expansion. */
@@ -293,7 +293,7 @@ internal class ForwardEncryptedAccess(
             throw ForwardPreparationFailure(R.string.forward_recipient_unknown, uncertain)
     }
 
-    suspend fun present(message: MessageResponse): MessageResponse {
+    suspend fun present(message: MessageUIO): MessageUIO {
         requireCurrent()
         if (!config.projectUuid.isNullOrBlank() && message.projectId != null && message.projectId != config.projectUuid)
             throw ForwardPreparationFailure(R.string.forward_quoted_message_unavailable)
@@ -306,7 +306,7 @@ internal class ForwardEncryptedAccess(
         return result
     }
 
-    suspend fun send(target: ForwardDestination, canonicalUuid: String, markdown: String): MessageResponse {
+    suspend fun send(target: ForwardDestination, canonicalUuid: String, markdown: String): MessageUIO {
         requireCurrent()
         if (repo.streams.value.none { it.uuid == target.streamUuid && it.encryption && !it.isArchived })
             throw ForwardPreparationFailure(R.string.forward_destination_unavailable)

@@ -17,20 +17,20 @@ package com.exordos.workspace.data
 import java.io.Closeable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import com.exordos.workspace.data.remote.dto.StreamBindingResponseData
+import com.exordos.workspace.data.uio.StreamBindingUIO
 
 /** Reconciles HTTP results with changes received during each request's lifetime. */
 internal class StreamMembershipState(private val lock: Any = Any()) {
-    private val mutableBindings = MutableStateFlow<Map<String, List<StreamBindingResponseData>>>(emptyMap())
+    private val mutableBindings = MutableStateFlow<Map<String, List<StreamBindingUIO>>>(emptyMap())
     val bindings = mutableBindings.asStateFlow()
     private val requests = mutableSetOf<Request>()
     // Keep only the latest change per binding until a complete first snapshot is published.
-    private val unloadedChanges = mutableMapOf<String, MutableMap<String, StreamBindingResponseData?>>()
+    private val unloadedChanges = mutableMapOf<String, MutableMap<String, StreamBindingUIO?>>()
 
     inner class Request internal constructor(val streamUuid: String) : Closeable {
         // Each overlapping first load must retain its own copy when another load consumes the journal.
         internal val initialChanges = unloadedChanges[streamUuid].orEmpty().toMap()
-        internal val changes = mutableMapOf<String, StreamBindingResponseData?>()
+        internal val changes = mutableMapOf<String, StreamBindingUIO?>()
         override fun close() { synchronized(lock) { requests.remove(this) } }
     }
 
@@ -38,7 +38,7 @@ internal class StreamMembershipState(private val lock: Any = Any()) {
         Request(streamUuid).also { requests += it }
     }
 
-    fun replaceSnapshot(request: Request, snapshot: List<StreamBindingResponseData>): Boolean = synchronized(lock) {
+    fun replaceSnapshot(request: Request, snapshot: List<StreamBindingUIO>): Boolean = synchronized(lock) {
         if (request !in requests || snapshot.any { it.streamUuid != request.streamUuid }) return false
         val merged = snapshot.associateBy { it.uuid }.toMutableMap()
         (request.initialChanges + request.changes).forEach { (uuid, binding) ->
@@ -50,7 +50,7 @@ internal class StreamMembershipState(private val lock: Any = Any()) {
         true
     }
 
-    fun mergeResponse(request: Request, response: List<StreamBindingResponseData>): Boolean = synchronized(lock) {
+    fun mergeResponse(request: Request, response: List<StreamBindingUIO>): Boolean = synchronized(lock) {
         if (request !in requests || response.any { it.streamUuid != request.streamUuid }) return false
         // A later event wins even when the response contains the same binding UUID.
         val accepted = response.filterNot { it.uuid in request.changes }
@@ -59,7 +59,7 @@ internal class StreamMembershipState(private val lock: Any = Any()) {
         true
     }
 
-    fun upsert(streamUuid: String, bindings: List<StreamBindingResponseData>) = synchronized(lock) {
+    fun upsert(streamUuid: String, bindings: List<StreamBindingUIO>) = synchronized(lock) {
         require(bindings.all { it.streamUuid == streamUuid })
         bindings.forEach { binding ->
             if (streamUuid !in mutableBindings.value) {

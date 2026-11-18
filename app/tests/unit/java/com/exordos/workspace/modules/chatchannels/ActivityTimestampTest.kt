@@ -2,10 +2,10 @@ package com.exordos.workspace.modules.chatchannels
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
-import com.exordos.workspace.data.remote.dto.MessageResponse
-import com.exordos.workspace.data.remote.dto.MessageResponsePayload
-import com.exordos.workspace.data.remote.dto.Stream
-import com.exordos.workspace.data.remote.dto.TopicsResponseData
+import com.exordos.workspace.data.uio.MessageUIO
+import com.exordos.workspace.data.uio.MessagePayloadUIO
+import com.exordos.workspace.data.uio.StreamUIO
+import com.exordos.workspace.data.uio.TopicUIO
 import com.exordos.workspace.modules.chatdialog.forwardableStreams
 
 class ActivityTimestampTest {
@@ -44,11 +44,11 @@ class ActivityTimestampTest {
     }
 
     private fun stream(id: String, date: String) =
-        Stream(id, 0, 0, 0, date, id, false, 0, notificationMode = "all_messages")
+        StreamUIO(id, 0, 0, 0, date, id, false, 0, notificationMode = "all_messages")
 
     private fun topic(id: String, date: String) =
-        TopicsResponseData(id, id, 0, "stream", date, 0, 0, false, false, notificationMode = "default")
+        TopicUIO(id, id, 0, "stream", date, 0, 0, false, false, notificationMode = "default")
 
-    private fun message(id: String, date: String) = MessageResponse(id, date, date, "stream", "topic",
-        "user", "user", MessageResponsePayload("markdown", "Synthetic"), true, emptyMap(), true)
+    private fun message(id: String, date: String) = MessageUIO(id, date, date, "stream", "topic",
+        "user", "user", MessagePayloadUIO("markdown", "Synthetic"), true, emptyMap(), true)
 }

@@ -12,12 +12,12 @@ import com.exordos.workspace.data.EventsRepositoryStore
 import com.exordos.workspace.data.remote.ApiResult
 import com.exordos.workspace.data.remote.WorkspaceAPIClient
 import com.exordos.workspace.data.remote.dto.DeleteDraftRequest
-import com.exordos.workspace.data.remote.dto.Draft
-import com.exordos.workspace.data.remote.dto.FolderResponseData
-import com.exordos.workspace.data.remote.dto.Stream
+import com.exordos.workspace.data.uio.DraftUIO
+import com.exordos.workspace.data.uio.FolderUIO
+import com.exordos.workspace.data.uio.StreamUIO
 import com.exordos.workspace.data.remote.dto.StreamBindingsRequest
 import com.exordos.workspace.data.remote.dto.TopicsByIdsRequest
-import com.exordos.workspace.data.remote.dto.TopicsResponseData
+import com.exordos.workspace.data.uio.TopicUIO
 import com.exordos.workspace.modules.chooseserver.QueryState
 
 class HomeDraftsViewModel(
@@ -26,21 +26,21 @@ class HomeDraftsViewModel(
 ): ViewModel() {
     val eventsRepository = eventsRepositoryStore.get(client.getCurrentServerId()) ?: error("Cannot get current event repository")
 
-    val drafts: StateFlow<List<Draft>> = eventsRepository.draftsPool
+    val drafts: StateFlow<List<DraftUIO>> = eventsRepository.draftsPool
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = eventsRepository.draftsPool.value
         )
 
-    val streams: StateFlow<List<Stream>> = eventsRepository.streams
+    val streams: StateFlow<List<StreamUIO>> = eventsRepository.streams
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = eventsRepository.streams.value
         )
 
-    val topicsPool: StateFlow<List<TopicsResponseData>> = eventsRepository.topicsPool
+    val topicsPool: StateFlow<List<TopicUIO>> = eventsRepository.topicsPool
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
@@ -79,7 +79,7 @@ class HomeDraftsViewModel(
         }
     }
 
-    suspend fun deleteCurrentTopicDraft(draft: Draft) {
+    suspend fun deleteCurrentTopicDraft(draft: DraftUIO) {
         val response = client.performRequest(DeleteDraftRequest(draft.uuid, draft.revision))
         when (response) {
             is ApiResult.Success -> {

@@ -49,8 +49,8 @@ import com.exordos.workspace.Chat
 import com.exordos.workspace.ChatFlow
 import com.exordos.workspace.LoginFlow
 import com.exordos.workspace.R
-import com.exordos.workspace.data.remote.dto.MessageResponse
-import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.uio.MessageUIO
+import com.exordos.workspace.data.uio.UserUIO
 import com.exordos.workspace.modules.chatdialog.MentionTextFieldState
 import com.exordos.workspace.modules.chooseserver.QueryState
 import com.exordos.workspace.modules.users.matchesUserSearch
@@ -171,8 +171,8 @@ fun CreateDirectStreamView(
 
 @Composable
 fun UserCell(
-    item: UserResponseData,
-    onUserSelected: (UserResponseData) -> Unit,
+    item: UserUIO,
+    onUserSelected: (UserUIO) -> Unit,
     baseUrl: String?,
     viewModel: CreateDirectStreamViewModel,
 ) {

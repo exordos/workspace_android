@@ -45,8 +45,8 @@ import androidx.navigation.NavHostController
 import kotlinx.coroutines.launch
 import com.exordos.workspace.data.WorkspaceDateTime
 import com.exordos.workspace.ChatFlow
-import com.exordos.workspace.data.remote.dto.Stream
-import com.exordos.workspace.data.remote.dto.TopicsResponseData
+import com.exordos.workspace.data.uio.StreamUIO
+import com.exordos.workspace.data.uio.TopicUIO
 import com.exordos.workspace.modules.chooseserver.QueryState
 import com.exordos.workspace.ui.AnimatedGif
 import com.exordos.workspace.ui.FullScreenError
@@ -297,32 +297,32 @@ fun ChatWithTopics(
     }
 }
 
-fun Stream.sortKey(): Instant =
+fun StreamUIO.sortKey(): Instant =
     WorkspaceDateTime.parse(lastMessage?.createdAt ?: updatedAt)
 
-fun List<Stream>.sortedForInbox(): List<Stream> =
+fun List<StreamUIO>.sortedForInbox(): List<StreamUIO> =
     sortedWith(
-        compareByDescending<Stream> { it.activeUnreadCount > 0 }
+        compareByDescending<StreamUIO> { it.activeUnreadCount > 0 }
             .thenByDescending { it.sortKey() }
     )
 
-fun List<Stream>.sortedByActivity(): List<Stream> =
+fun List<StreamUIO>.sortedByActivity(): List<StreamUIO> =
     sortedByDescending { it.sortKey() }
 
-fun TopicsResponseData.sortKey(): Instant =
+fun TopicUIO.sortKey(): Instant =
     WorkspaceDateTime.parse(lastMessage?.createdAt ?: updatedAt)
-private val TopicsResponseData.isNotMuted: Boolean
+private val TopicUIO.isNotMuted: Boolean
     get() = notificationMode != "mute"
 
-fun List<TopicsResponseData>.topicsSortedForInbox(): List<TopicsResponseData> =
+fun List<TopicUIO>.topicsSortedForInbox(): List<TopicUIO> =
     sortedWith(
-        compareByDescending<TopicsResponseData> { it.isNotMuted }
+        compareByDescending<TopicUIO> { it.isNotMuted }
             .thenByDescending { it.unreadCount }
             .thenByDescending { it.sortKey() }
     )
 
-fun List<TopicsResponseData>.topicsSortedByActivity(): List<TopicsResponseData> =
+fun List<TopicUIO>.topicsSortedByActivity(): List<TopicUIO> =
     sortedWith(
-        compareByDescending<TopicsResponseData> { it.isNotMuted }
+        compareByDescending<TopicUIO> { it.isNotMuted }
             .thenByDescending { it.sortKey() }
     )

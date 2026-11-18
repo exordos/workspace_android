@@ -14,6 +14,10 @@
 
 package com.exordos.workspace.data.remote.dto
 
+import com.exordos.workspace.data.remote.UIORequest
+import com.exordos.workspace.data.uio.toUio
+import com.exordos.workspace.data.uio.StreamUIO
+
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import com.exordos.workspace.data.remote.*
@@ -48,7 +52,8 @@ class RemovePushDeviceRequest(deviceUuid: String) : ApiRequest<EmptyRequestData,
     override val data = EmptyRequestData()
 }
 
-class PushStreamRequest(streamUuid: String) : ApiRequest<EmptyRequestData, Stream, ApiError> {
+class PushStreamRequest(streamUuid: String) : UIORequest<EmptyRequestData, Stream, StreamUIO, ApiError> {
+    override fun toUio(dto: Stream): StreamUIO = dto.toUio()
     override val method = HTTPMethod.GET
     override val url = "/api/workspace/v1/messenger/streams/$streamUuid"
     override val data = EmptyRequestData()

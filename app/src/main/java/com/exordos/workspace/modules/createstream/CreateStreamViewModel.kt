@@ -26,9 +26,9 @@ import com.exordos.workspace.data.remote.ApiResult
 import com.exordos.workspace.data.remote.WorkspaceAPIClient
 import com.exordos.workspace.data.remote.dto.AddStreamRequest
 import com.exordos.workspace.data.remote.dto.AddUsersToStreamRequest
-import com.exordos.workspace.data.remote.dto.MessageReaction
-import com.exordos.workspace.data.remote.dto.Stream
-import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.uio.MessageReactionUIO
+import com.exordos.workspace.data.uio.StreamUIO
+import com.exordos.workspace.data.uio.UserUIO
 import com.exordos.workspace.modules.chooseserver.QueryState
 
 class CreateStreamViewModel(
@@ -38,7 +38,7 @@ class CreateStreamViewModel(
 ): ViewModel() {
     val eventsRepository = eventsRepositoryStore.get(client.getCurrentServerId()) ?: error("Cannot get current event repository")
 
-    val users: StateFlow<List<UserResponseData>> = combine(eventsRepository.users, eventsRepository.currentUser) { users, current ->
+    val users: StateFlow<List<UserUIO>> = combine(eventsRepository.users, eventsRepository.currentUser) { users, current ->
         users.filter { it.uuid != current?.uuid }
     }
         .stateIn(
@@ -47,7 +47,7 @@ class CreateStreamViewModel(
             initialValue = emptyList()
         )
 
-    var createdStream: Stream? = null
+    var createdStream: StreamUIO? = null
     private val _encrypted = MutableStateFlow(false)
     val encrypted: StateFlow<Boolean> = _encrypted.asStateFlow()
     fun setEncrypted(value: Boolean) { if (canEditCreation()) _encrypted.value = value }
@@ -61,7 +61,7 @@ class CreateStreamViewModel(
         val staged: StagedChatCreation?,
         val members: List<String>,
         var phase: CreationPhase = CreationPhase.UNCONFIRMED,
-        var stream: Stream? = null,
+        var stream: StreamUIO? = null,
     )
     private var creationAttempt: CreationAttempt? = null
     fun canEditCreation() = _createQueryState.value !is QueryState.Loading && creationAttempt == null && createdStream == null
@@ -78,7 +78,7 @@ class CreateStreamViewModel(
     private val _createQueryState = MutableStateFlow<QueryState>(QueryState.Idle)
     val createQueryState: StateFlow<QueryState> = _createQueryState
 
-    fun didTapOnUser(user: UserResponseData) {
+    fun didTapOnUser(user: UserUIO) {
         if (!canEditCreation() || user.uuid == eventsRepository.currentUser.value?.uuid) return
         if (_selectedUserUuids.value.contains(user.uuid)) {
             _selectedUserUuids.update { it - user.uuid }

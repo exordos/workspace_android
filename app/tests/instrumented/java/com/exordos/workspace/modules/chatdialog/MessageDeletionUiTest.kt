@@ -46,8 +46,8 @@ import org.junit.runner.RunWith
 import com.exordos.workspace.R
 import com.exordos.workspace.data.remote.ApiError
 import com.exordos.workspace.data.remote.ApiResult
-import com.exordos.workspace.data.remote.dto.MessageResponse
-import com.exordos.workspace.data.remote.dto.MessageResponsePayload
+import com.exordos.workspace.data.uio.MessageUIO
+import com.exordos.workspace.data.uio.MessagePayloadUIO
 import com.exordos.workspace.ui.theme.WokspaceTheme
 
 /** Exercises the production menu, confirmation and deletion state on an Android device. */
@@ -187,7 +187,7 @@ class MessageDeletionUiTest {
     }
 
     private fun setConversation(
-        currentMessage: MutableState<MessageResponse> = mutableStateOf(message()),
+        currentMessage: MutableState<MessageUIO> = mutableStateOf(message()),
         darkTheme: Boolean = true,
         request: suspend (String) -> ApiResult<String, ApiError> = { ApiResult.Success("") },
     ) {
@@ -200,7 +200,7 @@ class MessageDeletionUiTest {
 
     @Composable
     private fun DeletionFixture(
-        message: MessageResponse,
+        message: MessageUIO,
         request: suspend (String) -> ApiResult<String, ApiError>,
     ) {
         var deleted by remember { mutableStateOf(false) }
@@ -254,7 +254,7 @@ class MessageDeletionUiTest {
     private fun localizedString(id: Int) =
         InstrumentationRegistry.getInstrumentation().targetContext.getString(id)
 
-    private fun message() = MessageResponse(
+    private fun message() = MessageUIO(
         uuid = "11111111-2222-4333-8444-555555555555",
         updatedAt = "2026-09-01T10:00:00Z",
         createdAt = "2026-09-01T10:00:00Z",
@@ -262,7 +262,7 @@ class MessageDeletionUiTest {
         topicUuid = TOPIC_UUID,
         userUuid = "test-author",
         authorUuid = "test-author",
-        payload = MessageResponsePayload("markdown", MESSAGE_TEXT),
+        payload = MessagePayloadUIO("markdown", MESSAGE_TEXT),
         isOwn = true,
         reactions = emptyMap(),
         read = true,

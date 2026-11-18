@@ -50,8 +50,8 @@ import androidx.navigation.NavHostController
 import kotlinx.coroutines.launch
 import com.exordos.workspace.ChatFlow
 import com.exordos.workspace.R
-import com.exordos.workspace.data.remote.dto.FolderResponseData
-import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.uio.FolderUIO
+import com.exordos.workspace.data.uio.UserUIO
 import com.exordos.workspace.modules.chooseserver.QueryState
 import com.exordos.workspace.modules.createdirectstream.CreateDirectStreamViewModel
 import com.exordos.workspace.ui.Avatar
@@ -126,7 +126,7 @@ fun FolderSettingsView(
 
 @Composable
 fun FolderCell(
-    folder: FolderResponseData
+    folder: FolderUIO
 ) {
     Column {
         Row(

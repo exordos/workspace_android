@@ -17,6 +17,8 @@ import org.junit.runner.RunWith
 import com.exordos.workspace.BuildConfig
 import com.exordos.workspace.data.TokenPair
 import com.exordos.workspace.data.remote.dto.*
+import com.exordos.workspace.data.uio.StreamUIO
+import com.exordos.workspace.data.uio.DraftUIO
 import com.exordos.workspace.fixtures.LoopbackWorkspaceServer
 import com.exordos.workspace.fixtures.WorkspaceTestAccount
 import java.util.concurrent.CountDownLatch

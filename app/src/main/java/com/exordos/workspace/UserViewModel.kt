@@ -17,7 +17,7 @@ import kotlinx.coroutines.launch
 import com.exordos.workspace.data.ServerRepository
 import com.exordos.workspace.data.ServerConfig
 import com.exordos.workspace.data.TokenPair
-import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.uio.UserUIO
 import java.util.UUID
 import kotlin.String
 
@@ -25,7 +25,7 @@ class UserViewModel(
     val repo: ServerRepository
 ):  ViewModel() {
 
-    var userData: UserResponseData? = null
+    var userData: UserUIO? = null
     val selectedServerId: StateFlow<String?> = repo.selectedServerIdFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 

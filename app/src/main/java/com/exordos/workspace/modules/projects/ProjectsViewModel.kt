@@ -10,10 +10,10 @@ import kotlinx.coroutines.launch
 import com.exordos.workspace.UserViewModel
 import com.exordos.workspace.data.remote.ApiResult
 import com.exordos.workspace.data.remote.WorkspaceAPIClient
-import com.exordos.workspace.data.remote.dto.FolderResponseData
+import com.exordos.workspace.data.uio.FolderUIO
 import com.exordos.workspace.data.remote.dto.FoldersRequest
 import com.exordos.workspace.data.remote.dto.LoginRequest
-import com.exordos.workspace.data.remote.dto.ProjectResponseData
+import com.exordos.workspace.data.uio.ProjectUIO
 import com.exordos.workspace.data.remote.dto.ProjectsRequest
 import com.exordos.workspace.data.remote.dto.TokenRefreshRequest
 import com.exordos.workspace.modules.chooseserver.QueryState
@@ -30,18 +30,18 @@ class ProjectsViewModel(
     private val _queryState = MutableStateFlow<QueryState>(QueryState.Idle)
     val queryState: StateFlow<QueryState> = _queryState
 
-    private val _projects = MutableStateFlow<List<ProjectResponseData>>(emptyList())
-    val projects: StateFlow<List<ProjectResponseData>> = _projects.asStateFlow()
+    private val _projects = MutableStateFlow<List<ProjectUIO>>(emptyList())
+    val projects: StateFlow<List<ProjectUIO>> = _projects.asStateFlow()
 
-    private val _selectedProject = MutableStateFlow<ProjectResponseData?>(null)
-    val selectedProject: StateFlow<ProjectResponseData?> = _selectedProject.asStateFlow()
+    private val _selectedProject = MutableStateFlow<ProjectUIO?>(null)
+    val selectedProject: StateFlow<ProjectUIO?> = _selectedProject.asStateFlow()
 
     init {
         viewModelScope.launch {
             getProjects()
         }
     }
-    fun setSelectedProject(project: ProjectResponseData?) {
+    fun setSelectedProject(project: ProjectUIO?) {
         _selectedProject.update { project }
     }
 

@@ -1,5 +1,8 @@
 package com.exordos.workspace.data.remote.dto
 
+import com.exordos.workspace.data.remote.UIORequest
+import com.exordos.workspace.data.uio.toUio
+import com.exordos.workspace.data.uio.ServerSettingsUIO
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import com.exordos.workspace.data.remote.ApiError
@@ -10,7 +13,8 @@ import com.exordos.workspace.data.remote.HTTPMethod
 
 class ServerSettingsRequest(
     val baseUrl: String
-): ApiRequest<EmptyRequestData, ServerSettingsResponseData, ApiError> {
+): UIORequest<EmptyRequestData, ServerSettingsResponseData, ServerSettingsUIO, ApiError> {
+    override fun toUio(dto: ServerSettingsResponseData): ServerSettingsUIO = dto.toUio()
     override val method: HTTPMethod = HTTPMethod.GET
     override val requiresApiKey: Boolean = false
     override val isAbsoluteUrl: Boolean = true

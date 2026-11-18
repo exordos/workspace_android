@@ -11,7 +11,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.exordos.workspace.data.remote.dto.MessageResponse
+import com.exordos.workspace.data.uio.MessageUIO
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -107,11 +107,11 @@ internal fun DeleteMessageConfirmationDialog(
 
 @Composable
 internal fun MessageDeletionMenu(
-    item: MessageResponse,
+    item: MessageUIO,
     viewModel: ChatDialogViewModel,
     expanded: Boolean,
     onDismissRequest: () -> Unit,
-    onForwardMessage: ((MessageResponse) -> Unit)? = null,
+    onForwardMessage: ((MessageUIO) -> Unit)? = null,
 ) {
     val deletingMessageUuids by viewModel.deletingMessageUuids.collectAsStateWithLifecycle()
     val canDelete = viewModel.canDeleteMessage(item)

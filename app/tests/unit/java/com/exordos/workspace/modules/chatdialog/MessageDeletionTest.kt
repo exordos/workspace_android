@@ -16,8 +16,8 @@ import org.junit.Test
 import com.exordos.workspace.R
 import com.exordos.workspace.data.remote.ApiError
 import com.exordos.workspace.data.remote.ApiResult
-import com.exordos.workspace.data.remote.dto.MessageResponse
-import com.exordos.workspace.data.remote.dto.MessageResponsePayload
+import com.exordos.workspace.data.uio.MessageUIO
+import com.exordos.workspace.data.uio.MessagePayloadUIO
 
 class MessageDeletionTest {
     @Test
@@ -141,7 +141,7 @@ class MessageDeletionTest {
         onDeleted = onDeleted,
     )
 
-    private fun message() = MessageResponse(
+    private fun message() = MessageUIO(
         uuid = MESSAGE_UUID,
         updatedAt = "2026-09-07T12:00:00Z",
         createdAt = "2026-09-07T12:00:00Z",
@@ -149,7 +149,7 @@ class MessageDeletionTest {
         topicUuid = TOPIC_UUID,
         userUuid = "current-user",
         authorUuid = "current-user",
-        payload = MessageResponsePayload("markdown", "Message to delete"),
+        payload = MessagePayloadUIO("markdown", "Message to delete"),
         isOwn = true,
         reactions = emptyMap(),
         read = true,

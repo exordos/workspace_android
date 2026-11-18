@@ -47,8 +47,8 @@ import androidx.navigation.NavHostController
 import dev.jeziellago.compose.markdowntext.MarkdownText
 import kotlinx.coroutines.launch
 import com.exordos.workspace.ChatFlow
-import com.exordos.workspace.data.remote.dto.Stream
-import com.exordos.workspace.data.remote.dto.TopicsResponseData
+import com.exordos.workspace.data.uio.StreamUIO
+import com.exordos.workspace.data.uio.TopicUIO
 import com.exordos.workspace.ui.theme.InterFontFamily
 import com.exordos.workspace.ui.theme.LocalWorkspaceColorsPalette
 import com.exordos.workspace.R
@@ -56,8 +56,8 @@ import com.exordos.workspace.R
 @Composable
 fun ChatTopic(
     viewModel: ChatViewModel,
-    item: TopicsResponseData,
-    stream: Stream,
+    item: TopicUIO,
+    stream: StreamUIO,
     navController: NavHostController
 ) {
     var menuExpanded by remember { mutableStateOf(false) }

@@ -1,5 +1,8 @@
 package com.exordos.workspace.data.remote.dto
 
+import com.exordos.workspace.data.remote.UIORequest
+import com.exordos.workspace.data.uio.toUio
+import com.exordos.workspace.data.uio.TopicUIO
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import com.exordos.workspace.data.remote.ApiError
@@ -10,7 +13,8 @@ import com.exordos.workspace.data.remote.HTTPMethod
 @Serializable
 data class TopicsRequest(
     val streamUuids: List<String>
-): ApiRequest<TopicsRequestData, List<TopicsResponseData>, ApiError> {
+): UIORequest<TopicsRequestData, List<TopicsResponseData>, List<TopicUIO>, ApiError> {
+    override fun toUio(dto: List<TopicsResponseData>): List<TopicUIO> = dto.map { it.toUio() }
     override val method: HTTPMethod = HTTPMethod.GET
     override val requiresApiKey: Boolean = true
     override val url: String = "/api/workspace/v1/messenger/stream_topics/"
@@ -24,7 +28,8 @@ data class TopicsRequestData(
 @Serializable
 data class TopicsByIdsRequest(
     val topicIds: List<String>
-): ApiRequest<TopicsByIdsRequestData, List<TopicsResponseData>, ApiError> {
+): UIORequest<TopicsByIdsRequestData, List<TopicsResponseData>, List<TopicUIO>, ApiError> {
+    override fun toUio(dto: List<TopicsResponseData>): List<TopicUIO> = dto.map { it.toUio() }
     override val method: HTTPMethod = HTTPMethod.GET
     override val requiresApiKey: Boolean = true
     override val url: String = "/api/workspace/v1/messenger/stream_topics/"
@@ -40,16 +45,15 @@ data class TopicsByIdsRequestData(
 @Serializable
 data class TopicsResponseData(
     val uuid: String,
-    var name: String,
+    val name: String,
     val color: Int,
     @SerialName("stream_uuid") val streamUuid: String,
-    @SerialName("updated_at") var updatedAt: String,
-    @SerialName("unread_count") var unreadCount: Int,
-    @SerialName("active_unread_count") var activeUnreadCount: Int,
-    @SerialName("is_done") var isDone: Boolean,
+    @SerialName("updated_at") val updatedAt: String,
+    @SerialName("unread_count") val unreadCount: Int,
+    @SerialName("active_unread_count") val activeUnreadCount: Int,
+    @SerialName("is_done") val isDone: Boolean,
     @SerialName("is_default") val isDefault: Boolean,
-    @SerialName("last_message_uuid") var lastMessageUuid: String? = null,
-    @SerialName("notification_mode") var notificationMode: String,
-    var lastMessage: MessageResponse? = null,
-    var summary: String? = null
+    @SerialName("last_message_uuid") val lastMessageUuid: String? = null,
+    @SerialName("notification_mode") val notificationMode: String,
+    val summary: String? = null
 )

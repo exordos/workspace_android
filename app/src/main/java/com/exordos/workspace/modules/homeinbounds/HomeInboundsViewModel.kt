@@ -14,24 +14,24 @@ import com.exordos.workspace.HomeFlow
 import com.exordos.workspace.data.EventsRepositoryStore
 import com.exordos.workspace.data.remote.ApiResult
 import com.exordos.workspace.data.remote.WorkspaceAPIClient
-import com.exordos.workspace.data.remote.dto.MessageResponse
+import com.exordos.workspace.data.uio.MessageUIO
 import com.exordos.workspace.data.remote.dto.MessagesByIdsRequest
-import com.exordos.workspace.data.remote.dto.Stream
+import com.exordos.workspace.data.uio.StreamUIO
 import com.exordos.workspace.data.remote.dto.TopicsRequest
-import com.exordos.workspace.data.remote.dto.TopicsResponseData
+import com.exordos.workspace.data.uio.TopicUIO
 import com.exordos.workspace.modules.chooseserver.QueryState
 
-internal val Stream.hasInboxUnread: Boolean
+internal val StreamUIO.hasInboxUnread: Boolean
     get() = activeUnreadCount > 0
 
-internal val TopicsResponseData.hasInboxUnread: Boolean
+internal val TopicUIO.hasInboxUnread: Boolean
     get() = notificationMode != "mute" && activeUnreadCount > 0
 
-internal fun firstInboxUnread(messages: List<MessageResponse>, stream: Stream, topic: TopicsResponseData): MessageResponse? =
+internal fun firstInboxUnread(messages: List<MessageUIO>, stream: StreamUIO, topic: TopicUIO): MessageUIO? =
     messages.asSequence().filter {
         it.streamUuid == stream.uuid && it.topicUuid == topic.uuid &&
             it.isActiveUnread(stream.notificationMode, topic.notificationMode)
-    }.minWithOrNull(compareBy<MessageResponse> { WorkspaceDateTime.parse(it.createdAt) }.thenBy { it.uuid })
+    }.minWithOrNull(compareBy<MessageUIO> { WorkspaceDateTime.parse(it.createdAt) }.thenBy { it.uuid })
 
 class HomeInboundsViewModel(
     val client: WorkspaceAPIClient,
@@ -56,7 +56,7 @@ class HomeInboundsViewModel(
         viewModelScope.launch { loadTopics(streams.value.filter { it.hasInboxUnread }) }
     }
 
-    suspend fun loadTopics(streams: List<Stream>) {
+    suspend fun loadTopics(streams: List<StreamUIO>) {
         if (_topicsQueryState.value != QueryState.Success) _topicsQueryState.value = QueryState.Loading
         if (streams.isEmpty()) {
             _topicsQueryState.value = QueryState.Success
@@ -85,7 +85,7 @@ class HomeInboundsViewModel(
         }
     }
 
-    suspend fun unreadDestination(stream: Stream, topic: TopicsResponseData): HomeFlow.ChatDialog? {
+    suspend fun unreadDestination(stream: StreamUIO, topic: TopicUIO): HomeFlow.ChatDialog? {
         val messages = when (val response = eventsRepository.refreshConversation(stream.uuid, topic.uuid)) {
             is ApiResult.Success -> response.value.filter { it.streamUuid == stream.uuid }
             is ApiResult.Error -> return null

@@ -2,8 +2,8 @@ package com.exordos.workspace.modules.chatdialog
 
 import org.junit.Assert.*
 import org.junit.Test
-import com.exordos.workspace.data.remote.dto.MessageResponse
-import com.exordos.workspace.data.remote.dto.MessageResponsePayload
+import com.exordos.workspace.data.uio.MessageUIO
+import com.exordos.workspace.data.uio.MessagePayloadUIO
 import com.exordos.workspace.modules.encryptedchat.EncryptedChatKeyRequest
 import com.exordos.workspace.modules.encryptedchat.EncryptedChatPayload
 import com.exordos.workspace.modules.encryptedchat.EncryptedChatRequestOutcome
@@ -98,13 +98,13 @@ class ChatHistoryPresentationTest {
         assertTrue(derive(emptyList()).ownGenerationRequests.isEmpty())
     }
 
-    private fun derive(visible: List<MessageResponse>?, pool: List<MessageResponse> = emptyList(),
-        histories: Map<String, List<MessageResponse>> = emptyMap(), viewer: String? = "viewer",
+    private fun derive(visible: List<MessageUIO>?, pool: List<MessageUIO> = emptyList(),
+        histories: Map<String, List<MessageUIO>> = emptyMap(), viewer: String? = "viewer",
         encryption: EncryptedChatSessionState = state, encrypted: Boolean = true) =
         deriveChatHistoryPresentation(visible, pool, histories, "stream", encrypted, viewer, encryption)
 
     private fun message(uuid: String, createdAt: String = "2026-10-15T10:00:00Z", kind: String = "markdown",
         stream: String = "stream", generation: String = "generation", viewer: String = "viewer", device: String = "device") =
-        MessageResponse(uuid, createdAt, createdAt, stream, "topic", viewer, viewer,
-            MessageResponsePayload(kind, keyUuid = generation, deviceId = device), true, emptyMap(), false)
+        MessageUIO(uuid, createdAt, createdAt, stream, "topic", viewer, viewer,
+            MessagePayloadUIO(kind, keyUuid = generation, deviceId = device), true, emptyMap(), false)
 }

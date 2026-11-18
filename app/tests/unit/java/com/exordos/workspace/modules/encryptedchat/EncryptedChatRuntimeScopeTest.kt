@@ -4,8 +4,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import com.exordos.workspace.data.remote.dto.MessageResponse
-import com.exordos.workspace.data.remote.dto.MessageResponsePayload
+import com.exordos.workspace.data.uio.MessageUIO
+import com.exordos.workspace.data.uio.MessagePayloadUIO
 
 class EncryptedChatRuntimeScopeTest {
     private val scope = EncryptedChatScope("https://workspace.example", "project", "owner", 1, "android", "Android", "chat")
@@ -36,7 +36,7 @@ class EncryptedChatRuntimeScopeTest {
         assertEquals("conversation ciphertext", latestEncryptedChatWireMessages(listOf(edit), listOf(simultaneous), "chat").single().payload.content)
     }
 
-    private fun message(updated: String, content: String) = MessageResponse(
+    private fun message(updated: String, content: String) = MessageUIO(
         "message", updated, "2026-10-15T10:00:00Z", "chat", "topic", "owner", "owner",
-        MessageResponsePayload("e2ee", content, keyUuid = "generation"), true, emptyMap(), false)
+        MessagePayloadUIO("e2ee", content, keyUuid = "generation"), true, emptyMap(), false)
 }

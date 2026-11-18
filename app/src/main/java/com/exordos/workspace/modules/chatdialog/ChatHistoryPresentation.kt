@@ -1,7 +1,7 @@
 package com.exordos.workspace.modules.chatdialog
 
 import com.exordos.workspace.data.WorkspaceDateTime
-import com.exordos.workspace.data.remote.dto.MessageResponse
+import com.exordos.workspace.data.uio.MessageUIO
 import com.exordos.workspace.modules.encryptedchat.EncryptedChatSessionState
 import java.time.Instant
 
@@ -14,7 +14,7 @@ internal data class OwnGenerationRequestKey(
 
 /** One derived snapshot for the list and every service row; never stored in a repository. */
 internal data class ChatHistoryPresentation(
-    val orderedMessages: List<MessageResponse>?,
+    val orderedMessages: List<MessageUIO>?,
     val firstMessageUuid: String?,
     val showInitialKeyRequest: Boolean,
     val latestOwnRequestUuids: Map<OwnGenerationRequestKey, String>,
@@ -28,9 +28,9 @@ internal data class ChatHistoryPresentation(
 }
 
 internal fun deriveChatHistoryPresentation(
-    visibleMessages: List<MessageResponse>?,
-    messagePool: List<MessageResponse>,
-    topicHistories: Map<String, List<MessageResponse>>,
+    visibleMessages: List<MessageUIO>?,
+    messagePool: List<MessageUIO>,
+    topicHistories: Map<String, List<MessageUIO>>,
     streamUuid: String,
     encrypted: Boolean,
     viewerUuid: String?,
@@ -38,7 +38,7 @@ internal fun deriveChatHistoryPresentation(
 ): ChatHistoryPresentation {
     val ordered = visibleMessages?.distinctBy { it.uuid }
         ?.map { it to WorkspaceDateTime.parse(it.createdAt) }
-        ?.sortedWith(compareBy<Pair<MessageResponse, Instant>> { it.second }.thenBy { it.first.uuid })
+        ?.sortedWith(compareBy<Pair<MessageUIO, Instant>> { it.second }.thenBy { it.first.uuid })
         ?.map { it.first }
     val latest = mutableMapOf<OwnGenerationRequestKey, Pair<Instant, String>>()
     val ownRequests = mutableSetOf<OwnGenerationRequestKey>()
@@ -86,9 +86,9 @@ internal fun deriveChatHistoryPresentation(
 
 /** Keep the selected unread anchor stable while read events and decryption update the rows. */
 internal fun initialChatMessageIndex(
-    messages: List<MessageResponse>,
+    messages: List<MessageUIO>,
     firstUnreadMessageUuid: String?,
-    isEligibleUnread: (MessageResponse) -> Boolean = { !it.read },
+    isEligibleUnread: (MessageUIO) -> Boolean = { !it.read },
 ): Int {
     if (firstUnreadMessageUuid == null) return messages.lastIndex
     return messages.indexOfFirst { it.uuid == firstUnreadMessageUuid }.takeIf { it >= 0 }

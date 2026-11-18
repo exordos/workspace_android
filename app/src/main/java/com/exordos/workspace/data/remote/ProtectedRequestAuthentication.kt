@@ -7,6 +7,13 @@ class ProtectedRequestAuthentication(private val accessToken: String) {
     fun matches(other: ProtectedRequestAuthentication?): Boolean = other != null && accessToken == other.accessToken
     fun matchesAccessToken(current: String?): Boolean = current == accessToken
 
+    fun <D, R, U, E> pin(request: UIORequest<D, R, U, E>): UIORequest<D, R, U, E> =
+        object : UIORequest<D, R, U, E> by request {
+            override val requiresApiKey = false
+            override val additionalHeaders = request.additionalHeaders.filterKeys { !it.equals("Authorization", ignoreCase = true) } +
+                ("Authorization" to "Bearer $accessToken")
+        }
+
     fun <D, R, E> pin(request: ApiRequest<D, R, E>): ApiRequest<D, R, E> = object : ApiRequest<D, R, E> by request {
         // WorkspaceAPIClient must not refresh/replay this operation using replacement credentials.
         override val requiresApiKey = false

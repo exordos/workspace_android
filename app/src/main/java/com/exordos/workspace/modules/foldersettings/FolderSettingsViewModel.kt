@@ -8,15 +8,15 @@ import kotlinx.coroutines.flow.stateIn
 import com.exordos.workspace.data.EventsRepository
 import com.exordos.workspace.data.EventsRepositoryStore
 import com.exordos.workspace.data.remote.WorkspaceAPIClient
-import com.exordos.workspace.data.remote.dto.FolderResponseData
-import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.uio.FolderUIO
+import com.exordos.workspace.data.uio.UserUIO
 
 class FolderSettingsViewModel(
     val client: WorkspaceAPIClient,
     val eventsRepositoryStore: EventsRepositoryStore
 ): ViewModel() {
     val eventsRepository = eventsRepositoryStore.get(client.getCurrentServerId()) ?: error("Cannot get current event repository")
-    val folders: StateFlow<List<FolderResponseData>> = eventsRepository.folders
+    val folders: StateFlow<List<FolderUIO>> = eventsRepository.folders
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),

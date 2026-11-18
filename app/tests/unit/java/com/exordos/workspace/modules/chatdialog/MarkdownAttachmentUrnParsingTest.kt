@@ -3,7 +3,7 @@ package com.exordos.workspace.modules.chatdialog
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Test
-import com.exordos.workspace.data.remote.dto.MessageElement
+import com.exordos.workspace.data.uio.MessageElement
 
 class MarkdownAttachmentUrnParsingTest {
     @Test fun `web photo metadata is excluded from the download UUID and caption is retained`() {

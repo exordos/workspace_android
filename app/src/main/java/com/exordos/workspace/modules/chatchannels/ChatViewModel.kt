@@ -39,27 +39,27 @@ import com.exordos.workspace.data.remote.dto.AddFolderRequest
 import com.exordos.workspace.data.remote.dto.AddStreamRequest
 import com.exordos.workspace.data.remote.dto.AddTopicRequest
 import com.exordos.workspace.data.remote.dto.DeleteChatFromFolderRequest
-import com.exordos.workspace.data.remote.dto.FolderResponseData
+import com.exordos.workspace.data.uio.FolderUIO
 import com.exordos.workspace.data.remote.dto.FoldersRequest
 import com.exordos.workspace.data.remote.dto.MarkMessagesReadUpToRequest
 import com.exordos.workspace.data.remote.dto.MarkStreamMessagesReadRequest
 import com.exordos.workspace.data.remote.dto.MarkTopicMessagesReadRequest
 import com.exordos.workspace.data.remote.dto.MessageReactionsRequest
-import com.exordos.workspace.data.remote.dto.MessageResponse
+import com.exordos.workspace.data.uio.MessageUIO
 import com.exordos.workspace.data.remote.dto.MessagesByIdsRequest
 import com.exordos.workspace.data.remote.dto.OwnUserRequest
 import com.exordos.workspace.data.remote.dto.ServerSettingsRequest
 import com.exordos.workspace.data.remote.dto.StreamsRequest
-import com.exordos.workspace.data.remote.dto.Stream
-import com.exordos.workspace.data.remote.dto.StreamBindingResponseData
+import com.exordos.workspace.data.uio.StreamUIO
+import com.exordos.workspace.data.uio.StreamBindingUIO
 import com.exordos.workspace.data.remote.dto.StreamBindingsRequest
 import com.exordos.workspace.data.remote.dto.ToggleTopicDoneRequest
 import com.exordos.workspace.data.remote.dto.TopicsRequest
-import com.exordos.workspace.data.remote.dto.TopicsResponseData
+import com.exordos.workspace.data.uio.TopicUIO
 import com.exordos.workspace.data.remote.dto.UpdateStreamNotificationModeRequest
 import com.exordos.workspace.data.remote.dto.UpdateTopicNotificationModeRequest
 import com.exordos.workspace.data.remote.dto.UsersRequest
-import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.uio.UserUIO
 import com.exordos.workspace.modules.chooseserver.QueryState
 import com.exordos.workspace.ui.theme.LocalWorkspaceColorsPalette
 import kotlin.collections.first
@@ -166,7 +166,7 @@ class ChatViewModel(
 
     override fun onCleared() { previewProjector.invalidate(); previewRefresh?.cancel(); super.onCleared() }
 
-    val streams: StateFlow<List<Stream>> = eventsRepo
+    val streams: StateFlow<List<StreamUIO>> = eventsRepo
         .flatMapLatest { repo ->
             repo?.streams ?: flowOf(emptyList())
         }
@@ -176,10 +176,10 @@ class ChatViewModel(
             initialValue = emptyList(),
         )
 
-    private val _currentlySelectedStream = MutableStateFlow<Stream?>(null)
-    var currentlySelectedStream: StateFlow<Stream?> = _currentlySelectedStream
+    private val _currentlySelectedStream = MutableStateFlow<StreamUIO?>(null)
+    var currentlySelectedStream: StateFlow<StreamUIO?> = _currentlySelectedStream
 
-    val streamTopics: StateFlow<Map<String, List<TopicsResponseData>>> = eventsRepo
+    val streamTopics: StateFlow<Map<String, List<TopicUIO>>> = eventsRepo
         .flatMapLatest { repo ->
             repo?.streamTopics ?: flowOf(emptyMap())
         }
@@ -188,7 +188,7 @@ class ChatViewModel(
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = emptyMap(),
         )
-    val folders: StateFlow<List<FolderResponseData>> = eventsRepo
+    val folders: StateFlow<List<FolderUIO>> = eventsRepo
         .flatMapLatest { repo ->
             repo?.folders ?: flowOf(emptyList())
         }
@@ -197,7 +197,7 @@ class ChatViewModel(
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = emptyList(),
         )
-    val streamBindings: StateFlow<Map<String, List<StreamBindingResponseData>>> = eventsRepo
+    val streamBindings: StateFlow<Map<String, List<StreamBindingUIO>>> = eventsRepo
         .flatMapLatest { repo ->
             repo?.streamBindings ?: flowOf(emptyMap())
         }
@@ -206,7 +206,7 @@ class ChatViewModel(
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = emptyMap(),
         )
-    val currentlySelectedFolder: StateFlow<FolderResponseData?> = eventsRepo
+    val currentlySelectedFolder: StateFlow<FolderUIO?> = eventsRepo
         .flatMapLatest { repo ->
             repo?.currentlySelectedFolder ?: flowOf(null)
         }
@@ -241,15 +241,15 @@ class ChatViewModel(
     private val _topicsQueryState = MutableStateFlow<QueryState>(QueryState.Idle)
     val topicsQueryState: StateFlow<QueryState> = _topicsQueryState
 
-    var createdStream: Stream? = null
+    var createdStream: StreamUIO? = null
     private val _createQueryState = MutableStateFlow<QueryState>(QueryState.Idle)
     val createQueryState: StateFlow<QueryState> = _createQueryState
 
     private val _navEvents = MutableSharedFlow<ChatNavEvent>(extraBufferCapacity = 1)
     val navEvents: SharedFlow<ChatNavEvent> = _navEvents
 
-    private val _chatToAdd = MutableStateFlow<Stream?>(null)
-    var chatToAdd: StateFlow<Stream?> = _chatToAdd
+    private val _chatToAdd = MutableStateFlow<StreamUIO?>(null)
+    var chatToAdd: StateFlow<StreamUIO?> = _chatToAdd
 
     val map: Map<String, Int> = emptyMap()
 
@@ -262,11 +262,11 @@ class ChatViewModel(
 
     var currentStreamId: String = ""
 
-    fun poolMessage(uuid: String?): MessageResponse? {
+    fun poolMessage(uuid: String?): MessageUIO? {
         return eventsRepo.value?.messagesPool?.value?.firstOrNull { it.uuid == uuid }
     }
 
-    fun updateCurrentlySelectedFolder(newFolder: FolderResponseData) {
+    fun updateCurrentlySelectedFolder(newFolder: FolderUIO) {
         if (newFolder.uuid != currentlySelectedFolder.value?.uuid) {
             eventsRepo.value?.updateCurrentlySelectedFolder(newFolder)
         }
@@ -284,11 +284,11 @@ class ChatViewModel(
         _searchQuery.value = query
     }
 
-    fun onChatToAddChange(chatToAdd: Stream?) {
+    fun onChatToAddChange(chatToAdd: StreamUIO?) {
         _chatToAdd.value = chatToAdd
     }
 
-    suspend fun updateSelectedChat(newChat: Stream?) {
+    suspend fun updateSelectedChat(newChat: StreamUIO?) {
         _currentlySelectedStream.update { newChat }
         if (newChat != null) {
             val currentStreamBindings = streamBindings.value[newChat.uuid]
@@ -304,7 +304,7 @@ class ChatViewModel(
         eventsRepo.value?.loadServerSettings()
     }
 
-    suspend fun loadStreamBindings(stream: Stream) {
+    suspend fun loadStreamBindings(stream: StreamUIO) {
         _topicsQueryState.value = QueryState.Loading
         val repo = eventsRepo.value ?: return
         val server = client.requireUserViewModel().selectedServer.value?.copy() ?: return
@@ -318,7 +318,7 @@ class ChatViewModel(
         loadTopics(stream)
     }
 
-    suspend fun loadTopics(stream: Stream) {
+    suspend fun loadTopics(stream: StreamUIO) {
         _topicsQueryState.value = QueryState.Loading
         val response = client.performRequest(TopicsRequest(listOf(stream.uuid)))
         when(response) {
@@ -392,7 +392,7 @@ class ChatViewModel(
         }
     }
 
-    suspend fun setNextNotificationMode(topic: TopicsResponseData) {
+    suspend fun setNextNotificationMode(topic: TopicUIO) {
         when (topic.notificationMode) {
             "mute" -> setTopicNotificationMode(topic.uuid, "default")
             "default" -> setTopicNotificationMode(topic.uuid, "follow")
@@ -454,7 +454,7 @@ class ChatViewModel(
         }
     }
 
-    suspend fun deleteChatFromFolder(chatId: String, folder: FolderResponseData) {
+    suspend fun deleteChatFromFolder(chatId: String, folder: FolderUIO) {
         val folderChat = folder.items.firstOrNull() { it.streamUuid == chatId }
         if (folderChat != null) {
             val response = client.performRequest(DeleteChatFromFolderRequest(folderChat.uuid))
@@ -498,7 +498,7 @@ class ChatViewModel(
         }
     }
 
-    suspend fun createPrivateStream(user: UserResponseData) {
+    suspend fun createPrivateStream(user: UserUIO) {
         _createQueryState.value = QueryState.Loading
         val response = client.performRequest(AddStreamRequest("Direct", "Private workspace", user.uuid))
         when(response) {
@@ -540,18 +540,17 @@ class ChatViewModel(
     }
 }
 
-@Serializable
 data class TopicHeader(
     val title: String,
     val uuid: String,
     val gravatar: String?,
     val channelName: String,
     val channelId: String,
-    val lastMessage: MessageResponse?,
+    val lastMessage: MessageUIO?,
     val unreadCount: Int
 ) {
     companion object {
-        fun from(topic: TopicsResponseData, channelName: String, channelId: String, lastMessage: MessageResponse?) = TopicHeader(
+        fun from(topic: TopicUIO, channelName: String, channelId: String, lastMessage: MessageUIO?) = TopicHeader(
             topic.name,
             topic.uuid,
             null,

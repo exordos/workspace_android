@@ -12,8 +12,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.exordos.workspace.data.remote.ApiResult
 import com.exordos.workspace.data.remote.WorkspaceAPIClient
-import com.exordos.workspace.data.remote.dto.MessageElement
-import com.exordos.workspace.data.remote.dto.MessageResponse
+import com.exordos.workspace.data.uio.MessageElement
+import com.exordos.workspace.data.uio.MessageUIO
 import com.exordos.workspace.data.remote.dto.MessagesByIdsRequest
 import com.exordos.workspace.data.remote.dto.parseCanonicalUuid
 import java.io.File
@@ -27,17 +27,17 @@ internal data class ExternalShareLabels(val attachment: String = "Attachment", v
 
 /** Materialize Workspace references before handing content to another app. */
 internal suspend fun materializeExternalMessages(
-    sources: List<MessageResponse>,
+    sources: List<MessageUIO>,
     labels: ExternalShareLabels = ExternalShareLabels(),
-    presentMessage: suspend (MessageResponse) -> MessageResponse = { requireForwardPlaintext(it) },
-    resolveQuote: suspend (String) -> MessageResponse?,
+    presentMessage: suspend (MessageUIO) -> MessageUIO = { requireForwardPlaintext(it) },
+    resolveQuote: suspend (String) -> MessageUIO?,
 ): ExternalShareContent {
     require(sources.isNotEmpty() && sources.size <= MAX_FORWARD_SOURCE_MESSAGES)
     val files = linkedMapOf<String, ExternalShareFile>()
-    val resolved = mutableMapOf<String, MessageResponse?>()
+    val resolved = mutableMapOf<String, MessageUIO?>()
     var characters = 0
 
-    suspend fun render(message: MessageResponse, visited: Set<String>, depth: Int, authorLabel: String? = null): String {
+    suspend fun render(message: MessageUIO, visited: Set<String>, depth: Int, authorLabel: String? = null): String {
         require(depth <= 8) { "В сообщении слишком много вложенных цитат" }
         require(message.payload.kind == "markdown") { "Сообщение недоступно для пересылки" }
         val author = authorLabel ?: message.user?.displayableName()?.trim()?.takeIf { it.isNotEmpty() } ?: message.authorUuid
@@ -99,7 +99,7 @@ private suspend fun <T> List<T>.joinToStringSuspend(separator: String, transform
 
 internal suspend fun prepareExternalShareIntent(
     context: Context,
-    sources: List<MessageResponse>,
+    sources: List<MessageUIO>,
     client: WorkspaceAPIClient,
     repo: EventsRepository,
 ): Intent = withContext(Dispatchers.IO) {

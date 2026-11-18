@@ -6,8 +6,8 @@ import org.junit.Test
 import com.exordos.workspace.R
 import com.exordos.workspace.data.remote.ApiError
 import com.exordos.workspace.data.remote.ApiResult
-import com.exordos.workspace.data.remote.dto.MessageResponse
-import com.exordos.workspace.data.remote.dto.MessageResponsePayload
+import com.exordos.workspace.data.uio.MessageUIO
+import com.exordos.workspace.data.uio.MessagePayloadUIO
 import com.exordos.workspace.data.remote.dto.SendMessageResponse
 import com.exordos.workspace.modules.encryptedchat.encryptedMessagePlacementUuid
 
@@ -15,8 +15,8 @@ class EncryptedMessageForwardingTest {
     @Test fun `encrypted readback verifies decrypted snapshot and commits only original ciphertext`() = runBlocking {
         val source = projectedSource()
         val expected = requireNotNull(buildWorkspaceForwardMarkdown(source))
-        val raw = message(RETURNED, MessageResponsePayload("e2ee", "destination-ciphertext", keyUuid = KEY))
-        val confirmed = mutableListOf<MessageResponse>()
+        val raw = message(RETURNED, MessagePayloadUIO("e2ee", "destination-ciphertext", keyUuid = KEY))
+        val confirmed = mutableListOf<MessageUIO>()
         var checked = 0
         val forwarding = MessageForwarding(listOf(source), AUTHOR,
             post = { _, _, markdown -> assertEquals(expected, markdown); ApiResult.Success(SendMessageResponse(RETURNED, TOPIC)) },
@@ -42,7 +42,7 @@ class EncryptedMessageForwardingTest {
         val reads = mutableListOf<String>()
         var posts = 0
         var readable = false
-        val raw = message(placement, MessageResponsePayload("e2ee", "opaque", keyUuid = KEY))
+        val raw = message(placement, MessagePayloadUIO("e2ee", "opaque", keyUuid = KEY))
         val forwarding = MessageForwarding(listOf(projectedSource()), AUTHOR,
             post = { _, _, _ -> posts++; ApiResult.Error(ApiError("lost", "REQUEST_FAILED")) },
             read = { reads += it; ApiResult.Success(if (readable) listOf(raw) else emptyList()) },
@@ -63,7 +63,7 @@ class EncryptedMessageForwardingTest {
         var posts = 0
         val forwarding = MessageForwarding(listOf(projectedSource()), AUTHOR,
             post = { _, _, _ -> posts++; ApiResult.Success(SendMessageResponse(RETURNED, TOPIC)) },
-            read = { ApiResult.Success(listOf(message(RETURNED, MessageResponsePayload("e2ee", "opaque", keyUuid = KEY)))) },
+            read = { ApiResult.Success(listOf(message(RETURNED, MessagePayloadUIO("e2ee", "opaque", keyUuid = KEY)))) },
             onConfirmed = { fail("No key means no confirmed delivery") },
             verifyContent = { _, _, _ -> throw ForwardPreparationFailure(R.string.forward_quoted_message_unavailable) })
         forwarding.send(TARGET)
@@ -77,7 +77,7 @@ class EncryptedMessageForwardingTest {
         var decryptions = 0
         val forwarding = MessageForwarding(listOf(projectedSource()), AUTHOR,
             post = { _, _, _ -> ApiResult.Success(SendMessageResponse(RETURNED, TOPIC)) },
-            read = { ApiResult.Success(listOf(message(RETURNED, MessageResponsePayload("e2ee", "opaque", keyUuid = KEY)).copy(authorUuid = SOURCE))) },
+            read = { ApiResult.Success(listOf(message(RETURNED, MessagePayloadUIO("e2ee", "opaque", keyUuid = KEY)).copy(authorUuid = SOURCE))) },
             onConfirmed = { fail("Foreign author cannot confirm a forward") },
             verifyContent = { _, _, _ -> decryptions++; true })
         forwarding.send(TARGET)
@@ -86,17 +86,17 @@ class EncryptedMessageForwardingTest {
     }
 
     @Test fun `wire ciphertext and service messages cannot be forwarded as visible text`() {
-        val raw = message(SOURCE, MessageResponsePayload("e2ee", "opaque", keyUuid = KEY))
+        val raw = message(SOURCE, MessagePayloadUIO("e2ee", "opaque", keyUuid = KEY))
         assertFalse(canForwardMessage(raw))
         assertNull(buildWorkspaceForwardMarkdown(raw))
-        assertNull(buildWorkspaceForwardMarkdown(raw.copy(payload = MessageResponsePayload("key_request"))))
+        assertNull(buildWorkspaceForwardMarkdown(raw.copy(payload = MessagePayloadUIO("key_request"))))
         assertTrue(canForwardMessage(projectedSource()))
         assertTrue(requireNotNull(buildWorkspaceForwardMarkdown(projectedSource())).contains("visible source"))
     }
 
     @Test fun `preparation decrypts original projection and nested source stream before snapshotting files`() = runBlocking {
         val source = projectedSource()
-        val nested = message(NESTED, MessageResponsePayload("e2ee", "nested-ciphertext", keyUuid = KEY))
+        val nested = message(NESTED, MessagePayloadUIO("e2ee", "nested-ciphertext", keyUuid = KEY))
             .copy(streamUuid = NESTED_STREAM)
         val decryptedStreams = mutableListOf<String>()
         var copies = 0
@@ -136,7 +136,7 @@ class EncryptedMessageForwardingTest {
 
     @Test fun `external share resolves encrypted nested quotes without exporting envelopes`() = runBlocking {
         val source = projectedSource()
-        val nested = message(NESTED, MessageResponsePayload("e2ee", "nested-ciphertext", keyUuid = KEY))
+        val nested = message(NESTED, MessagePayloadUIO("e2ee", "nested-ciphertext", keyUuid = KEY))
         val result = materializeExternalMessages(listOf(source), presentMessage = { input ->
             presentForwardMessage(input) { wire ->
                 if (wire.uuid == SOURCE) "Source plaintext\n[Other](urn:quote:$NESTED)\n[file.pdf](urn:file:$FILE)"
@@ -159,10 +159,10 @@ class EncryptedMessageForwardingTest {
         }.exceptionOrNull() is ForwardPreparationFailure)
     }
 
-    private fun projectedSource(): MessageResponse = message(SOURCE, MessageResponsePayload("markdown", "visible source"))
-        .copy(originalEncryptedPayload = MessageResponsePayload("e2ee", "source-ciphertext", keyUuid = KEY))
+    private fun projectedSource(): MessageUIO = message(SOURCE, MessagePayloadUIO("markdown", "visible source"))
+        .copy(originalEncryptedPayload = MessagePayloadUIO("e2ee", "source-ciphertext", keyUuid = KEY))
 
-    private fun message(uuid: String, payload: MessageResponsePayload) = MessageResponse(uuid,
+    private fun message(uuid: String, payload: MessagePayloadUIO) = MessageUIO(uuid,
         "2026-10-15T12:00:00Z", "2026-10-15T12:00:00Z", STREAM, TOPIC, AUTHOR, AUTHOR,
         payload, true, emptyMap(), true)
 
