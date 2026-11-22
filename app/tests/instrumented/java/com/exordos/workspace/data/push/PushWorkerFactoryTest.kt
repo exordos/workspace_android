@@ -27,6 +27,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -95,6 +96,50 @@ class PushWorkerFactoryTest {
                 assertTrue(requests.any { it.path.endsWith("/messenger/messages/") })
                 assertTrue(requests.all { it.headers["authorization"] == "Bearer cassi-fixture-0" })
                 assertNull(inbox.resolve(route.identity))
+            } finally {
+                keys.remove(account.config.id)
+                WorkspacePushNotifications(context).cancelServer(account.config.id)
+                account.close()
+            }
+        }
+    }
+
+    @Test fun existingTopicApiRepairsLostZeroUpdatesWithoutClosingUnreadTopics() = runBlocking {
+        val owner = UUID.randomUUID().toString()
+        val project = UUID.randomUUID().toString()
+        val stream = UUID.randomUUID().toString()
+        val read = UUID.randomUUID().toString()
+        val unread = UUID.randomUUID().toString()
+        val requests = CopyOnWriteArrayList<LoopbackWorkspaceServer.Request>()
+        fun topic(uuid: String, count: Int) = """{"uuid":"$uuid","name":"Recovery fixture","color":0,"stream_uuid":"$stream","updated_at":"2026-01-01T00:00:00Z","unread_count":$count,"active_unread_count":$count,"is_done":false,"is_default":false,"notification_mode":"default"}"""
+        LoopbackWorkspaceServer { request ->
+            requests += request
+            when {
+                request.path.endsWith("/messenger/me/") -> LoopbackWorkspaceServer.Response(
+                    """{"username":"cassi-fixture","uuid":"$owner","status":"active","avatar":""}""")
+                request.path.endsWith("/messenger/stream_topics/") -> LoopbackWorkspaceServer.Response(
+                    "[${topic(read, 0)},${topic(unread, 1)}]")
+                else -> LoopbackWorkspaceServer.Response("{}")
+            }
+        }.use { server ->
+            val account = WorkspaceTestAccount.create(server.url)
+            val keys = PushKeyStore(context)
+            try {
+                account.preferences.updateServerProjectUuid(account.config.id, project)
+                val registration = keys.getOrCreate(account.config.id, UUID.randomUUID().toString(), project, owner)
+                fun route(topic: String) = PushRoute(UUID.randomUUID().toString(), account.config.id,
+                    registration.organizationUuid, project, owner, stream, topic, UUID.randomUUID().toString(), true)
+                val routes = listOf(route(read), route(unread), route(UUID.randomUUID().toString()))
+                val inbox = PushInbox(context)
+                routes.forEach { inbox.updateTopic(it, System.currentTimeMillis(), 1, 1, 100, UUID.randomUUID().toString()) }
+                val worker = TestListenableWorkerBuilder<PushReconciliationWorker>(context)
+                    .setWorkerFactory(PushWorkerFactory(account.api, account.preferences)).build()
+                assertEquals(ListenableWorker.Result.success(), worker.doWork())
+                assertNull(inbox.resolve(routes[0].identity))
+                assertNotNull(inbox.resolve(routes[1].identity))
+                assertNull(inbox.resolve(routes[2].identity))
+                assertTrue(requests.any { it.path.endsWith("/messenger/stream_topics/") })
+                assertTrue(requests.none { it.path.endsWith("/messenger/messages/") })
             } finally {
                 keys.remove(account.config.id)
                 WorkspacePushNotifications(context).cancelServer(account.config.id)

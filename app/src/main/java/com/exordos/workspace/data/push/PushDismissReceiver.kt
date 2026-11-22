@@ -28,7 +28,8 @@ class PushDismissReceiver : BroadcastReceiver() {
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 WorkspacePushNotifications(context).dismiss(intent.getStringExtra("identity"),
-                    intent.getStringExtra("conversation"), intent.getLongExtra("snapshot", 0))
+                    intent.getStringExtra("conversation"), intent.getLongExtra("snapshot", 0),
+                    intent.getStringExtra("epoch_generation"))
             } finally { pending.finish() }
         }
     }
