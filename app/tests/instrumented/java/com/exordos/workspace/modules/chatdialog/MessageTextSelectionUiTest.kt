@@ -90,6 +90,7 @@ class MessageTextSelectionUiTest {
 
     @Test fun selectAllCopiesTheWholeRenderedMessage() = runBlocking {
         showChat(own = true)
+        compose.runOnIdle { clipboard.clearPrimaryClip() }
         onView(body("Начало выделение конец")).perform(touchWord("выделение", Tap.LONG))
         clickTextAction(android.R.string.selectAll)
         clickTextAction(android.R.string.copy)
@@ -183,16 +184,14 @@ class MessageTextSelectionUiTest {
         automation.serviceInfo = service
         try {
             val label = context.getString(labelId)
-            var action: AccessibilityNodeInfo? = null
-            compose.waitUntil(5_000) {
-                action = automation.windows.asSequence().mapNotNull { it.root }
+            // Select all can rebuild the toolbar between finding a visible label and clicking it.
+            compose.waitUntil(conditionDescription = "Native $label action accepts a click", timeoutMillis = 5_000) {
+                automation.windows.asSequence().mapNotNull { it.root }
                     .flatMap { it.findAccessibilityNodeInfosByText(label).asSequence() }
-                    .firstOrNull { it.text?.toString() == label && it.isVisibleToUser }
-                action != null
+                    .filter { it.text?.toString() == label && it.isVisibleToUser }
+                    .mapNotNull { action -> generateSequence(action) { it.parent }.firstOrNull { it.isClickable } }
+                    .any { it.isEnabled && it.isVisibleToUser && it.performAction(AccessibilityNodeInfo.ACTION_CLICK) }
             }
-            var target = checkNotNull(action)
-            while (!target.isClickable && target.parent != null) target = checkNotNull(target.parent)
-            assertTrue("Native $label action must be clickable", target.performAction(AccessibilityNodeInfo.ACTION_CLICK))
             instrumentation.waitForIdleSync()
         } finally {
             service.flags = flags
