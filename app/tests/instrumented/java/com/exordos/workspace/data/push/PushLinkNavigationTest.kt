@@ -1,5 +1,7 @@
 package com.exordos.workspace.data.push
 
+import android.Manifest
+import android.os.Build
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
@@ -10,7 +12,6 @@ import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.assertion.ViewAssertions.matches
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
 import androidx.test.espresso.matcher.ViewMatchers.withText
-import com.exordos.workspace.R
 import com.exordos.workspace.ApplicationSwitcher
 import com.exordos.workspace.ChatNavigation
 import com.exordos.workspace.LocalBottomBarVisible
@@ -23,7 +24,6 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNotNull
 import org.junit.Before
@@ -48,7 +48,11 @@ class PushLinkNavigationTest {
     private val message = UUID.randomUUID().toString()
 
     @Before fun prepare() = runBlocking {
-        assertFalse(context.resources.getBoolean(R.bool.push_enabled))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            // A tap on a delivered notification assumes the user already allowed notifications.
+            InstrumentationRegistry.getInstrumentation().uiAutomation
+                .grantRuntimePermission(context.packageName, Manifest.permission.POST_NOTIFICATIONS)
+        }
         server = LoopbackWorkspaceServer { request ->
             // Keep /me owner verification, without starting unrelated repository bootstrap jobs.
             if (request.path.contains("/message_reactions/"))
@@ -96,13 +100,13 @@ class PushLinkNavigationTest {
         if (::server.isInitialized) server.close()
     }
 
-    @Test fun coldPushLinkOpensMessageWhilePushDeliveryIsDisabled() {
+    @Test fun coldPushLinkOpensMessage() {
         pending.value = link
         render(chatOnly = false)
         assertLinkedMessageOpens()
     }
 
-    @Test fun warmPushLinkOpensMessageWhilePushDeliveryIsDisabled() {
+    @Test fun warmPushLinkOpensMessage() {
         render(chatOnly = true)
         compose.onNodeWithText("Мессенджер").assertIsDisplayed()
         compose.runOnIdle { pending.value = link }

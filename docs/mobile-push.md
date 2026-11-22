@@ -1,22 +1,23 @@
 # Native encrypted Workspace notifications
 
-Push is temporarily disabled by `@bool/push_enabled` in `values/push.xml`.
-The flag disables Firebase token auto-initialization, Analytics collection and
-notification delegation, the FCM broadcast receiver,
-the messaging service and dismiss receiver, application push callbacks/work,
-notification permission requests. Deep-link navigation remains available with
-push delivery disabled and retains its account and access checks. The implementation and its
-protocol tests remain available for the later rollout. Crashlytics stays enabled.
-Push-specific chat visibility updates and notification settings are also off.
-Application startup also applies the delegation flag through the Firebase SDK,
-so a delegate saved by an earlier installation is cleared when push is off.
+Push is enabled in the app by `@bool/push_enabled` in `values/push.xml`.
+Android still requires notification permission, and registration only runs for
+saved accounts whose server supports and enables native push. Firebase Analytics
+collection stays disabled independently of push; Crashlytics keeps its existing
+configuration.
+
+With the build-time switch off, the app disables token auto-initialization,
+notification delegation, the FCM and dismiss receivers, the messaging service,
+and push work, notification permissions and push-specific settings. Existing
+notification links retain their account and access checks. Application startup
+also applies the switch through the Firebase SDK to clear an old notification
+delegate when push is off.
 
 Android registers its Firebase token and a separate X25519 push public key with
 Workspace. Workspace prepares the preview, encrypts one content envelope per
-device, and sends it through local Notification → upstream Notification → FCM.
-Only the upstream Notification has Firebase sending credentials. The complete
-server/event/deployment contract lives in
-`exordos_notification/docs/mobile-push.md`.
+device, and submits it to the installation's Notification service for direct FCM
+delivery. The Firebase sending credential stays on Notification, not on the app
+or the Workspace node. See the [server deployment contract](https://github.com/exordos/workspace_backend/blob/master/docs/mobile-push.md).
 
 ## Registration and account lifetime
 

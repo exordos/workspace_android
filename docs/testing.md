@@ -50,6 +50,7 @@ This map describes covered contracts; it does not establish full line coverage.
 | Protected stream, settings, notifications, call action | `ProtectedStream*Test`, `StreamInfoAvailabilityUiTest` |
 | Login/OTP server-error and empty/whitespace fallback Toasts, repeated identical failures, navigation, layout | `AuthenticationErrorUiTest`, `AuthenticationUiTest`, `AuthReviewRegressionTest`, `ProfileNavigationUiTest`, `PublicationWindowTest` |
 | Firebase release configuration, token/payload log privacy and notification content | `verifyFirebaseReleaseConfig`, `FirebaseTokenLoggingTest`; opt-in `FirebaseRegistrationSmokeTest` and dedicated notification acceptance |
+| Push entry points and WorkManager wiring enabled, Firebase Analytics still disabled, warm and cold notification links | `PushConfigurationTest`, `PushLinkNavigationTest` |
 
 When extending this map, identify the failure scenario: lost acknowledgement,
 account replacement during a request, an empty fresh snapshot after deletion,
