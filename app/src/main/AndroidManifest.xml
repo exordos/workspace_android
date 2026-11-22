@@ -22,7 +22,7 @@
             android:value="@bool/push_enabled" />
         <meta-data
             android:name="firebase_analytics_collection_enabled"
-            android:value="@bool/push_enabled" />
+            android:value="false" />
         <meta-data
             android:name="firebase_messaging_notification_delegation_enabled"
             android:value="@bool/push_enabled" />
