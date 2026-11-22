@@ -146,6 +146,7 @@ private fun MessageQuoteContent(
                     style = TextStyle(color = LocalWorkspaceColorsPalette.current.textHeaders,
                         fontSize = 14.sp, fontFamily = InterFontFamily),
                     navController = navController, viewModel = viewModel,
+                    isTextSelectable = true,
                 )
             }
         }

@@ -34,6 +34,7 @@ This map describes covered contracts; it does not establish full line coverage.
 | Ordinary/direct/encrypted stream creation without legacy `source`, canonical key metadata and one selected member | `AddStreamRequestContractTest`, `WorkspaceRequestHttpContractTest#streamCreationUsesSupportedFieldsWithTheProductionJsonConfiguration`, `EncryptedChatRuntimeInstrumentedTest#createEncryptedStreamFinalizesKeyAndInvitationRetryDoesNotCreateAnotherStream` |
 | Active unread, topic overrides, first unread message, folders | `InboxUnreadTest`, `InboxInstrumentedTest`, `NotificationIndicatorRepositoryTest` |
 | Markdown, URNs, links, snapshots, bounded quotes | `UrnParserTest`, `MarkdownAttachmentUrnParsingTest`, `ForwardedQuoteParsingTest`, `MessageQuote*Test`, `ChatHistoryPresentationTest` |
+| Native text selection and clipboard contents for incoming/own formatted messages and quotes, link taps and whole-message selection | `MessageTextSelectionUiTest` |
 | Sending/forwarding/deletion/selection, partial failures | `MessageDeletion*Test`, `DeleteMessage*Test`, `MessageSelection*Test`, `MessageForwardingTest`, `Forward*Test`, `EncryptedMessageForwardingTest` |
 | Uncertain-forward cancel/reopen/Back cycles, verification and explicit abandon, dialog-window focus | `ForwardMessagesUiTest` |
 | External sharing, grants, attachments, safe filenames | `ExternalMessageShareTest`, `ExternalShareGrantTest`, `AttachmentFileNameTest`, `WorkspaceFileUploadTest` |

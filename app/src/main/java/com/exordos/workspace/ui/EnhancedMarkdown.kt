@@ -28,7 +28,8 @@ fun EnhancedMarkdown(
     modifier: Modifier = Modifier,
     style: TextStyle,
     navController: NavHostController?,
-    viewModel: ChatDialogViewModel?
+    viewModel: ChatDialogViewModel?,
+    isTextSelectable: Boolean = false,
 ) {
     val context = LocalContext.current
     if (MarkdownParser.hasQuotes(markdown)) {
@@ -39,11 +40,13 @@ fun EnhancedMarkdown(
             style = style,
             depth = 0,
             navController,
-            viewModel
+            viewModel,
+            isTextSelectable = isTextSelectable,
         )
     } else {
         MarkdownText(
             markdown = markdown,
+            isTextSelectable = isTextSelectable,
             style = style,
             onLinkClicked = { url ->
                 when {
@@ -191,7 +194,8 @@ private fun MessageNodes(
     style: TextStyle,
     depth: Int,
     navController: NavHostController?,
-    viewModel: ChatDialogViewModel?
+    viewModel: ChatDialogViewModel?,
+    isTextSelectable: Boolean,
 ) {
     val context = LocalContext.current
     Column(modifier = modifier.fillMaxWidth()) {
@@ -199,6 +203,7 @@ private fun MessageNodes(
             when (node) {
                 is QouteNode.Text -> MarkdownText(
                     markdown = node.content,
+                    isTextSelectable = isTextSelectable,
                     style = style,
                     onLinkClicked = { url ->
                         when {
@@ -228,7 +233,8 @@ private fun MessageNodes(
                     style = style,
                     depth = depth,
                     navController = navController,
-                    viewModel
+                    viewModel,
+                    isTextSelectable = isTextSelectable,
                 )
             }
         }
@@ -243,7 +249,8 @@ private fun ZulipQuoteBlock(
     style: TextStyle,
     depth: Int,
     navController: NavHostController?,
-    viewModel: ChatDialogViewModel?
+    viewModel: ChatDialogViewModel?,
+    isTextSelectable: Boolean,
 ) {
     val context = LocalContext.current
     val colors = LocalWorkspaceColorsPalette.current
@@ -271,6 +278,7 @@ private fun ZulipQuoteBlock(
         quote.header?.let { header ->
             MarkdownText(
                 markdown = header.toMarkdownLine(),
+                isTextSelectable = isTextSelectable,
                 style = headerStyle,
                 onLinkClicked = { url ->
                     when {
@@ -302,7 +310,8 @@ private fun ZulipQuoteBlock(
                 style = style,
                 depth = depth + 1,
                 navController = navController,
-                viewModel = viewModel
+                viewModel = viewModel,
+                isTextSelectable = isTextSelectable,
             )
         }
     }
