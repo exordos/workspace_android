@@ -51,7 +51,7 @@ import androidx.navigation.NavHostController
 import kotlinx.coroutines.launch
 import com.exordos.workspace.ChatFlow
 import com.exordos.workspace.R
-import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.uio.UserUIO
 import com.exordos.workspace.data.remote.AuthHeader
 import com.exordos.workspace.modules.share.shareWorkspaceLink
 import com.exordos.workspace.modules.share.workspaceStreamShareLink
@@ -426,7 +426,7 @@ internal data class UserRowStyle(
 /** The caller supplies the server/auth snapshot; rows never resolve a different selected account. */
 @Composable
 internal fun UserRow(
-    user: UserResponseData,
+    user: UserUIO,
     baseUrl: String,
     authHeaders: List<AuthHeader>,
     navController: NavHostController,

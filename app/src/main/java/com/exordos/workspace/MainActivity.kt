@@ -77,7 +77,7 @@ import com.exordos.workspace.data.remote.workspaceHttpClient
 import io.ktor.client.plugins.HttpTimeout
 import com.exordos.workspace.data.remote.WorkspaceAPIClient
 import com.exordos.workspace.data.remote.AuthHeader
-import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.uio.UserUIO
 import com.exordos.workspace.modules.chatchannels.ChatScreen
 import com.exordos.workspace.modules.chatchannels.ChatViewModel
 import com.exordos.workspace.modules.chatdialog.ChatDialogScreen
@@ -199,25 +199,6 @@ class WorkspaceApplication : Application(), Configuration.Provider {
             attachUserViewModel(UserViewModel(serverRepository))
         }
         if (!pushEnabled) return
-        eventsRepositoryStore.onPushMessagesKnown = { serverId, owner, messages ->
-            if (messages.any { it.read }) appScope.launch(Dispatchers.IO) {
-                WorkspacePushNotifications(this@WorkspaceApplication)
-                    .knownMessages(serverId, owner, messages)
-            }
-        }
-        eventsRepositoryStore.onPushMessageRemoved = { serverId, owner, messageUuid ->
-            appScope.launch(Dispatchers.IO) {
-                WorkspacePushNotifications(this@WorkspaceApplication)
-                    .removedMessage(serverId, owner, messageUuid)
-            }
-        }
-        eventsRepositoryStore.onPushRead = { serverId, owner, messageUuids ->
-            appScope.launch(Dispatchers.IO) {
-                WorkspacePushNotifications(this@WorkspaceApplication)
-                    .readMessages(serverId, owner, messageUuids)
-            }
-            PushReconciliationWorker.schedule(this)
-        }
         eventsRepositoryStore.onPushTopicUpdated = { serverId, owner, topic, epoch, generation ->
             appScope.launch(Dispatchers.IO) {
                 WorkspacePushNotifications(this@WorkspaceApplication).topicUpdated(serverId, owner,
@@ -563,7 +544,7 @@ fun WorkspaceApp(
 @Composable
 private fun DestinationIcon(
     destination: Destinations,
-    profile: UserResponseData?,
+    profile: UserUIO?,
     baseUrl: String,
     authHeaders: List<AuthHeader>,
     avatarSize: Dp,

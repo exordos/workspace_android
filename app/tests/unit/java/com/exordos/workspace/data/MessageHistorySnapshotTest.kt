@@ -2,15 +2,15 @@ package com.exordos.workspace.data
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
-import com.exordos.workspace.data.remote.dto.MessageResponse
-import com.exordos.workspace.data.remote.dto.MessageResponsePayload
+import com.exordos.workspace.data.uio.MessageUIO
+import com.exordos.workspace.data.uio.MessagePayloadUIO
 
 class MessageHistorySnapshotTest {
     @Test
     fun `snapshot removes missed deletions and applies missed edits`() {
         val stale = message("stale")
         val old = message("edited")
-        val updated = old.copy(payload = MessageResponsePayload("markdown", "New text"))
+        val updated = old.copy(payload = MessagePayloadUIO("markdown", "New text"))
 
         assertEquals(listOf(updated), mergeMessageHistorySnapshot(
             listOf(stale, old), listOf(stale, old), listOf(updated), emptySet(),
@@ -40,7 +40,7 @@ class MessageHistorySnapshotTest {
     @Test
     fun `edit received during request takes precedence over an older response`() {
         val old = message("edited")
-        val edited = old.copy(payload = MessageResponsePayload("markdown", "Edited during request"))
+        val edited = old.copy(payload = MessagePayloadUIO("markdown", "Edited during request"))
 
         assertEquals(listOf(edited), mergeMessageHistorySnapshot(
             listOf(old), listOf(edited), listOf(old), emptySet(),
@@ -51,7 +51,7 @@ class MessageHistorySnapshotTest {
     fun `deletion received during request is not resurrected by its response`() {
         val deleted = message("deleted")
 
-        assertEquals(emptyList<MessageResponse>(), mergeMessageHistorySnapshot(
+        assertEquals(emptyList<MessageUIO>(), mergeMessageHistorySnapshot(
             listOf(deleted), emptyList(), listOf(deleted), emptySet(),
         ))
     }
@@ -66,9 +66,9 @@ class MessageHistorySnapshotTest {
         ))
     }
 
-    private fun message(id: String) = MessageResponse(
+    private fun message(id: String) = MessageUIO(
         uuid = id, updatedAt = "2026-10-15T12:00:00Z", createdAt = "2026-10-15T12:00:00Z",
         streamUuid = "stream", topicUuid = "topic", userUuid = "user", authorUuid = "user",
-        payload = MessageResponsePayload("markdown", id), isOwn = false, reactions = emptyMap(), read = false,
+        payload = MessagePayloadUIO("markdown", id), isOwn = false, reactions = emptyMap(), read = false,
     )
 }

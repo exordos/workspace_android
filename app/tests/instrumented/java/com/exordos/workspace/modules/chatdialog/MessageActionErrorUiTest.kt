@@ -26,8 +26,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import com.exordos.workspace.R
 import com.exordos.workspace.data.remote.ApiResult
-import com.exordos.workspace.data.remote.dto.MessageResponse
-import com.exordos.workspace.data.remote.dto.MessageResponsePayload
+import com.exordos.workspace.data.uio.MessageUIO
+import com.exordos.workspace.data.uio.MessagePayloadUIO
 import com.exordos.workspace.ui.theme.WokspaceTheme
 import java.util.Locale
 
@@ -115,7 +115,7 @@ class MessageActionErrorUiTest {
         }
     }
 
-    private fun message(index: Int) = MessageResponse(
+    private fun message(index: Int) = MessageUIO(
         uuid = "00000000-0000-4000-8000-${index.toString().padStart(12, '0')}",
         updatedAt = "2026-09-07T12:00:00Z",
         createdAt = "2026-09-07T12:00:00Z",
@@ -123,7 +123,7 @@ class MessageActionErrorUiTest {
         topicUuid = "topic",
         userUuid = "current-user",
         authorUuid = "current-user",
-        payload = MessageResponsePayload("markdown", "Selection limit fixture"),
+        payload = MessagePayloadUIO("markdown", "Selection limit fixture"),
         isOwn = true,
         reactions = emptyMap(),
         read = true,

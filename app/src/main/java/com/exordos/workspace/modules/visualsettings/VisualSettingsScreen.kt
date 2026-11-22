@@ -196,16 +196,15 @@ private fun PushNotificationLimits() {
     val context = LocalContext.current
     if (!context.resources.getBoolean(R.bool.push_enabled)) return
     val scope = rememberCoroutineScope()
-    var limits by remember { mutableStateOf(WorkspacePushNotifications(context).limits()) }
-    fun save() { scope.launch(Dispatchers.IO) { WorkspacePushNotifications(context).setLimits(limits.conversations, limits.messages) } }
+    var limit by remember { mutableStateOf(WorkspacePushNotifications(context).topicLimit()) }
     Column(Modifier.fillMaxWidth().padding(12.dp)) {
         Text(stringResource(R.string.push_display_limits), color = LocalWorkspaceColorsPalette.current.textHeaders)
-        Text(stringResource(R.string.push_group_limit, limits.conversations))
-        Slider(value = limits.conversations.toFloat(), onValueChange = { limits = limits.copy(conversations = it.toInt()) },
-            valueRange = 1f..5f, steps = 3, onValueChangeFinished = { save() })
-        Text(stringResource(R.string.push_message_limit, limits.messages))
-        Slider(value = limits.messages.toFloat(), onValueChange = { limits = limits.copy(messages = it.toInt()) },
-            valueRange = 1f..10f, steps = 8, onValueChangeFinished = { save() })
+        Text(stringResource(R.string.push_group_limit, limit))
+        Slider(value = limit.toFloat(), onValueChange = { limit = it.toInt() }, valueRange = 1f..5f, steps = 3,
+            onValueChangeFinished = {
+                val selectedLimit = limit
+                scope.launch(Dispatchers.IO) { WorkspacePushNotifications(context).setTopicLimit(selectedLimit) }
+            })
         Text(stringResource(R.string.push_limit_explanation), fontSize = 12.sp)
     }
 }

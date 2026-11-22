@@ -10,7 +10,7 @@ import com.exordos.workspace.data.ServerConfig
 import com.exordos.workspace.data.remote.ApiError
 import com.exordos.workspace.data.remote.ApiResult
 import com.exordos.workspace.data.remote.HTTPMethod
-import com.exordos.workspace.data.remote.dto.Stream
+import com.exordos.workspace.data.uio.StreamUIO
 
 class ProtectedStreamNotificationTest {
     @Test fun `owner administrator moderator and member update their own preference under captured configuration`() = runBlocking {
@@ -111,7 +111,7 @@ class ProtectedStreamNotificationTest {
 
     private class Fixture(role: String = "member", startMissing: Boolean = false) {
         val original = ProtectedStreamEditContext(ServerConfig("server", "https://workspace.example", "", "", false,
-            projectUuid = "project"), "user", Stream(uuid = "stream", unreadCount = 0, activeUnreadCount = 0,
+            projectUuid = "project"), "user", StreamUIO(uuid = "stream", unreadCount = 0, activeUnreadCount = 0,
             passiveUnreadCount = 0, updatedAt = "", isArchived = false, notificationMode = "all_messages",
             isPrivate = false, name = "Protected", color = 0, role = role,
             projectId = "project", userUuid = "user", encryption = true, currentEncryptionKeyUuid = "generation"))

@@ -14,6 +14,7 @@
 
 package com.exordos.workspace.modules.createstream
 
+import com.exordos.workspace.data.uio.toUio
 import com.exordos.workspace.data.remote.ApiResult
 
 import androidx.compose.runtime.mutableStateOf
@@ -77,7 +78,7 @@ class StreamMembershipInstrumentedTest {
         for (count in 1..2) {
             val model = create(owner)
             model.onStreamNameChange("CASSI $count peers")
-            peer.people.drop(1).take(count).forEach(model::didTapOnUser)
+            peer.people.drop(1).take(count).map { it.toUio() }.forEach(model::didTapOnUser)
             model.createStream()
             assertEquals(QueryState.Success, model.createQueryState.value)
             val stream = requireNotNull(model.createdStream)
@@ -96,7 +97,7 @@ class StreamMembershipInstrumentedTest {
         val owner = account(0)
         val model = create(owner)
         model.onStreamNameChange("CASSI retry")
-        model.didTapOnUser(peer.people[1])
+        model.didTapOnUser(peer.people[1].toUio())
         peer.failInvitation = true
         model.createStream()
         assertTrue(model.createQueryState.value is QueryState.Error)
@@ -104,8 +105,8 @@ class StreamMembershipInstrumentedTest {
         compose.setContent { if (mounted.value) WokspaceTheme { CreateStreamView(model, rememberNavController()) } }
         val error = (model.createQueryState.value as QueryState.Error).message
         compose.onNodeWithText(error).assertIsDisplayed()
-        model.didTapOnUser(peer.people[1])
-        model.didTapOnUser(peer.people[2])
+        model.didTapOnUser(peer.people[1].toUio())
+        model.didTapOnUser(peer.people[2].toUio())
         model.onStreamNameChange("Changed after partial success")
         assertEquals(listOf(peer.people[1].uuid), model.selectedUserUuids.value)
         assertEquals("CASSI retry", model.streamName.value)
@@ -125,7 +126,7 @@ class StreamMembershipInstrumentedTest {
         val observer = launch { model.users.collect() }
         try {
             withTimeout(5_000) { model.users.first { it.size == 2 } }
-            owner.repo.addStreamBindings(peer.initial.uuid, listOf(peer.binding(1)))
+            owner.repo.addStreamBindings(peer.initial.uuid, listOf(peer.binding(1)).map { it.toUio() })
             withTimeout(5_000) { model.users.first { it.map { person -> person.uuid } == listOf(peer.people[2].uuid) } }
             owner.repo.addStreamBindings(peer.initial.uuid, emptyList())
             withTimeout(5_000) { model.users.first { it.size == 2 } }
@@ -136,7 +137,7 @@ class StreamMembershipInstrumentedTest {
     @Test fun concurrentInvitationIsSingleAndDisplaysFailureInsteadOfGenericError(): Unit = runBlocking {
         val owner = account(0)
         val model = add(owner)
-        model.didTapOnUser(peer.people[1])
+        model.didTapOnUser(peer.people[1].toUio())
         val gate = CountDownLatch(1)
         val mounted = mutableStateOf(true)
         peer.invitationGate = gate
@@ -146,7 +147,7 @@ class StreamMembershipInstrumentedTest {
                 val first = async { model.addUsersToStream() }
                 withTimeout(5_000) { while (peer.invitations.isEmpty()) delay(10) }
                 model.addUsersToStream()
-                model.didTapOnUser(peer.people[2])
+                model.didTapOnUser(peer.people[2].toUio())
                 assertEquals(listOf(peer.people[1].uuid), model.selectedUserUuids.value)
                 compose.setContent { if (mounted.value) WokspaceTheme { AddUsersToStreamView(model, rememberNavController()) } }
                 compose.onNodeWithText("Добавить").assertIsNotEnabled()
@@ -170,22 +171,22 @@ class StreamMembershipInstrumentedTest {
         val owner = account(0)
         val model = add(owner)
         model.addUsersToStream()
-        model.didTapOnUser(peer.people[0])
+        model.didTapOnUser(peer.people[0].toUio())
         model.addUsersToStream()
         assertTrue(peer.invitations.isEmpty())
         val creation = create(owner)
-        creation.didTapOnUser(peer.people[0])
+        creation.didTapOnUser(peer.people[0].toUio())
         assertTrue(creation.selectedUserUuids.value.isEmpty())
     }
 
     @Test fun realtimeConfirmedInvitationFinishesRetryWithoutAnotherPost(): Unit = runBlocking {
         val owner = account(0)
         val model = add(owner)
-        model.didTapOnUser(peer.people[1])
+        model.didTapOnUser(peer.people[1].toUio())
         peer.failInvitation = true
         model.addUsersToStream()
         assertTrue(model.createQueryState.value is QueryState.Error)
-        owner.repo.addStreamBindings(peer.initial.uuid, listOf(peer.binding(0), peer.binding(1)))
+        owner.repo.addStreamBindings(peer.initial.uuid, listOf(peer.binding(0), peer.binding(1)).map { it.toUio() })
         model.addUsersToStream()
         assertEquals(QueryState.Success, model.createQueryState.value)
         assertEquals(1, peer.invitations.size)
@@ -194,7 +195,7 @@ class StreamMembershipInstrumentedTest {
     @Test fun invitationResponseImmediatelyUpdatesMembershipAndRepeatedSnapshotDoesNotDuplicateIt(): Unit = runBlocking {
         val owner = account(0)
         val model = add(owner)
-        model.didTapOnUser(peer.people[1])
+        model.didTapOnUser(peer.people[1].toUio())
         model.addUsersToStream()
         assertEquals(QueryState.Success, model.createQueryState.value)
         val snapshot = owner.repo.streamBindings.value.getValue(peer.initial.uuid)
@@ -219,7 +220,7 @@ class StreamMembershipInstrumentedTest {
             withTimeout(5_000) { model.users.first { it.map { user -> user.uuid } == listOf(peer.people[2].uuid) } }
             assertEquals(2, owner.repo.streamBindings.value.getValue(peer.initial.uuid).size)
             val own = owner.repo.streamBindings.value.getValue(peer.initial.uuid).first { it.userUuid == peer.people[0].uuid }
-            owner.repo.didReceiveStreamBindingEvent(Json.encodeToString(own.copy(role = "administrator")), "updated")
+            owner.repo.didReceiveStreamBindingEvent(Json.encodeToString(peer.binding(0).copy(role = "administrator")), "updated")
             assertEquals("administrator", owner.repo.streams.value.single().role)
             owner.repo.didReceiveStreamBindingEvent(buildJsonObject {
                 put("uuid", added.uuid); put("stream_uuid", added.streamUuid); put("user_uuid", added.userUuid)
@@ -236,7 +237,7 @@ class StreamMembershipInstrumentedTest {
         val owner = account(0)
         val model = create(owner)
         model.onStreamNameChange("CASSI recreation")
-        model.didTapOnUser(peer.people[1])
+        model.didTapOnUser(peer.people[1].toUio())
         val mounted = mutableStateOf(true)
         val gate = CountDownLatch(1)
         peer.invitationGate = gate
@@ -258,14 +259,14 @@ class StreamMembershipInstrumentedTest {
         val owner = account(0)
         val invitation = add(owner)
         val direct = withContext(Dispatchers.Main) { CreateDirectStreamViewModel(owner.api, owner.events).also { models += it } }
-        invitation.didTapOnUser(peer.people[1])
+        invitation.didTapOnUser(peer.people[1].toUio())
         val other = owner.config.copy(id = "cassi-other-${UUID.randomUUID()}")
         try {
             owner.preferences.addServer(other, TokenPair("cassi-fixture-1", "cassi-fixture-refresh"))
             owner.preferences.setSelectedServerId(other.id)
             withTimeout(5_000) { owner.user.selectedServer.first { it?.id == other.id } }
             invitation.addUsersToStream()
-            direct.createPrivateStream(peer.people[1])
+            direct.createPrivateStream(peer.people[1].toUio())
             assertTrue(invitation.createQueryState.value is QueryState.Error)
             assertTrue(direct.createQueryState.value is QueryState.Error)
             assertTrue(peer.invitations.isEmpty())
@@ -278,13 +279,13 @@ class StreamMembershipInstrumentedTest {
         val invitation = add(owner)
         val direct = withContext(Dispatchers.Main) { CreateDirectStreamViewModel(owner.api, owner.events).also { models += it } }
         val creation = create(owner)
-        invitation.didTapOnUser(peer.people[1])
+        invitation.didTapOnUser(peer.people[1].toUio())
         creation.onStreamNameChange("CASSI stale project")
-        creation.didTapOnUser(peer.people[1])
+        creation.didTapOnUser(peer.people[1].toUio())
         owner.preferences.updateServerProjectUuid(owner.config.id, "other-project")
         withTimeout(5_000) { owner.user.selectedServer.first { it?.projectUuid == "other-project" } }
         invitation.addUsersToStream()
-        direct.createPrivateStream(peer.people[1])
+        direct.createPrivateStream(peer.people[1].toUio())
         creation.createStream()
         assertTrue(invitation.createQueryState.value is QueryState.Error)
         assertTrue(direct.createQueryState.value is QueryState.Error)
@@ -301,7 +302,7 @@ class StreamMembershipInstrumentedTest {
     @Test fun delayedInvitationHttpResponseCannotRestoreADeletedMember(): Unit = runBlocking {
         val owner = account(0)
         val model = add(owner)
-        model.didTapOnUser(peer.people[1])
+        model.didTapOnUser(peer.people[1].toUio())
         val gate = CountDownLatch(1)
         peer.invitationGate = gate
         try {
@@ -340,13 +341,13 @@ class StreamMembershipInstrumentedTest {
         val model = withContext(Dispatchers.Main) { CreateDirectStreamViewModel(owner.api, owner.events).also { models += it } }
         compose.setContent { WokspaceTheme { CreateDirectStreamView(model, rememberNavController()) } }
         compose.waitUntil(5_000) { model.users.value.size == 2 }
-        compose.onNodeWithText(peer.people[1].displayableName()).assertIsDisplayed()
-        compose.onNodeWithText(peer.people[0].displayableName()).assertDoesNotExist()
+        compose.onNodeWithText(peer.people[1].toUio().displayableName()).assertIsDisplayed()
+        compose.onNodeWithText(peer.people[0].toUio().displayableName()).assertDoesNotExist()
         compose.onAllNodes(hasSetTextAction())[0].performTextReplacement("Person1")
-        compose.onNodeWithText(peer.people[1].displayableName()).assertIsDisplayed()
-        compose.onNodeWithText(peer.people[2].displayableName()).assertDoesNotExist()
+        compose.onNodeWithText(peer.people[1].toUio().displayableName()).assertIsDisplayed()
+        compose.onNodeWithText(peer.people[2].toUio().displayableName()).assertDoesNotExist()
         compose.onAllNodes(hasSetTextAction())[0].performTextReplacement("person1@example.invalid")
-        compose.onNodeWithText(peer.people[1].displayableName()).assertIsDisplayed()
+        compose.onNodeWithText(peer.people[1].toUio().displayableName()).assertIsDisplayed()
     }
 
     private suspend fun create(a: WorkspaceTestAccount) = withContext(Dispatchers.Main) {
@@ -357,10 +358,10 @@ class StreamMembershipInstrumentedTest {
     }
     private suspend fun account(index: Int): WorkspaceTestAccount {
         val account = WorkspaceTestAccount.create(peer.url, index).also { accounts += it }
-        account.repo.updateCurrentUser(peer.people[index])
-        account.repo.setInitialUsers(peer.people)
-        account.repo.setInitialStreams(listOf(peer.initial))
-        account.repo.addStreamBindings(peer.initial.uuid, listOf(peer.binding(0)))
+        account.repo.updateCurrentUser(peer.people[index].toUio())
+        account.repo.setInitialUsers(peer.people.map { it.toUio() })
+        account.repo.setInitialStreams(listOf(peer.initial).map { it.toUio() })
+        account.repo.addStreamBindings(peer.initial.uuid, listOf(peer.binding(0)).map { it.toUio() })
         return account
     }
 }

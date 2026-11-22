@@ -14,7 +14,7 @@ import com.exordos.workspace.data.EventsRepositoryStore
 import com.exordos.workspace.data.remote.ApiResult
 import com.exordos.workspace.data.remote.WorkspaceAPIClient
 import com.exordos.workspace.data.remote.dto.AddUsersToStreamRequest
-import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.uio.UserUIO
 import com.exordos.workspace.modules.chooseserver.QueryState
 import com.exordos.workspace.modules.creationbase.streamActionAccount
 
@@ -25,7 +25,7 @@ class AddUsersToStreamViewModel(
 ): ViewModel() {
     val eventsRepository = eventsRepositoryStore.get(client.getCurrentServerId()) ?: error("Cannot get current event repository")
 
-    val users: StateFlow<List<UserResponseData>> = combine(eventsRepository.users, eventsRepository.streamBindings, eventsRepository.currentUser) { list, bindings, current ->
+    val users: StateFlow<List<UserUIO>> = combine(eventsRepository.users, eventsRepository.streamBindings, eventsRepository.currentUser) { list, bindings, current ->
             val members = bindings[streamUuid].orEmpty().map { it.userUuid }.toSet()
             list.filter { it.uuid !in members && it.uuid != current?.uuid }
         }
@@ -43,7 +43,7 @@ class AddUsersToStreamViewModel(
     private val _createQueryState = MutableStateFlow<QueryState>(QueryState.Idle)
     val createQueryState: StateFlow<QueryState> = _createQueryState
 
-    fun didTapOnUser(user: UserResponseData) {
+    fun didTapOnUser(user: UserUIO) {
         if (_createQueryState.value is QueryState.Loading || _createQueryState.value is QueryState.Success ||
             user.uuid == eventsRepository.currentUser.value?.uuid ||
             eventsRepository.streamBindings.value[streamUuid].orEmpty().any { it.userUuid == user.uuid }) return

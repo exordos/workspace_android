@@ -9,9 +9,9 @@ import kotlinx.coroutines.withContext
 import com.exordos.workspace.data.WorkspaceDateTime
 import com.exordos.workspace.data.ConfirmedAccountContext
 import com.exordos.workspace.data.crypto.*
-import com.exordos.workspace.data.remote.dto.MessageResponse
-import com.exordos.workspace.data.remote.dto.Stream
-import com.exordos.workspace.data.remote.dto.StreamBindingResponseData
+import com.exordos.workspace.data.uio.MessageUIO
+import com.exordos.workspace.data.uio.StreamUIO
+import com.exordos.workspace.data.uio.StreamBindingUIO
 import com.exordos.workspace.modules.encryptedchat.latestEncryptedChatWireMessages
 import com.exordos.workspace.modules.encryptedchat.EncryptedChatScope
 import com.exordos.workspace.modules.encryptedchat.encryptedChatStorageScopeMatches
@@ -23,19 +23,19 @@ internal data class EncryptedPreviewSource(
 
 private val encryptedServiceKinds = setOf("key_request", "key_grant", "key_reject", "key_announced")
 
-internal fun latestLoadedEncryptedPreviewMessage(stream: Stream, pool: List<MessageResponse>, conversations: List<MessageResponse>): MessageResponse? {
+internal fun latestLoadedEncryptedPreviewMessage(stream: StreamUIO, pool: List<MessageUIO>, conversations: List<MessageUIO>): MessageUIO? {
     val known = latestEncryptedChatWireMessages(listOfNotNull(stream.lastMessage) + pool, conversations, stream.uuid)
     val last = known.firstOrNull { it.uuid == stream.lastMessageUuid } ?: return null
     if (last.payload.kind == "e2ee") return last
     if (last.payload.kind !in encryptedServiceKinds) return null
     val time = runCatching { WorkspaceDateTime.parse(last.createdAt) }.getOrNull() ?: return null
     return known.filter { it.payload.kind == "e2ee" && runCatching { WorkspaceDateTime.parse(it.createdAt) <= time }.getOrDefault(false) }
-        .maxWithOrNull(compareBy<MessageResponse> { WorkspaceDateTime.parse(it.createdAt) }.thenBy { it.uuid })
+        .maxWithOrNull(compareBy<MessageUIO> { WorkspaceDateTime.parse(it.createdAt) }.thenBy { it.uuid })
 }
 
 /** Captures only public wire fields; repository objects and ciphertext are never replaced with plaintext. */
-internal fun encryptedPreviewSource(stream: Stream, message: MessageResponse?, ownUserUuid: String,
-                                    projectUuid: String, bindings: List<StreamBindingResponseData>?, catalogLast: MessageResponse? = stream.lastMessage): EncryptedPreviewSource? {
+internal fun encryptedPreviewSource(stream: StreamUIO, message: MessageUIO?, ownUserUuid: String,
+                                    projectUuid: String, bindings: List<StreamBindingUIO>?, catalogLast: MessageUIO? = stream.lastMessage): EncryptedPreviewSource? {
     if (message == null || !stream.encryption || message.payload.kind != "e2ee" || message.payload.keyUuid.isNullOrBlank()) return null
     val memberRoles = setOf("owner", "administrator", "moderator", "member")
     val authorized = stream.userUuid == ownUserUuid && (stream.projectId == null || stream.projectId == projectUuid) &&

@@ -4,9 +4,11 @@ import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import com.exordos.workspace.data.remote.dto.MessageElement
-import com.exordos.workspace.data.remote.dto.MessageResponse
+import com.exordos.workspace.data.uio.MessageElement
+import com.exordos.workspace.data.uio.MessageUIO
+import com.exordos.workspace.data.uio.MessagePayloadUIO
 import com.exordos.workspace.data.remote.dto.MessageResponsePayload
+import com.exordos.workspace.data.uio.toUio
 
 class ForwardedQuoteParsingTest {
     private val first = "11111111-1111-4111-8111-111111111111"
@@ -180,11 +182,11 @@ class ForwardedQuoteParsingTest {
         }
     }
 
-    private fun message(content: String) = MessageResponse(
+    private fun message(content: String) = MessageUIO(
         uuid = "33333333-3333-4333-8333-333333333333",
         updatedAt = "2026-09-07T12:00:00Z", createdAt = "2026-09-07T12:00:00Z",
         streamUuid = "stream", topicUuid = "topic", userUuid = "reader", authorUuid = "sender",
-        payload = MessageResponsePayload("markdown", content), isOwn = false,
+        payload = MessagePayloadUIO("markdown", content), isOwn = false,
         reactions = emptyMap(), read = true,
     )
 }

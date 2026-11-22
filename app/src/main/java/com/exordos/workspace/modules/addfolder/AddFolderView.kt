@@ -37,7 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
 import com.exordos.workspace.R
-import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.uio.UserUIO
 import com.exordos.workspace.modules.createstream.CreateStreamViewModel
 import com.exordos.workspace.ui.Avatar
 import com.exordos.workspace.ui.theme.InterFontFamily
@@ -175,8 +175,8 @@ fun AddFolderView(
 
 @Composable
 fun UserWithCheckboxCell(
-    item: UserResponseData,
-    onUserSelected: (UserResponseData) -> Unit,
+    item: UserUIO,
+    onUserSelected: (UserUIO) -> Unit,
     isSelected: Boolean,
     baseUrl: String?,
     viewModel: AddFolderViewModel

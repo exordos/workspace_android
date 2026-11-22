@@ -74,8 +74,8 @@ class PushWorkerFactoryTest {
                 request.path.endsWith("/messenger/me/") -> LoopbackWorkspaceServer.Response(
                     """{"username":"cassi-fixture","uuid":"$owner","status":"active","avatar":""}"""
                 )
-                request.path.endsWith("/messenger/messages/") -> LoopbackWorkspaceServer.Response(
-                    """[{"uuid":"$message","updated_at":"2026-10-01T00:00:00Z","created_at":"2026-10-01T00:00:00Z","stream_uuid":"$stream","topic_uuid":"$topic","user_uuid":"$owner","author_uuid":"$owner","payload":{"kind":"markdown","content":"Synthetic worker fixture"},"is_own":false,"reactions":{},"read":true,"project_id":"$project"}]"""
+                request.path.endsWith("/messenger/stream_topics/") -> LoopbackWorkspaceServer.Response(
+                    """[{"uuid":"$topic","name":"Recovery fixture","color":0,"stream_uuid":"$stream","updated_at":"2026-01-01T00:00:00Z","unread_count":0,"active_unread_count":0,"is_done":false,"is_default":false,"notification_mode":"default"}]"""
                 )
                 else -> LoopbackWorkspaceServer.Response("{}")
             }
@@ -86,14 +86,14 @@ class PushWorkerFactoryTest {
                 account.preferences.updateServerProjectUuid(account.config.id, project)
                 val registration = keys.getOrCreate(account.config.id, UUID.randomUUID().toString(), project, owner)
                 val route = PushRoute(UUID.randomUUID().toString(), account.config.id,
-                    registration.organizationUuid, project, owner, stream, topic, message)
+                    registration.organizationUuid, project, owner, stream, topic, message, topicUpdate = true)
                 val inbox = PushInbox(context)
-                assertTrue(inbox.accept(route, System.currentTimeMillis()))
+                assertEquals(true, inbox.updateTopic(route, System.currentTimeMillis(), 1, 1, 1, UUID.randomUUID().toString()))
                 val worker = TestListenableWorkerBuilder<PushReconciliationWorker>(context)
                     .setWorkerFactory(PushWorkerFactory(account.api, account.preferences)).build()
                 assertEquals(ListenableWorker.Result.success(), worker.doWork())
                 assertTrue(requests.any { it.path.endsWith("/messenger/me/") })
-                assertTrue(requests.any { it.path.endsWith("/messenger/messages/") })
+                assertTrue(requests.any { it.path.endsWith("/messenger/stream_topics/") })
                 assertTrue(requests.all { it.headers["authorization"] == "Bearer cassi-fixture-0" })
                 assertNull(inbox.resolve(route.identity))
             } finally {

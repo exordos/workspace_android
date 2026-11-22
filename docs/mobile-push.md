@@ -71,8 +71,8 @@ registration requests are removed.
 
 The wire message is data-only: `data.payload` contains an Event UUID, installation,
 project, stream, topic, target message, user and device UUIDs, and an encrypted
-HPKE envelope. The producer uses `notification_topic_update`; the receiver still
-accepts legacy create/cancel kinds for in-flight deliveries.
+HPKE envelope. Android accepts `notification_topic_update`. Installations must
+run a producer that emits topic snapshots before deploying this client.
 
 HPKE follows RFC 9180 base mode, X25519/HKDF-SHA256/AES-256-GCM, raw 32-byte keys,
 unpadded base64url and `info=workspace-mobile-push`. AAD is compact JSON:
@@ -97,8 +97,9 @@ unread message changes. Active-unread growth can alert; decrease, repeat and
 restoration are silent. Zero active unread removes it. Android permission and
 channel settings apply; the lock-screen public version is generic.
 
-The additive SQLite upgrade preserves existing legacy receipts. Topic receipts
-persist their existing WebSocket cursor and retired generation decisions, so an
+On first startup after upgrading, Android removes old per-message receipts,
+stored route aliases and their notification cards. It preserves topic receipts,
+including their WebSocket cursor and retired generation decisions, so an
 older push cannot undo a zero snapshot or restore an old account's card. A
 WebSocket all-read topic update closes the card immediately, including when it
 arrives before the first FCM delivery. A stale swipe intent cannot dismiss a newer
@@ -112,15 +113,12 @@ dismissed cards are retained.
 The existing background reconciliation worker also batches topic IDs through the
 ordinary authenticated topic API. All-read, deleted or inaccessible topics close
 only the receipt captured before HTTP; failed requests retain it and a concurrent
-newer FCM snapshot survives. Legacy receipts keep their message-API repair. This
-runs separately from offline receipt/rendering and requires no resolver endpoint.
+newer FCM snapshot survives. Reconciliation runs separately from offline
+rendering and requires no resolver endpoint.
 
-The default limit remains five conversations. Legacy per-message cards retain
-the existing per-conversation limit and read/delete reconciliation during
-transition. Topic snapshots use a single card and no separate summary. Overflow
-preserves pending routes and returns silently when room is available. A message
-actually visible in the resumed chat is hidden without changing its unread state.
-The application being open elsewhere does not make messages read.
+The default display limit is five topics. An older topic stays pending and
+returns silently when room is available. A topic card is hidden while its
+target message is visible in the resumed chat. Hiding leaves unread state intact.
 
 Decrypted previews live only in a bounded process cache. After process death,
 restoration uses generic text until a new encrypted snapshot arrives. Unread
@@ -139,8 +137,9 @@ waits for its verified account, and checks that the owner/project match. It
 opens the authorized stream/topic and uses the public message placement UUID as
 the initial message anchor. Stream, topic and message loading must succeed in
 the captured authenticated context before navigation. A failed sign-in, denied
-request, failed loading or failed navigation does not remove the receipt. Only
-successful read confirmation or an authoritative read/delete update closes it.
+request, failed loading or failed navigation leaves the receipt intact. A
+successful mark-as-read request schedules reconciliation. An authoritative
+topic snapshot or reconciliation can close the receipt.
 
 Cold launch and `onNewIntent` both handle the receipt. A handled intent is
 cleared so rotation cannot replay an old navigation. A removed/disabled
@@ -170,13 +169,13 @@ publication is required for these checks.
 ```
 
 `EncryptedPushReceiptTest` runs on Android with public synthetic HPKE keys. It
-checks offline decryption/display, routes older than two weeks, duplicate and
-tampered-cancellation handling, independent duplicate connections, single/group
-dismissal snapshots, overflow/silent return, visible-message suppression and
-late read/delete cancellation. `PushAccountAndRecoveryTest` exercises the real
-HTTP client, pre-replacement device retirement, automatic refresh and recovery
-of missed read/delete updates through the existing message API. It removes only its synthetic registration/notifications and preserves
-real connection data. It does not establish live Firebase delivery.
+checks rejection of both retired message kinds, removal of obsolete receipts
+and cards on upgrade, independent saved connections, and restoration after
+visibility or display limits change. `EncryptedTopicPushTest` checks offline
+decryption, absolute counters, and stale delivery or dismissal.
+`PushAccountAndRecoveryTest` exercises the real HTTP client, device retirement,
+automatic refresh, and recovery of missed updates through the topic API. The
+Android tests use synthetic registrations and notifications.
 
 `PushRegistrationSchedulingTest` uses real WorkManager storage to keep an older
 request pending and verifies that a fresh login/token request supersedes it
@@ -195,8 +194,8 @@ for normal chat loading. Repeat critical receipt/click checks on the optimized
 release artifact; unit tests and a debug build do not replace those checks.
 Never uninstall or clear an existing app's data to work around a signing mismatch.
 
-Deploy Notification support and this Android consumer before enabling the new
-Workspace topic-update producer. Keep legacy kinds during the transition.
+Update Notification and enable the Workspace topic-update producer before
+rolling out this Android client. Legacy message deliveries are ignored.
 
 ## Live connection preflight
 

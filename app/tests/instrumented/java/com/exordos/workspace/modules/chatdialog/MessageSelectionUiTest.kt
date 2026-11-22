@@ -52,8 +52,8 @@ import org.junit.runner.RunWith
 import com.exordos.workspace.R
 import com.exordos.workspace.data.remote.ApiError
 import com.exordos.workspace.data.remote.ApiResult
-import com.exordos.workspace.data.remote.dto.MessageResponse
-import com.exordos.workspace.data.remote.dto.MessageResponsePayload
+import com.exordos.workspace.data.uio.MessageUIO
+import com.exordos.workspace.data.uio.MessagePayloadUIO
 import com.exordos.workspace.ui.theme.WokspaceTheme
 
 @RunWith(AndroidJUnit4::class)
@@ -284,7 +284,7 @@ class MessageSelectionUiTest {
     private fun localizedQuantity(id: Int, count: Int) =
         InstrumentationRegistry.getInstrumentation().targetContext.resources.getQuantityString(id, count, count)
 
-    private fun message(uuid: String, content: String) = MessageResponse(
+    private fun message(uuid: String, content: String) = MessageUIO(
         uuid = uuid,
         updatedAt = "2026-09-01T10:00:00Z",
         createdAt = "2026-09-01T10:00:00Z",
@@ -292,7 +292,7 @@ class MessageSelectionUiTest {
         topicUuid = TOPIC_UUID,
         userUuid = "test-author",
         authorUuid = "test-author",
-        payload = MessageResponsePayload("markdown", content),
+        payload = MessagePayloadUIO("markdown", content),
         isOwn = true,
         reactions = emptyMap(),
         read = true,

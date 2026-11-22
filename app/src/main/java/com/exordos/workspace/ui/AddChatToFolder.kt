@@ -30,16 +30,16 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.exordos.workspace.data.remote.dto.FolderResponseData
-import com.exordos.workspace.data.remote.dto.Stream
+import com.exordos.workspace.data.uio.FolderUIO
+import com.exordos.workspace.data.uio.StreamUIO
 import com.exordos.workspace.ui.theme.InterFontFamily
 import com.exordos.workspace.ui.theme.LocalWorkspaceColorsPalette
 
 @Composable
 fun AddChatToFolder(
-    folders: List<FolderResponseData>,
-    chat: Stream,
-    onAddButtonTap: (FolderResponseData, Stream) -> Unit
+    folders: List<FolderUIO>,
+    chat: StreamUIO,
+    onAddButtonTap: (FolderUIO, StreamUIO) -> Unit
 ) {
     var folderName by remember { mutableStateOf("") }
     Column(

@@ -12,8 +12,8 @@ import org.junit.Test
 import com.exordos.workspace.R
 import com.exordos.workspace.data.remote.ApiError
 import com.exordos.workspace.data.remote.ApiResult
-import com.exordos.workspace.data.remote.dto.MessageResponse
-import com.exordos.workspace.data.remote.dto.MessageResponsePayload
+import com.exordos.workspace.data.uio.MessageUIO
+import com.exordos.workspace.data.uio.MessagePayloadUIO
 
 class MessageSelectionTest {
     @Test
@@ -183,7 +183,7 @@ class MessageSelectionTest {
         val deleted: List<String>,
     )
 
-    private fun message(uuid: String, own: Boolean = true) = MessageResponse(
+    private fun message(uuid: String, own: Boolean = true) = MessageUIO(
         uuid = uuid,
         updatedAt = "2026-09-07T12:00:00Z",
         createdAt = "2026-09-07T12:00:00Z",
@@ -191,7 +191,7 @@ class MessageSelectionTest {
         topicUuid = TOPIC_UUID,
         userUuid = "current-user",
         authorUuid = if (own) "current-user" else "other-user",
-        payload = MessageResponsePayload("markdown", "Selection fixture"),
+        payload = MessagePayloadUIO("markdown", "Selection fixture"),
         isOwn = own,
         reactions = emptyMap(),
         read = true,

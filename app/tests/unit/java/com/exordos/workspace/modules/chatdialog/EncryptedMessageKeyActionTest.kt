@@ -2,15 +2,15 @@ package com.exordos.workspace.modules.chatdialog
 
 import org.junit.Assert.*
 import org.junit.Test
-import com.exordos.workspace.data.remote.dto.MessageResponse
-import com.exordos.workspace.data.remote.dto.MessageResponsePayload
+import com.exordos.workspace.data.uio.MessageUIO
+import com.exordos.workspace.data.uio.MessagePayloadUIO
 import com.exordos.workspace.modules.encryptedchat.EncryptedChatFailure
 import com.exordos.workspace.modules.encryptedchat.EncryptedChatRequestStatus
 import com.exordos.workspace.modules.encryptedchat.EncryptedChatSessionState
 
 class EncryptedMessageKeyActionTest {
     @Test fun `historical message action uses its exact generation and ciphertext recovery probe`() {
-        val wire = message(MessageResponsePayload("e2ee", "original-ciphertext", keyUuid = "historical"))
+        val wire = message(MessagePayloadUIO("e2ee", "original-ciphertext", keyUuid = "historical"))
         val target = requireNotNull(encryptedMessageKeyTarget(wire, "stream", "topic", "project"))
         assertEquals("historical", target.keyUuid)
         assertEquals("original-ciphertext", target.rawMessage.payload.content)
@@ -20,8 +20,8 @@ class EncryptedMessageKeyActionTest {
     }
 
     @Test fun `projection recovers original ciphertext without sending its displayed plaintext`() {
-        val encrypted = MessageResponsePayload("e2ee", "opaque-envelope", keyUuid = "old-generation")
-        val projection = message(MessageResponsePayload("markdown", "private displayed text"))
+        val encrypted = MessagePayloadUIO("e2ee", "opaque-envelope", keyUuid = "old-generation")
+        val projection = message(MessagePayloadUIO("markdown", "private displayed text"))
             .copy(originalEncryptedPayload = encrypted)
         val target = requireNotNull(encryptedMessageKeyTarget(projection, "stream", "topic", "project"))
         assertEquals("old-generation", target.keyUuid)
@@ -33,10 +33,10 @@ class EncryptedMessageKeyActionTest {
 
     @Test fun `ordinary and service payloads or another conversation cannot request a message key`() {
         listOf("markdown", "key_request", "key_grant", "key_reject", "key_announced").forEach { kind ->
-            assertNull(encryptedMessageKeyTarget(message(MessageResponsePayload(kind, "content", keyUuid = "key")),
+            assertNull(encryptedMessageKeyTarget(message(MessagePayloadUIO(kind, "content", keyUuid = "key")),
                 "stream", "topic", "project"))
         }
-        val wire = message(MessageResponsePayload("e2ee", "ciphertext", keyUuid = "key"))
+        val wire = message(MessagePayloadUIO("e2ee", "ciphertext", keyUuid = "key"))
         assertNull(encryptedMessageKeyTarget(wire, "other-stream", "topic", "project"))
         assertNull(encryptedMessageKeyTarget(wire, "stream", "other-topic", "project"))
         assertNull(encryptedMessageKeyTarget(wire, "stream", "topic", "other-project"))
@@ -53,7 +53,7 @@ class EncryptedMessageKeyActionTest {
         assertTrue(messageKeyRequestPending("historical", state.copy(error = EncryptedChatFailure.STALE, requestStatus = emptyMap())))
     }
 
-    private fun message(payload: MessageResponsePayload) = MessageResponse("message", "2026-10-15T10:00:00Z",
+    private fun message(payload: MessagePayloadUIO) = MessageUIO("message", "2026-10-15T10:00:00Z",
         "2026-10-15T10:00:00Z", "stream", "topic", "viewer", "author", payload, false, emptyMap(), true,
         projectId = "project")
 }

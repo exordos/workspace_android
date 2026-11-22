@@ -81,8 +81,8 @@ class PushLinkNavigationTest {
         val registration = PushKeyStore(context).getOrCreate(account.config.id,
             UUID.randomUUID().toString(), requireNotNull(account.config.projectUuid), owner)
         val route = PushRoute(UUID.randomUUID().toString(), registration.serverId,
-            registration.organizationUuid, registration.projectUuid, owner, stream, topic, message)
-        PushInbox(context).accept(route, System.currentTimeMillis())
+            registration.organizationUuid, registration.projectUuid, owner, stream, topic, message, topicUpdate = true)
+        PushInbox(context).updateTopic(route, System.currentTimeMillis(), 1, 1, 1, UUID.randomUUID().toString())
         link = "workspace-push/${route.identity}"
         assertEquals(route, WorkspacePushNotifications(context).resolve(link))
     }

@@ -1,5 +1,6 @@
 package com.exordos.workspace.data
 
+import com.exordos.workspace.data.uio.toUio
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -119,11 +120,11 @@ class DateTimeScreensRegressionTest {
             LoopbackWorkspaceServer.Response(body)
         }
         account = WorkspaceTestAccount.create(server.url)
-        account.repo.setInitialStreams(listOf(stream))
-        account.repo.appendItemsToTopicsPool(topics)
-        account.repo.setInitialDraftsPool(drafts)
+        account.repo.setInitialStreams(listOf(stream).map { it.toUio() })
+        account.repo.appendItemsToTopicsPool(topics.map { it.toUio() })
+        account.repo.setInitialDraftsPool(drafts.map { it.toUio() })
         account.repo.setInitialUsers(listOf(UserResponseData(username = "cassi", uuid = "user",
-            status = "active", avatar = "")))
+            status = "active", avatar = "")).map { it.toUio() })
     }
 
     private fun show(content: @Composable () -> Unit) {

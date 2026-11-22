@@ -12,10 +12,10 @@ import com.exordos.workspace.data.EventsRepositoryStore
 import com.exordos.workspace.data.remote.ApiResult
 import com.exordos.workspace.data.remote.WorkspaceAPIClient
 import com.exordos.workspace.data.remote.dto.MentionedMessagesRequest
-import com.exordos.workspace.data.remote.dto.MessageResponse
-import com.exordos.workspace.data.remote.dto.Stream
+import com.exordos.workspace.data.uio.MessageUIO
+import com.exordos.workspace.data.uio.StreamUIO
 import com.exordos.workspace.data.remote.dto.TopicsByIdsRequest
-import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.uio.UserUIO
 import com.exordos.workspace.modules.chooseserver.QueryState
 import kotlin.collections.map
 
@@ -28,22 +28,22 @@ class HomeMentionsViewModel(
     private val _messagesQueryState = MutableStateFlow<QueryState>(QueryState.Idle)
     val messagesQueryState: StateFlow<QueryState> = _messagesQueryState
 
-    val users: StateFlow<List<UserResponseData>> = eventsRepository.users
+    val users: StateFlow<List<UserUIO>> = eventsRepository.users
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = eventsRepository.users.value
         )
 
-    val streams: StateFlow<List<Stream>> = eventsRepository.streams
+    val streams: StateFlow<List<StreamUIO>> = eventsRepository.streams
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = eventsRepository.streams.value
         )
 
-    private val _messages = MutableStateFlow<List<MessageResponse>>(emptyList())
-    val messages: StateFlow<List<MessageResponse>> = _messages
+    private val _messages = MutableStateFlow<List<MessageUIO>>(emptyList())
+    val messages: StateFlow<List<MessageUIO>> = _messages
 
     init {
         viewModelScope.launch {

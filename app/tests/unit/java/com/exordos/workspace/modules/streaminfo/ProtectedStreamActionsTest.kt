@@ -11,9 +11,9 @@ import com.exordos.workspace.data.ServerConfig
 import com.exordos.workspace.data.remote.ApiError
 import com.exordos.workspace.data.remote.ApiResult
 import com.exordos.workspace.data.remote.ProtectedRequestAuthentication
-import com.exordos.workspace.data.remote.dto.MessageResponse
-import com.exordos.workspace.data.remote.dto.MessageResponsePayload
-import com.exordos.workspace.data.remote.dto.Stream
+import com.exordos.workspace.data.uio.MessageUIO
+import com.exordos.workspace.data.uio.MessagePayloadUIO
+import com.exordos.workspace.data.uio.StreamUIO
 import com.exordos.workspace.modules.encryptedchat.EncryptedChatException
 import com.exordos.workspace.modules.encryptedchat.EncryptedChatFailure
 
@@ -188,7 +188,7 @@ class ProtectedStreamActionsTest {
 
     @Test fun `plaintext call acknowledgement cannot launch a protected call`() = runBlocking {
         val f = CallFixture()
-        f.response = receipt().copy(payload = MessageResponsePayload("markdown", "https://meet.example/room"))
+        f.response = receipt().copy(payload = MessagePayloadUIO("markdown", "https://meet.example/room"))
         assertNull(f.starter.createCall())
         assertEquals(ProtectedStreamUpdateFailure.INVALID_RESPONSE, f.starter.state.value.error)
     }
@@ -303,12 +303,12 @@ class ProtectedStreamActionsTest {
         private const val TOPIC = "00000000-0000-0000-0000-000000000002"
         private fun editContext(role: String = "owner") = ProtectedStreamEditContext(
             ServerConfig("server-a", "https://workspace.example", "", "Workspace", projectUuid = "project-a"), "user-a",
-            Stream(STREAM, 0, 0, 0, "2026-10-15T12:00:00Z", "Protected", false, 0,
+            StreamUIO(STREAM, 0, 0, 0, "2026-10-15T12:00:00Z", "Protected", false, 0,
                 notificationMode = "all_messages", encryption = true, currentEncryptionKeyUuid = "generation",
                 ownerUuid = "user-a", projectId = "project-a", userUuid = "user-a", role = role),
         )
-        private fun receipt() = MessageResponse("message-a", "2026-10-15T12:00:00Z", "2026-10-15T12:00:00Z",
-            STREAM, TOPIC, "user-a", "user-a", MessageResponsePayload("e2ee", "opaque-ciphertext", keyUuid = "generation"),
+        private fun receipt() = MessageUIO("message-a", "2026-10-15T12:00:00Z", "2026-10-15T12:00:00Z",
+            STREAM, TOPIC, "user-a", "user-a", MessagePayloadUIO("e2ee", "opaque-ciphertext", keyUuid = "generation"),
             true, emptyMap(), true, projectId = "project-a")
     }
 }

@@ -96,7 +96,7 @@ class PushAccountAndRecoveryTest {
         }
     }
 
-    @Test fun existingMessageApiRepairsLostReadAndDeleteUpdatesWithoutClosingUnreadMessages() = runBlocking {
+    @Test fun scheduledReconciliationClosesReadAndDeletedTopicsAndKeepsUnreadTopics() = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val app = context.applicationContext as WorkspaceApplication
         val repository = app.serverRepository
@@ -106,18 +106,17 @@ class PushAccountAndRecoveryTest {
         val owner = UUID.randomUUID().toString()
         val project = UUID.randomUUID().toString()
         val stream = UUID.randomUUID().toString()
-        val topic = UUID.randomUUID().toString()
         val read = UUID.randomUUID().toString()
         val deleted = UUID.randomUUID().toString()
         val unread = UUID.randomUUID().toString()
         val requests = CopyOnWriteArrayList<LoopbackWorkspaceServer.Request>()
-        fun message(uuid: String, isRead: Boolean) = """{"uuid":"$uuid","updated_at":"2026-10-01T00:00:00Z","created_at":"2026-10-01T00:00:00Z","stream_uuid":"$stream","topic_uuid":"$topic","user_uuid":"$owner","author_uuid":"$owner","payload":{"kind":"markdown","content":"Synthetic recovery fixture"},"is_own":false,"reactions":{},"read":$isRead,"project_id":"$project"}"""
+        fun topic(uuid: String, count: Int) = """{"uuid":"$uuid","name":"Recovery fixture","color":0,"stream_uuid":"$stream","updated_at":"2026-01-01T00:00:00Z","unread_count":$count,"active_unread_count":$count,"is_done":false,"is_default":false,"notification_mode":"default"}"""
         repository.onPushRegistrationNeeded = null
         LoopbackWorkspaceServer { request ->
             requests += request
             when {
                 request.path.endsWith("/messenger/me/") -> LoopbackWorkspaceServer.Response("""{"username":"cassi-fixture","uuid":"$owner","status":"active","avatar":""}""")
-                request.path.endsWith("/messenger/messages/") -> LoopbackWorkspaceServer.Response("[${message(read, true)},${message(unread, false)}]")
+                request.path.endsWith("/messenger/stream_topics/") -> LoopbackWorkspaceServer.Response("[${topic(read, 0)},${topic(unread, 1)}]")
                 else -> LoopbackWorkspaceServer.Response("{}")
             }
         }.use { server ->
@@ -126,17 +125,18 @@ class PushAccountAndRecoveryTest {
                     TokenPair("cassi-recovery-access", "cassi-recovery-refresh"))
                 val registration = PushKeyStore(context).getOrCreate(id, UUID.randomUUID().toString(), project, owner)
                 val inbox = PushInbox(context)
-                fun route(uuid: String) = PushRoute(UUID.randomUUID().toString(), id, registration.organizationUuid, project, owner, stream, topic, uuid)
+                fun route(uuid: String) = PushRoute(UUID.randomUUID().toString(), id, registration.organizationUuid, project, owner, stream, uuid, UUID.randomUUID().toString(), topicUpdate = true)
                 val routes = listOf(route(read), route(deleted), route(unread))
-                routes.forEach { inbox.accept(it, System.currentTimeMillis() - 15 * 24 * 3600_000L) }
+                val generation = UUID.randomUUID().toString()
+                routes.forEach { inbox.updateTopic(it, System.currentTimeMillis() - 15 * 24 * 3600_000L, 1, 1, 1, generation) }
                 PushReconciliationWorker.schedule(context)
                 val deadline = android.os.SystemClock.elapsedRealtime() + 25_000
                 while ((inbox.resolve(routes[0].identity) != null || inbox.resolve(routes[1].identity) != null) && android.os.SystemClock.elapsedRealtime() < deadline) delay(50)
                 assertNull(inbox.resolve(routes[0].identity)); assertNull(inbox.resolve(routes[1].identity))
                 assertNotNull(inbox.resolve(routes[2].identity))
                 assertTrue(requests.any { it.path.endsWith("/messenger/me/") })
-                assertTrue(requests.any { it.path.endsWith("/messenger/messages/") })
-                assertFalse(inbox.accept(routes[0], System.currentTimeMillis()))
+                assertTrue(requests.any { it.path.endsWith("/messenger/stream_topics/") })
+                assertNull(inbox.updateTopic(routes[0], System.currentTimeMillis(), 1, 1, 1, generation))
             } finally {
                 repository.removeServer(id)
                 repository.setSelectedServerId(selected)

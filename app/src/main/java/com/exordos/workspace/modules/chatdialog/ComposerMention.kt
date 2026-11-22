@@ -37,7 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.exordos.workspace.R
 import com.exordos.workspace.data.remote.AuthHeader
-import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.uio.UserUIO
 import com.exordos.workspace.ui.Avatar
 import com.exordos.workspace.ui.theme.InterFontFamily
 import com.exordos.workspace.ui.theme.LocalWorkspaceColorsPalette
@@ -77,7 +77,7 @@ internal data class ComposerMentionSuggestion(
 )
 
 internal fun composerMentionCandidates(
-    users: List<UserResponseData>,
+    users: List<UserUIO>,
 ): List<ComposerMentionSuggestion> {
     val seenUserUuids = HashSet<String>()
     return buildList {
@@ -298,7 +298,7 @@ private fun ComposerMentionScrollbar(
     }
 }
 
-private fun UserResponseData.toComposerMentionSuggestion(): ComposerMentionSuggestion? {
+private fun UserUIO.toComposerMentionSuggestion(): ComposerMentionSuggestion? {
     val userUuid = uuid.toCanonicalUuid() ?: return null
     val normalizedUsername = username.trim().take(maxMentionFieldChars)
     val displayName = displayableName().trim()

@@ -25,14 +25,14 @@ import org.jitsi.meet.sdk.JitsiMeetActivity
 import org.jitsi.meet.sdk.JitsiMeetConferenceOptions
 import com.exordos.workspace.R
 import com.exordos.workspace.WorkspaceViewModel
-import com.exordos.workspace.data.remote.dto.MessageResponse
+import com.exordos.workspace.data.uio.MessageUIO
 import com.exordos.workspace.ui.theme.InterFontFamily
 import com.exordos.workspace.ui.theme.LocalWorkspaceColorsPalette
 import java.net.URL
 
 @Composable
 fun IncomingCall(
-    callMessage: MessageResponse,
+    callMessage: MessageUIO,
     viewModel: WorkspaceViewModel,
     context: Context
 ) {

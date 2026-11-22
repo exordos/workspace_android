@@ -35,7 +35,7 @@ import org.junit.runner.RunWith
 import com.exordos.workspace.*
 import com.exordos.workspace.data.*
 import com.exordos.workspace.data.remote.WorkspaceAPIClient
-import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.uio.UserUIO
 import com.exordos.workspace.ui.theme.WokspaceTheme
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -165,7 +165,7 @@ private class ProfileFixtureServer : AutoCloseable {
     private val socket = ServerSocket(0, 16, InetAddress.getByName("127.0.0.1"))
     private val executor = Executors.newCachedThreadPool()
     val url = "http://127.0.0.1:${socket.localPort}"
-    val user = UserResponseData(firstName = "Example", lastName = "User", username = "cassi", uuid = "cassi-fixture", status = "active", avatar = "")
+    val user = UserUIO(firstName = "Example", lastName = "User", username = "cassi", uuid = "cassi-fixture", status = "active", avatar = "")
     val portrait = ByteArrayOutputStream().apply {
         val bitmap = Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)

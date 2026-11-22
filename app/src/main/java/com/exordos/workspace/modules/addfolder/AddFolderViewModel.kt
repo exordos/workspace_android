@@ -11,14 +11,14 @@ import kotlinx.coroutines.flow.update
 import com.exordos.workspace.data.EventsRepository
 import com.exordos.workspace.data.EventsRepositoryStore
 import com.exordos.workspace.data.remote.WorkspaceAPIClient
-import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.uio.UserUIO
 
 class AddFolderViewModel(
     val client: WorkspaceAPIClient,
     val eventsRepositoryStore: EventsRepositoryStore
 ): ViewModel() {
     val eventsRepository = eventsRepositoryStore.get(client.getCurrentServerId()) ?: error("Cannot get current event repository")
-    val users: StateFlow<List<UserResponseData>> = eventsRepository.users
+    val users: StateFlow<List<UserUIO>> = eventsRepository.users
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
@@ -32,7 +32,7 @@ class AddFolderViewModel(
 
     val selectedUserUuids: StateFlow<List<String>> = _selectedUserUuids.asStateFlow()
 
-    fun didTapOnUser(user: UserResponseData) {
+    fun didTapOnUser(user: UserUIO) {
         if (_selectedUserUuids.value.contains(user.uuid)) {
             _selectedUserUuids.update { it - user.uuid }
         } else {

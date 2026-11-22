@@ -1,7 +1,6 @@
 package com.exordos.workspace.data
 
-import com.exordos.workspace.data.remote.dto.MessageResponse
-import com.exordos.workspace.data.remote.dto.TopicsResponseData
+import com.exordos.workspace.data.uio.TopicUIO
 
 import io.ktor.client.HttpClient
 import com.exordos.workspace.UserViewModel
@@ -12,10 +11,7 @@ class EventsRepositoryStore(
     var client: WorkspaceAPIClient
 ) {
     private val repos = mutableMapOf<String, EventsRepository>()
-    var onPushMessagesKnown: (String, String?, List<MessageResponse>) -> Unit = { _, _, _ -> }
-    var onPushMessageRemoved: (String, String?, String) -> Unit = { _, _, _ -> }
-    var onPushRead: (String, String?, List<String>) -> Unit = { _, _, _ -> }
-    var onPushTopicUpdated: (String, String?, TopicsResponseData, Long, String) -> Unit = { _, _, _, _, _ -> }
+    var onPushTopicUpdated: (String, String?, TopicUIO, Long, String) -> Unit = { _, _, _, _, _ -> }
     var onPushRefreshNeeded: () -> Unit = {}
 
     @Synchronized
@@ -25,9 +21,6 @@ class EventsRepositoryStore(
             existing.close()
         }
         return EventsRepository(config.id, config.copy(), tokenStore, client).also { repo ->
-            repo.onPushMessagesKnown = { onPushMessagesKnown(config.id, repo.currentUser.value?.uuid, it) }
-            repo.onPushMessageRemoved = { onPushMessageRemoved(config.id, repo.currentUser.value?.uuid, it) }
-            repo.onPushRead = { onPushRead(config.id, repo.currentUser.value?.uuid, it) }
             repo.onPushTopicUpdated = { topic, epoch, generation -> onPushTopicUpdated(config.id, repo.currentUser.value?.uuid, topic, epoch, generation) }
             repo.onPushRefreshNeeded = { onPushRefreshNeeded() }
             repos[config.id] = repo

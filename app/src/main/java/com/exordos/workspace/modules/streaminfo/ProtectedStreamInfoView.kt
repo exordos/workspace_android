@@ -46,10 +46,10 @@ import com.exordos.workspace.data.WorkspaceDateTime
 import com.exordos.workspace.ChatFlow
 import com.exordos.workspace.LocalProtectedBottomBarStyle
 import com.exordos.workspace.R
-import com.exordos.workspace.data.remote.dto.Stream
+import com.exordos.workspace.data.uio.StreamUIO
 import com.exordos.workspace.data.remote.AuthHeader
-import com.exordos.workspace.data.remote.dto.StreamBindingResponseData
-import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.uio.StreamBindingUIO
+import com.exordos.workspace.data.uio.UserUIO
 import com.exordos.workspace.modules.encryptedchat.EncryptedChatAccent
 import com.exordos.workspace.modules.encryptedchat.EncryptedChatAvatarBadge
 import com.exordos.workspace.modules.encryptedchat.EncryptedChatBackground
@@ -333,7 +333,7 @@ private fun ProtectedInfoHeader(title: String?, onBack: () -> Unit, onClose: () 
 }
 
 @Composable
-private fun ProtectedAvatar(stream: Stream, size: Int, baseUrl: String, viewModel: StreamInfoViewModel) {
+private fun ProtectedAvatar(stream: StreamUIO, size: Int, baseUrl: String, viewModel: StreamInfoViewModel) {
     Box(Modifier.size(size.dp), contentAlignment = Alignment.Center) {
         Avatar(null, baseUrl, viewModel.client.authHeaders(), stream.color, stream.displayableName(), Modifier.fillMaxSize())
         EncryptedChatAvatarBadge(Modifier.size(if (size >= 80) 28.dp else 24.dp))
@@ -352,8 +352,8 @@ private fun ProtectedActionTile(icon: Int, label: Int, enabled: Boolean, tag: St
 }
 
 @Composable
-private fun ProtectedMembers(navController: NavHostController, users: List<UserResponseData>,
-    bindings: List<StreamBindingResponseData>, stream: Stream, baseUrl: String, authHeaders: List<AuthHeader>) {
+private fun ProtectedMembers(navController: NavHostController, users: List<UserUIO>,
+    bindings: List<StreamBindingUIO>, stream: StreamUIO, baseUrl: String, authHeaders: List<AuthHeader>) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
         Row(Modifier.fillMaxWidth().height(44.dp).padding(start = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             ProtectedText(stringResource(R.string.protected_stream_members), modifier = Modifier.weight(1f))

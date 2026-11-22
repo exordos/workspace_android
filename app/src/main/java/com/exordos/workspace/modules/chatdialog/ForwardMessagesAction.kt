@@ -25,13 +25,13 @@ import com.exordos.workspace.R
 import com.exordos.workspace.UserViewModel
 import com.exordos.workspace.data.EventsRepository
 import com.exordos.workspace.data.remote.WorkspaceAPIClient
-import com.exordos.workspace.data.remote.dto.MessageResponse
+import com.exordos.workspace.data.uio.MessageUIO
 import com.exordos.workspace.ui.theme.LocalWorkspaceColorsPalette
 
 /** Native Sharesheet first, then the Workspace picker only when its target is chosen. */
 @Composable
 internal fun ForwardMessagesAction(
-    sources: List<MessageResponse>,
+    sources: List<MessageUIO>,
     client: WorkspaceAPIClient,
     repo: EventsRepository,
     userViewModel: UserViewModel,

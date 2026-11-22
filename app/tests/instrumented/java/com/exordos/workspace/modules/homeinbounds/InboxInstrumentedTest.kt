@@ -1,5 +1,7 @@
 package com.exordos.workspace.modules.homeinbounds
 
+import com.exordos.workspace.data.uio.toUio
+import com.exordos.workspace.data.uio.MessagePayloadUIO
 import com.exordos.workspace.modules.encryptedchat.EncryptedChatPresentation
 
 import androidx.activity.ComponentActivity
@@ -99,11 +101,11 @@ class InboxInstrumentedTest {
             LoopbackWorkspaceServer.Response(response)
         }
         account = WorkspaceTestAccount.create(server.url)
-        account.repo.setInitialStreams(streams)
+        account.repo.setInitialStreams(streams.map { it.toUio() })
         account.repo.loadUserInfo()
         account.repo.setInitialUsers(listOf(viewer,
-            UserResponseData(username = "Preview author", uuid = authorId, status = "active", avatar = "")))
-        if (cached.isNotEmpty()) account.repo.addStreamTopicMessages(streamId, topicId, cached)
+            UserResponseData(username = "Preview author", uuid = authorId, status = "active", avatar = "")).map { it.toUio() })
+        if (cached.isNotEmpty()) account.repo.addStreamTopicMessages(streamId, topicId, cached.map { it.toUio() })
         compose.runOnUiThread { inbox = HomeInboundsViewModel(account.api, account.events) }
         compose.setContent {
             WokspaceTheme {
@@ -114,7 +116,7 @@ class InboxInstrumentedTest {
                         val preview = remember {
                             ChatViewModel(account.api, account.user, account.events, null, {}).also { previews += it }
                         }
-                        ChatTopic(preview, cachedTopics.getValue(streamId).single(), stream(), nav)
+                        ChatTopic(preview, cachedTopics.getValue(streamId).single(), stream().toUio(), nav)
                     } else NavHost(nav, HomeFlow.HomeInbounds) {
                         composable<HomeFlow.HomeInbounds> { HomeInboundsScreen(inbox, nav) }
                         composable<HomeFlow.ChatDialog> { entry ->
@@ -146,7 +148,7 @@ class InboxInstrumentedTest {
             topic().copy(uuid = "passive-child", name = "Only passive unread", unreadCount = 8, activeUnreadCount = 0))
         // Reproduce the empty-topic cache which used to be treated as fully loaded forever.
         account.repo.addStreamTopics(ordinary.uuid, emptyList())
-        compose.runOnIdle { account.repo.setInitialStreams(listOf(ordinary, secret, muted)) }
+        compose.runOnIdle { account.repo.setInitialStreams(listOf(ordinary, secret, muted).map { it.toUio() }) }
         waitForTag("inbox-topic-$topicId")
         compose.onNodeWithTag("inbox-count-$topicId", useUnmergedTree = true).assertTextEquals("7")
         compose.onNodeWithTag("inbox-topic-secret-topic").assertIsDisplayed()
@@ -157,12 +159,12 @@ class InboxInstrumentedTest {
         compose.onNodeWithText("Only passive unread").assertDoesNotExist()
         val previous = topicRequests.get()
         topics = topics.map { if (it.uuid == topicId) it.copy(unreadCount = 12, activeUnreadCount = 9) else it }
-        compose.runOnIdle { account.repo.updateStream(ordinary.copy(unreadCount = 12, activeUnreadCount = 9)) }
+        compose.runOnIdle { account.repo.updateStream(ordinary.copy(unreadCount = 12, activeUnreadCount = 9).toUio()) }
         compose.waitUntil(8_000) { topicRequests.get() > previous }
         compose.waitUntil(8_000) { compose.onAllNodesWithTag("inbox-count-$topicId", useUnmergedTree = true).fetchSemanticsNodes().any {
             it.config.getOrElse(androidx.compose.ui.semantics.SemanticsProperties.Text) { emptyList() }.any { text -> text.text == "9" }
         } }
-        compose.runOnIdle { account.repo.updateStream(ordinary.copy(notificationMode = "muted", activeUnreadCount = 0)) }
+        compose.runOnIdle { account.repo.updateStream(ordinary.copy(notificationMode = "muted", activeUnreadCount = 0).toUio()) }
         compose.onNodeWithTag("inbox-topic-$topicId").assertDoesNotExist()
     }
 
@@ -182,7 +184,7 @@ class InboxInstrumentedTest {
             repeat(24) { index ->
                 val count = 41 + index
                 topics = listOf(topic().copy(unreadCount = count, activeUnreadCount = count))
-                compose.runOnIdle { account.repo.updateStream(stream().copy(unreadCount = count, activeUnreadCount = count)) }
+                compose.runOnIdle { account.repo.updateStream(stream().copy(unreadCount = count, activeUnreadCount = count).toUio()) }
                 Thread.sleep(120) // Incoming counters keep changing before the topic response arrives.
             }
             assertEquals("Counter updates must not cancel the in-flight request", 1, topicRequests.get())
@@ -215,11 +217,11 @@ class InboxInstrumentedTest {
             compose.onNodeWithText("Preview author").assertIsDisplayed()
         }
         val author = account.repo.users.value.first { it.uuid == authorId }
-        val previous = message(48, false).copy(payload = MessageResponsePayload("markdown", "Cached preview"), user = author)
+        val previous = message(48, false).toUio().copy(payload = MessagePayloadUIO("markdown", "Cached preview"), user = author)
         topics = listOf(topic().copy(lastMessageUuid = previous.uuid, activeUnreadCount = 9))
         messagesStatus = 503
         compose.runOnIdle {
-            account.repo.addStreamTopics(streamId, listOf(topics.single().copy(activeUnreadCount = 7, lastMessage = previous)))
+            account.repo.addStreamTopics(streamId, listOf(topics.single().toUio().copy(activeUnreadCount = 7, lastMessage = previous)))
             showPreview.value = true
         }
         assertPreview("Cached preview")
@@ -227,7 +229,7 @@ class InboxInstrumentedTest {
         fun refreshAndShowPreview(count: Int) {
             compose.runOnIdle {
                 showPreview.value = false
-                account.repo.updateStream(stream().copy(activeUnreadCount = count))
+                account.repo.updateStream(stream().copy(activeUnreadCount = count).toUio())
             }
             compose.waitUntil(8_000) {
                 compose.onAllNodesWithTag("inbox-count-$topicId", useUnmergedTree = true).fetchSemanticsNodes().any {
@@ -237,7 +239,7 @@ class InboxInstrumentedTest {
             }
             compose.runOnIdle { showPreview.value = true }
         }
-        compose.runOnIdle { account.repo.setInitialStreams(listOf(stream().copy(activeUnreadCount = 7))) }
+        compose.runOnIdle { account.repo.setInitialStreams(listOf(stream().copy(activeUnreadCount = 7)).map { it.toUio() }) }
         refreshAndShowPreview(9)
         assertPreview("Cached preview")
 
@@ -277,7 +279,7 @@ class InboxInstrumentedTest {
         compose.onNodeWithTag("chat-message-${message(49, encrypted).uuid}").assertDoesNotExist()
         compose.waitUntil(8_000) { reads.isNotEmpty() }
         assertTrue(reads.none { "read_up_to" in it || message(49, encrypted).uuid in it })
-        compose.runOnIdle { account.repo.addMessageToStreamTopic(message(50, encrypted)) }
+        compose.runOnIdle { account.repo.addMessageToStreamTopic(message(50, encrypted).toUio()) }
         compose.onNodeWithTag("chat-message-${message(target, encrypted).uuid}").assertIsDisplayed()
         compose.onNodeWithTag("chat-message-${message(50, encrypted).uuid}").assertDoesNotExist()
     }

@@ -16,10 +16,10 @@ package com.exordos.workspace.modules.users
 
 import org.junit.Assert.*
 import org.junit.Test
-import com.exordos.workspace.data.remote.dto.UserResponseData
+import com.exordos.workspace.data.uio.UserUIO
 
 class UserSearchTest {
-    private val person = UserResponseData("anna@example.invalid", "Anna", "Smith", "anna-login", "user", status = "active", avatar = "")
+    private val person = UserUIO("anna@example.invalid", "Anna", "Smith", "anna-login", "user", status = "active", avatar = "")
 
     @Test fun searchesEveryFieldEvenWhenLastNameDoesNotMatch() {
         for (query in listOf("anna", "SMITH", "example.invalid", "anna-login", " Anna ", "")) {

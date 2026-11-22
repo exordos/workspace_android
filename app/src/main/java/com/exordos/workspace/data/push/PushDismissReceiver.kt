@@ -24,12 +24,13 @@ import kotlinx.coroutines.launch
 /** Explicit, non-exported target of immutable notification delete intents. */
 class PushDismissReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        val identity = intent.getStringExtra("identity") ?: return
+        val snapshot = intent.getLongExtra("snapshot", 0).takeIf { it > 0 } ?: return
+        val generation = intent.getStringExtra("epoch_generation") ?: return
         val pending = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                WorkspacePushNotifications(context).dismiss(intent.getStringExtra("identity"),
-                    intent.getStringExtra("conversation"), intent.getLongExtra("snapshot", 0),
-                    intent.getStringExtra("epoch_generation"))
+                WorkspacePushNotifications(context).dismiss(identity, snapshot, generation)
             } finally { pending.finish() }
         }
     }

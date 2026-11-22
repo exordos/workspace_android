@@ -1,5 +1,8 @@
 package com.exordos.workspace.data.remote.dto
 
+import com.exordos.workspace.data.remote.UIORequest
+import com.exordos.workspace.data.uio.toUio
+import com.exordos.workspace.data.uio.StreamUIO
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.EncodeDefault
@@ -15,7 +18,8 @@ class AddStreamRequest(
     val encryption: Boolean = false,
     val currentEncryptionKeyUuid: String? = null,
     val canonicalUuid: String? = null,
-): ApiRequest<AddStreamRequestData, Stream, ApiError> {
+): UIORequest<AddStreamRequestData, Stream, StreamUIO, ApiError> {
+    override fun toUio(dto: Stream): StreamUIO = dto.toUio()
     override val method: HTTPMethod = HTTPMethod.POST
     override val requiresApiKey: Boolean = true
     override val url: String = "/api/workspace/v1/messenger/streams/"

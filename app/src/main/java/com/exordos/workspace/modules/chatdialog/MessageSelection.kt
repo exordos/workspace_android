@@ -3,13 +3,13 @@ package com.exordos.workspace.modules.chatdialog
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import com.exordos.workspace.R
-import com.exordos.workspace.data.remote.dto.MessageResponse
+import com.exordos.workspace.data.uio.MessageUIO
 import com.exordos.workspace.data.remote.dto.parseCanonicalUuid
 
 internal const val MAX_SELECTED_MESSAGES = 50
 
 internal fun canSelectMessage(
-    message: MessageResponse,
+    message: MessageUIO,
     streamUuid: String,
     topicUuid: String,
     pendingMessageUuid: String? = null,
@@ -19,11 +19,11 @@ internal fun canSelectMessage(
     message.uuid != pendingMessageUuid
 
 internal class MessageSelection(
-    private val canSelect: (MessageResponse) -> Boolean,
-    private val canDelete: (MessageResponse) -> Boolean,
+    private val canSelect: (MessageUIO) -> Boolean,
+    private val canDelete: (MessageUIO) -> Boolean,
     private val deletion: MessageDeletion,
 ) {
-    private var selected = linkedMapOf<String, MessageResponse>()
+    private var selected = linkedMapOf<String, MessageUIO>()
     private val _selectedMessageUuids = MutableStateFlow<Set<String>>(emptySet())
     val selectedMessageUuids = _selectedMessageUuids.asStateFlow()
     private val _isSelectionMode = MutableStateFlow(false)
@@ -33,16 +33,16 @@ internal class MessageSelection(
     private val _deletingSelectedMessages = MutableStateFlow(false)
     val deletingSelectedMessages = _deletingSelectedMessages.asStateFlow()
 
-    fun selectedMessages(): List<MessageResponse> = selected.values.map {
+    fun selectedMessages(): List<MessageUIO> = selected.values.map {
         it.copy(payload = it.payload.copy())
     }
 
-    fun startMessageSelection(message: MessageResponse) {
+    fun startMessageSelection(message: MessageUIO) {
         if (_deletingSelectedMessages.value || !canSelect(message)) return
         if (message.uuid !in selected) toggleMessageSelection(message)
     }
 
-    fun toggleMessageSelection(message: MessageResponse) {
+    fun toggleMessageSelection(message: MessageUIO) {
         if (_deletingSelectedMessages.value || !canSelect(message)) return
         if (message.uuid in selected) {
             selected.remove(message.uuid)
@@ -65,7 +65,7 @@ internal class MessageSelection(
         publishSelection()
     }
 
-    fun refreshMessages(messages: List<MessageResponse>) {
+    fun refreshMessages(messages: List<MessageUIO>) {
         val messagesByUuid = messages.associateBy { it.uuid }
         selected = selected.mapNotNull { (uuid, _) ->
             messagesByUuid[uuid]?.takeIf(canSelect)?.let {

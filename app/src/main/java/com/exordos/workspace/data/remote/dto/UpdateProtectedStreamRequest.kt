@@ -1,5 +1,8 @@
 package com.exordos.workspace.data.remote.dto
 
+import com.exordos.workspace.data.remote.UIORequest
+import com.exordos.workspace.data.uio.toUio
+import com.exordos.workspace.data.uio.StreamUIO
 import kotlinx.serialization.Serializable
 import com.exordos.workspace.data.remote.ApiError
 import com.exordos.workspace.data.remote.ApiRequest
@@ -8,7 +11,8 @@ import com.exordos.workspace.data.remote.HTTPMethod
 
 /** The metadata endpoint uses PUT with partial fields; stream encryption/type are immutable. */
 class UpdateProtectedStreamRequest(streamUuid: String, name: String, description: String) :
-    ApiRequest<UpdateProtectedStreamRequestData, Stream, ApiError> {
+    UIORequest<UpdateProtectedStreamRequestData, Stream, StreamUIO, ApiError> {
+    override fun toUio(dto: Stream): StreamUIO = dto.toUio()
     override val method = HTTPMethod.PUT
     override val url = "/api/workspace/v1/messenger/streams/${canonicalStreamId(streamUuid)}"
     override val data = UpdateProtectedStreamRequestData(name, description)
@@ -17,7 +21,8 @@ class UpdateProtectedStreamRequest(streamUuid: String, name: String, description
 @Serializable
 data class UpdateProtectedStreamRequestData(val name: String, val description: String)
 
-class ProtectedStreamDetailsRequest(streamUuid: String) : ApiRequest<EmptyRequestData, Stream, ApiError> {
+class ProtectedStreamDetailsRequest(streamUuid: String) : UIORequest<EmptyRequestData, Stream, StreamUIO, ApiError> {
+    override fun toUio(dto: Stream): StreamUIO = dto.toUio()
     override val method = HTTPMethod.GET
     override val url = "/api/workspace/v1/messenger/streams/${canonicalStreamId(streamUuid)}"
     override val data = EmptyRequestData()

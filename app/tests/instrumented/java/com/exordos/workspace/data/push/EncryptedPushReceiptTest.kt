@@ -14,261 +14,167 @@
 
 package com.exordos.workspace.data.push
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationManager
-import android.content.ComponentName
-import android.content.pm.PackageManager
-import androidx.test.platform.app.InstrumentationRegistry
-import org.junit.Assert.*
-import org.junit.Before
-import org.junit.After
-import org.junit.Test
-import kotlinx.serialization.json.*
-import com.exordos.workspace.data.crypto.WorkspacePushPayload
-import com.exordos.workspace.data.remote.dto.MessageResponse
+import android.content.ContentValues
 import android.database.sqlite.SQLiteDatabase
-import java.time.Instant
+import android.os.Build
+import android.os.SystemClock
+import androidx.test.platform.app.InstrumentationRegistry
+import com.exordos.workspace.R
+import com.exordos.workspace.data.crypto.WorkspacePushPayload
+import com.google.crypto.tink.subtle.X25519
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
 import java.util.Base64
 import java.util.UUID
 
-/** Real Android storage, PendingIntents and NotificationManager; Firebase delivery is separate. */
 class EncryptedPushReceiptTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context = instrumentation.targetContext
     private val manager = context.getSystemService(NotificationManager::class.java)
-    private val dismissReceiver = ComponentName(context, PushDismissReceiver::class.java)
-    private var dismissReceiverState = PackageManager.COMPONENT_ENABLED_STATE_DEFAULT
-    private val keys = PushKeyStore(context)
     private val inbox = PushInbox(context)
+    private val keys = PushKeyStore(context)
+    private val preferences = context.getSharedPreferences("workspace_push_receipts", 0)
     private val fixture = Json.parseToJsonElement(instrumentation.context.assets.open("mobile_push_event.json").bufferedReader().readText()).jsonObject
     private val payload = Json.decodeFromJsonElement<WorkspacePushPayload>(fixture.getValue("payload"))
     private val privateKey = fixture.getValue("recipient_private_key_hex").jsonPrimitive.content.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
     private val encoder = Base64.getUrlEncoder().withoutPadding()
-    private val registration = PushRegistration("cassi-pr97-receipt", payload.organizationUuid, payload.projectUuid, payload.userUuid,
-        payload.deviceUuid, payload.content.keyUuid, encoder.encodeToString(com.google.crypto.tink.subtle.X25519.publicFromPrivate(privateKey)), encoder.encodeToString(privateKey))
-    private val secondary = registration.copy(serverId = "cassi-pr97-second-connection")
-    private val route = PushRoute.from(payload, registration.serverId)
+    private val registration = PushRegistration("cassi-legacy-upgrade", payload.organizationUuid, payload.projectUuid,
+        payload.userUuid, payload.deviceUuid, payload.content.keyUuid, encoder.encodeToString(X25519.publicFromPrivate(privateKey)),
+        encoder.encodeToString(privateKey))
+    private val secondary = registration.copy(serverId = "cassi-topic-second-connection")
+    private val legacy = PushRoute(payload.uuid, registration.serverId, registration.organizationUuid, registration.projectUuid,
+        registration.userUuid, payload.streamUuid, payload.topicUuid, requireNotNull(payload.messageUuid))
+    private val generation = "00000000-0000-0000-0000-00000000000b"
     private val notifications = WorkspacePushNotifications(context)
-    private val previousLimits = notifications.limits()
-    private val create = fixture.getValue("payload").toString()
+    private val previousLimit = notifications.topicLimit()
+    private val legacyTag = listOf(legacy.organizationUuid, legacy.projectUuid, legacy.userUuid, legacy.messageUuid).joinToString(":")
 
     @Before fun prepare() {
-        dismissReceiverState = context.packageManager.getComponentEnabledSetting(dismissReceiver)
-        context.packageManager.setComponentEnabledSetting(dismissReceiver,
-            PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP)
-        if (android.os.Build.VERSION.SDK_INT >= 33) instrumentation.uiAutomation.grantRuntimePermission(context.packageName, android.Manifest.permission.POST_NOTIFICATIONS)
-        cleanup()
+        if (Build.VERSION.SDK_INT >= 33) instrumentation.uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.POST_NOTIFICATIONS)
         keys.save(registration)
-        notifications.setLimits(5, 5)
+        notifications.setTopicLimit(5)
     }
-    @After fun finish() {
-        try {
-            cleanup()
-            notifications.setLimits(previousLimits.conversations, previousLimits.messages)
-        } finally {
-            context.packageManager.setComponentEnabledSetting(dismissReceiver, dismissReceiverState,
-                PackageManager.DONT_KILL_APP)
-            privateKey.fill(0)
-        }
-    }
-    private fun cleanup() {
-        listOf(registration.serverId, secondary.serverId).forEach { notifications.cancelServer(it); keys.remove(it) }
+
+    @After fun cleanup() {
         notifications.visibility(this, registration.serverId, emptySet())
+        notifications.cancelServer(registration.serverId)
+        notifications.cancelServer(secondary.serverId)
+        keys.remove(registration.serverId)
+        keys.remove(secondary.serverId)
+        manager.cancel(legacyTag, 0)
+        notifications.setTopicLimit(previousLimit)
+        privateKey.fill(0)
     }
-    private fun child(route: PushRoute = this.route) = manager.activeNotifications.firstOrNull { it.tag == WorkspacePushNotifications.messageTag(route.identity) }
-    private fun waitUntil(check: () -> Boolean) {
-        val end = android.os.SystemClock.elapsedRealtime() + 5000
-        while (!check() && android.os.SystemClock.elapsedRealtime() < end) Thread.sleep(20)
-        assertTrue(check())
-    }
-    private fun shown(route: PushRoute = this.route): android.service.notification.StatusBarNotification {
-        waitUntil { child(route) != null }
-        return requireNotNull(child(route))
-    }
-    private fun assertPresent(route: PushRoute = this.route) { shown(route) }
-    private fun assertSilent(route: PushRoute = this.route) {
-        waitUntil { child(route)?.notification?.groupAlertBehavior == Notification.GROUP_ALERT_SUMMARY }
-    }
-    private fun assertAbsent(route: PushRoute = this.route) { waitUntil { child(route) == null } }
-    private fun another(topic: String = route.topicUuid, message: String = UUID.randomUUID().toString()) =
-        route.copy(eventUuid = UUID.randomUUID().toString(), topicUuid = topic, messageUuid = message)
 
-    private fun readSnapshot(message: String, created: String) = Json.decodeFromString<MessageResponse>(
-        """{"uuid":"$message","updated_at":"$created","created_at":"$created","stream_uuid":"${route.streamUuid}","topic_uuid":"${route.topicUuid}","user_uuid":"${route.userUuid}","author_uuid":"${route.userUuid}","payload":{"kind":"markdown","content":"Synthetic read history"},"is_own":false,"reactions":{},"read":true,"project_id":"${route.projectUuid}"}""")
+    @Test fun legacyCreateAndCancelAreIgnoredWithoutAlteringTheTopicCard() {
+        val topic = legacy.copy(topicUpdate = true)
+        addTopic(topic)
+        notifications.restore()
+        await { shown(topic) }
+        for (name in listOf("payload", "cancel_payload")) {
+            assertFalse(notifications.receive(fixture.getValue(name).toString()))
+        }
+        assertEquals(topic, notifications.resolve("workspace-push/${topic.identity}"))
+        assertNull(notifications.resolve("workspace-push/${legacy.identity}"))
+        assertEquals(0, legacyRowCount())
+        assertTrue(shown(topic))
+    }
 
-    private fun storedRows(): Int = SQLiteDatabase.openDatabase(context.getDatabasePath("workspace_push_inbox.db").path,
+    @Test fun upgradeRemovesLegacyRoutesAndCardsButRestoresTheTopicCard() {
+        val topic = legacy.copy(topicUpdate = true)
+        addTopic(topic)
+        val legacyJson = Json.encodeToString(legacy)
+        SQLiteDatabase.openDatabase(context.getDatabasePath("workspace_push_inbox.db").path,
+            null, SQLiteDatabase.OPEN_READWRITE).use { db ->
+            db.insertOrThrow("push_receipts", null, ContentValues().apply {
+                put("identity", legacy.identity); put("conversation", legacy.conversationIdentity)
+                put("server_id", legacy.serverId); put("organization_uuid", legacy.organizationUuid)
+                put("project_uuid", legacy.projectUuid); put("user_uuid", legacy.userUuid)
+                put("message_uuid", legacy.messageUuid); put("route", legacyJson)
+                put("created_at", System.currentTimeMillis()); put("state", "unread")
+            })
+        }
+        val obsoleteRoute = "route:${legacy.eventUuid}"
+        val obsoleteAlias = "legacy:${legacy.eventUuid}"
+        val legacyGroup = "workspace:group:${legacy.conversationIdentity}"
+        preferences.edit().remove("legacy_receipts_removed").putString(obsoleteRoute, legacyJson)
+            .putString(obsoleteAlias, legacy.identity).putInt("messages_limit", 3).commit()
+        val oldCard = Notification.Builder(context, WorkspacePushNotifications.CHANNEL).setSmallIcon(R.drawable.icon)
+            .setContentTitle("Old message").build()
+        manager.notify(legacyTag, 0, oldCard)
+        manager.notify(legacyGroup, 0, oldCard)
+        manager.notify(WorkspacePushNotifications.messageTag(legacy.identity), 0, oldCard)
+        await { shown(legacy) }
+        assertEquals(1, legacyRowCount())
+
+        val upgraded = WorkspacePushNotifications(context)
+        upgraded.restore()
+        await { shown(topic) && !shown(legacy) && manager.activeNotifications.none { it.tag == legacyTag || it.tag == legacyGroup } }
+        assertEquals(0, legacyRowCount())
+        assertFalse(preferences.contains(obsoleteRoute))
+        assertFalse(preferences.contains(obsoleteAlias))
+        assertFalse(preferences.contains("messages_limit"))
+        assertEquals(topic, upgraded.resolve("workspace-push/${topic.identity}"))
+        assertNull(upgraded.resolve("workspace-push/${legacy.eventUuid}"))
+    }
+
+    @Test fun visibleTargetHidesOnlyItsOwnSavedConnectionUntilTheChatCloses() {
+        val topic = legacy.copy(topicUpdate = true)
+        val other = topic.copy(serverId = secondary.serverId)
+        keys.save(secondary)
+        addTopic(topic)
+        addTopic(other)
+        notifications.restore()
+        await { shown(topic) && shown(other) }
+        notifications.visibleMessages(this, topic.serverId, topic.projectUuid, topic.userUuid, setOf(topic.messageUuid))
+        await { !shown(topic) && shown(other) }
+        notifications.visibility(this, topic.serverId, emptySet())
+        await { shown(topic) && shown(other) }
+    }
+
+    @Test fun exceedingTheTopicLimitKeepsTheOlderTopicAvailableForRestoration() {
+        val older = legacy.copy(topicUpdate = true)
+        val newer = older.copy(topicUuid = UUID.randomUUID().toString())
+        val now = System.currentTimeMillis()
+        notifications.setTopicLimit(1)
+        addTopic(older, now - 1_000)
+        addTopic(newer, now)
+        notifications.restore()
+        await { shown(newer) && !shown(older) }
+        notifications.dismiss(newer.identity, 1, generation)
+        await { shown(older) && !shown(newer) }
+    }
+
+    private fun addTopic(route: PushRoute, createdAt: Long = System.currentTimeMillis()) {
+        assertEquals(true, inbox.updateTopic(route, createdAt, 1, 1, 1, generation))
+    }
+
+    private fun shown(route: PushRoute): Boolean = manager.activeNotifications.any {
+        it.tag == WorkspacePushNotifications.messageTag(route.identity)
+    }
+
+    private fun await(predicate: () -> Boolean) {
+        val deadline = SystemClock.elapsedRealtime() + 5_000
+        while (!predicate() && SystemClock.elapsedRealtime() < deadline) SystemClock.sleep(20)
+        assertTrue(predicate())
+    }
+
+    private fun legacyRowCount(): Int = SQLiteDatabase.openDatabase(context.getDatabasePath("workspace_push_inbox.db").path,
         null, SQLiteDatabase.OPEN_READONLY).use { db ->
-        db.rawQuery("SELECT COUNT(*) FROM push_receipts WHERE server_id=?", arrayOf(registration.serverId)).use {
+        db.rawQuery("SELECT COUNT(*) FROM push_receipts WHERE server_id=? AND topic_update=0", arrayOf(registration.serverId)).use {
             check(it.moveToFirst()); it.getInt(0)
         }
-    }
-
-    @Test fun loadingOldReadHistoryDoesNotCreateRowsForMessagesWithoutPushes() {
-        inbox.accept(route, 1)
-        val old = Instant.now().minusSeconds(15 * 86400L).toString()
-        val messages = List(2000) { readSnapshot(UUID.randomUUID().toString(), old) } + readSnapshot(route.messageUuid, old)
-        notifications.knownMessages(registration.serverId, registration.userUuid, messages)
-        assertEquals("Loaded history must only close the already received old push", 1, storedRows())
-        assertNull(inbox.resolve(route.identity))
-        assertFalse(inbox.accept(route, 2))
-    }
-
-    @Test fun aRecentReadSnapshotBeforeThePushStillPreventsLateDisplay() {
-        notifications.knownMessages(registration.serverId, registration.userUuid,
-            listOf(readSnapshot(route.messageUuid, Instant.now().toString())))
-        assertTrue(notifications.receive(create))
-        assertAbsent()
-        assertNull(notifications.resolve("workspace-push/${route.identity}"))
-    }
-
-    @Test fun onlyExpiredDecisionsWithoutReceiptsArePruned() {
-        val unknown = UUID.randomUUID().toString()
-        notifications.readMessages(registration.serverId, registration.userUuid, listOf(unknown))
-        val old = System.currentTimeMillis() - 15 * 24 * 3600_000L
-        val closed = another(); val dismissed = another()
-        inbox.accept(route, old); inbox.accept(closed, old); inbox.accept(dismissed, old)
-        inbox.close(closed); inbox.dismiss(dismissed.identity)
-        SQLiteDatabase.openDatabase(context.getDatabasePath("workspace_push_inbox.db").path, null, SQLiteDatabase.OPEN_READWRITE).use {
-            it.execSQL("UPDATE push_receipts SET created_at=? WHERE server_id=? AND message_uuid=?",
-                arrayOf(System.currentTimeMillis() - 2 * 3600_000L, registration.serverId, unknown))
-        }
-        notifications.restore()
-        assertEquals("Only the transient no-receipt decision should expire", 3, storedRows())
-        assertPresent(route)
-        assertEquals(route, notifications.resolve("workspace-push/${route.identity}"))
-        assertFalse(inbox.accept(closed, old)); assertFalse(inbox.accept(dismissed, old))
-    }
-
-    @Test fun authenticatedOfflineReceiptKeepsItsRouteAndRejectsTamperedCancellation() {
-        assertTrue(notifications.receive(create))
-        val posted = shown()
-        assertEquals("Alice", posted.notification.extras.getString("android.title"))
-        assertEquals("Привет из Workspace", posted.notification.extras.getCharSequence("android.text").toString())
-        assertTrue("No application deadline; Android may supply its own default", posted.notification.timeoutAfter == 0L || posted.notification.timeoutAfter >= 3 * 24 * 3600_000L)
-        assertEquals(0, posted.notification.flags and Notification.FLAG_AUTO_CANCEL)
-        assertEquals(route, notifications.resolve("workspace-push/${route.identity}"))
-        assertFalse(notifications.receive(Json.encodeToString(payload.copy(kind = "notification_message_cancel"))))
-        assertPresent()
-        assertTrue(notifications.receive(create))
-        assertEquals(1, manager.activeNotifications.count { it.tag == posted.tag })
-        assertFalse("A duplicate receipt must not be inserted again", inbox.accept(route, System.currentTimeMillis()))
-        // Android can retain the original group behavior while coalescing an update.
-        // The existing card must always suppress another alert when it is updated.
-        assertTrue(shown().notification.flags and Notification.FLAG_ONLY_ALERT_ONCE != 0)
-        assertTrue(notifications.receive(fixture.getValue("cancel_payload").toString()))
-        assertAbsent()
-        assertTrue(notifications.receive(create))
-        assertAbsent()
-        assertNull(notifications.resolve("workspace-push/${route.identity}"))
-    }
-
-    @Test fun unreadRoutesRemainUsableAfterTwoWeeksAndRestoreSilently() {
-        val old = System.currentTimeMillis() - 15 * 24 * 3600_000L
-        assertTrue(inbox.accept(route, old))
-        WorkspacePushNotifications(context).restore()
-        val posted = shown()
-        assertEquals(old, posted.notification.extras.getLong("workspace.message_created_at"))
-        assertTrue("No application deadline; Android may supply its own default", posted.notification.timeoutAfter == 0L || posted.notification.timeoutAfter >= 3 * 24 * 3600_000L)
-        assertEquals(Notification.GROUP_ALERT_SUMMARY, posted.notification.groupAlertBehavior)
-        assertEquals(route, WorkspacePushNotifications(context).resolve("workspace-push/${route.identity}"))
-        // An unsuccessful cold-start attempt must leave the receipt and Android notification available.
-        posted.notification.contentIntent.send()
-        instrumentation.waitForIdleSync()
-        assertPresent()
-        assertEquals(route, notifications.resolve("workspace-push/${route.identity}"))
-        notifications.reconciled(registration, listOf(route.messageUuid))
-        assertAbsent()
-    }
-
-    @Test fun identicalAccountsInTwoSavedConnectionsOwnIndependentAlertsAndRoutes() {
-        keys.save(secondary)
-        assertTrue(notifications.receive(create))
-        val secondRoute = PushRoute.from(payload, secondary.serverId)
-        assertNotEquals(route.identity, secondRoute.identity)
-        assertPresent(route); assertPresent(secondRoute)
-        assertEquals(secondary.serverId, notifications.resolve("workspace-push/${secondRoute.identity}")?.serverId)
-        notifications.cancelServer(registration.serverId)
-        keys.remove(registration.serverId)
-        assertAbsent(route); assertPresent(secondRoute)
-        assertTrue(notifications.receive(create))
-        assertPresent(secondRoute)
-    }
-
-    @Test fun aSingleSwipeIsDurableAndDoesNotMarkOtherMessagesRead() {
-        assertTrue(notifications.receive(create))
-        shown().notification.deleteIntent.send()
-        waitUntil { child() == null }
-        WorkspacePushNotifications(context).restore()
-        assertTrue(notifications.receive(create))
-        assertAbsent()
-        assertNull(notifications.resolve("workspace-push/${route.identity}"))
-        val fresh = another()
-        inbox.accept(fresh, System.currentTimeMillis())
-        notifications.restore()
-        assertPresent(fresh)
-        assertAbsent()
-    }
-
-    @Test fun aGroupSwipeUsesItsSnapshotAndLeavesLaterArrivals() {
-        val older = another()
-        inbox.accept(route, 1); inbox.accept(older, 2)
-        notifications.restore()
-        waitUntil { manager.activeNotifications.any { it.tag == WorkspacePushNotifications.groupTag(route.conversationIdentity) } }
-        val summary = manager.activeNotifications.single { it.tag == WorkspacePushNotifications.groupTag(route.conversationIdentity) }
-        val newArrival = another()
-        inbox.accept(newArrival, 3)
-        notifications.restore()
-        summary.notification.deleteIntent.send()
-        waitUntil { child(route) == null && child(older) == null }
-        assertPresent(newArrival)
-        notifications.restore()
-        assertPresent(newArrival)
-        assertFalse(inbox.accept(route.copy(eventUuid = UUID.randomUUID().toString()), 4))
-        assertAbsent(route)
-    }
-
-    @Test fun overflowReturnsOlderUnreadMessagesSilentlyInsteadOfDismissingThem() {
-        notifications.setLimits(1, 2)
-        val middle = another(); val newest = another(); val otherConversation = another(topic = UUID.randomUUID().toString())
-        // Rank only these fixtures ahead of real accounts; preserve their existing receipts.
-        val createdAt = System.currentTimeMillis() + 60_000
-        inbox.accept(route, createdAt + 1); inbox.accept(middle, createdAt + 2)
-        inbox.accept(newest, createdAt + 3); inbox.accept(otherConversation, createdAt)
-        notifications.restore()
-        assertAbsent(route); assertPresent(middle); assertPresent(newest); assertAbsent(otherConversation)
-        assertEquals(route, notifications.resolve("workspace-push/${route.identity}"))
-        notifications.reconciled(registration, listOf(newest.messageUuid))
-        assertPresent(route); assertPresent(middle); assertAbsent(newest)
-        assertSilent(route)
-        notifications.reconciled(registration, listOf(route.messageUuid, middle.messageUuid))
-        assertPresent(otherConversation)
-        assertSilent(otherConversation)
-    }
-
-    @Test fun readOrDeleteBeforeCreationAndOldCancellationCannotBeReversedByLateDelivery() {
-        notifications.removedMessage(registration.serverId, registration.userUuid, route.messageUuid)
-        assertTrue(notifications.receive(create))
-        assertAbsent()
-        notifications.restore()
-        assertAbsent()
-        val fresh = another()
-        inbox.accept(fresh, 1)
-        notifications.reconciled(registration, listOf(fresh.messageUuid))
-        assertFalse(inbox.accept(fresh.copy(eventUuid = UUID.randomUUID().toString()), 2))
-        notifications.restore()
-        assertAbsent(fresh)
-    }
-
-    @Test fun onlyActuallyVisibleMessagesAreHiddenAndTheyReturnSilentlyAfterLeaving() {
-        val elsewhere = another()
-        notifications.visibility(this, registration.serverId, setOf(route.identity))
-        assertTrue(notifications.receive(create))
-        assertAbsent()
-        inbox.accept(elsewhere, System.currentTimeMillis())
-        notifications.restore()
-        assertPresent(elsewhere)
-        notifications.visibility(this, registration.serverId, emptySet())
-        assertPresent()
-        assertEquals(Notification.GROUP_ALERT_SUMMARY, shown().notification.groupAlertBehavior)
     }
 }
