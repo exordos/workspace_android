@@ -18,6 +18,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -123,23 +124,15 @@ class WorkspaceShareInstrumentedTest {
 
     private fun cancelShare(activity: ComponentActivity) {
         val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
-        compose.waitUntil(timeoutMillis = 5_000) {
-            activity.lifecycle.currentState != Lifecycle.State.RESUMED
+        val chooserPackage = requireNotNull(launchedIntent?.resolveActivity(activity.packageManager)).packageName
+        // The caller can pause before the chooser has focus. Back in that gap closes the caller.
+        compose.waitUntil(conditionDescription = "The Android Sharesheet becomes active", timeoutMillis = 5_000) {
+            automation.rootInActiveWindow?.packageName?.toString() == chooserPackage
         }
-        repeat(3) {
-            automation.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
-            val resumed = runCatching {
-                compose.waitUntil(timeoutMillis = 2_000) {
-                    activity.lifecycle.currentState == Lifecycle.State.RESUMED
-                }
-            }.isSuccess
-            if (resumed) {
-                compose.waitForIdle()
-                return
-            }
-        }
-        compose.waitUntil(timeoutMillis = 5_000) {
+        assertTrue("Back must be accepted by Android", automation.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK))
+        compose.waitUntil(conditionDescription = "The sharing caller resumes", timeoutMillis = 5_000) {
             activity.lifecycle.currentState == Lifecycle.State.RESUMED
         }
+        compose.waitForIdle()
     }
 }
