@@ -103,6 +103,16 @@ chat/attachments, native SDKs, rotation, resizing, edge-to-edge, keyboard, and
 memory in foreground/background/cached states. Select the RAM tier using actual
 `Total Memory`, rather than the device's advertised capacity alone.
 
+Check that the packaged APK does not require Wi-Fi hardware. A permission from
+a dependency can otherwise imply an installation filter even without an
+explicit hardware requirement in the app manifest. Run this against the
+optimized APK with `aapt2` from the Android SDK Build Tools:
+
+```sh
+python3 app/tests/host/verify_optional_wifi.py --aapt2 /path/to/aapt2 \
+  app/build/outputs/apk/exordos/release/app-exordos-release-unsigned.apk
+```
+
 The current build enables R8 and resource shrinking, but that does not measure
 optimization percentages. Local memory samples do not establish production P90.
 Without fresh release-specific data, Console vitals, 28-day memory, DEX
