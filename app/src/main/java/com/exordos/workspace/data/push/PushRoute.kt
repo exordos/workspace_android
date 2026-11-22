@@ -35,13 +35,13 @@ data class PushRoute(val eventUuid: String, val serverId: String, val organizati
             Json.encodeToString(fields.toList()).toByteArray(Charsets.UTF_8)
         ).toString()
         internal fun from(payload: WorkspacePushPayload, serverId: String): PushRoute {
-            require(payload.kind == WorkspacePushCrypto.TOPIC_UPDATE || payload.messageUuid != null)
+            require(payload.kind == WorkspacePushCrypto.TOPIC_UPDATE)
             listOfNotNull(payload.uuid, payload.organizationUuid, payload.projectUuid, payload.userUuid, payload.streamUuid,
                 payload.topicUuid, payload.messageUuid, payload.deviceUuid, payload.content.keyUuid).forEach {
                 require(UUID.fromString(it).toString() == it)
             }
             return PushRoute(payload.uuid, serverId, payload.organizationUuid, payload.projectUuid, payload.userUuid,
-                payload.streamUuid, payload.topicUuid, payload.messageUuid.orEmpty(), payload.kind == WorkspacePushCrypto.TOPIC_UPDATE)
+                payload.streamUuid, payload.topicUuid, payload.messageUuid.orEmpty(), topicUpdate = true)
         }
     }
 }

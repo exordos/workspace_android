@@ -799,7 +799,7 @@ class ChatDialogViewModel(
         val markMessagesReadResponse = client.performRequest(MarkMessagesReadRequest(messageUuid))
         when(markMessagesReadResponse) {
             is ApiResult.Success -> {
-                repo.notificationRead(listOf(messageUuid))
+                repo.notificationRead()
             }
 
             is ApiResult.Error -> {

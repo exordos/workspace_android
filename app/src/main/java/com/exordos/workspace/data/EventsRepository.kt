@@ -96,12 +96,9 @@ class EventsRepository(
 ) {
 
     private val originalServer = config.copy()
-    internal var onPushMessagesKnown: (List<MessageUIO>) -> Unit = {}
-    internal var onPushMessageRemoved: (String) -> Unit = {}
-    internal var onPushRead: (List<String>) -> Unit = {}
     internal var onPushTopicUpdated: (TopicUIO, Long, String) -> Unit = { _, _, _ -> }
     internal var onPushRefreshNeeded: () -> Unit = {}
-    fun notificationRead(messageUuids: List<String>) { onPushRead(messageUuids) }
+    fun notificationRead() { onPushRefreshNeeded() }
 
     internal fun matchesServerConfiguration(server: ServerConfig): Boolean =
         server.id == serverId && server.baseUrl == originalServer.baseUrl && server.projectUuid == originalServer.projectUuid
@@ -195,7 +192,6 @@ class EventsRepository(
         _currentlySelectedFolder.update { newFolder }
     }
     fun addStreamTopicMessages(streamUuid: String, topicUuid: String, messages: List<MessageUIO>) {
-        onPushMessagesKnown(messages)
         val messagesWithUser = messages.map { message ->
             message.user = users.value.firstOrNull { it.uuid == message.authorUuid }
             message
@@ -351,7 +347,6 @@ class EventsRepository(
     }
 
     fun removeMessage(messageUuid: String) {
-        onPushMessageRemoved(messageUuid)
         _streamTopicMessages.update { current ->
             current.mapValues { (_, messages) ->
                 messages.filterNot { it.uuid == messageUuid }
@@ -509,7 +504,6 @@ class EventsRepository(
     }
 
     fun updateMessagesPool(newList: List<MessageUIO>) {
-        onPushMessagesKnown(newList)
         val currentPoolIds = _messagesPool.value.map { it.uuid }
         val filteredMessages = newList.filter { !currentPoolIds.contains(it.uuid) }
         val messagesWithUser = filteredMessages.map { message ->

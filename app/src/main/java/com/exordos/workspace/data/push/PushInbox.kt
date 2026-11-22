@@ -24,19 +24,14 @@ import kotlinx.serialization.json.Json
 
 internal data class PushReceipt(val sequence: Long, val route: PushRoute, val createdAt: Long,
     val unreadCount: Int = 1, val activeUnreadCount: Int = 1, val epochVersion: Long = 0, val epochGeneration: String = "")
-internal data class PushConversation(val identity: String, val count: Int, val snapshot: Long)
 
 /** Durable routes and terminal decisions. Message text and encryption keys never enter this database. */
 internal class PushInbox(context: Context) {
     private val db = database(context.applicationContext).writableDatabase
 
-    fun accept(route: PushRoute, createdAt: Long): Boolean = db.insertWithOnConflict(
-        TABLE, null, values(route, createdAt, UNREAD), SQLiteDatabase.CONFLICT_IGNORE
-    ) != -1L
-
-    fun hasTopic(identity: String): Boolean = db.rawQuery(
-        "SELECT 1 FROM $TABLE WHERE identity=? AND topic_update=1", arrayOf(identity)
-    ).use { it.moveToFirst() }
+    fun removeLegacyReceipts() {
+        db.delete(TABLE, "topic_update=0", null)
+    }
 
     /** Null means duplicate/outdated; otherwise the result says whether to alert. */
     fun updateTopic(route: PushRoute, createdAt: Long, unread: Int, active: Int,
@@ -68,8 +63,6 @@ internal class PushInbox(context: Context) {
                 put("epoch_version", epochVersion); put("epoch_generation", epochGeneration)
                 put("retired_generations", Json.encodeToString(retired))
             }
-            // Replace any pre-upgrade per-message cards for this topic.
-            db.delete(TABLE, "conversation=? AND topic_update=0", arrayOf(route.conversationIdentity))
             if (db.update(TABLE, values, "identity=?", arrayOf(route.identity)) == 0)
                 check(db.insertOrThrow(TABLE, null, values) != -1L)
             db.setTransactionSuccessful()
@@ -110,7 +103,6 @@ internal class PushInbox(context: Context) {
                 }
                 db.insertOrThrow(TABLE, null, values)
             }
-            db.delete(TABLE, "conversation=? AND topic_update=0", arrayOf(identity))
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
     }
@@ -124,84 +116,32 @@ internal class PushInbox(context: Context) {
             arrayOf(receipt.route.identity, receipt.epochVersion.toString(), receipt.epochGeneration, Json.encodeToString(receipt.route)))
     }
 
-    fun close(route: PushRoute) {
-        db.beginTransaction()
-        try {
-            db.insertWithOnConflict(TABLE, null, values(route, 0L, CLOSED), SQLiteDatabase.CONFLICT_IGNORE)
-            db.update(TABLE, ContentValues().apply { put("state", CLOSED) }, "identity=?", arrayOf(route.identity))
-            db.setTransactionSuccessful()
-        } finally { db.endTransaction() }
-    }
-
-    fun closeMessages(registration: PushRegistration, ids: Collection<String>, rememberUnknown: Boolean = true) {
-        if (ids.isEmpty()) return
-        db.beginTransaction()
-        try {
-            // A read/delete may arrive before the push. Its tombstone needs no fabricated route.
-            if (rememberUnknown) ids.forEach { messageUuid ->
-                db.insertWithOnConflict(TABLE, null, ContentValues().apply {
-                    put("identity", PushRoute.messageIdentity(registration.serverId, registration.organizationUuid,
-                        registration.projectUuid, registration.userUuid, messageUuid))
-                    put("conversation", ""); put("server_id", registration.serverId)
-                    put("organization_uuid", registration.organizationUuid); put("project_uuid", registration.projectUuid)
-                    put("user_uuid", registration.userUuid); put("message_uuid", messageUuid)
-                    put("created_at", WorkspaceDateTime.nowEpochMillis()); put("state", CLOSED)
-                }, SQLiteDatabase.CONFLICT_IGNORE)
-            }
-            ids.chunked(100).forEach { batch ->
-                val placeholders = batch.joinToString(",") { "?" }
-                db.update(TABLE, ContentValues().apply { put("state", CLOSED) },
-                    "server_id=? AND organization_uuid=? AND project_uuid=? AND user_uuid=? AND topic_update=0 AND message_uuid IN ($placeholders)",
-                    (listOf(registration.serverId, registration.organizationUuid, registration.projectUuid, registration.userUuid) + batch).toTypedArray())
-            }
-            db.setTransactionSuccessful()
-        } finally { db.endTransaction() }
-    }
-
-    /** Closed topic snapshots and unknown-message decisions guard one delivery window. */
+    /** Retain closed topic snapshots for one delivery window to reject delayed events. */
     fun pruneTransientDecisions(now: Long) {
-        // Older pre-release rows used zero; give them one full window on upgrade.
-        db.update(TABLE, ContentValues().apply { put("created_at", now) },
-            "state=? AND route IS NULL AND created_at=0", arrayOf(CLOSED))
-        db.delete(TABLE, "state=? AND (route IS NULL OR topic_update=1) AND created_at<?",
+        db.delete(TABLE, "state=? AND topic_update=1 AND created_at<?",
             arrayOf(CLOSED, (now - DELIVERY_WINDOW_MILLIS).toString()))
     }
 
-    fun dismiss(identity: String, snapshot: Long = 0, generation: String? = null) {
+    fun dismiss(identity: String, snapshot: Long, generation: String) {
         db.update(TABLE, ContentValues().apply { put("state", DISMISSED) },
-            "identity=? AND state=? AND (topic_update=0 OR (epoch_version<=? AND epoch_generation=?))",
-            arrayOf(identity, UNREAD, snapshot.toString(), generation ?: ""))
+            "identity=? AND state=? AND topic_update=1 AND epoch_version<=? AND epoch_generation=?",
+            arrayOf(identity, UNREAD, snapshot.toString(), generation))
     }
-
-    /** A group swipe applies only to the rows that existed when its delete intent was built. */
-    fun dismissConversation(identity: String, snapshot: Long) {
-        db.update(TABLE, ContentValues().apply { put("state", DISMISSED) },
-            "conversation=? AND sequence<=? AND state=?", arrayOf(identity, snapshot.toString(), UNREAD))
-    }
-
-    fun belongsTo(serverId: String, identity: String): Boolean = db.rawQuery(
-        "SELECT 1 FROM $TABLE WHERE server_id=? AND identity=?", arrayOf(serverId, identity)
-    ).use { it.moveToFirst() }
 
     fun removeServer(serverId: String) { db.delete(TABLE, "server_id=?", arrayOf(serverId)) }
 
     fun resolve(identity: String): PushRoute? = db.rawQuery(
-        "SELECT route FROM $TABLE WHERE identity=? AND state=?", arrayOf(identity, UNREAD)
+        "SELECT route FROM $TABLE WHERE identity=? AND state=? AND topic_update=1", arrayOf(identity, UNREAD)
     ).use { if (it.moveToFirst()) Json.decodeFromString<PushRoute>(it.getString(0)) else null }
 
-    fun conversations(limit: Int): List<PushConversation> = db.rawQuery(
-        "SELECT conversation,SUM(unread_count),MAX(sequence) FROM $TABLE WHERE state=? " +
-            "GROUP BY conversation ORDER BY MAX(created_at) DESC,conversation LIMIT ?", arrayOf(UNREAD, limit.toString())
-    ).use { cursor -> buildList { while (cursor.moveToNext()) add(PushConversation(cursor.getString(0), cursor.getInt(1), cursor.getLong(2))) } }
-
-    fun messages(conversation: String, limit: Int): List<PushReceipt> = db.rawQuery(
-        "SELECT sequence,route,created_at,unread_count,active_unread_count,epoch_version,epoch_generation FROM $TABLE WHERE conversation=? AND state=? " +
-            "ORDER BY created_at DESC,sequence DESC LIMIT ?", arrayOf(conversation, UNREAD, limit.toString())
+    fun activeTopics(limit: Int): List<PushReceipt> = db.rawQuery(
+        "SELECT sequence,route,created_at,unread_count,active_unread_count,epoch_version,epoch_generation FROM $TABLE " +
+            "WHERE state=? AND topic_update=1 ORDER BY created_at DESC,identity LIMIT ?", arrayOf(UNREAD, limit.toString())
     ).use(::receipts)
 
     fun pending(registration: PushRegistration, afterSequence: Long, limit: Int = 50): List<PushReceipt> = db.rawQuery(
         "SELECT sequence,route,created_at,unread_count,active_unread_count,epoch_version,epoch_generation FROM $TABLE WHERE server_id=? AND organization_uuid=? " +
-            "AND project_uuid=? AND user_uuid=? AND state=? AND sequence>? ORDER BY sequence LIMIT ?",
+            "AND project_uuid=? AND user_uuid=? AND state=? AND topic_update=1 AND sequence>? ORDER BY sequence LIMIT ?",
         arrayOf(registration.serverId, registration.organizationUuid, registration.projectUuid, registration.userUuid,
             UNREAD, afterSequence.toString(), limit.toString())
     ).use(::receipts)

@@ -54,14 +54,12 @@ data class WorkspacePushPayload(
 /** Push keys are separate from chat keys; only the registered device can decrypt. */
 object WorkspacePushCrypto {
     const val ALGORITHM = "HPKE-v1-BASE-X25519-HKDF-SHA256-AES-256-GCM"
-    const val MESSAGE_CREATE = "notification_message_create"
-    const val MESSAGE_CANCELLED = "notification_message_cancel"
     const val TOPIC_UPDATE = "notification_topic_update"
     private val info = "workspace-mobile-push".toByteArray(Charsets.US_ASCII)
 
     fun decrypt(privateKey: ByteArray, publicKey: ByteArray, payload: WorkspacePushPayload): ByteArray {
         if (payload.content.kind != "encrypted" || payload.content.algorithm != ALGORITHM ||
-            payload.kind !in setOf(MESSAGE_CREATE, MESSAGE_CANCELLED, TOPIC_UPDATE)) {
+            payload.kind != TOPIC_UPDATE) {
             throw GeneralSecurityException("Unsupported push content")
         }
         val decoder = Base64.getUrlDecoder()

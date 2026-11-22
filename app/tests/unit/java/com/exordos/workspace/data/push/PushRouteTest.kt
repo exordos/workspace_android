@@ -23,6 +23,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import com.exordos.workspace.data.crypto.WorkspacePushCrypto
 import com.exordos.workspace.data.crypto.WorkspacePushPayload
 import com.google.crypto.tink.subtle.X25519
+import java.security.GeneralSecurityException
 
 class PushRouteTest {
     @Test fun topicSnapshotDecryptsAndKeepsOneIdentityWhenItsAnchorChanges() {
@@ -43,23 +44,16 @@ class PushRouteTest {
         assertNotEquals(firstRoute.identity, firstRoute.copy(serverId = "other-account").identity)
         key.fill(0); plaintext.fill(0)
     }
-    @Test fun pythonProducerPayloadDecryptsAndHasExactMessageRoute() {
+    @Test fun legacyCreateAndCancelCannotDecryptOrCreateRoutes() {
         val fixture = Json.parseToJsonElement(javaClass.classLoader!!.getResource("mobile_push_event.json")!!.readText()).jsonObject
-        val payload = Json.decodeFromJsonElement(WorkspacePushPayload.serializer(), fixture.getValue("payload"))
         val key = fixture.getValue("recipient_private_key_hex").jsonPrimitive.content.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
-        val publicKey = com.google.crypto.tink.subtle.X25519.publicFromPrivate(key)
-        val plaintext = WorkspacePushCrypto.decrypt(key, publicKey, payload)
-        val content = Json.parseToJsonElement(plaintext.decodeToString()).jsonObject
-        assertEquals("Привет из Workspace", content.getValue("text").jsonPrimitive.content)
-        val route = PushRoute.from(payload, "saved-server")
-        assertEquals(payload.messageUuid, route.messageUuid)
-        assertEquals(payload.streamUuid, route.streamUuid)
-        assertEquals(payload.topicUuid, route.topicUuid)
-        assertNotEquals(route.identity, route.copy(userUuid = "other-user").identity)
-        assertNotEquals(route.identity, route.copy(organizationUuid = "other-org").identity)
-        // Two saved connections to the same account must own independent alerts.
-        assertNotEquals(route.identity, route.copy(serverId = "second-saved-connection").identity)
-        // Another delivery kind/event for the same message is the same alert.
-        assertEquals(route.identity, route.copy(eventUuid = "another-event").identity)
+        try {
+            val publicKey = X25519.publicFromPrivate(key)
+            for (kind in listOf("payload", "cancel_payload")) {
+                val payload = Json.decodeFromJsonElement<WorkspacePushPayload>(fixture.getValue(kind))
+                assertTrue(runCatching { WorkspacePushCrypto.decrypt(key, publicKey, payload) }.exceptionOrNull() is GeneralSecurityException)
+                assertTrue(runCatching { PushRoute.from(payload, "saved-server") }.isFailure)
+            }
+        } finally { key.fill(0) }
     }
 }

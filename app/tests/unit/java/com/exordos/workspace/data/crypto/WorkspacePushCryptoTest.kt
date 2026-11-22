@@ -40,15 +40,15 @@ class WorkspacePushCryptoTest {
     @Test fun associatedDataChangesWhenCancellationReplacesCreation() {
         val content = EncryptedPushContent("encrypted", WorkspacePushCrypto.ALGORITHM,
             "key", "enc", "ciphertext")
-        val payload = WorkspacePushPayload("event", WorkspacePushCrypto.MESSAGE_CREATE,
+        val payload = WorkspacePushPayload("event", WorkspacePushCrypto.TOPIC_UPDATE,
             "organization", "project", "stream", "topic", "message", "user", "device", content)
         assertNotEquals(payload.associatedData().toList(),
-            payload.copy(kind = WorkspacePushCrypto.MESSAGE_CANCELLED).associatedData().toList())
+            payload.copy(kind = "different_kind").associatedData().toList())
     }
 
     @Test(expected = GeneralSecurityException::class)
     fun rejectsUnsupportedEncryptionBeforeAttemptingToDisplayContent() {
-        val payload = WorkspacePushPayload("event", WorkspacePushCrypto.MESSAGE_CREATE,
+        val payload = WorkspacePushPayload("event", WorkspacePushCrypto.TOPIC_UPDATE,
             "organization", "project", "stream", "topic", "message", "user", "device",
             EncryptedPushContent("message", "plaintext", "key", "enc", "text"))
         WorkspacePushCrypto.decrypt(ByteArray(32), ByteArray(32), payload)

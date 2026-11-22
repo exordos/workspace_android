@@ -52,7 +52,7 @@ This map describes covered contracts; it does not establish full line coverage.
 | Login/OTP server-error and empty/whitespace fallback Toasts, repeated identical failures, navigation, layout | `AuthenticationErrorUiTest`, `AuthenticationUiTest`, `AuthReviewRegressionTest`, `ProfileNavigationUiTest`, `PublicationWindowTest` |
 | Firebase release configuration, token/payload log privacy and notification content | `verifyFirebaseReleaseConfig`, `FirebaseTokenLoggingTest`; opt-in `FirebaseRegistrationSmokeTest` and dedicated notification acceptance |
 | Push entry points and WorkManager wiring enabled, Firebase Analytics still disabled, warm and cold notification links | `PushConfigurationTest`, `PushLinkNavigationTest` |
-| Encrypted topic snapshots, legacy push compatibility, read/zero ordering and expiry | `PushRouteTest`, `EncryptedTopicPushTest`, `EncryptedPushReceiptTest`; opt-in real FCM acceptance in [mobile push](mobile-push.md) |
+| Encrypted topic snapshots, removal of old push receipts on upgrade, read/zero ordering and expiry | `PushRouteTest`, `EncryptedTopicPushTest`, `EncryptedPushReceiptTest`; opt-in real FCM acceptance in [mobile push](mobile-push.md) |
 
 When extending this map, identify the failure scenario: lost acknowledgement,
 account replacement during a request, an empty fresh snapshot after deletion,

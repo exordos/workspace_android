@@ -104,9 +104,9 @@ class EncryptedTopicPushTest {
     @Test fun oldSwipeCannotDismissANewerCounterSnapshot() {
         assertTrue(receive("first"))
         assertTrue(receive("second"))
-        notifications.dismiss(route.identity, null, 100, "00000000-0000-0000-0000-00000000000b")
+        notifications.dismiss(route.identity, 100, "00000000-0000-0000-0000-00000000000b")
         await { card()?.notification?.number == 1 }
-        notifications.dismiss(route.identity, null, 200, "00000000-0000-0000-0000-00000000000b")
+        notifications.dismiss(route.identity, 200, "00000000-0000-0000-0000-00000000000b")
         await { card() == null }
         assertTrue(receive("newer"))
         await { card()?.notification?.number == 3 }
@@ -147,6 +147,7 @@ class EncryptedTopicPushTest {
 
     @Test fun anOldSwipeFromAnotherGenerationCannotDismissANewCard() {
         assertTrue(receive("first"))
+        await { card() != null }
         val staleIntent = requireNotNull(card()).notification.deleteIntent
         PushInbox(context).updateTopic(route.copy(eventUuid = java.util.UUID.randomUUID().toString()),
             System.currentTimeMillis(), 3, 3, 1, "00000000-0000-0000-0000-00000000000c")
@@ -155,6 +156,12 @@ class EncryptedTopicPushTest {
         staleIntent.send()
         Thread.sleep(300)
         assertEquals(3, card()?.notification?.number)
+    }
+
+    private fun hasTopic(identity: String): Boolean = SQLiteDatabase.openDatabase(
+        context.getDatabasePath("workspace_push_inbox.db").path, null, SQLiteDatabase.OPEN_READONLY
+    ).use { db ->
+        db.rawQuery("SELECT 1 FROM push_receipts WHERE identity=? AND topic_update=1", arrayOf(identity)).use { it.moveToFirst() }
     }
 
     @Test fun closedTopicReceiptsExpireOneDeliveryWindowAfterClosure() {
@@ -174,7 +181,7 @@ class EncryptedTopicPushTest {
         inbox.updateTopic(dismissed, old, 1, 1, 1, generation)
         inbox.dismiss(dismissed.identity, 1, generation)
         inbox.pruneTransientDecisions(now)
-        for (entry in listOf(route, withoutRoute, zero, active, dismissed)) assertTrue(inbox.hasTopic(entry.identity))
+        for (entry in listOf(route, withoutRoute, zero, active, dismissed)) assertTrue(hasTopic(entry.identity))
         assertNull(inbox.updateTopic(route, now, 1, 1, 1, generation))
         // Age only this fixture's rows; do not advance pruning for real accounts.
         SQLiteDatabase.openDatabase(context.getDatabasePath("workspace_push_inbox.db").path,
@@ -183,8 +190,8 @@ class EncryptedTopicPushTest {
                 arrayOf(now - PushInbox.DELIVERY_WINDOW_MILLIS - 1, registration.serverId))
         }
         inbox.pruneTransientDecisions(now)
-        for (entry in listOf(route, withoutRoute, zero)) assertFalse(inbox.hasTopic(entry.identity))
-        for (entry in listOf(active, dismissed)) assertTrue(inbox.hasTopic(entry.identity))
+        for (entry in listOf(route, withoutRoute, zero)) assertFalse(hasTopic(entry.identity))
+        for (entry in listOf(active, dismissed)) assertTrue(hasTopic(entry.identity))
     }
 
 }
