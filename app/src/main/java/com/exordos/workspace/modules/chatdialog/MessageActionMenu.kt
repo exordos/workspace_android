@@ -1,5 +1,7 @@
 package com.exordos.workspace.modules.chatdialog
 
+import android.view.WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM
+import android.view.WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
@@ -29,6 +31,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.PopupProperties
 import com.exordos.workspace.R
 import com.exordos.workspace.ui.theme.InterFontFamily
 import com.exordos.workspace.ui.theme.LocalWorkspaceColorsPalette
@@ -56,6 +59,8 @@ internal fun MessageActionMenu(
         modifier = Modifier.width(252.dp),
         shape = RoundedCornerShape(8.dp),
         containerColor = LocalWorkspaceColorsPalette.current.messageBackground,
+        // Receive Back while leaving the composer as the IME target.
+        properties = PopupProperties(flags = FLAG_ALT_FOCUSABLE_IM or FLAG_WATCH_OUTSIDE_TOUCH),
     ) {
         if (onRequestEncryptionKey != null) {
             MessageActionMenuItem(

@@ -45,6 +45,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -399,11 +400,11 @@ fun WorkspaceApp(
     val pushOwnerProof = currentUserRepository?.verifiedOwnerAuthentication?.collectAsState()?.value
     val currentCallMessage by viewModel.currentCallMessage.collectAsState()
     var currentDestination = rememberSaveable { mutableStateOf(0 ) }
-    var showNavigation by rememberSaveable { mutableStateOf(true) }
+    var chatsHidingNavigation by remember { mutableIntStateOf(0) }
     var protectedBottomBarVisibility by remember { mutableStateOf<Boolean?>(null) }
     val setProtectedBottomBarStyle: (Boolean?) -> Unit = remember { { protectedBottomBarVisibility = it } }
     val protectedBottomBar = protectedBottomBarVisibility != null
-    val navigationVisible = protectedBottomBarVisibility ?: showNavigation
+    val navigationVisible = protectedBottomBarVisibility ?: (chatsHidingNavigation == 0)
     val selectDestination: (Int) -> Unit = { index ->
         currentDestination.value = index
         navController.navigate(destinationList[index].route) {
@@ -459,7 +460,10 @@ fun WorkspaceApp(
     ) {
 
         CompositionLocalProvider(
-            LocalBottomBarVisible provides { visible -> showNavigation = visible },
+            LocalBottomBarVisible provides { visible ->
+                // A push transition can compose the incoming chat before disposing the outgoing chat.
+                chatsHidingNavigation += if (visible) -1 else 1
+            },
             LocalProtectedBottomBarStyle provides setProtectedBottomBarStyle,
         ) {
             Column(Modifier.fillMaxSize()) {
