@@ -22,26 +22,21 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.defaultMinSize
-import androidx.compose.foundation.layout.exclude
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.isImeVisible
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -335,7 +330,8 @@ fun ChatDialogScreen(
 
     Box(Modifier.fillMaxSize()) {
         Scaffold(
-            modifier = if (forwardingMessages != null) Modifier.clearAndSetSemantics {} else Modifier,
+            modifier = Modifier.imePadding()
+                .then(if (forwardingMessages != null) Modifier.clearAndSetSemantics {} else Modifier),
             snackbarHost = { SnackbarHost(snackbarHostState) },
             bottomBar = {
                 if (selectionMode) {
@@ -508,17 +504,11 @@ fun ChatDialogScreen(
                 )
             },
         ) { innerPadding ->
-            val density = LocalDensity.current
-            val navBarHeight = 70.dp
             Box(
                 modifier = Modifier.fillMaxSize()
                     .background(if (stream?.encryption == true) EncryptedChatBackground else LocalWorkspaceColorsPalette.current.background)
                     .padding(innerPadding)
-                    .windowInsetsPadding(
-                        WindowInsets.ime
-                            .exclude(WindowInsets.navigationBars)
-                            .only(WindowInsetsSides.Bottom)
-                    ),
+                    .consumeWindowInsets(innerPadding),
                 contentAlignment = Alignment.Center
             ) {
                 Column(
