@@ -4,6 +4,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.exordos.workspace.data.remote.ApiError
 import com.exordos.workspace.data.remote.ApiResult
 import com.exordos.workspace.data.remote.ProtectedRequestAuthentication
+import com.exordos.workspace.data.remote.dto.FoldersRequest
 import com.exordos.workspace.data.remote.dto.MessageReactionsRequest
 import com.exordos.workspace.data.remote.dto.MessagesRequest
 import com.exordos.workspace.data.remote.dto.ProjectsRequest
@@ -36,6 +37,7 @@ class StartupUioInstrumentedTest {
     private lateinit var account: WorkspaceTestAccount
     private val requests = CopyOnWriteArrayList<LoopbackWorkspaceServer.Request>()
     @Volatile private var bindingStatus = 200
+    @Volatile private var omitFolderItemParent = false
     private val person = """{"uuid":"person","username":"CASSI fixture","status":"active","avatar":""}"""
     private val message = """{"uuid":"message","updated_at":"2026-01-01T00:00:00Z","created_at":"2026-01-01T00:00:00Z",
         "stream_uuid":"stream","topic_uuid":"topic","user_uuid":"person","author_uuid":"person",
@@ -61,7 +63,10 @@ class StartupUioInstrumentedTest {
                 request.path.endsWith("/streams/") -> "[$stream]"
                 request.path.endsWith("/stream_topics/") -> "[$topic]"
                 request.path.endsWith("/messages/") -> "[$message]"
-                request.path.endsWith("/folders/") -> "[$folder]"
+                request.path.endsWith("/folders/") -> {
+                    val payload = if (omitFolderItemParent) folder.replace("\"folder\":\"folder\",", "") else folder
+                    "[$payload]"
+                }
                 request.path.endsWith("/stream_bindings/") -> "[$binding]"
                 request.path.endsWith("/message_reactions/") -> "[$reaction]"
                 request.path.endsWith("/drafts/") -> """[{"uuid":"draft","stream_uuid":"stream","topic_uuid":"topic",
@@ -124,6 +129,13 @@ class StartupUioInstrumentedTest {
         assertEquals("FORBIDDEN", denied.error.code)
         assertEquals(401, denied.error.httpStatusCode)
         assertEquals(count + 1, requests.count { it.path.endsWith("/stream_bindings/") })
+    }
+
+    @Test fun foldersRequestAcceptsNestedItemWithoutParent(): Unit = runBlocking {
+        omitFolderItemParent = true
+        val response = account.api.performRequest(FoldersRequest())
+        assertTrue(response is ApiResult.Success)
+        assertEquals("folder", (response as ApiResult.Success).value.single().uuid)
     }
 
     @Test fun realtimeMapsEveryEntityBeforeUpdatingPresentationState() = runBlocking {

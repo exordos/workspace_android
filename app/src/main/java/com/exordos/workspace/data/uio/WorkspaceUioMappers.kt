@@ -108,12 +108,12 @@ fun FolderResponseData.toUio(): FolderUIO = FolderUIO(
     creationDate = creationDate
 )
 
-fun FolderItem.toUio(): FolderItemUIO = FolderItemUIO(
+fun FolderItem.toUio(folderUuid: String = requireNotNull(folder)): FolderItemUIO = FolderItemUIO(
     uuid = uuid,
     streamUuid = streamUuid,
     chatType = chatType,
     unreadCount = unreadCount,
-    folder = folder
+    folder = folderUuid,
 )
 
 fun StreamBindingResponseData.toUio(): StreamBindingUIO = StreamBindingUIO(
