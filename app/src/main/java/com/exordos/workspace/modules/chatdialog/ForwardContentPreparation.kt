@@ -10,6 +10,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.first
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import com.exordos.workspace.R
@@ -35,6 +36,7 @@ internal class ForwardContentPreparation(
     private val resolve: suspend (String) -> MessageUIO?,
     private val copyFile: suspend (String, String, String) -> String,
     private val presentMessage: suspend (MessageUIO) -> MessageUIO = { requireForwardPlaintext(it) },
+    private val authorNames: suspend () -> Map<String, String> = { emptyMap() },
 ) {
     private val resolved = mutableMapOf<String, MessageUIO>()
     private val prepared = mutableMapOf<String, String>()
@@ -78,7 +80,8 @@ internal class ForwardContentPreparation(
         val snapshots = projectedSources.map { source ->
             source.copy(payload = source.payload.copy(content = render(source.payload.content, setOf(source.uuid), 0)))
         }
-        return requireNotNull(buildWorkspaceForwardMarkdown(snapshots)).also {
+        val names = authorNames()
+        return requireNotNull(buildWorkspaceForwardMarkdown(snapshots, names::get)).also {
             if (it.length > 100_000) throw ForwardPreparationFailure(R.string.forward_too_much_text)
             prepared[target.streamUuid] = it
         }
@@ -235,6 +238,7 @@ internal fun createForwardPreparation(
         },
         copyFile = copies::copy,
         presentMessage = encryptedAccess::present,
+        authorNames = { repo.users.first().associate { it.uuid to it.displayableName() } },
     )
 }
 
@@ -308,7 +312,7 @@ internal class ForwardEncryptedAccess(
 
     suspend fun send(target: ForwardDestination, canonicalUuid: String, markdown: String): MessageUIO {
         requireCurrent()
-        if (repo.streams.value.none { it.uuid == target.streamUuid && it.encryption && !it.isArchived })
+        if (repo.streams.first().none { it.uuid == target.streamUuid && it.encryption && !it.isArchived })
             throw ForwardPreparationFailure(R.string.forward_destination_unavailable)
         return withRuntime(target.streamUuid, target.topicUuid, mutating = true) {
             it.sendText(markdown, target.topicUuid, canonicalUuid)
@@ -323,7 +327,7 @@ internal class ForwardEncryptedAccess(
         // must still have the complete durable key scope before mounting a runtime.
         if (config.projectUuid.isNullOrBlank())
             throw ForwardPreparationFailure(R.string.forward_destination_unavailable)
-        if (repo.streams.value.none { it.uuid == streamUuid && it.encryption })
+        if (repo.streams.first().none { it.uuid == streamUuid && it.encryption })
             throw ForwardPreparationFailure(R.string.forward_destination_unavailable)
         val runtime = EncryptedChatRuntime(context, client, repo, this, streamUuid, topicUuid)
         try { action(runtime).also { requireCurrent(uncertain = mutating) } } finally { runtime.close() }

@@ -95,7 +95,8 @@ fun TextMessageView(
     val deletingMessageUuids by viewModel.deletingMessageUuids.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val author = viewModel.author(item)
+    val users by viewModel.users.collectAsStateWithLifecycle()
+    val author = users.firstOrNull { it.uuid == item.authorUuid }
     var showFullscreen by remember { mutableStateOf(false) }
     val bubbleShape = if (item.isOwn) {
         RoundedCornerShape(

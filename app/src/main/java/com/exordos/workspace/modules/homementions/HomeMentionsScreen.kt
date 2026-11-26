@@ -67,6 +67,7 @@ fun HomeMentionsScreen(
     val messagesQueryState by viewModel.messagesQueryState.collectAsStateWithLifecycle()
     val streams by viewModel.streams.collectAsStateWithLifecycle()
     val messages by viewModel.messages.collectAsStateWithLifecycle()
+    val users by viewModel.users.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     Scaffold(
         topBar = {
@@ -131,7 +132,7 @@ fun HomeMentionsScreen(
                             items = messages.sortedByDescending  { WorkspaceDateTime.parse(it.createdAt) }
                         ) { item ->
 
-                            val author = viewModel.eventsRepository.userDao.getUser(item.authorUuid)
+                            val author = users.firstOrNull { it.uuid == item.authorUuid }
                             val stream = streams.firstOrNull { it.uuid == item.streamUuid }
                             if (stream != null) {
                                 Row(

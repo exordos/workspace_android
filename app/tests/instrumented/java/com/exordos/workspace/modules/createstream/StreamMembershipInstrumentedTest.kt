@@ -221,7 +221,7 @@ class StreamMembershipInstrumentedTest {
             assertEquals(2, owner.repo.streamBindings.value.getValue(peer.initial.uuid).size)
             val own = owner.repo.streamBindings.value.getValue(peer.initial.uuid).first { it.userUuid == peer.people[0].uuid }
             owner.repo.didReceiveStreamBindingEvent(Json.encodeToString(peer.binding(0).copy(role = "administrator")), "updated")
-            assertEquals("administrator", owner.repo.streams.value.single().role)
+            assertEquals("administrator", owner.repo.streams.first().single().role)
             owner.repo.didReceiveStreamBindingEvent(buildJsonObject {
                 put("uuid", added.uuid); put("stream_uuid", added.streamUuid); put("user_uuid", added.userUuid)
             }.toString(), "deleted")
@@ -229,7 +229,7 @@ class StreamMembershipInstrumentedTest {
             owner.repo.didReceiveStreamBindingEvent(buildJsonObject {
                 put("uuid", own.uuid); put("stream_uuid", own.streamUuid); put("user_uuid", own.userUuid)
             }.toString(), "deleted")
-            assertTrue(owner.repo.streams.value.isEmpty())
+            assertTrue(owner.repo.streams.first().isEmpty())
         } finally { observer.cancelAndJoin() }
     }
 

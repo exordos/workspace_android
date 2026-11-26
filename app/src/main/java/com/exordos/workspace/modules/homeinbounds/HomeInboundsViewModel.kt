@@ -19,6 +19,7 @@ import com.exordos.workspace.data.remote.dto.MessagesByIdsRequest
 import com.exordos.workspace.data.uio.StreamUIO
 import com.exordos.workspace.data.remote.dto.TopicsRequest
 import com.exordos.workspace.data.uio.TopicUIO
+import com.exordos.workspace.data.uio.UserUIO
 import com.exordos.workspace.modules.chooseserver.QueryState
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
@@ -40,6 +41,8 @@ class HomeInboundsViewModel(
     val eventsRepositoryStore: EventsRepositoryStore
 ): ViewModel() {
     val eventsRepository = eventsRepositoryStore.get(client.getCurrentServerId()) ?: error("Cannot get current event repository")
+    internal val users: StateFlow<List<UserUIO>> = eventsRepository.users
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val streams: StateFlow<List<StreamUIO>> = eventsRepository.streams
         .stateIn(
             scope = viewModelScope,

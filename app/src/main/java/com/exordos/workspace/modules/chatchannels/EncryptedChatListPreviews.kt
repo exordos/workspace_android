@@ -23,8 +23,13 @@ internal data class EncryptedPreviewSource(
 
 private val encryptedServiceKinds = setOf("key_request", "key_grant", "key_reject", "key_announced")
 
-internal fun latestLoadedEncryptedPreviewMessage(stream: StreamUIO, pool: List<MessageUIO>, conversations: List<MessageUIO>): MessageUIO? {
-    val known = latestEncryptedChatWireMessages(listOfNotNull(stream.lastMessage) + pool, conversations, stream.uuid)
+internal fun latestLoadedEncryptedPreviewMessage(
+    stream: StreamUIO,
+    pool: List<MessageUIO>,
+    conversations: List<MessageUIO>,
+    catalogLast: MessageUIO? = null,
+): MessageUIO? {
+    val known = latestEncryptedChatWireMessages(listOfNotNull(catalogLast) + pool, conversations, stream.uuid)
     val last = known.firstOrNull { it.uuid == stream.lastMessageUuid } ?: return null
     if (last.payload.kind == "e2ee") return last
     if (last.payload.kind !in encryptedServiceKinds) return null
@@ -35,7 +40,8 @@ internal fun latestLoadedEncryptedPreviewMessage(stream: StreamUIO, pool: List<M
 
 /** Captures only public wire fields; repository objects and ciphertext are never replaced with plaintext. */
 internal fun encryptedPreviewSource(stream: StreamUIO, message: MessageUIO?, ownUserUuid: String,
-                                    projectUuid: String, bindings: List<StreamBindingUIO>?, catalogLast: MessageUIO?): EncryptedPreviewSource? {
+                                    projectUuid: String, bindings: List<StreamBindingUIO>?, catalogLast: MessageUIO? = null,
+                                    authorName: String? = null): EncryptedPreviewSource? {
     if (message == null || !stream.encryption || message.payload.kind != "e2ee" || message.payload.keyUuid.isNullOrBlank()) return null
     val memberRoles = setOf("owner", "administrator", "moderator", "member")
     val authorized = stream.userUuid == ownUserUuid && (stream.projectId == null || stream.projectId == projectUuid) &&
@@ -45,7 +51,7 @@ internal fun encryptedPreviewSource(stream: StreamUIO, message: MessageUIO?, own
             runCatching { WorkspaceDateTime.parse(message.createdAt) <= WorkspaceDateTime.parse(catalogLast.createdAt) }.getOrDefault(false))) && message.streamUuid == stream.uuid &&
         message.userUuid == ownUserUuid && (message.projectId == null || message.projectId == projectUuid)
     return EncryptedPreviewSource(stream.uuid, message.uuid, requireNotNull(message.payload.keyUuid), message.payload.content, authorized,
-        stream.lastMessageUuid, message.user?.displayableName(), message.createdAt)
+        stream.lastMessageUuid, authorName, message.createdAt)
 }
 
 internal data class EncryptedPreviewSnapshot(val account: ConfirmedAccountContext, val rows: List<EncryptedPreviewSource>) {

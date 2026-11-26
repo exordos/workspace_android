@@ -96,7 +96,7 @@ class AuthenticationRefreshInstrumentedTest {
         tokenStore = SecureTokenStore(
             InstrumentationRegistry.getInstrumentation().targetContext,
         )
-        eventsStore = EventsRepositoryStore(tokenStore, api)
+        eventsStore = EventsRepositoryStore(tokenStore, api, InstrumentationRegistry.getInstrumentation().targetContext)
         repository = ServerRepository(store, tokenStore, eventsStore, storeScope)
         user = UserViewModel(repository)
         api.attachUserViewModel(user)
@@ -403,7 +403,7 @@ class AuthenticationRefreshInstrumentedTest {
                 val removed = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
                     withTimeout(5_000) { chat.stream.first { it == null } }
                 }
-                chat.repo.setInitialStreams(emptyList())
+                chat.repo.streamDao.deleteAll()
                 assertEquals(null, removed.await())
             } finally {
                 chat.viewModelScope.cancel()

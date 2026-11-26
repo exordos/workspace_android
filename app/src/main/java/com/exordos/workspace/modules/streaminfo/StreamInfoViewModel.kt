@@ -54,13 +54,10 @@ class StreamInfoViewModel(
 ): ViewModel() {
     val repo = eventsRepositoryStore.get(client.getCurrentServerId()) ?: error("Cannot get current event repository")
 
-    val streams: StateFlow<List<StreamUIO>> = repo.streams
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = emptyList(),
-        )
-    private var mountedProtectedStream = streams.value.firstOrNull { it.uuid == streamUuid }?.encryption == true
+    private var mountedProtectedStream = false
+    val stream: StateFlow<StreamUIO?> = repo.streams
+        .map { list -> list.firstOrNull { it.uuid == streamUuid }?.also { if (it.encryption) mountedProtectedStream = true } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
     val hasMountedProtectedStream: Boolean get() = mountedProtectedStream
     private val notificationMountServer = client.requireUserViewModel().selectedServer.value?.takeIf { it.id == repo.serverId }?.copy()
     private val notificationMountOwner = notificationMountServer?.let { server -> repo.currentUser.value?.uuid?.let {
@@ -77,7 +74,7 @@ class StreamInfoViewModel(
             }
         },
         commit = { _, mode ->
-            streams.value.firstOrNull { it.uuid == streamUuid }?.let {
+            stream.value?.let {
                 viewModelScope.launch {
                     repo.updateStream(it.copy(notificationMode = mode))
                 }
@@ -95,7 +92,7 @@ class StreamInfoViewModel(
             body.name, body.description)), captured.server.id, captured.server) },
         commit = { _, response ->
             // Metadata edits must not roll a concurrently rotated key back to an older response.
-            streams.value.firstOrNull { it.uuid == streamUuid }?.let { current ->
+            stream.value?.let { current ->
                 viewModelScope.launch {
                     repo.updateStream(
                         current.copy(
@@ -139,14 +136,13 @@ class StreamInfoViewModel(
     suspend fun createProtectedCall(): String? = protectedCallStarter.createCall()
     fun clearProtectedStreamCallState() = protectedCallStarter.clearStatus()
 
-    private fun currentProtectedContext() = currentProtectedStreamContext(client, repo, streamUuid)
+    private fun currentProtectedContext() = currentProtectedStreamContext(client, repo, stream.value)
 
     init {
         viewModelScope.launch {
             merge(combine(client.requireUserViewModel().selectedServer, client.requireUserViewModel().accessToken,
-                repo.currentUser, repo.streams, repo.verifiedOwnerAuthentication) { _, _, _, _, _ -> Unit },
+                repo.currentUser, stream, repo.verifiedOwnerAuthentication) { _, _, _, _, _ -> Unit },
                 ConfirmedAccountContext.invalidations.map { Unit }).collect {
-                    if (streams.value.any { it.uuid == streamUuid && it.encryption }) mountedProtectedStream = true
                     protectedStreamEditor.onContextChanged()
                     protectedCallStarter.onContextChanged()
                     protectedNotifications.onContextChanged()
@@ -167,14 +163,6 @@ class StreamInfoViewModel(
     fun deleteEncryptionKeys(keys: Set<String>) = encryptionAction { runtime -> keys.forEach { runtime.removeLocalKey(it) } }
     fun clearEncryptedError() = encryptionRuntime?.clearError()
     override fun onCleared() { encryptionRuntime?.close(); super.onCleared() }
-
-    val stream: StateFlow<StreamUIO?> = repo.streams
-        .map { list -> list.firstOrNull { it.uuid == streamUuid }?.also { if (it.encryption) mountedProtectedStream = true } }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = streams.value.firstOrNull { it.uuid == streamUuid }
-        )
 
     val topic: StateFlow<TopicUIO?> = repo.topics
         .map { list -> list?.firstOrNull { it.uuid == topicUuid } }
@@ -201,7 +189,8 @@ class StreamInfoViewModel(
     suspend fun setStreamNotificationMode(notificationMode: String) {
         // A mounted protected VM must never fall back to the current account's ordinary transport,
         // including after its original stream disappears during account switching.
-        if (mountedProtectedStream || streams.value.any { it.uuid == streamUuid && it.encryption }) {
+        val target = stream.value ?: return
+        if (mountedProtectedStream || target.encryption) {
             mountedProtectedStream = true
             protectedNotifications.update(notificationMode)
             return
@@ -263,9 +252,8 @@ internal data class ProtectedStreamEditOwner(val serverId: String, val baseUrl: 
                                             val projectUuid: String?, val userUuid: String, val streamUuid: String)
 
 internal fun currentProtectedStreamContext(client: WorkspaceAPIClient, repo: EventsRepository,
-                                            streamUuid: String): ProtectedStreamEditContext? {
+                                            target: StreamUIO?): ProtectedStreamEditContext? {
     val account = confirmedAccountContext(client, repo) ?: return null
-    val target = repo.streams.value.firstOrNull { it.uuid == streamUuid }
     if (target == null || !target.encryption || (target.projectId != null && target.projectId != account.projectUuid) ||
         (target.userUuid != null && target.userUuid != account.userUuid)) return null
     return ProtectedStreamEditContext(account.serverConfig(), account.userUuid, target.copy(), confirmedAccount = account)

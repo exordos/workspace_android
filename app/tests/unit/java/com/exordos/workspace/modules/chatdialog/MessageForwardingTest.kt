@@ -12,13 +12,12 @@ import com.exordos.workspace.data.remote.ApiResult
 import com.exordos.workspace.data.uio.MessageUIO
 import com.exordos.workspace.data.uio.MessagePayloadUIO
 import com.exordos.workspace.data.remote.dto.SendMessageResponse
-import com.exordos.workspace.data.uio.UserUIO
 
 class MessageForwardingTest {
     @Test fun `forward snapshots preserve body order and escape author markdown`() {
-        val first = source(FIRST).copy(user = UserUIO(username = "A ](link)\\nB", uuid = AUTHOR, status = "active", avatar = ""))
+        val first = source(FIRST)
         val second = source(SECOND).copy(payload = MessagePayloadUIO("markdown", "second source text"))
-        val content = requireNotNull(buildWorkspaceForwardMarkdown(listOf(second, first)))
+        val content = requireNotNull(buildWorkspaceForwardMarkdown(listOf(second, first)) { "A ](link)\\nB" })
         assertTrue(content.indexOf("second source text") < content.lastIndexOf("source text"))
         assertTrue(content.contains("A \\]\\(link\\)\\\\nB"))
         assertTrue(content.contains("> source text"))

@@ -83,14 +83,14 @@ class DeleteMessageHttpContractTest {
         }
         api = WorkspaceAPIClient(http)
         tokenStore = SecureTokenStore(InstrumentationRegistry.getInstrumentation().targetContext)
-        eventsStore = EventsRepositoryStore(tokenStore, api)
+        eventsStore = EventsRepositoryStore(tokenStore, api, InstrumentationRegistry.getInstrumentation().targetContext)
         preferences = ServerRepository(store, tokenStore, eventsStore, storeScope)
         user = UserViewModel(preferences)
         api.attachUserViewModel(user)
         serverId = "cassi-delete-http-${UUID.randomUUID()}"
         messages = EventsRepository(
             serverId, ServerConfig(serverId, "http://127.0.0.1", "", "Delete cache test"),
-            tokenStore, api,
+            tokenStore, api, InstrumentationRegistry.getInstrumentation().targetContext,
         )
     }
 
@@ -134,14 +134,14 @@ class DeleteMessageHttpContractTest {
         val selected = message(MESSAGE_UUID)
         val kept = message(KEPT_MESSAGE_UUID)
         messages.addStreamTopicMessages(STREAM_UUID, TOPIC_UUID, listOf(selected, kept))
-        messages.setInitialMessagesPool(listOf(selected, kept))
+        messages.messageDao.upsert(listOf(selected, kept))
         LoopbackDeleteServer(204, "No Content").use { server ->
             saveSession(server.baseUrl)
             val deletion = deletion()
 
             deletion.delete(selected)
 
-            assertEquals(listOf(kept), messages.messagesPool.value)
+            assertEquals(listOf(kept), messages.messages.first())
             assertEquals(listOf(kept), messages.streamTopicMessages.value["$STREAM_UUID.$TOPIC_UUID"])
             assertTrue(deletion.deletingMessageUuids.value.isEmpty())
             assertNull(deletion.actionError.value)
@@ -164,7 +164,7 @@ class DeleteMessageHttpContractTest {
         val first = message(MESSAGE_UUID)
         val second = message(KEPT_MESSAGE_UUID)
         messages.addStreamTopicMessages(STREAM_UUID, TOPIC_UUID, listOf(first, second))
-        messages.setInitialMessagesPool(listOf(first, second))
+        messages.messageDao.upsert(listOf(first, second))
         LoopbackDeleteServer(
             listOf(
                 LoopbackResponse(500, "Internal Server Error", """{"error":"Request failed"}"""),
@@ -184,7 +184,7 @@ class DeleteMessageHttpContractTest {
 
             selection.deleteSelectedMessages()
 
-            assertEquals(listOf(first), messages.messagesPool.value)
+            assertEquals(listOf(first), messages.messages.first())
             assertEquals(setOf(MESSAGE_UUID), selection.selectedMessageUuids.value)
             assertEquals(
                 R.string.messages_delete_partial_failure,
@@ -196,7 +196,7 @@ class DeleteMessageHttpContractTest {
 
             selection.deleteSelectedMessages()
 
-            assertTrue(messages.messagesPool.value.isEmpty())
+            assertTrue(messages.messages.first().isEmpty())
             assertTrue(selection.selectedMessageUuids.value.isEmpty())
             assertNull(deletion.actionError.value)
             assertDeleteContract(server.awaitRequest(), MESSAGE_UUID)
@@ -206,14 +206,14 @@ class DeleteMessageHttpContractTest {
     private suspend fun assertFailedDeletionKeepsMessage(status: Int, reason: String) {
         val selected = message(MESSAGE_UUID)
         messages.addStreamTopicMessages(STREAM_UUID, TOPIC_UUID, listOf(selected))
-        messages.setInitialMessagesPool(listOf(selected))
+        messages.messageDao.upsert(listOf(selected))
         LoopbackDeleteServer(status, reason, """{"error":"Cannot delete message"}""").use { server ->
             saveSession(server.baseUrl)
             val deletion = deletion()
 
             deletion.delete(selected)
 
-            assertEquals(listOf(selected), messages.messagesPool.value)
+            assertEquals(listOf(selected), messages.messages.first())
             assertEquals(listOf(selected), messages.streamTopicMessages.value["$STREAM_UUID.$TOPIC_UUID"])
             assertTrue(deletion.deletingMessageUuids.value.isEmpty())
             assertNotNull(deletion.actionError.value)

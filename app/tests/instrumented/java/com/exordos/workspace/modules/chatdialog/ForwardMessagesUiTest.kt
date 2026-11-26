@@ -118,10 +118,11 @@ class ForwardMessagesUiTest {
             var selected by remember { mutableStateOf<StreamUIO?>(null) }
             WokspaceTheme(darkTheme = true, dynamicColor = false) {
                 ForwardRecipientPicker(listOf(stream(FIRST, "CASSI Design"), stream(SECOND, "CASSI General")),
-                    listOf(FolderUIO("folder", "Design", 0, "custom", "2026-09-07T12:00:00Z", listOf(FolderItemUIO("item", FIRST, "stream", 0)))),
+                    listOf(FolderUIO("folder", "Design", 0, "custom", "2026-09-07T12:00:00Z")),
                     emptyList(), selected, listOf(topic()), query, folder, false, true, null, "", null,
                     onCancel = {}, onBack = { selected = null }, onSearch = { query = it }, onFolder = { folder = it },
-                    onStream = { selected = it; query = "" }, onTopic = { chosen = it.uuid }, onRetry = {})
+                    onStream = { selected = it; query = "" }, onTopic = { chosen = it.uuid }, onRetry = {},
+                    folderItems = mapOf("folder" to listOf(FolderItemUIO("item", "folder", FIRST, "stream", 0))))
             }
         }
         compose.onNodeWithText("Design", useUnmergedTree = true).performClick()

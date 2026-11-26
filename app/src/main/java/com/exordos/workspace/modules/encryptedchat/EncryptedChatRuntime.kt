@@ -13,9 +13,12 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -29,6 +32,7 @@ import com.exordos.workspace.data.remote.WorkspaceAPIClient
 import com.exordos.workspace.data.remote.dto.EncryptedEditMessageRequest
 import com.exordos.workspace.data.remote.dto.EncryptedSendMessageRequest
 import com.exordos.workspace.data.uio.MessageUIO
+import com.exordos.workspace.data.uio.StreamUIO
 import com.exordos.workspace.data.uio.MessagePayloadUIO
 import com.exordos.workspace.data.remote.dto.MessagesByIdsRequest
 import com.exordos.workspace.data.remote.dto.MessagesRequest
@@ -64,7 +68,8 @@ class EncryptedChatRuntime(
     @Volatile private var closed = false
     @Volatile private var account: ConfirmedAccountContext? = null
     private var mountedAccount: ConfirmedAccountContext? = null
-    @Volatile private var protectedStreamKnown = repo.streams.value.any { it.uuid == streamId && it.encryption }
+    private val stream = MutableStateFlow<StreamUIO?>(null)
+    @Volatile private var protectedStreamKnown = false
     @Volatile private var boundGeneration: Long? = null
     private var ownerUuid: String? = null
     @Volatile private var session: EncryptedChatSession? = null
@@ -77,15 +82,15 @@ class EncryptedChatRuntime(
     private val preparedSends = ConcurrentHashMap<String, PreparedSend>()
     private val observer: Job = coroutineScope.launch {
         merge(
-            repo.streams.map { Unit }, repo.currentUser.map { Unit },
-            repo.streamBindings.map { Unit }, repo.messagesPool.map { Unit },
+            repo.streams.onEach { streams -> stream.value = streams.firstOrNull { it.uuid == streamId } }.map { Unit },
+            repo.currentUser.map { Unit }, repo.streamBindings.map { Unit }, repo.messages.map { Unit },
             repo.streamTopicMessages.map { Unit }, user.selectedServer.map { Unit },
             user.accessToken.map { Unit }, repo.verifiedOwnerAuthentication.map { Unit },
             ConfirmedAccountContext.invalidations.map { Unit },
         ).collect {
             if (closed || !isProtectedRuntime()) return@collect
             invalidateIfStale()
-            if (repo.streams.value.firstOrNull { it.uuid == streamId }?.encryption != true) return@collect
+            if (stream.value?.encryption != true) return@collect
             try { refresh() }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) { report(error) }
@@ -108,13 +113,13 @@ class EncryptedChatRuntime(
     private val identityObserver: Job = coroutineScope.launch {
         merge(user.selectedServer.map { Unit }, user.selectedServerId.map { Unit }, user.accessToken.map { Unit },
             repo.currentUser.map { Unit }, repo.verifiedOwnerAuthentication.map { Unit },
-            ConfirmedAccountContext.invalidations.map { Unit }, repo.streams.map { Unit }, repo.streamBindings.map { Unit }).collect {
+            ConfirmedAccountContext.invalidations.map { Unit }, stream.map { Unit }, repo.streamBindings.map { Unit }).collect {
             if (!closed && isProtectedRuntime()) invalidateIfStale()
         }
     }
 
     private fun isProtectedRuntime(): Boolean {
-        if (repo.streams.value.any { it.uuid == streamId && it.encryption }) protectedStreamKnown = true
+        if (stream.value?.encryption == true) protectedStreamKnown = true
         return protectedStreamKnown || mountedAccount != null
     }
 
@@ -180,13 +185,13 @@ class EncryptedChatRuntime(
 
     private fun currentAccess(scope: EncryptedChatScope): EncryptedChatAccess? {
         if (!boundCurrent() || scope.runtimeGeneration != boundGeneration) return null
-        val stream = repo.streams.value.firstOrNull { it.uuid == streamId } ?: return null
+        val stream = stream.value ?: return null
         if (!stream.encryption || stream.currentEncryptionKeyUuid.isNullOrBlank() ||
             (stream.projectId != null && stream.projectId != scope.projectId) ||
             (stream.userUuid != null && stream.userUuid != scope.userId)) return null
         val bindings = repo.streamBindings.value[streamId].orEmpty().filter { it.streamUuid == streamId }
         val roles = bindings.associate { it.userUuid to it.role }.toMutableMap()
-        if (!rolesLoaded && stream.role != null) roles[scope.userId] = stream.role
+        if (!rolesLoaded) stream.role?.let { roles[scope.userId] = it }
         val owner = stream.ownerUuid ?: bindings.firstOrNull { it.role == "owner" }?.userUuid ?: ""
         return EncryptedChatAccess(scope, requireNotNull(stream.currentEncryptionKeyUuid), owner, roles,
             isMember = owner == scope.userId || !rolesLoaded || bindings.any { it.userUuid == scope.userId })
@@ -194,7 +199,11 @@ class EncryptedChatRuntime(
 
     suspend fun readySession(): EncryptedChatSession = initMutex.withLock {
         session?.let { requireBound(); return@withLock it }
-        if (closed || repo.streams.value.none { it.uuid == streamId && it.encryption }) throw EncryptedChatException(EncryptedChatFailure.STALE)
+        if (closed) throw EncryptedChatException(EncryptedChatFailure.STALE)
+        val target = stream.value ?: repo.streams.first().firstOrNull { it.uuid == streamId }
+        if (target?.encryption != true) throw EncryptedChatException(EncryptedChatFailure.STALE)
+        stream.compareAndSet(null, target)
+        protectedStreamKnown = true
         val confirmed = confirmedAccountContext(client, repo)
             ?: throw EncryptedChatException(EncryptedChatFailure.STALE)
         synchronized(bindingLock) {
@@ -227,14 +236,14 @@ class EncryptedChatRuntime(
             }
         }
         requireBound(confirmed)
-        defaultTopic = repo.streams.value.firstOrNull { it.uuid == streamId }?.defaultTopicUuid?.takeIf { it.isNotBlank() }
-            ?: repo.streamTopics.value[streamId]?.firstOrNull { it.isDefault }?.uuid
+        defaultTopic = target.defaultTopicUuid?.takeIf { it.isNotBlank() }
+            ?: repo.topicDao.observeTopics(streamId).first().firstOrNull { it.isDefault }?.uuid
         if (defaultTopic == null) {
             when (val response = client.performRequest(confirmed.pin(TopicsRequest(listOf(streamId))), serverId, captured)) {
                 is ApiResult.Success -> {
                     requireBound(confirmed)
                     val topics = response.value.filter { it.streamUuid == streamId }
-                    repo.addStreamTopics(streamId, topics)
+                    repo.setInitialTopics(topics)
                     defaultTopic = topics.firstOrNull { it.isDefault }?.uuid
                 }
                 is ApiResult.Error -> throw EncryptedChatException(EncryptedChatFailure.UNAVAILABLE)
@@ -245,9 +254,14 @@ class EncryptedChatRuntime(
             EncryptedChatServiceTransport { payload, canonical, _, guard ->
                 postPayload(payload, requireNotNull(defaultTopic), canonical, guard).asEncryptedChatWire(boundScope.projectId)
             }, { defaultTopic }, { keyUuid ->
-                requireBound(confirmed)
-                repo.streams.value.firstOrNull { it.uuid == streamId }?.let { stream ->
-                    repo.updateStream(stream.copy(currentEncryptionKeyUuid = keyUuid))
+                // The session invokes this on Dispatchers.IO and reads the key again before returning.
+                runBlocking<Unit> {
+                    requireBound(confirmed)
+                    val current = stream.value ?: throw EncryptedChatException(EncryptedChatFailure.STALE)
+                    val updated = current.copy(currentEncryptionKeyUuid = keyUuid)
+                    repo.updateStream(updated)
+                    requireBound(confirmed)
+                    stream.compareAndSet(current, updated)
                 }
             })
         created.load()
@@ -273,14 +287,17 @@ class EncryptedChatRuntime(
         stateJob.start()
         // Service messages can live in the default topic while the user is viewing another topic.
         when (val history = client.performRequest(confirmed.pin(MessagesRequest(streamId, null,  100, null)), serverId, captured)) {
-            is ApiResult.Success -> { requireBound(confirmed); repo.updateMessagesPool(history.value.filter { it.streamUuid == streamId }) }
+            is ApiResult.Success -> {
+                requireBound(confirmed)
+                repo.messageDao.upsert(history.value.filter { it.streamUuid == streamId })
+            }
             is ApiResult.Error -> { mutableState.value = mutableState.value.copy(error = EncryptedChatFailure.UNAVAILABLE) }
         }
         created
     }
 
-    private fun wireMessages(): List<MessageUIO> = latestEncryptedChatWireMessages(
-        repo.messagesPool.value, repo.streamTopicMessages.value.values.flatten(), streamId)
+    private suspend fun wireMessages(): List<MessageUIO> = latestEncryptedChatWireMessages(
+        repo.messages.first(), repo.streamTopicMessages.value.values.flatten(), streamId)
 
     internal suspend fun refresh(force: Boolean = false) = refreshMutex.withLock {
         val active = readySession()

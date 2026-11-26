@@ -129,7 +129,7 @@ class EncryptedChatRuntimeInstrumentedTest {
         member.sync()
         assertEquals(historicalText, (memberRuntime.presentation(historical) as EncryptedChatPresentation.Text).text)
         assertNotEquals(historicalText, historical.payload.content)
-        assertTrue(member.repo.messagesPool.value.all { it.payload.kind != "markdown" })
+        assertTrue(member.repo.messages.first().all { it.payload.kind != "markdown" })
 
         val editable = ownerRuntime.sendText("Before encrypted edit")
         val editedText = "Edited through the production JSON default policy"
@@ -257,7 +257,7 @@ class EncryptedChatRuntimeInstrumentedTest {
         issuer.refresh(force = true)
         issuer.grantKey(request.uuid)
         val valid = backend.messages.last { it.payload.kind == "key_grant" }
-        val originalPool = member.repo.messagesPool.value.toList()
+        val originalPool = member.repo.messages.first().toList()
         val altered = listOf(
             valid.copy(authorUuid = member.userUuid),
             valid.copy(streamUuid = UUID.randomUUID().toString()),
@@ -269,12 +269,13 @@ class EncryptedChatRuntimeInstrumentedTest {
             valid.copy(payload = valid.payload.copy(content = WorkspaceChatCrypto.toBase64(ByteArray(85)))),
         )
         altered.forEach { bad ->
-            member.repo.setInitialMessagesPool(originalPool + bad.copy(uuid = UUID.randomUUID().toString()).toUio())
+            member.repo.messageDao.upsert(originalPool + bad.copy(uuid = UUID.randomUUID().toString()).toUio())
             val failure = runCatching { receiver.refresh(force = true) }.exceptionOrNull()
             if (failure != null) assertTrue(failure is EncryptedChatException && failure.failure == EncryptedChatFailure.INVALID_MESSAGE)
             assertNull(keys.readChatKey(member.address(CURRENT)))
             assertEquals(EncryptedChatRequestStatus.REQUESTED, receiver.state.value.requestStatus[CURRENT])
-            member.repo.setInitialMessagesPool(originalPool)
+            member.repo.messageDao.deleteAll()
+            member.repo.messageDao.upsert(originalPool)
             receiver.refresh(force = true)
         }
         member.sync()
@@ -478,7 +479,7 @@ class EncryptedChatRuntimeInstrumentedTest {
                 // Fresh UserViewModel, repositories and encrypted preferences; no in-memory owner proof survives.
                 account.events.clear()
                 account.user.viewModelScope.cancel()
-                events = EventsRepositoryStore(SecureTokenStore(context), account.api)
+                events = EventsRepositoryStore(SecureTokenStore(context), account.api, context)
                 extraScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
                 preferences = ServerRepository(account.dataStore, SecureTokenStore(context), events, extraScope)
                 user = UserViewModel(preferences)
@@ -589,7 +590,7 @@ class EncryptedChatRuntimeInstrumentedTest {
         owner.repo.updateStream(backend.stream.copy(encryption = false, currentEncryptionKeyUuid = null, userUuid = OWNER).toUio())
         val ordinary = backend.messages.first().copy(payload = backend.messages.first().payload.copy(kind = "markdown", content = "ordinary message", keyUuid = null))
         owner.repo.addStreamTopicMessages(STREAM, TOPIC, listOf(ordinary).map { it.toUio() })
-        owner.repo.setInitialMessagesPool(listOf(ordinary).map { it.toUio() })
+        owner.repo.messageDao.upsert(listOf(ordinary).map { it.toUio() })
         val chat = withContext(Dispatchers.Main) {
             ChatDialogViewModel(owner.api, owner.user, "Ordinary", STREAM, "General", TOPIC,
                 false, owner.events, null, AttachmentStorage(context, owner.api))
@@ -650,7 +651,7 @@ class EncryptedChatRuntimeInstrumentedTest {
             }
             assertEquals(created.uuid, backend.createdStreams.single().uuid)
             assertArrayEquals(stored, keys.readChatKey(keyAddress))
-            assertTrue(owner.repo.streams.value.any { it.uuid == created.uuid && it.encryption })
+            assertTrue(owner.repo.streams.first().any { it.uuid == created.uuid && it.encryption })
             stored.fill(0)
         } finally { viewModel.viewModelScope.cancel() }
     }
@@ -674,7 +675,7 @@ class EncryptedChatRuntimeInstrumentedTest {
             val created = requireNotNull(viewModel.createdStream)
             assertFalse(created.encryption)
             assertNull(created.currentEncryptionKeyUuid)
-            assertTrue(legacy.repo.streams.value.any { it.uuid == created.uuid && !it.encryption })
+            assertTrue(legacy.repo.streams.first().any { it.uuid == created.uuid && !it.encryption })
             assertEquals(stagedBefore, keys.listStagedCreations(legacy.keyScope).map { it.creationId })
             assertTrue(keys.listChatKeys(legacy.keyScope, created.uuid).isEmpty())
         } finally { viewModel.viewModelScope.cancel() }
@@ -776,7 +777,7 @@ class EncryptedChatRuntimeInstrumentedTest {
         }
         val api = WorkspaceAPIClient(http)
         val tokens = SecureTokenStore(context)
-        val events = EventsRepositoryStore(tokens, api)
+        val events = EventsRepositoryStore(tokens, api, context)
         val preferences = ServerRepository(dataStore, tokens, events, scope)
         val config = ServerConfig("cassi-runtime-${UUID.randomUUID()}", backend.url, "", "CASSI test", projectUuid = projectUuid)
         preferences.addServer(config, TokenPair(token, "synthetic-refresh"))
@@ -813,9 +814,9 @@ class EncryptedChatRuntimeInstrumentedTest {
         val runtimes = mutableListOf<EncryptedChatRuntime>()
         fun address(keyUuid: String) = ChatKeyAddress(keyScope, STREAM, keyUuid)
         fun runtime() = EncryptedChatRuntime(context, api, repo, scope, STREAM, TOPIC).also { runtimes += it }
-        fun sync() {
+        suspend fun sync() {
             repo.updateStream(backend.stream.copy(userUuid = userUuid).toUio())
-            repo.updateMessagesPool(backend.messages.map { it.copy(isOwn = it.authorUuid == userUuid) }.map { it.toUio() })
+            repo.messageDao.upsert(backend.messages.map { it.copy(isOwn = it.authorUuid == userUuid) }.map { it.toUio() })
         }
     }
 

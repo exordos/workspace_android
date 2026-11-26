@@ -25,13 +25,16 @@ internal fun canForwardMessage(message: MessageUIO): Boolean =
     isCanonicalForwardUuid(message.uuid) && message.authorUuid.isNotBlank() && message.payload.kind == "markdown"
 
 /** Keep the supplied (conversation) order, never merge or silently discard sources. */
-internal fun buildWorkspaceForwardMarkdown(messages: List<MessageUIO>): String? {
+internal fun buildWorkspaceForwardMarkdown(
+    messages: List<MessageUIO>,
+    authorName: (String) -> String? = { null },
+): String? {
     if (messages.isEmpty() || messages.size > MAX_FORWARD_SOURCE_MESSAGES ||
         messages.any { !canForwardMessage(it) } ||
         messages.map { parseCanonicalUuid(it.uuid) }.distinct().size != messages.size
     ) return null
     return messages.joinToString("\n\n") { message ->
-        val label = (message.user?.displayableName()?.trim()?.takeIf { it.isNotEmpty() }
+        val label = (authorName(message.authorUuid)?.trim()?.takeIf { it.isNotEmpty() }
             ?: message.authorUuid.trim()).replace(Regex("[\\r\\n\\t]+"), " ").take(512)
         buildForwardSnapshotBlock(label, message.payload.content)
     }
@@ -74,7 +77,7 @@ internal class MessageForwarding(
     private val currentUserUuid: String,
     private val post: suspend (String, ForwardDestination, String) -> ApiResult<SendMessageResponse, ApiError>,
     private val read: suspend (String) -> ApiResult<List<MessageUIO>, ApiError>,
-    private val onConfirmed: (MessageUIO) -> Unit,
+    private val onConfirmed: suspend (MessageUIO) -> Unit,
     private val newUuid: () -> String = { UUID.randomUUID().toString() },
     private val prepare: suspend (ForwardDestination) -> String = { requireNotNull(buildWorkspaceForwardMarkdown(sources)) },
     private val verificationUuid: (String, ForwardDestination) -> String = { canonical, _ -> canonical },
