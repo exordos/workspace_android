@@ -403,7 +403,7 @@ class ChatDialogViewModel(
 
     fun initialMessageIndex(messages: List<MessageUIO>): Int =
         initialChatMessageIndex(messages, firstUnreadMessageUuid) { message ->
-            val streamMode = streams.value.firstOrNull { it.uuid == chatId }?.notificationMode ?: "all_messages"
+            val streamMode = stream.value?.notificationMode ?: "all_messages"
             val topicMode = topics.value.firstOrNull { it.uuid == topicUuid }?.notificationMode ?: "default"
             message.isActiveUnread(streamMode, topicMode)
         }
@@ -559,7 +559,7 @@ class ChatDialogViewModel(
             else sendMessage(context)
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (error: Exception) {
-            if (streams.value.firstOrNull { it.uuid == chatId }?.encryption == true)
+            if (stream.value?.encryption == true)
                 messageDeletion.showActionError(R.string.encrypted_chat_error)
             else throw error
         }
@@ -567,7 +567,7 @@ class ChatDialogViewModel(
 
     suspend fun sendMessage(context: Context) {
         val attachmentList = _uriList.value
-        val currentStream = streams.value.firstOrNull { it.uuid == chatId }
+        val currentStream = stream.value
         if (currentStream == null) { messageDeletion.showActionError(R.string.chat_send_unavailable); return }
         val encrypted = currentStream.encryption
         if (encrypted && encryptionRuntime.readySession().state.value.sendingKeyUuid == null) {
@@ -612,7 +612,7 @@ class ChatDialogViewModel(
 
     @OptIn(ExperimentalUuidApi::class)
     suspend fun sendTextMessage(messageText: String) {
-        val currentStream = streams.value.firstOrNull { it.uuid == chatId }
+        val currentStream = stream.value
         if (currentStream == null) { messageDeletion.showActionError(R.string.chat_send_unavailable); return }
         if (currentStream.encryption) {
             try {
@@ -697,7 +697,7 @@ class ChatDialogViewModel(
     }
 
     suspend fun sendEditMessage(messageUuid: String, messageText: String) {
-        val currentStream = streams.value.firstOrNull { it.uuid == chatId }
+        val currentStream = stream.value
         if (currentStream == null) { messageDeletion.showActionError(R.string.chat_send_unavailable); return }
         if (currentStream.encryption || editingMessage?.originalEncryptedPayload != null) {
             try {
@@ -754,7 +754,7 @@ class ChatDialogViewModel(
                 loadStreamBindings()
             }
             val draft = drafts.value.firstOrNull { it.streamUuid == chatId && it.topicUuid == topicUuid }
-            if (draft != null && streams.value.firstOrNull { it.uuid == chatId }?.encryption != true) {
+            if (draft != null && stream.value?.encryption != true) {
                 mentions.setText(draft.payload.content)
             }
         }

@@ -36,6 +36,7 @@ import org.junit.runner.RunWith
 import com.exordos.workspace.LocalBottomBarVisible
 import com.exordos.workspace.data.remote.dto.MessageResponse
 import com.exordos.workspace.data.remote.dto.MessageResponsePayload
+import com.exordos.workspace.data.remote.dto.SendMessageRequestData
 import com.exordos.workspace.data.remote.dto.Stream
 import com.exordos.workspace.data.remote.dto.UserResponseData
 import com.exordos.workspace.fixtures.LoopbackWorkspaceServer
@@ -54,6 +55,7 @@ class ChatTimestampRegressionTest {
     private val releaseResponse = CountDownLatch(1)
     private var midnightHeader = ""
     private val readUpToRequests = CopyOnWriteArrayList<String>()
+    private val sendRequests = CopyOnWriteArrayList<SendMessageRequestData>()
 
     @After fun cleanup() = runBlocking {
         releaseResponse.countDown()
@@ -145,6 +147,10 @@ class ChatTimestampRegressionTest {
             account.repo.streamTopicMessages.value["$STREAM.$TOPIC"].orEmpty().any { it.uuid == CONFIRMED }
         }
         compose.onNodeWithTag("chat-message-$CONFIRMED").assertIsDisplayed()
+        assertEquals(
+            listOf(SendMessageRequestData(STREAM, TOPIC, MessageResponsePayload("markdown", "CASSI offset message"))),
+            sendRequests.toList(),
+        )
     }
 
     private suspend fun showConversation(history: List<MessageResponse>) {
@@ -155,6 +161,7 @@ class ChatTimestampRegressionTest {
                     LoopbackWorkspaceServer.Response("{}")
                 }
                 request.method == "POST" && request.path == "/api/workspace/v1/messenger/messages/" -> {
+                    sendRequests += Json.decodeFromString<SendMessageRequestData>(request.body)
                     check(releaseResponse.await(20, TimeUnit.SECONDS))
                     LoopbackWorkspaceServer.Response("""{"uuid":"$CONFIRMED","topic_uuid":"$TOPIC"}""")
                 }
