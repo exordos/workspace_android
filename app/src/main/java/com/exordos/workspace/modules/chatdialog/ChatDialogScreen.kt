@@ -144,6 +144,7 @@ fun ChatDialogScreen(
     val streamTopicMessages by viewModel.streamTopicMessages.collectAsStateWithLifecycle()
     val rawTopicMessages by viewModel.repo.streamTopicMessages.collectAsStateWithLifecycle()
     val viewer by viewModel.repo.currentUser.collectAsStateWithLifecycle()
+    val messagePool by viewModel.storedMessages.collectAsStateWithLifecycle(emptyList())
     val history = remember(viewModel, streamTopicMessages, messagePool, rawTopicMessages, viewer?.uuid, stream?.encryption, encryptedChatState) {
         deriveChatHistoryPresentation(streamTopicMessages["${viewModel.chatId}.${viewModel.topicUuid}"], messagePool,
             rawTopicMessages, viewModel.chatId, stream?.encryption == true, viewer?.uuid, encryptedChatState)
@@ -722,7 +723,8 @@ internal fun ChatMessage(
                     lockedPresentation = encryptedPresentation)
             } else if (encryptedPresentation is EncryptedChatPresentation.Service) {
                 val ownRequestKey = history.requestKey(item.streamUuid, encryptedPresentation.payload.keyUuid)
-                val author = viewModel.author(item)
+                val users by viewModel.users.collectAsStateWithLifecycle()
+                val author = users.firstOrNull { it.uuid == item.authorUuid }
                 EncryptedChatServiceMessage(
                     payload = encryptedPresentation.payload,
                     authorName = author?.displayableName() ?: stringResource(R.string.encrypted_chat_member),

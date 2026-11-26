@@ -1,6 +1,7 @@
 package com.exordos.workspace.modules.homeinbounds
 
 import com.exordos.workspace.data.uio.toUio
+import com.exordos.workspace.data.uio.toLastMessageUIO
 import com.exordos.workspace.data.uio.MessagePayloadUIO
 import com.exordos.workspace.modules.encryptedchat.EncryptedChatPresentation
 
@@ -112,11 +113,11 @@ class InboxInstrumentedTest {
                 CompositionLocalProvider(LocalBottomBarVisible provides {}) {
                     val nav = rememberNavController()
                     if (showPreview.value) {
-                        val cachedTopics by account.repo.streamTopics.collectAsStateWithLifecycle()
+                        val cachedTopics by account.repo.topics.collectAsStateWithLifecycle(emptyList())
                         val preview = remember {
                             ChatViewModel(account.api, account.user, account.events, null, {}).also { previews += it }
                         }
-                        ChatTopic(preview, cachedTopics.getValue(streamId).single(), stream().toUio(), nav)
+                        cachedTopics.singleOrNull { it.uuid == topicId }?.let { ChatTopic(preview, it, stream().toUio(), nav) }
                     } else NavHost(nav, HomeFlow.HomeInbounds) {
                         composable<HomeFlow.HomeInbounds> { HomeInboundsScreen(inbox, nav) }
                         composable<HomeFlow.ChatDialog> { entry ->
@@ -135,6 +136,28 @@ class InboxInstrumentedTest {
         }
     }
 
+    @Test fun storedTopicPreviewUpdatesWhenTheAuthorChanges() {
+        setup(emptyList())
+        val previous = message(48, false).toUio()
+        runBlocking {
+            account.repo.addLastMessage(previous.toLastMessageUIO())
+            account.repo.addTopic(topic().copy(lastMessageUuid = previous.uuid).toUio())
+        }
+        compose.runOnIdle { showPreview.value = true }
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Preview author").fetchSemanticsNodes().isNotEmpty()
+        }
+        runBlocking {
+            account.repo.updateUser(UserResponseData(
+                username = "Updated preview author", uuid = authorId, status = "active", avatar = "",
+            ).toUio())
+        }
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Updated preview author").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithText("Updated preview author").assertIsDisplayed()
+    }
+
     @Test fun topicsAppearAfterEmptyCacheAndStreamUpdatesWithCountsAndNoMutedRows() {
         setup(emptyList())
         val ordinary = stream()
@@ -146,9 +169,7 @@ class InboxInstrumentedTest {
             topic().copy(uuid = "muted-child", name = "Hidden muted topic", notificationMode = "mute"),
             topic().copy(uuid = "read-child", name = "Fully read topic", unreadCount = 0, activeUnreadCount = 0),
             topic().copy(uuid = "passive-child", name = "Only passive unread", unreadCount = 8, activeUnreadCount = 0))
-        // Reproduce the empty-topic cache which used to be treated as fully loaded forever.
-        account.repo.addStreamTopics(ordinary.uuid, emptyList())
-        compose.runOnIdle { account.repo.setInitialStreams(listOf(ordinary, secret, muted).map { it.toUio() }) }
+        runBlocking { account.repo.setInitialStreams(listOf(ordinary, secret, muted).map { it.toUio() }) }
         waitForTag("inbox-topic-$topicId")
         compose.onNodeWithTag("inbox-count-$topicId", useUnmergedTree = true).assertTextEquals("7")
         compose.onNodeWithTag("inbox-topic-secret-topic").assertIsDisplayed()
@@ -159,12 +180,12 @@ class InboxInstrumentedTest {
         compose.onNodeWithText("Only passive unread").assertDoesNotExist()
         val previous = topicRequests.get()
         topics = topics.map { if (it.uuid == topicId) it.copy(unreadCount = 12, activeUnreadCount = 9) else it }
-        compose.runOnIdle { account.repo.updateStream(ordinary.copy(unreadCount = 12, activeUnreadCount = 9).toUio()) }
+        runBlocking { account.repo.updateStream(ordinary.copy(unreadCount = 12, activeUnreadCount = 9).toUio()) }
         compose.waitUntil(8_000) { topicRequests.get() > previous }
         compose.waitUntil(8_000) { compose.onAllNodesWithTag("inbox-count-$topicId", useUnmergedTree = true).fetchSemanticsNodes().any {
             it.config.getOrElse(androidx.compose.ui.semantics.SemanticsProperties.Text) { emptyList() }.any { text -> text.text == "9" }
         } }
-        compose.runOnIdle { account.repo.updateStream(ordinary.copy(notificationMode = "muted", activeUnreadCount = 0).toUio()) }
+        runBlocking { account.repo.updateStream(ordinary.copy(notificationMode = "muted", activeUnreadCount = 0).toUio()) }
         compose.onNodeWithTag("inbox-topic-$topicId").assertDoesNotExist()
     }
 
@@ -184,7 +205,7 @@ class InboxInstrumentedTest {
             repeat(24) { index ->
                 val count = 41 + index
                 topics = listOf(topic().copy(unreadCount = count, activeUnreadCount = count))
-                compose.runOnIdle { account.repo.updateStream(stream().copy(unreadCount = count, activeUnreadCount = count).toUio()) }
+                runBlocking { account.repo.updateStream(stream().copy(unreadCount = count, activeUnreadCount = count).toUio()) }
                 Thread.sleep(120) // Incoming counters keep changing before the topic response arrives.
             }
             assertEquals("Counter updates must not cancel the in-flight request", 1, topicRequests.get())
@@ -194,7 +215,7 @@ class InboxInstrumentedTest {
             compose.waitUntil(8_000) { topicRequests.get() == 2 }
             secondResponse.countDown()
             compose.waitUntil(8_000) {
-                account.repo.streamTopics.value[streamId]?.singleOrNull()?.activeUnreadCount == 64
+                account.repo.topicDao.getTopic(topicId)?.activeUnreadCount == 64
             }
             compose.onNodeWithTag("inbox-count-$topicId", useUnmergedTree = true).assertTextEquals("64")
             assertEquals("The pending burst needs just one refresh", 2, topicRequests.get())
@@ -216,21 +237,19 @@ class InboxInstrumentedTest {
             }
             compose.onNodeWithText("Preview author").assertIsDisplayed()
         }
-        val author = account.repo.users.value.first { it.uuid == authorId }
-        val previous = message(48, false).toUio().copy(payload = MessagePayloadUIO("markdown", "Cached preview"), user = author)
+        val previous = message(48, false).toUio().copy(payload = MessagePayloadUIO("markdown", "Cached preview"))
         topics = listOf(topic().copy(lastMessageUuid = previous.uuid, activeUnreadCount = 9))
         messagesStatus = 503
-        compose.runOnIdle {
-            account.repo.addStreamTopics(streamId, listOf(topics.single().toUio().copy(activeUnreadCount = 7, lastMessage = previous)))
-            showPreview.value = true
+        runBlocking {
+            account.repo.addLastMessage(previous.toLastMessageUIO())
+            account.repo.addTopic(topics.single().toUio().copy(activeUnreadCount = 7))
         }
+        compose.runOnIdle { showPreview.value = true }
         assertPreview("Cached preview")
 
         fun refreshAndShowPreview(count: Int) {
-            compose.runOnIdle {
-                showPreview.value = false
-                account.repo.updateStream(stream().copy(activeUnreadCount = count).toUio())
-            }
+            compose.runOnIdle { showPreview.value = false }
+            runBlocking { account.repo.updateStream(stream().copy(activeUnreadCount = count).toUio()) }
             compose.waitUntil(8_000) {
                 compose.onAllNodesWithTag("inbox-count-$topicId", useUnmergedTree = true).fetchSemanticsNodes().any {
                     it.config.getOrElse(androidx.compose.ui.semantics.SemanticsProperties.Text) { emptyList() }
@@ -239,7 +258,7 @@ class InboxInstrumentedTest {
             }
             compose.runOnIdle { showPreview.value = true }
         }
-        compose.runOnIdle { account.repo.setInitialStreams(listOf(stream().copy(activeUnreadCount = 7)).map { it.toUio() }) }
+        runBlocking { account.repo.setInitialStreams(listOf(stream().copy(activeUnreadCount = 7)).map { it.toUio() }) }
         refreshAndShowPreview(9)
         assertPreview("Cached preview")
 

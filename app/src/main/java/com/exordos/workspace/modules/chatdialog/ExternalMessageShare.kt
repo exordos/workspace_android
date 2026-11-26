@@ -9,6 +9,7 @@ import com.exordos.workspace.data.WorkspaceDateTime
 import com.exordos.workspace.R
 import com.exordos.workspace.data.EventsRepository
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import com.exordos.workspace.data.remote.ApiResult
 import com.exordos.workspace.data.remote.WorkspaceAPIClient
@@ -30,6 +31,7 @@ internal suspend fun materializeExternalMessages(
     sources: List<MessageUIO>,
     labels: ExternalShareLabels = ExternalShareLabels(),
     presentMessage: suspend (MessageUIO) -> MessageUIO = { requireForwardPlaintext(it) },
+    authorName: (String) -> String? = { null },
     resolveQuote: suspend (String) -> MessageUIO?,
 ): ExternalShareContent {
     require(sources.isNotEmpty() && sources.size <= MAX_FORWARD_SOURCE_MESSAGES)
@@ -40,7 +42,7 @@ internal suspend fun materializeExternalMessages(
     suspend fun render(message: MessageUIO, visited: Set<String>, depth: Int, authorLabel: String? = null): String {
         require(depth <= 8) { "В сообщении слишком много вложенных цитат" }
         require(message.payload.kind == "markdown") { "Сообщение недоступно для пересылки" }
-        val author = authorLabel ?: message.user?.displayableName()?.trim()?.takeIf { it.isNotEmpty() } ?: message.authorUuid
+        val author = authorLabel ?: authorName(message.authorUuid)?.trim()?.takeIf { it.isNotEmpty() } ?: message.authorUuid
         val pieces = mutableListOf<String>()
         for (element in MarkdownPayloadParser.parse(message.payload.content)) {
             when (element) {
@@ -105,9 +107,10 @@ internal suspend fun prepareExternalShareIntent(
 ): Intent = withContext(Dispatchers.IO) {
     val encryptedAccess = ForwardEncryptedAccess(context, client, repo, repo.currentUser.value?.uuid.orEmpty())
     encryptedAccess.requireCurrent()
+    val users = repo.users.first().associateBy { it.uuid }
     val content = materializeExternalMessages(sources, ExternalShareLabels(
         context.getString(R.string.external_share_attachment), context.getString(R.string.external_share_workspace_link),
-    ), presentMessage = encryptedAccess::present) { id ->
+    ), presentMessage = encryptedAccess::present, authorName = { users[it]?.displayableName() }) { id ->
         encryptedAccess.requireCurrent()
         (client.performRequest(MessagesByIdsRequest(listOf(id)), encryptedAccess.serverId,
             encryptedAccess.config) as? ApiResult.Success)?.value?.singleOrNull { it.uuid == id }

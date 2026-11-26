@@ -47,7 +47,7 @@ class StartupUioInstrumentedTest {
         "updated_at":"2026-01-01T00:00:00Z","unread_count":1,"active_unread_count":1,
         "is_done":false,"is_default":true,"notification_mode":"follow"}"""
     private val folder = """{"uuid":"folder","title":"Folder","unread_count":1,"system_type":"custom",
-        "created_at":"2026-01-01T00:00:00Z","folder_items":[{"uuid":"item","stream_uuid":"stream","chat_type":"stream","unread_count":1}]}"""
+        "created_at":"2026-01-01T00:00:00Z","folder_items":[{"uuid":"item","folder":"folder","stream_uuid":"stream","chat_type":"stream","unread_count":1}]}"""
     private val binding = """{"uuid":"binding","stream_uuid":"stream","user_uuid":"person","role":"owner"}"""
     private val reaction = """{"uuid":"reaction","user_uuid":"person","message_uuid":"message","emoji_name":"smile"}"""
 
@@ -86,15 +86,16 @@ class StartupUioInstrumentedTest {
         repo.loadServerSettings()
         withTimeout(10_000) { repo.streamsQueryState.first { it == QueryState.Success } }
         assertEquals("CASSI fixture", repo.currentUser.value!!.displayableName())
-        assertEquals("person", repo.users.value.single().uuid)
-        val loaded = repo.streams.value.single()
-        assertEquals("CASSI fixture", loaded.displayableName())
-        assertEquals("Hello", loaded.lastMessage!!.description())
-        assertEquals("person", loaded.lastMessage!!.user!!.uuid)
-        assertEquals("stream", repo.folders.value.single().items.single().streamUuid)
+        assertEquals("person", repo.users.first().single().uuid)
+        val loaded = repo.streams.first().single()
+        assertEquals("CASSI fixture", repo.users.first().single { it.uuid == loaded.directUserUuid }.displayableName())
+        val lastMessage = repo.lastMessageDao.observeLastMessages().first().single { it.uuid == loaded.lastMessageUuid }
+        assertEquals("Hello", lastMessage.description())
+        assertEquals("person", lastMessage.authorUuid)
+        assertEquals("stream", repo.folderItemDao.observeFolderItems("folder").first().single().streamUuid)
         assertEquals("folder", repo.currentlySelectedFolder.value!!.uuid)
         assertEquals("reaction", repo.userReactions.value.single().uuid)
-        assertEquals("Draft", repo.draftsPool.value.single().payload.content)
+        assertEquals("Draft", repo.drafts.first().single().payload.content)
         assertEquals("https://meet.example.invalid", repo.jitsiServerUrl)
         val history: ApiResult<List<MessageUIO>, ApiError> = repo.refreshConversation("stream", "topic")
         assertTrue(history is ApiResult.Success)
@@ -104,7 +105,7 @@ class StartupUioInstrumentedTest {
     @Test fun typedHttpAndPinnedRequestsReturnUios(): Unit = runBlocking {
         val api = account.api
         val topics: ApiResult<List<TopicUIO>, ApiError> = api.performRequest(TopicsRequest(listOf("stream")))
-        val messages: ApiResult<List<MessageUIO>, ApiError> = api.performRequest(MessagesRequest("stream", "topic"))
+        val messages: ApiResult<List<MessageUIO>, ApiError> = api.performRequest(MessagesRequest("stream", "topic", 25, null))
         val reactions: ApiResult<List<MessageReactionUIO>, ApiError> = api.performRequest(MessageReactionsRequest("person"))
         val projects: ApiResult<List<ProjectUIO>, ApiError> = api.performRequest(ProjectsRequest())
         val settings: ApiResult<ServerSettingsUIO, ApiError> = api.performRequest(ServerSettingsRequest(server.url))
@@ -125,12 +126,11 @@ class StartupUioInstrumentedTest {
         assertEquals(count + 1, requests.count { it.path.endsWith("/stream_bindings/") })
     }
 
-    @Test fun realtimeMapsEveryEntityBeforeUpdatingPresentationState() {
+    @Test fun realtimeMapsEveryEntityBeforeUpdatingPresentationState() = runBlocking {
         val repo = account.repo
         repo.didReceiveUserEvent(person, "created")
-        repo.updateCurrentUser(repo.users.value.single())
+        repo.updateCurrentUser(withTimeout(5_000) { repo.users.first { it.isNotEmpty() } }.single())
         repo.didReceiveStreamEvent(stream, "created")
-        repo.addStreamTopics("stream", emptyList())
         repo.didReceiveTopicEvent(topic, "created")
         repo.didReceiveMessageEvent(message, "created")
         repo.didReceiveFolderEvent(folder, "created")
@@ -138,10 +138,9 @@ class StartupUioInstrumentedTest {
         repo.didReceiveStreamBindingEvent("""{"uuid":"stream","items":[$binding]}""", "created")
         repo.didReceiveStreamBindingEvent(binding.replace("owner", "administrator"), "updated")
         repo.didReceiveReactionEvent(reaction, "created")
-        assertEquals("CASSI fixture", repo.users.value.single().displayableName())
-        assertEquals("Hello", repo.messagesPool.value.single().description())
-        assertEquals("Topic", repo.streamTopics.value.getValue("stream").single().name)
-        assertEquals("Topic", repo.topicsPool.value.single().name)
+        assertEquals("CASSI fixture", repo.users.first().single().displayableName())
+        assertEquals("Hello", withTimeout(5_000) { repo.lastMessageDao.observeLastMessages().first { it.isNotEmpty() } }.single().description())
+        assertEquals("Topic", withTimeout(5_000) { repo.topics.first { it.isNotEmpty() } }.single().name)
         assertEquals("Folder", repo.folders.value.single().title)
         assertEquals("administrator", repo.streamBindings.value.getValue("stream").single().role)
         assertEquals("smile", repo.userReactions.value.single().emojiName)

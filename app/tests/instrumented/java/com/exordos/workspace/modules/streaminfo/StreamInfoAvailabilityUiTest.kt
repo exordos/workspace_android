@@ -103,14 +103,14 @@ class StreamInfoAvailabilityUiTest {
             val context = InstrumentationRegistry.getInstrumentation().targetContext
             val repo = fixture.repo
             val viewModel = fixture.info
-            repo.addStreamTopics(STREAM, listOf(topic(OTHER_TOPIC)).map { it.toUio() })
+            repo.setInitialTopics(listOf(topic(OTHER_TOPIC)).map { it.toUio() })
             show(viewModel)
             compose.onNodeWithText(context.getString(R.string.stream_info_unavailable)).assertIsDisplayed()
             compose.onNodeWithContentDescription(context.getString(R.string.stream_info_back)).assertIsDisplayed().assertHasClickAction()
             compose.runOnIdle { assertNull(protectedBottomBarStyle.get()) }
 
             repo.setInitialStreams(listOf(fixture.peer.stream).map { it.toUio() })
-            repo.addStreamTopics(STREAM, listOf(topic(TOPIC)).map { it.toUio() })
+            repo.setInitialTopics(listOf(topic(TOPIC)).map { it.toUio() })
             compose.waitUntil(5_000) { viewModel.stream.value != null && viewModel.topic.value != null &&
                 viewModel.protectedStreamDetails.value != null && !viewModel.protectedStreamUpdateState.value.busy }
             compose.onNodeWithText("CASSI protected chat").assertIsDisplayed()
@@ -121,8 +121,8 @@ class StreamInfoAvailabilityUiTest {
             compose.runOnIdle { assertEquals(true, protectedBottomBarStyle.get()) }
             compose.onNodeWithText(context.getString(R.string.encrypted_chat_key_screen_title)).assertIsDisplayed()
 
-            repo.setInitialStreams(emptyList())
-            repo.addStreamTopics(STREAM, listOf(topic(OTHER_TOPIC)).map { it.toUio() })
+            repo.streamDao.deleteAll()
+            repo.setInitialTopics(listOf(topic(OTHER_TOPIC)).map { it.toUio() })
             compose.waitUntil(5_000) { viewModel.stream.value == null && viewModel.topic.value == null }
             compose.onNodeWithTag("encrypted-chat-keys-screen").assertDoesNotExist()
             compose.runOnIdle { assertNull(protectedBottomBarStyle.get()) }
@@ -176,8 +176,11 @@ class StreamInfoAvailabilityUiTest {
             compose.onNodeWithTag("protected-stream-name").performScrollTo().performTextReplacement("CASSI updated protected chat")
             compose.onNodeWithTag("protected-stream-description").performTextReplacement("Synthetic updated description")
             compose.onNodeWithTag("protected-stream-save").performScrollTo().assertIsEnabled().performClick()
-            compose.waitUntil(5_000) { fixture.peer.mutations.size == 1 && fixture.repo.streams.value.any {
-                it.uuid == STREAM && it.name == "CASSI updated protected chat" && it.description == "Synthetic updated description" } }
+            compose.waitUntil(5_000) {
+                val stream = fixture.repo.streamDao.getStream(STREAM)
+                fixture.peer.mutations.size == 1 && stream?.name == "CASSI updated protected chat" &&
+                    stream.description == "Synthetic updated description"
+            }
             compose.onNodeWithTag("protected-stream-info").assertIsDisplayed()
             compose.onNodeWithText("CASSI updated protected chat").assertIsDisplayed()
             compose.runOnIdle { assertEquals(false, protectedBottomBarStyle.get()) }
@@ -245,7 +248,7 @@ class StreamInfoAvailabilityUiTest {
                 compose.onNodeWithTag("protected-stream-delete-row").performScrollTo().performClick()
                 compose.onNodeWithTag("protected-stream-confirm-delete").performClick()
                 compose.waitUntil(5_000) { started.count == 0L }
-                fixture.repo.setInitialStreams(emptyList())
+                fixture.repo.streamDao.deleteAll()
                 compose.waitUntil(5_000) { fixture.info.stream.value == null }
                 compose.onNodeWithText(InstrumentationRegistry.getInstrumentation().targetContext
                     .getString(R.string.stream_info_unavailable)).assertIsDisplayed()
@@ -298,7 +301,7 @@ class StreamInfoAvailabilityUiTest {
         }
         val api = WorkspaceAPIClient(http)
         val tokens = SecureTokenStore(context)
-        val events = EventsRepositoryStore(tokens, api)
+        val events = EventsRepositoryStore(tokens, api, context)
         val preferences = ServerRepository(dataStore, tokens, events, scope)
         val serverId = "cassi-stream-info-${UUID.randomUUID()}"
         var user: UserViewModel? = null
@@ -329,7 +332,7 @@ class StreamInfoAvailabilityUiTest {
             assertTrue(repo.verifiedOwnerAuthentication.value != null)
             repo.setInitialUsers(listOf(peer.viewer, peer.partner).map { it.toUio() })
             repo.addStreamBindings(STREAM, peer.bindings.map { it.toUio() })
-            repo.addStreamTopics(STREAM, listOf(topic(TOPIC)).map { it.toUio() })
+            repo.setInitialTopics(listOf(topic(TOPIC)).map { it.toUio() })
             if (initialStream) repo.setInitialStreams(listOf(peer.stream).map { it.toUio() })
             val viewModel = withContext(Dispatchers.Main) { StreamInfoViewModel(STREAM, TOPIC, api, events) }
             info = viewModel

@@ -20,7 +20,6 @@ import com.exordos.workspace.data.remote.dto.SendMessageRequest
 import com.exordos.workspace.data.uio.StreamUIO
 import com.exordos.workspace.data.uio.UserUIO
 import com.exordos.workspace.modules.chooseserver.QueryState
-import kotlin.collections.first
 
 class ChatUserInfoViewModel(
     val userName: String,
@@ -33,11 +32,11 @@ class ChatUserInfoViewModel(
     val repo = eventsRepositoryStore.get(client.getCurrentServerId()) ?: error("Cannot get current event repository")
 
     val user: StateFlow<UserUIO?> = repo.users
-        .map { list -> list.first { it.uuid == userUuid } }
+        .map { list -> list.firstOrNull { it.uuid == userUuid } }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = repo.userDao.getUser(userUuid)
+            initialValue = null
         )
     private val _createQueryState = MutableStateFlow<QueryState>(QueryState.Idle)
     val createQueryState: StateFlow<QueryState> = _createQueryState

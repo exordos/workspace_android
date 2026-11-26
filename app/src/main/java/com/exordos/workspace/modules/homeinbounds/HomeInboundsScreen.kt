@@ -170,7 +170,8 @@ fun StreamInboundView(
         Row(
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            val user = viewModel.eventsRepository.userDao.getUser(stream.directUserUuid ?: "")
+            val users by viewModel.users.collectAsStateWithLifecycle()
+            val user = users.firstOrNull { it.uuid == stream.directUserUuid }
             val avatarUrn = user?.avatar
             Avatar(
                 avatarUrn,

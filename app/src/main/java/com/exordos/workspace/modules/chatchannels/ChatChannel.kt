@@ -42,6 +42,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.graphics.toColorInt
 import dev.jeziellago.compose.markdowntext.MarkdownText
 import kotlinx.coroutines.launch
@@ -51,6 +52,7 @@ import com.exordos.workspace.data.uio.MessagePayloadUIO
 import com.exordos.workspace.data.uio.FolderUIO
 import com.exordos.workspace.data.uio.MessageUIO
 import com.exordos.workspace.data.uio.StreamUIO
+import com.exordos.workspace.data.uio.UserUIO
 import com.exordos.workspace.modules.encryptedchat.EncryptedChatAvatarBadge
 import com.exordos.workspace.ui.Avatar
 import com.exordos.workspace.ui.theme.InterFontFamily
@@ -66,6 +68,8 @@ fun ChatChannel(
     onChatNumberToAddChange: (StreamUIO?) -> Unit,
     onClick: () -> Unit
 ) {
+    val users by viewModel.users.collectAsStateWithLifecycle(emptyMap())
+    val lastMessages by viewModel.lastMessages.collectAsStateWithLifecycle(emptyMap())
     val previewContext = LocalContext.current
     val encryptedPreviews by viewModel.encryptedPreviews.collectAsState()
     DisposableEffect(viewModel, item.uuid, item.encryption) {
@@ -104,9 +108,9 @@ fun ChatChannel(
         Row(
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            val directUser = viewModel.directUser(item)
+            val directUser = users[item.directUserUuid]
             val avatarUrn = directUser?.avatar
-            val lastMessage = viewModel.lastMessage(item)
+            val lastMessage = lastMessages[item.lastMessageUuid]
             val encryptedPreview = if (item.encryption && encryptedPreviews.containsKey(item.uuid)) viewModel.encryptedPreview(item.uuid)
                 ?.takeIf { it.catalogMessageUuid == lastMessage?.uuid } else null
             Box(Modifier.padding(start = 8.dp, top = 12.dp, end = 12.dp, bottom = 12.dp).size(40.dp)) {
@@ -130,7 +134,7 @@ fun ChatChannel(
 
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
-                    text = item.name,
+                    text = chatDisplayName(item, directUser),
                     color = LocalWorkspaceColorsPalette.current.textHeaders,
                     fontSize = 14.sp,
                     fontFamily = InterFontFamily,
@@ -145,7 +149,7 @@ fun ChatChannel(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        val lastMessageAuthor = encryptedPreview?.authorName ?: viewModel.author(lastMessage)?.displayableName()
+                        val lastMessageAuthor = encryptedPreview?.authorName ?: users[lastMessage.authorUuid]?.displayableName()
                         if (lastMessageAuthor != null) {
                             Text(
                                 text = lastMessageAuthor,
@@ -348,3 +352,6 @@ fun ChatChannel(
         }
     }
 }
+
+internal fun chatDisplayName(stream: StreamUIO, user: UserUIO?): String =
+    user?.takeIf { it.uuid == stream.directUserUuid }?.displayableName()?.takeIf { it.isNotBlank() } ?: stream.name

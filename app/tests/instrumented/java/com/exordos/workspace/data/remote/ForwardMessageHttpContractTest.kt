@@ -81,7 +81,7 @@ class ForwardMessageHttpContractTest {
         }
         api = WorkspaceAPIClient(http)
         tokenStore = SecureTokenStore(InstrumentationRegistry.getInstrumentation().targetContext)
-        eventsStore = EventsRepositoryStore(tokenStore, api)
+        eventsStore = EventsRepositoryStore(tokenStore, api, InstrumentationRegistry.getInstrumentation().targetContext)
         preferences = ServerRepository(store, tokenStore, eventsStore, scope)
         user = UserViewModel(preferences)
         api.attachUserViewModel(user)

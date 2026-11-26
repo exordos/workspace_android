@@ -88,7 +88,7 @@ fun ProtectedStreamInfoView(viewModel: StreamInfoViewModel, navController: NavHo
     val bindingsByStream by viewModel.streamBindings.collectAsStateWithLifecycle()
     val encryption by viewModel.encryptedChatState.collectAsStateWithLifecycle()
     val rawMessages by viewModel.repo.streamTopicMessages.collectAsStateWithLifecycle()
-    val pooledMessages by viewModel.repo.messagesPool.collectAsStateWithLifecycle()
+    val pooledMessages by viewModel.repo.messages.collectAsStateWithLifecycle(emptyList())
     val selectedServer by viewModel.client.requireUserViewModel().selectedServer.collectAsStateWithLifecycle()
     val memberBaseUrl = selectedServer?.takeIf { it.id == viewModel.repo.serverId }?.baseUrl.orEmpty()
     val memberAuthHeaders = viewModel.client.authHeaders(viewModel.repo.serverId)

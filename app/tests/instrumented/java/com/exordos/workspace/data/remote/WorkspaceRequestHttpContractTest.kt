@@ -164,7 +164,7 @@ class WorkspaceRequestHttpContractTest {
                 LoopbackWorkspaceServer.Response("""{"msg":"Refresh rejected","code":"INVALID_GRANT"}""", 400)
             } else LoopbackWorkspaceServer.Response("""{"msg":"Expired","code":"SESSION_EXPIRED"}""", 401)
         }) { account, requests ->
-            val pending = async(Dispatchers.IO) { account.api.performRequest(MessagesRequest("stream", "topic")) }
+            val pending = async(Dispatchers.IO) { account.api.performRequest(MessagesRequest("stream", "topic", 25, null)) }
             val replacement = TokenPair("synthetic-replacement", "synthetic-replacement-refresh")
             try {
                 assertProtected(requests.receive())
@@ -187,7 +187,7 @@ class WorkspaceRequestHttpContractTest {
             else LoopbackWorkspaceServer.Response("""{"msg":"Expired","code":"SESSION_EXPIRED"}""", 401)
         }) { account, requests ->
             val before = account.preferences.tokensFor(account.config.id)
-            val result = account.api.performRequest(MessagesRequest("stream", "topic"))
+            val result = account.api.performRequest(MessagesRequest("stream", "topic", 25, null))
 
             assertEquals(ApiResult.Error(ApiError("Try later", "SERVICE_UNAVAILABLE", 503)), result)
             assertProtected(requests.receive())
@@ -281,7 +281,7 @@ class WorkspaceRequestHttpContractTest {
     @Test
     fun mismatchedServerIdAndConfigurationNeverReachTheTransport() = runBlocking {
         withPeer("[]") { account, requests ->
-            val result = account.api.performRequest(MessagesRequest("stream", "topic"),
+            val result = account.api.performRequest(MessagesRequest("stream", "topic", 25, null),
                 serverId = "cassi-another-account", serverConfig = account.config)
 
             assertTrue(result is ApiResult.Error)
@@ -293,7 +293,7 @@ class WorkspaceRequestHttpContractTest {
     @Test
     fun plainServerErrorsPreserveStatusAndDoNotTriggerRefresh() = runBlocking {
         withPeer("temporarily unavailable", 503) { account, requests ->
-            val result = account.api.performRequest(MessagesRequest("stream", "topic"))
+            val result = account.api.performRequest(MessagesRequest("stream", "topic", 25, null))
 
             assertEquals(ApiResult.Error(ApiError("temporarily unavailable", "503", 503)), result)
             assertEquals("GET", requests.receive().method)
@@ -307,7 +307,7 @@ class WorkspaceRequestHttpContractTest {
         for (body in listOf("", "{", "{}", "null", "[]", """{"msg":"Missing code"}""")) {
             withPeer(body, 502) { account, requests ->
                 val before = account.preferences.tokensFor(account.config.id)
-                val result = account.api.performRequest(MessagesRequest("stream", "topic"))
+                val result = account.api.performRequest(MessagesRequest("stream", "topic", 25, null))
 
                 assertEquals(ApiResult.Error(ApiError(body, "502", 502)), result)
                 assertProtected(requests.receive())

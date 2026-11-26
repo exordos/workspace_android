@@ -40,6 +40,7 @@ import com.exordos.workspace.ui.theme.InterFontFamily
 import com.exordos.workspace.ui.theme.LocalWorkspaceColorsPalette
 import java.net.URL
 import kotlin.time.ExperimentalTime
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @OptIn(ExperimentalTime::class)
 @Composable
@@ -52,7 +53,8 @@ fun CallMessageView(
     var menuExpanded by remember(item.uuid) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val author = viewModel.author(item)
+    val users by viewModel.users.collectAsStateWithLifecycle()
+    val author = users.firstOrNull { it.uuid == item.authorUuid }
     val itemUrl = URL(item.payload.content)
     val bubbleShape = if (item.isOwn) {
         RoundedCornerShape(

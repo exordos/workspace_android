@@ -101,7 +101,7 @@ class RealtimeRecoveryInstrumentedTest {
             install(WebSockets)
         }
         val api = WorkspaceAPIClient(http)
-        val eventsStore = EventsRepositoryStore(tokens, api)
+        val eventsStore = EventsRepositoryStore(tokens, api, context)
         val sessions = ServerRepository(store, tokens, eventsStore, storeScope)
         val user = UserViewModel(sessions)
         api.attachUserViewModel(user)
@@ -128,12 +128,12 @@ class RealtimeRecoveryInstrumentedTest {
                         assertEquals(2, server.historyRequests)
                         assertTrue(chat.isLoading.value) // Ordinary request A is still held.
                         assertTrue(events.streamTopicMessages.value.getValue("stream.topic").isEmpty())
-                        assertTrue(events.messagesPool.value.isEmpty())
+                        assertTrue(events.messages.first().isEmpty())
                         // B has committed an empty, fresh history. Now finish the obsolete A with [M].
                         server.releaseHistory.countDown()
                         withTimeout(5_000) { chat.isLoading.first { !it } }
                         assertTrue("Obsolete history resurrected M", events.streamTopicMessages.value.getValue("stream.topic").isEmpty())
-                        assertTrue(events.messagesPool.value.isEmpty())
+                        assertTrue(events.messages.first().isEmpty())
                         assertFalse(chat.streamTopicMessages.value["stream.topic"].orEmpty().any { it.uuid == "deleted-before-recovery" })
                         assertFalse(events.isConversationStale("stream", "topic"))
                         server.sendLive("live-after-overlap")
@@ -141,7 +141,7 @@ class RealtimeRecoveryInstrumentedTest {
                             cache["stream.topic"].orEmpty().any { it.uuid == "live-after-overlap" }
                         } }
                         assertEquals(listOf("live-after-overlap"), events.streamTopicMessages.value.getValue("stream.topic").map { it.uuid })
-                        assertFalse(events.messagesPool.value.any { it.uuid == "deleted-before-recovery" })
+                        assertFalse(events.messages.first().any { it.uuid == "deleted-before-recovery" })
                         withContext(Dispatchers.Main) { chat.onChatClosed(); chat.onChatOpened() }
                         assertFalse(chat.isLoading.value)
                         assertEquals(2, server.historyRequests)
@@ -182,7 +182,7 @@ class RealtimeRecoveryInstrumentedTest {
             install(WebSockets)
         }
         val api = WorkspaceAPIClient(http)
-        val eventsStore = EventsRepositoryStore(tokens, api)
+        val eventsStore = EventsRepositoryStore(tokens, api, context)
         val sessions = ServerRepository(store, tokens, eventsStore, storeScope)
         val user = UserViewModel(sessions)
         api.attachUserViewModel(user)

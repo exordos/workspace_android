@@ -71,7 +71,8 @@ fun ChatWithTopics(
     val scope = rememberCoroutineScope()
     val streamsQueryState by chatViewModel.streamsQueryState.collectAsStateWithLifecycle()
     val topicsQueryState by chatViewModel.topicsQueryState.collectAsStateWithLifecycle()
-    val repo by chatViewModel.eventsRepo.collectAsState()
+    val folderItems by chatViewModel.selectedFolderItems.collectAsStateWithLifecycle(emptyList())
+    val topics by chatViewModel.selectedStreamTopics.collectAsStateWithLifecycle(emptyList())
 
     when (streamsQueryState) {
         QueryState.Loading -> {
@@ -92,9 +93,8 @@ fun ChatWithTopics(
         }
 
         QueryState.Success -> {
-            val filteredSubscriptions = remember(searchQuery, streams, currentlySelectedFolder) {
-                val folderItems = chatViewModel.eventsRepo.value?.folderItemDao?.getFolderItems(currentlySelectedFolder?.uuid ?: "")
-                val folderSubscriptions = if (folderItems != null) {
+            val filteredSubscriptions = remember(searchQuery, streams, currentlySelectedFolder, folderItems) {
+                val folderSubscriptions = if (currentlySelectedFolder?.systemType?.let { it != "all" } == true) {
                     folderItems.mapNotNull { folderItem ->
                         streams.firstOrNull { it.uuid == folderItem.streamUuid }
                     }
@@ -234,8 +234,7 @@ fun ChatWithTopics(
                                     ) {
                                         val selectedStream = currentlySelectedStream
                                         if (selectedStream != null) {
-                                            val topics = repo?.topicDao?.getTopics(selectedStream.uuid)
-                                            if (topics?.isEmpty() ?: true) {
+                                            if (topics.isEmpty()) {
                                                 Box(
                                                     modifier = Modifier.fillMaxSize(),
                                                     contentAlignment = Alignment.Center

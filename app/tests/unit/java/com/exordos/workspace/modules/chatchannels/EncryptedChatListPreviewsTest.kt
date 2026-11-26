@@ -181,11 +181,11 @@ class EncryptedChatListPreviewsTest {
     @Test fun `service last message selects newest loaded regular message and edited wire replaces old ciphertext`() = runBlocking {
         val f = Fixture()
         val service = f.message.copy(uuid = "grant", createdAt = "2026-10-15T12:01:00Z", payload = MessagePayloadUIO("key_grant", keyUuid = "current"))
-        val stream = f.stream.copy(lastMessageUuid = service.uuid, lastMessage = service)
+        val stream = f.stream.copy(lastMessageUuid = service.uuid)
         val old = f.message.copy(uuid = "older", createdAt = "2026-10-15T11:59:00Z")
-        assertEquals(f.message.uuid, latestLoadedEncryptedPreviewMessage(stream, listOf(old, f.message), emptyList())?.uuid)
+        assertEquals(f.message.uuid, latestLoadedEncryptedPreviewMessage(stream, listOf(old, f.message), emptyList(), service)?.uuid)
         assertNull(latestLoadedEncryptedPreviewMessage(stream, emptyList(), emptyList()))
-        assertTrue(requireNotNull(encryptedPreviewSource(stream, f.message, "owner", "project", null)).authorized)
+        assertTrue(requireNotNull(encryptedPreviewSource(stream, f.message, "owner", "project", null, service)).authorized)
         val edit = f.message.copy(updatedAt = "2026-10-15T12:02:00Z", payload = f.message.payload.copy(content = "replaced"))
         assertEquals("replaced", latestLoadedEncryptedPreviewMessage(f.stream, listOf(f.message), listOf(edit))?.payload?.content)
         val projector = f.projector()
@@ -217,7 +217,7 @@ class EncryptedChatListPreviewsTest {
             MessagePayloadUIO("e2ee", WorkspaceChatCrypto.toBase64(crypto.encryptMessage(key, "private **preview**".toByteArray(),
                 ChatMessageContext("stream", "historical"))), "historical"), false, emptyMap(), true, projectId = "project")
         val stream = StreamUIO("stream", 0, 0, 0, "2026-10-15T12:00:00Z", "Protected", false, 0,
-            lastMessageUuid = message.uuid, notificationMode = "all_messages", lastMessage = message,
+            lastMessageUuid = message.uuid, notificationMode = "all_messages",
             encryption = true, currentEncryptionKeyUuid = "current", projectId = "project", userUuid = "owner", role = "member")
         val source = requireNotNull(encryptedPreviewSource(stream, message, "owner", "project", null))
         val proof = VerifiedOwnerAuthentication(server.id, server.baseUrl, "owner", ProtectedRequestAuthentication("synthetic-token"), 1, server.copy())

@@ -5,13 +5,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
@@ -39,6 +40,7 @@ import com.exordos.workspace.data.remote.dto.AddFolderRequest
 import com.exordos.workspace.data.remote.dto.AddStreamRequest
 import com.exordos.workspace.data.remote.dto.AddTopicRequest
 import com.exordos.workspace.data.remote.dto.DeleteChatFromFolderRequest
+import com.exordos.workspace.data.uio.FolderItemUIO
 import com.exordos.workspace.data.uio.FolderUIO
 import com.exordos.workspace.data.remote.dto.FoldersRequest
 import com.exordos.workspace.data.remote.dto.MarkMessagesReadUpToRequest
@@ -93,6 +95,26 @@ class ChatViewModel(
         id?.let { eventsRepositoryStore.getOrCreateForId(it, servers) }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
+    private data class ChatListData(
+        val repository: EventsRepository,
+        val users: Map<String, UserUIO>,
+        val lastMessages: Map<String, LastMessageUIO>,
+        val messages: List<MessageUIO>,
+    )
+
+    private val chatListData = eventsRepo.flatMapLatest { repo ->
+        if (repo == null) return@flatMapLatest flowOf(null)
+        val data: Flow<ChatListData?> = combine(
+            repo.users, repo.lastMessageDao.observeLastMessages(), repo.messages,
+        ) { users, lastMessages, messages ->
+            ChatListData(repo, users.associateBy(UserUIO::uuid), lastMessages.associateBy(LastMessageUIO::uuid), messages)
+        }
+        data.onStart { emit(null) }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    internal val users = chatListData.map { it?.users.orEmpty() }
+    internal val lastMessages = chatListData.map { it?.lastMessages.orEmpty() }
+
     @Volatile private var previewContext: Context? = null
     @Volatile private var previewStorage: ChatKeyStorage? = null
     private val previewRowCounts = mutableMapOf<String, Int>()
@@ -119,29 +141,6 @@ class ChatViewModel(
 
     fun encryptedPreview(streamUuid: String): EncryptedChatListPreview? = previewProjector.preview(streamUuid)
 
-    fun directUser(stream: StreamUIO): UserUIO? {
-        val directUserUuid = stream.directUserUuid ?: return null
-
-        return eventsRepo.value?.userDao?.getUser(directUserUuid)
-    }
-
-    fun author(lastMessage: LastMessageUIO?): UserUIO? {
-        val message = lastMessage ?: return null
-        return eventsRepo.value?.userDao?.getUser(message.authorUuid)
-    }
-
-    fun lastMessage(stream: StreamUIO): LastMessageUIO? {
-        val lastMessageUuid = stream.lastMessageUuid ?: return null
-
-        return eventsRepo.value?.lastMessageDao?.getLastMessage(lastMessageUuid)
-    }
-
-    fun lastMessage(topic: TopicUIO): LastMessageUIO? {
-        val lastMessageUuid = topic.lastMessageUuid ?: return null
-
-        return eventsRepo.value?.lastMessageDao?.getLastMessage(lastMessageUuid)
-    }
-
     private fun previewSnapshot(): EncryptedPreviewSnapshot? {
         val repo = eventsRepo.value ?: return null
         val selected = userViewModel.selectedServer.value ?: return null
@@ -150,25 +149,23 @@ class ChatViewModel(
             selected.projectUuid.isNullOrBlank()) return null
         val proof = repo.verifiedOwnerAuthentication.value
         val account = confirmedAccountContext(client, repo) ?: return null
-        val pool = repo.messagesPool.value
+        val catalog = chatListData.value?.takeIf { it.repository === repo } ?: return null
         val conversations = repo.streamTopicMessages.value
         val bindings = repo.streamBindings.value
-        val users = repo.users.stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = emptyList(),
-        )
         val currentStreams = streams.value
         val visible = previewRows.value
         val cacheKey = listOf(repo, selected.copy(), own.uuid, proof,
-            currentStreams, pool, conversations, bindings, users.value, visible)
+            currentStreams, catalog, conversations, bindings, visible)
         synchronized(previewCacheLock) {
             if (previewCacheKey == cacheKey) return previewCache
             val loadedConversations = conversations.values.flatten()
             val rows = currentStreams.filter { it.uuid in visible }.mapNotNull { stream ->
-                val message = latestLoadedEncryptedPreviewMessage(stream, pool, loadedConversations)
-                val lastMessage = lastMessage(stream)
-                encryptedPreviewSource(stream, message, own.uuid, requireNotNull(selected.projectUuid), bindings[stream.uuid], lastMessage?.toMessageUIO())
+                val lastMessage = catalog.lastMessages[stream.lastMessageUuid]?.toMessageUIO()
+                val message = latestLoadedEncryptedPreviewMessage(stream, catalog.messages, loadedConversations, lastMessage)
+                encryptedPreviewSource(
+                    stream, message, own.uuid, requireNotNull(selected.projectUuid), bindings[stream.uuid],
+                    lastMessage, catalog.users[message?.authorUuid]?.displayableName(),
+                )
             }.sortedBy { it.streamUuid }
             return EncryptedPreviewSnapshot(account, rows).also { previewCacheKey = cacheKey; previewCache = it }
         }
@@ -185,6 +182,26 @@ class ChatViewModel(
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = emptyList(),
         )
+
+    private val previewObserver = viewModelScope.launch {
+        merge(
+            eventsRepo.flatMapLatest { repo -> if (repo == null) flowOf(Unit) else merge(
+                repo.currentUser.map { Unit }, repo.streamBindings.map { Unit },
+                repo.streamTopicMessages.map { Unit }, repo.verifiedOwnerAuthentication.map { Unit },
+            ) },
+            streams.map { Unit }, chatListData.map { Unit },
+            userViewModel.selectedServer.map { Unit }, userViewModel.selectedServerId.map { Unit },
+            userViewModel.accessToken.map { Unit }, previewRows.map { Unit }, previewAttached,
+            EncryptedChatRuntime.localKeyChanges.filter(previewProjector::affectedBy).map { Unit },
+            ConfirmedAccountContext.invalidations.filter { previewProjector.accountChanged() }.map { Unit },
+        ).collect {
+            previewProjector.invalidate()
+            previewRefresh?.cancel()
+            if (previewContext != null && previewRows.value.isNotEmpty()) previewRefresh = launch {
+                previewProjector.refresh()
+            }
+        }
+    }
 
     private val _currentlySelectedStream = MutableStateFlow<StreamUIO?>(null)
     var currentlySelectedStream: StateFlow<StreamUIO?> = _currentlySelectedStream
@@ -216,6 +233,16 @@ class ChatViewModel(
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = null,
         )
+
+    internal val selectedFolderItems: Flow<List<FolderItemUIO>> = combine(eventsRepo, currentlySelectedFolder) { repo, folder ->
+        if (folder == null || folder.systemType == "all") flowOf(emptyList())
+        else repo?.folderItemDao?.observeFolderItems(folder.uuid)?.onStart { emit(emptyList()) } ?: flowOf(emptyList())
+    }.flatMapLatest { it }
+
+    internal val selectedStreamTopics: Flow<List<TopicUIO>> = combine(eventsRepo, currentlySelectedStream) { repo, stream ->
+        if (stream == null) flowOf(emptyList())
+        else repo?.topicDao?.observeTopics(stream.uuid)?.onStart { emit(emptyList()) } ?: flowOf(emptyList())
+    }.flatMapLatest { it }
 
     private val _newFolderName = MutableStateFlow("")
     val newFolderName: StateFlow<String> = _newFolderName
@@ -289,8 +316,10 @@ class ChatViewModel(
         _currentlySelectedStream.update { newChat }
         if (newChat != null) {
             val currentStreamBindings = streamBindings.value[newChat.uuid]
-            if (currentStreamBindings?.isEmpty() ?: true) {
+            if (currentStreamBindings.isNullOrEmpty()) {
                 loadStreamBindings(newChat)
+            } else {
+                _topicsQueryState.value = QueryState.Success
             }
         }
     }
@@ -300,15 +329,18 @@ class ChatViewModel(
     }
 
     suspend fun loadStreamBindings(stream: StreamUIO) {
-        _topicsQueryState.value = QueryState.Loading
         val repo = eventsRepo.value ?: return
         val server = client.requireUserViewModel().selectedServer.value?.copy() ?: return
         if (!repo.matchesServerConfiguration(server)) return
+        _topicsQueryState.value = QueryState.Loading
         repo.beginStreamBindingsRequest(stream.uuid).use { request ->
             when (val response = client.performRequest(StreamBindingsRequest(stream.uuid), server.id, server)) {
                 is ApiResult.Success -> repo.applyStreamBindingsSnapshot(request, response.value)
                 is ApiResult.Error -> Unit
             }
+        }
+        if (eventsRepo.value === repo && currentlySelectedStream.value?.uuid == stream.uuid) {
+            _topicsQueryState.value = QueryState.Success
         }
     }
 
@@ -414,7 +446,9 @@ class ChatViewModel(
     }
 
     suspend fun deleteChatFromFolder(chatId: String, folder: FolderUIO) {
-        val folderChat = eventsRepo.value.folderItemDao.getFolderItem(folder.uuid, chatId)
+        val repo = eventsRepo.value ?: return
+        val folderChat = repo.folderItemDao.observeFolderItems(folder.uuid).first()
+            .firstOrNull { it.streamUuid == chatId }
         if (folderChat != null) {
             val response = client.performRequest(DeleteChatFromFolderRequest(folderChat.uuid))
             when (response) {

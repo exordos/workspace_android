@@ -210,7 +210,7 @@ class EncryptedConversationUiTest {
         }
         val api = WorkspaceAPIClient(http)
         val tokens = SecureTokenStore(context)
-        events = EventsRepositoryStore(tokens, api)
+        events = EventsRepositoryStore(tokens, api, context)
         preferences = ServerRepository(dataStore, tokens, events, storeScope)
         serverId = "cassi-encrypted-conversation-${UUID.randomUUID()}"
         val config = ServerConfig(serverId, fixture.url, "", "CASSI test", projectUuid = PROJECT)
@@ -693,7 +693,7 @@ class EncryptedConversationUiTest {
         assertTrue(chat.repo.streamTopicMessages.value["$STREAM.$TOPIC"].orEmpty().all { it.payload.kind != "markdown" })
         val postedBeforeMissingSnapshot = fixture.sentBodies.size
         withContext(Dispatchers.Main) {
-            chat.repo.setInitialStreams(emptyList())
+            chat.repo.streamDao.deleteAll()
             chat.sendTextMessage("should never plaintext")
             assertEquals(R.string.chat_send_unavailable, chat.actionError.value?.resourceId)
         }
