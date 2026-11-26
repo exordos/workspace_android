@@ -95,6 +95,7 @@ fun TextMessageView(
     val deletingMessageUuids by viewModel.deletingMessageUuids.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val author = viewModel.author(item)
     var showFullscreen by remember { mutableStateOf(false) }
     val bubbleShape = if (item.isOwn) {
         RoundedCornerShape(
@@ -129,9 +130,9 @@ fun TextMessageView(
                                 onClick = {
                                     navController.navigate(
                                         ChatFlow.ChatUserInfo(
-                                            item.user?.displayableName() ?: "",
+                                            author?.displayableName() ?: "",
                                             item.authorUuid,
-                                            item.user?.avatar ?: "",
+                                            author?.avatar ?: "",
                                             ""
                                         )
                                     )
@@ -139,11 +140,11 @@ fun TextMessageView(
                             )
                     ) {
                         Avatar(
-                            item.user?.avatar,
+                            author?.avatar,
                             viewModel.userViewModel.baseUrl.value ?: "",
                             viewModel.client.authHeaders(),
                             null,
-                            item.user?.displayableName() ?: "",
+                            author?.displayableName() ?: "",
                             Modifier
                                 .padding(end = 4.dp, bottom = bottomPadding)
                                 .size(30.dp)
@@ -163,21 +164,21 @@ fun TextMessageView(
                             onClick = {
                                 navController.navigate(
                                     ChatFlow.ChatUserInfo(
-                                        item.user?.displayableName() ?: "",
+                                        author?.displayableName() ?: "",
                                         item.authorUuid,
-                                        item.user?.avatar ?: "",
-                                        item.user?.email ?: ""
+                                        author?.avatar ?: "",
+                                        author?.email ?: ""
                                     )
                                 )
                             }
                         )
                 ) {
                     Avatar(
-                        item.user?.avatar,
+                        author?.avatar,
                         viewModel.userViewModel.baseUrl.value ?: "",
                         viewModel.client.authHeaders(),
                         null,
-                        item.user?.displayableName() ?: "",
+                        author?.displayableName() ?: "",
                         Modifier
                             .padding(end = 4.dp, bottom = bottomPadding)
                             .size(30.dp)
@@ -212,7 +213,7 @@ fun TextMessageView(
                             val defaultName = if (item.isOwn) "Я" else "Собеседник"
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text(
-                                    text = item.user?.displayableName() ?: defaultName,
+                                    text = author?.displayableName() ?: defaultName,
                                     color = if (item.isOwn && encrypted) LocalWorkspaceColorsPalette.current.textHeaders
                                         else if (item.isOwn) LocalWorkspaceColorsPalette.current.indicatorBlue else LocalWorkspaceColorsPalette.current.indicatorPurple,
                                     fontSize = 14.sp,

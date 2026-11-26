@@ -1,5 +1,6 @@
 package com.exordos.workspace.data
 
+import android.content.Context
 import com.exordos.workspace.data.uio.toUio
 import com.exordos.workspace.data.remote.dto.UserResponseData
 import com.exordos.workspace.data.remote.dto.Stream
@@ -9,6 +10,12 @@ import com.exordos.workspace.data.remote.dto.MessageReaction
 import com.exordos.workspace.data.remote.dto.FolderResponseData
 import com.exordos.workspace.data.remote.dto.StreamBindingResponseData
 import android.util.Log
+import androidx.compose.ui.platform.LocalContext
+import androidx.room3.ColumnTypeConverters
+import androidx.room3.Database
+import androidx.room3.Room
+import androidx.room3.RoomDatabase
+import androidx.sqlite.driver.AndroidSQLiteDriver
 import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.client.plugins.websocket.webSocket
 import io.ktor.client.request.headers
@@ -73,10 +80,28 @@ import com.exordos.workspace.data.remote.dto.ServerSettingsRequest
 import com.exordos.workspace.data.uio.StreamUIO
 import com.exordos.workspace.data.uio.StreamBindingUIO
 import com.exordos.workspace.data.remote.dto.StreamsRequest
+import com.exordos.workspace.data.remote.dto.TopicsRequest
 import com.exordos.workspace.data.uio.TopicUIO
 import com.exordos.workspace.data.uio.UserUIO
 import com.exordos.workspace.data.remote.dto.UsersRequest
+import com.exordos.workspace.data.uio.DraftDao
+import com.exordos.workspace.data.uio.FolderDao
+import com.exordos.workspace.data.uio.FolderItemDao
+import com.exordos.workspace.data.uio.FolderItemUIO
+import com.exordos.workspace.data.uio.LastMessageDao
+import com.exordos.workspace.data.uio.LastMessageUIO
+import com.exordos.workspace.data.uio.MapConverters
+import com.exordos.workspace.data.uio.MessageDao
+import com.exordos.workspace.data.uio.MessageReactionDao
+import com.exordos.workspace.data.uio.StreamBindingDao
+import com.exordos.workspace.data.uio.StreamDao
+import com.exordos.workspace.data.uio.TopicDao
+import com.exordos.workspace.data.uio.UserDao
+import com.exordos.workspace.data.uio.toLastMessageUIO
 import com.exordos.workspace.modules.chooseserver.QueryState
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.firstOrNull
+import org.webrtc.ApplicationContextProvider
 import java.net.URI
 import kotlin.collections.map
 import kotlin.collections.orEmpty
@@ -88,17 +113,53 @@ private const val MAX_RETRY_DELAY_MILLIS = 30_000L
 private const val REALTIME_PROBE_INTERVAL_MILLIS = 30_000L
 private const val EVENTS_CURSOR_EXPIRED_STATUS_CODE = 410
 
+@Database(
+    entities = [
+        UserUIO::class,
+        StreamUIO::class,
+        TopicUIO::class,
+        LastMessageUIO::class,
+        DraftUIO::class,
+        FolderUIO::class,
+        FolderItemUIO::class,
+        StreamBindingUIO::class,
+        MessageUIO::class,
+        MessageReactionUIO::class,
+    ],
+    version = 1
+)
+
+@ColumnTypeConverters(MapConverters::class)
+abstract class AppDatabase : RoomDatabase() {
+    abstract fun userDao(): UserDao
+    abstract fun streamDao(): StreamDao
+    abstract fun topicDao(): TopicDao
+    abstract fun lastMessageDao(): LastMessageDao
+    abstract fun draftDao(): DraftDao
+    abstract fun folderDao(): FolderDao
+    abstract fun folderItemDao(): FolderItemDao
+    abstract fun messageDao(): MessageDao
+    abstract fun messageReactionDao(): MessageReactionDao
+    abstract fun streamBindingDao(): StreamBindingDao
+}
+
 class EventsRepository(
     val serverId: String,
     private val config: ServerConfig,
     private val tokenStore: SecureTokenStore,
-    var client: WorkspaceAPIClient
+    var client: WorkspaceAPIClient,
+    val context: Context
 ) {
 
     private val originalServer = config.copy()
     internal var onPushTopicUpdated: (TopicUIO, Long, String) -> Unit = { _, _, _ -> }
     internal var onPushRefreshNeeded: () -> Unit = {}
     fun notificationRead() { onPushRefreshNeeded() }
+
+    val db =
+        Room.databaseBuilder<AppDatabase>(context, "database-${config.id}")
+            .setDriver(AndroidSQLiteDriver())
+            .build()
 
     internal fun matchesServerConfiguration(server: ServerConfig): Boolean =
         server.id == serverId && server.baseUrl == originalServer.baseUrl && server.projectUuid == originalServer.projectUuid
@@ -117,6 +178,8 @@ class EventsRepository(
     var epochGeneration: String = ""
     private val connectionMutex = Mutex()
     private val realtimeStateLock = Any()
+
+    private val pageLimit = 25
     @Volatile
     private var activeSession: DefaultClientWebSocketSession? = null
     @Volatile
@@ -188,17 +251,26 @@ class EventsRepository(
     private val _streamDeletedEvents = MutableSharedFlow<String>(extraBufferCapacity = 64)
     val streamDeletedEvents = _streamDeletedEvents.asSharedFlow()
 
+    val userDao = db.userDao()
+    val streamDao = db.streamDao()
+    val topicDao = db.topicDao()
+    val lastMessageDao = db.lastMessageDao()
+    val draftDao = db.draftDao()
+    val folderDao = db.folderDao()
+    val folderItemDao = db.folderItemDao()
+    val messageDao = db.messageDao()
+    val messageReactionDao = db.messageReactionDao()
+    val streamBindingDao = db.streamBindingDao()
+
+    val users: Flow<List<UserUIO>> = userDao.observeUsers()
+
     fun updateCurrentlySelectedFolder(newFolder: FolderUIO?) {
         _currentlySelectedFolder.update { newFolder }
     }
     fun addStreamTopicMessages(streamUuid: String, topicUuid: String, messages: List<MessageUIO>) {
-        val messagesWithUser = messages.map { message ->
-            message.user = users.value.firstOrNull { it.uuid == message.authorUuid }
-            message
-        }
         val key = "$streamUuid.$topicUuid"
         _streamTopicMessages.update { current ->
-            current + (key to messagesWithUser)
+            current + (key to messages)
         }
     }
 
@@ -242,7 +314,7 @@ class EventsRepository(
             // A normal load may precede the fresh cursor and leave an uncovered event gap.
             historyGeneration to (!messageResyncRequired || coveredByRecoveryCursor)
         }
-        val response = client.performRequest(MessagesRequest(streamUuid, topicUuid), serverId, config)
+        val response = client.performRequest(MessagesRequest(streamUuid, topicUuid, pageLimit, null), serverId, config)
         if (response is ApiResult.Success) {
             // Check and publish atomically with cursor invalidation. An older response must
             // not overwrite a newer recovery snapshot, even if that snapshot was empty.
@@ -250,17 +322,11 @@ class EventsRepository(
                 if (historyGeneration != generation) {
                     return ApiResult.Error(ApiError("History response is obsolete", "HISTORY_RESPONSE_OBSOLETE"))
                 }
-                val snapshot = response.value.map { message ->
-                    message.copy(user = users.value.firstOrNull { it.uuid == message.authorUuid })
-                }
+                val snapshot = response.value
                 _streamTopicMessages.update { current ->
                     current + (key to mergeMessageHistorySnapshot(
                         beforeRequest, current[key].orEmpty(), snapshot, pendingMessageUuids.value,
                     ))
-                }
-                val refreshed = _streamTopicMessages.value[key].orEmpty().associateBy { it.uuid }
-                _messagesPool.update { current ->
-                    current.filterNot { it.uuid in refreshed } + refreshed.values
                 }
                 if (canClearStale) staleConversations -= key
             }
@@ -270,12 +336,13 @@ class EventsRepository(
 
     fun addPendingMessage(message: MessageUIO) {
         pendingMessageUuids.update { it + message.uuid }
-        updateMessagesPool(listOf(message))
+        scope.launch {
+            addLastMessage(message.toLastMessageUIO())
+        }
         addMessageToStreamTopic(message)
     }
     fun addMessageToStreamTopic(message: MessageUIO) {
         val key = "${message.streamUuid}.${message.topicUuid}"
-        message.user = users.value.firstOrNull { it.uuid == message.authorUuid }
 
         _streamTopicMessages.update { current ->
             if (current[key] != null ) {
@@ -336,13 +403,6 @@ class EventsRepository(
             } else messages + confirmed
             cleaned + (key to reconciled)
         }
-        _messagesPool.update { current ->
-            if (current.any { it.uuid == confirmed.uuid }) {
-                current.filterNot { it.uuid == pendingUuid }.distinctBy { it.uuid }
-            } else if (current.any { it.uuid == pendingUuid }) {
-                current.map { if (it.uuid == pendingUuid) confirmed else it }
-            } else current + confirmed
-        }
         pendingMessageUuids.update { it - pendingUuid }
     }
 
@@ -352,25 +412,7 @@ class EventsRepository(
                 messages.filterNot { it.uuid == messageUuid }
             }
         }
-        _messagesPool.update { current -> current.filterNot { it.uuid == messageUuid } }
         _userReactions.update { current -> current.filterNot { it.messageUuid == messageUuid } }
-        _streams.update { current ->
-            current.map { stream ->
-                if (stream.lastMessageUuid == messageUuid) {
-                    stream.copy(lastMessageUuid = null, lastMessage = null)
-                } else {
-                    stream
-                }
-            }
-        }
-        _streamTopics.update { current ->
-            current.mapValues { (_, topics) ->
-                topics.map { it.withoutDeletedMessage(messageUuid) }
-            }
-        }
-        _topicsPool.update { current ->
-            current.map { it.withoutDeletedMessage(messageUuid) }
-        }
         if (!_messageDeletedEvents.tryEmit(messageUuid)) {
             scope.launch { _messageDeletedEvents.emit(messageUuid) }
         }
@@ -381,80 +423,20 @@ class EventsRepository(
         synchronized(realtimeStateLock) {
             streamRemovalRevisions[streamUuid] = streamRemovalRevision(streamUuid) + 1
             historyGeneration++ // An older HTTP history response must not restore a deleted conversation.
-            _streams.update { it.filterNot { stream -> stream.uuid == streamUuid } }
-            val messageIds = (_messagesPool.value + _streamTopicMessages.value.values.flatten())
-                .filter { it.streamUuid == streamUuid }.map { it.uuid }.toSet()
             membership.removeStream(streamUuid)
-            _streamTopics.update { it - streamUuid }
-            _topicsPool.update { it.filterNot { topic -> topic.streamUuid == streamUuid } }
             _streamTopicMessages.update { it.filterKeys { key -> !key.startsWith("$streamUuid.") } }
-            _messagesPool.update { it.filterNot { message -> message.streamUuid == streamUuid } }
-            _draftsPool.update { it.filterNot { draft -> draft.streamUuid == streamUuid } }
-            _userReactions.update { it.filterNot { reaction -> reaction.messageUuid in messageIds } }
-            pendingMessageUuids.update { it - messageIds }
             staleConversations.removeAll { it.startsWith("$streamUuid.") }
             if (openConversation.value?.streamUuid == streamUuid) openConversation.value = null
             if (!_streamDeletedEvents.tryEmit(streamUuid)) scope.launch { _streamDeletedEvents.emit(streamUuid) }
-            messageIds.forEach { uuid ->
-                if (!_messageDeletedEvents.tryEmit(uuid)) scope.launch { _messageDeletedEvents.emit(uuid) }
-            }
         }
     }
 
     private fun TopicUIO.withoutDeletedMessage(messageUuid: String): TopicUIO =
         if (lastMessageUuid == messageUuid) {
-            copy(lastMessageUuid = null, lastMessage = null)
+            copy(lastMessageUuid = null)
         } else {
             this
         }
-
-    private val _streamTopics = MutableStateFlow<Map<String, List<TopicUIO>>>(emptyMap())
-    val streamTopics: StateFlow<Map<String, List<TopicUIO>>> = _streamTopics.asStateFlow()
-
-    fun addStreamTopics(streamUuid: String, topics: List<TopicUIO>) {
-        _streamTopics.update { current ->
-            current + (streamUuid to topics)
-        }
-        appendItemsToTopicsPool(topics)
-    }
-    fun addTopicToStream(topic: TopicUIO) {
-        _streamTopics.update { current ->
-            if (current[topic.streamUuid] != null) {
-                val existingTopics = current[topic.streamUuid].orEmpty()
-                current + (topic.streamUuid to (existingTopics + topic))
-            } else {
-                current
-            }
-        }
-        appendItemsToTopicsPool(listOf(topic))
-    }
-
-    fun updateTopic(updatedTopic: TopicUIO) {
-        val message = messagesPool.value.firstOrNull { it.uuid == updatedTopic.lastMessageUuid }
-        _streamTopics.update { current ->
-            val topics = current[updatedTopic.streamUuid] ?: return@update current
-            val updatedTopics = topics.map { topic ->
-                if (topic.uuid == updatedTopic.uuid) {
-                    topic.copy(
-                        unreadCount = updatedTopic.unreadCount,
-                        activeUnreadCount = updatedTopic.activeUnreadCount,
-                        name = updatedTopic.name,
-                        lastMessageUuid = updatedTopic.lastMessageUuid,
-                        isDone = updatedTopic.isDone,
-                        lastMessage = message,
-                        notificationMode = updatedTopic.notificationMode,
-                        summary = updatedTopic.summary
-                    )
-                } else {
-                    topic
-                }
-            }
-
-            if (updatedTopics == topics) return@update current
-            current + (updatedTopic.streamUuid to updatedTopics)
-        }
-        updateTopicInTopicsPool(updatedTopic)
-    }
 
     private val membership = StreamMembershipState(realtimeStateLock)
     val streamBindings: StateFlow<Map<String, List<StreamBindingUIO>>> = membership.bindings
@@ -486,100 +468,33 @@ class EventsRepository(
     private fun updateOwnStreamRole(streamUuid: String, changes: List<StreamBindingUIO> = emptyList()) {
         val ownBinding = (membership.bindings.value[streamUuid] ?: changes)
             .firstOrNull { it.userUuid == _currentUser.value?.uuid } ?: return
-        _streams.update { streams -> streams.map { stream ->
-            if (stream.uuid == streamUuid) stream.copy(role = ownBinding.role) else stream
-        } }
-    }
-
-    private val _messagesPool = MutableStateFlow<List<MessageUIO>>(emptyList())
-    val messagesPool: StateFlow<List<MessageUIO>> = _messagesPool.asStateFlow()
-    fun setInitialMessagesPool(newList: List<MessageUIO>) {
-        val messagesWithUser = newList.map { message ->
-            message.user = users.value.firstOrNull { it.uuid == message.authorUuid }
-            message
-        }
-        _messagesPool.update {
-            messagesWithUser
-        }
-    }
-
-    fun updateMessagesPool(newList: List<MessageUIO>) {
-        val currentPoolIds = _messagesPool.value.map { it.uuid }
-        val filteredMessages = newList.filter { !currentPoolIds.contains(it.uuid) }
-        val messagesWithUser = filteredMessages.map { message ->
-            message.user = users.value.firstOrNull { it.uuid == message.authorUuid }
-            message
-        }
-        _messagesPool.update { current ->
-            current + messagesWithUser
-        }
-    }
-
-    private val _topicsPool = MutableStateFlow<List<TopicUIO>>(emptyList())
-    val topicsPool: StateFlow<List<TopicUIO>> = _topicsPool.asStateFlow()
-
-    fun appendItemsToTopicsPool(newList: List<TopicUIO>) {
-        val currentPoolIds = _messagesPool.value.map { it.uuid }
-        val filteredTopics = newList.filter { !currentPoolIds.contains(it.uuid) }
-
-        _topicsPool.update { current ->
-            current + filteredTopics
-        }
-    }
-
-    fun updateTopicInTopicsPool(updatedTopic: TopicUIO) {
-        _topicsPool.update { current ->
-            current.map { topic ->
-                if (topic.uuid == updatedTopic.uuid) {
-                    topic.copy(
-                        unreadCount = updatedTopic.unreadCount,
-                        activeUnreadCount = updatedTopic.activeUnreadCount,
-                        name = updatedTopic.name,
-                        lastMessageUuid = updatedTopic.lastMessageUuid,
-                        isDone = updatedTopic.isDone,
-                        notificationMode = updatedTopic.notificationMode,
-                        summary = updatedTopic.summary
-                    )
-                } else {
-                    topic
-                }
+        var stream = streamDao.getStream(streamUuid)
+        stream?.role = ownBinding.role
+        if (stream != null) {
+            scope.launch {
+                streamDao.upsert(stream)
             }
         }
     }
 
-    private val _draftsPool = MutableStateFlow<List<DraftUIO>>(emptyList())
-    val draftsPool: StateFlow<List<DraftUIO>> = _draftsPool.asStateFlow()
+    val messages: Flow<List<MessageUIO>> = messageDao.observeMessages()
 
-    fun setInitialDraftsPool(newList: List<DraftUIO>) {
-        _draftsPool.update {
-            newList
-        }
+    val drafts: Flow<List<DraftUIO>> = draftDao.observeDrafts()
+
+    suspend fun setInitialDrafts(newList: List<DraftUIO>) {
+        draftDao.upsert(newList)
     }
 
-    fun addDraft(newValue: DraftUIO) {
-        _draftsPool.update { current ->
-            current + newValue
-        }
+    suspend fun addDraft(newValue: DraftUIO) {
+        draftDao.upsert(newValue)
     }
 
-    fun updateDraft(updatedDraft: DraftUIO) {
-        _draftsPool.update { current ->
-            current.map { draft ->
-                if (draft.uuid == updatedDraft.uuid) {
-                    draft.copy(
-                        payload = updatedDraft.payload
-                    )
-                } else {
-                    draft
-                }
-            }
-        }
+    suspend fun updateDraft(updatedDraft: DraftUIO) {
+        draftDao.upsert(updatedDraft)
     }
 
-    fun removeDraft(valueToRemove: DraftUIO) {
-        _draftsPool.update { current ->
-            current - valueToRemove
-        }
+    suspend fun removeDraft(valueToRemove: DraftUIO) {
+        draftDao.delete(valueToRemove)
     }
 
     private val _userReactions = MutableStateFlow<List<MessageReactionUIO>>(emptyList())
@@ -611,103 +526,56 @@ class EventsRepository(
         }
     }
 
-    private val _users = MutableStateFlow<List<UserUIO>>(emptyList())
-    val users: StateFlow<List<UserUIO>> = _users.asStateFlow()
-
-    fun updateUser(updatedUser: UserUIO) {
-        _users.update { current ->
-            current.map { user ->
-                if (user.uuid == updatedUser.uuid) {
-                    user.copy(
-                        email = updatedUser.email,
-                        firstName = updatedUser.firstName,
-                        lastName = updatedUser.lastName,
-                        status = updatedUser.status,
-                        statusText = updatedUser.statusText,
-                        statusEmoji = updatedUser.statusEmoji,
-                        avatar = updatedUser.avatar
-                    )
-                } else {
-                    user
-                }
-            }
-        }
+    suspend fun updateUser(updatedUser: UserUIO) {
+        userDao.upsert(updatedUser)
     }
 
-    fun addUser(newUser: UserUIO) {
-        _users.update { current ->
-            current + newUser
-        }
+    suspend fun addUser(newUser: UserUIO) {
+        userDao.upsert(newUser)
     }
 
-    fun setInitialUsers(newList: List<UserUIO>) {
-        _users.update {
-            newList
-        }
+    suspend fun setInitialUsers(newList: List<UserUIO>) {
+        userDao.upsert(newList)
     }
 
-    fun poolMessage(uuid: String?): MessageUIO? {
-        return messagesPool.value.firstOrNull { it.uuid == uuid }
+    val streams: Flow<List<StreamUIO>> = streamDao.observeStreams()
+
+    suspend fun updateStream(updatedStream: StreamUIO) {
+        streamDao.upsert(updatedStream)
     }
 
-    private val _streams = MutableStateFlow<List<StreamUIO>>(emptyList())
-    val streams: StateFlow<List<StreamUIO>> = _streams.asStateFlow()
-
-    fun updateStream(updatedStream: StreamUIO) {
-        val message = messagesPool.value.firstOrNull { it.uuid == updatedStream.lastMessageUuid }
-        _streams.update { current ->
-            current.map { stream ->
-                if (stream.uuid == updatedStream.uuid) {
-                    stream.copy(
-                        lastMessageUuid = updatedStream.lastMessageUuid,
-                        unreadCount = updatedStream.unreadCount,
-                        activeUnreadCount = updatedStream.activeUnreadCount,
-                        passiveUnreadCount = updatedStream.passiveUnreadCount,
-                        notificationMode = updatedStream.notificationMode,
-                        lastMessage = message,
-                        currentEncryptionKeyUuid = updatedStream.currentEncryptionKeyUuid,
-                        name = updatedStream.name,
-                        description = updatedStream.description,
-                        inviteOnly = updatedStream.inviteOnly,
-                        announce = updatedStream.announce,
-                        encryption = updatedStream.encryption,
-                        ownerUuid = updatedStream.ownerUuid,
-                        role = updatedStream.role,
-                        projectId = updatedStream.projectId,
-                        userUuid = updatedStream.userUuid,
-                    )
-                } else {
-                    stream
-                }
-            }
-        }
+    suspend fun addStream(newStream: StreamUIO) {
+        streamDao.upsert(newStream)
     }
 
-    fun addStream(newStream: StreamUIO) {
-        var streamWithUser = newStream
-        val directUserUuid = newStream.directUserUuid
-        if (directUserUuid != null) {
-            val directUser = _users.value.firstOrNull { it.uuid == directUserUuid }
-            streamWithUser.directUser = directUser
-        }
-        _streams.update { current ->
-            current + streamWithUser
-        }
+    suspend fun setInitialStreams(newList: List<StreamUIO>) {
+        streamDao.upsert(newList)
     }
 
-    fun setInitialStreams(newList: List<StreamUIO>) {
-        val streamsWithUsers  = newList.map { newStream ->
-            var streamWithUser = newStream
-            val directUserUuid = newStream.directUserUuid
-            if (directUserUuid != null) {
-                val directUser = _users.value.firstOrNull { it.uuid == directUserUuid }
-                streamWithUser.directUser = directUser
-            }
-            streamWithUser
-        }
-        _streams.update {
-            streamsWithUsers
-        }
+    val topics: Flow<List<TopicUIO>> = topicDao.observeTopics()
+
+    suspend fun updateTopic(updatedTopic: TopicUIO) {
+        topicDao.upsert(updatedTopic)
+    }
+
+    suspend fun addTopic(newTopic: TopicUIO) {
+        topicDao.upsert(newTopic)
+    }
+
+    suspend fun setInitialTopics(newList: List<TopicUIO>) {
+        topicDao.upsert(newList)
+    }
+
+    suspend fun addLastMessage(newMessage: LastMessageUIO) {
+        lastMessageDao.upsert(newMessage)
+    }
+
+    suspend fun addLastMessages(messagesList: List<LastMessageUIO>) {
+        lastMessageDao.upsert(messagesList)
+    }
+
+    suspend fun setInitialLastMessages(newList: List<LastMessageUIO>) {
+        lastMessageDao.upsert(newList)
     }
 
     private val _folders = MutableStateFlow<List<FolderUIO>>(emptyList())
@@ -718,8 +586,7 @@ class EventsRepository(
                 if (folder.uuid == updatedFolder.uuid) {
                     folder.copy(
                         unreadCount = updatedFolder.unreadCount,
-                        title = updatedFolder.title,
-                        items = updatedFolder.items
+                        title = updatedFolder.title
                     )
                 } else {
                     folder
@@ -1096,7 +963,7 @@ class EventsRepository(
                 synchronized(realtimeStateLock) {
                     membership.removeBinding(deleted.streamUuid, deleted.uuid)
                 }
-                if (deleted.userUuid == _currentUser.value?.uuid && _streams.value.any { it.uuid == deleted.streamUuid }) {
+                if (deleted.userUuid == _currentUser.value?.uuid ) {
                     removeStream(deleted.streamUuid)
                 }
             }
@@ -1106,16 +973,20 @@ class EventsRepository(
     fun didReceiveUserEvent(payload: String, action: String) {
         when(action) {
             "created" -> {
-                val user = json.decodeFromString<UserResponseData>(payload).toUio()
-                addUser(user)
+                scope.launch {
+                    val user = json.decodeFromString<UserResponseData>(payload).toUio()
+                    addUser(user)
+                }
             }
             "updated" -> {
-                val user = json.decodeFromString<UserResponseData>(payload).toUio()
-                val currentUser = _currentUser.value
-                if (currentUser?.uuid == user.uuid) {
-                    updateCurrentUser(user)
+                scope.launch {
+                    val user = json.decodeFromString<UserResponseData>(payload).toUio()
+                    val currentUser = _currentUser.value
+                    if (currentUser?.uuid == user.uuid) {
+                        updateCurrentUser(user)
+                    }
+                    updateUser(user)
                 }
-                updateUser(user)
             }
             "deleted" -> {
 
@@ -1127,12 +998,16 @@ class EventsRepository(
         when(action) {
             "created" -> {
                 val message = json.decodeFromString<MessageResponse>(payload).toUio()
-                updateMessagesPool(listOf(message))
+                scope.launch {
+                    addLastMessage(message.toLastMessageUIO())
+                }
                 addMessageToStreamTopic(message)
             }
             "updated" -> {
                 val message = json.decodeFromString<MessageResponse>(payload).toUio()
-                updateMessagesPool(listOf(message))
+                scope.launch {
+                    addLastMessage(message.toLastMessageUIO())
+                }
                 updateMessage(message)
             }
             "deleted" -> {
@@ -1175,11 +1050,15 @@ class EventsRepository(
         when(action) {
             "created" -> {
                 val stream = json.decodeFromString<Stream>(payload).toUio()
-                addStream(stream)
+                scope.launch {
+                    addStream(stream)
+                }
             }
             "updated" -> {
                 val stream = json.decodeFromString<Stream>(payload).toUio()
-                updateStream(stream)
+                scope.launch {
+                    updateStream(stream)
+                }
             }
             "deleted" -> {
                 json.decodeFromString<JsonObject>(payload)["uuid"]?.jsonPrimitive?.contentOrNull?.let(::removeStream)
@@ -1192,12 +1071,20 @@ class EventsRepository(
         when(action) {
             "created" -> {
                 val topic = json.decodeFromString<TopicsResponseData>(payload).toUio()
-                addTopicToStream(topic)
+                scope.launch {
+                    addTopic(topic)
+                }
             }
             "updated" -> {
                 val topic = json.decodeFromString<TopicsResponseData>(payload).toUio()
-                updateTopic(topic)
-                if (epochVersion != null && generation != null) onPushTopicUpdated(topic, epochVersion, generation)
+                scope.launch {
+                    updateTopic(topic)
+                    if (epochVersion != null && generation != null) onPushTopicUpdated(
+                        topic,
+                        epochVersion,
+                        generation
+                    )
+                }
             }
             "deleted" -> {
 
@@ -1326,37 +1213,10 @@ class EventsRepository(
     }
 
     suspend fun loadSubscribedChannels() {
-        val webSocketClient = client ?: return
-        val response = webSocketClient.performRequest(StreamsRequest(), serverId)
+        val response = client.performRequest(StreamsRequest(), serverId)
         when(response) {
             is ApiResult.Success -> {
-                val messageIds = response.value.mapNotNull { it.lastMessageUuid }
-                if (!messageIds.isEmpty()) {
-                    val messagesResponse = webSocketClient.performRequest(
-                        MessagesByIdsRequest(messageIds),
-                        serverId,
-                    )
-                    when (messagesResponse) {
-                        is ApiResult.Success -> {
-                            setInitialMessagesPool(messagesResponse.value)
-                            val streamsWithMessages = response.value.map { stream ->
-                                var updatedStream = stream
-                                updatedStream.lastMessage = poolMessage(stream.lastMessageUuid)
-                                updatedStream
-                            }
-                            setInitialStreams(streamsWithMessages)
-                            loadDrafts()
-                        }
-
-                        is ApiResult.Error -> {
-                            setInitialStreams(response.value)
-                            loadDrafts()
-                        }
-                    }
-                } else {
-                    setInitialStreams(response.value)
-                    loadDrafts()
-                }
+                loadTopics(response.value)
             }
 
             is ApiResult.Error -> {
@@ -1365,12 +1225,50 @@ class EventsRepository(
         }
     }
 
+    suspend fun loadTopics(streams: List<StreamUIO>) {
+        val response = client.performRequest(TopicsRequest(), serverId)
+        when(response) {
+            is ApiResult.Success -> {
+                loadLastMessages(streams, response.value)
+            }
+
+            is ApiResult.Error -> {
+                _streamsQueryState.value = QueryState.Error("")
+            }
+        }
+    }
+
+    suspend fun loadLastMessages(streams: List<StreamUIO>, topics: List<TopicUIO>) {
+
+        val streamMessageIds = streams.mapNotNull { it.lastMessageUuid }
+        val topicMessageIds = topics.mapNotNull { it.lastMessageUuid }
+        val messageIds = streamMessageIds + topicMessageIds
+        if (!messageIds.isEmpty()) {
+            for (messageIdsBatch in messageIds.chunked(100)) {
+                when (val messagesResponse = client.performRequest(
+                    MessagesByIdsRequest(messageIdsBatch),
+                    serverId,
+                )) {
+                    is ApiResult.Success -> {
+                        addLastMessages(messagesResponse.value.map { it.toLastMessageUIO() })
+                    }
+                    is ApiResult.Error -> {
+                        _streamsQueryState.value = QueryState.Error("")
+                    }
+                }
+            }
+        }
+        setInitialStreams(streams)
+        setInitialTopics(topics)
+        loadDrafts()
+    }
+
     suspend fun loadDrafts() {
         val webSocketClient = client ?: return
         val response = webSocketClient.performRequest(DraftsRequest(), serverId)
         when(response) {
             is ApiResult.Success -> {
-                setInitialDraftsPool(response.value)
+                setInitialDrafts(response.value)
                 _streamsQueryState.value = QueryState.Success
                 start()
             }

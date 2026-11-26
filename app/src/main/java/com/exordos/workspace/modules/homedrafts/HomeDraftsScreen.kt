@@ -103,9 +103,6 @@ fun HomeDraftsScreen(
             }
             is QueryState.Error -> {
                 FullScreenError {
-                    scope.launch {
-                        viewModel.loadTopicsIfNeeded()
-                    }
                 }
             }
             QueryState.Success -> {
@@ -148,7 +145,7 @@ fun HomeDraftsScreen(
                                                 onClick = {
                                                     navController.navigate(
                                                         HomeFlow.ChatDialog(
-                                                            stream.displayableName(),
+                                                            stream.name,
                                                             stream.uuid,
                                                             topic.name,
                                                             topic.uuid,
@@ -175,7 +172,7 @@ fun HomeDraftsScreen(
                                                     .padding(horizontal = 8.dp, vertical = 4.dp),
                                             )
                                             Text(
-                                                stream.displayableName(),
+                                                stream.name,
                                                 color = LocalWorkspaceColorsPalette.current.textHeaders,
                                                 fontSize = 14.sp,
                                                 fontWeight = FontWeight.Medium

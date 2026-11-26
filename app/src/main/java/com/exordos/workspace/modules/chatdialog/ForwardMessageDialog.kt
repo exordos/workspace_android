@@ -64,6 +64,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 import com.exordos.workspace.R
@@ -91,6 +92,7 @@ import com.exordos.workspace.modules.encryptedchat.encryptedMessagePlacementUuid
 
 @Composable
 internal fun ForwardMessagesDialog(
+    chatDialogViewModel: ChatDialogViewModel,
     sources: List<MessageUIO>,
     client: WorkspaceAPIClient,
     repo: EventsRepository,
@@ -107,7 +109,7 @@ internal fun ForwardMessagesDialog(
     val currentUser by repo.currentUser.collectAsStateWithLifecycle()
     val cachedTopics by repo.streamTopics.collectAsStateWithLifecycle()
     val cachedBindings by repo.streamBindings.collectAsStateWithLifecycle()
-    val users by repo.users.collectAsState()
+    val users by chatDialogViewModel.users.collectAsStateWithLifecycle()
     val folders by repo.folders.collectAsState()
     var streams by remember { mutableStateOf(forwardableStreams(repo.streams.value)) }
     var loading by remember { mutableStateOf(true) }

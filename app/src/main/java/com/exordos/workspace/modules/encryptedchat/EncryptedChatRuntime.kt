@@ -272,7 +272,7 @@ class EncryptedChatRuntime(
         }
         stateJob.start()
         // Service messages can live in the default topic while the user is viewing another topic.
-        when (val history = client.performRequest(confirmed.pin(MessagesRequest(streamId, null)), serverId, captured)) {
+        when (val history = client.performRequest(confirmed.pin(MessagesRequest(streamId, null,  100, null)), serverId, captured)) {
             is ApiResult.Success -> { requireBound(confirmed); repo.updateMessagesPool(history.value.filter { it.streamUuid == streamId }) }
             is ApiResult.Error -> { mutableState.value = mutableState.value.copy(error = EncryptedChatFailure.UNAVAILABLE) }
         }

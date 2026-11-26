@@ -134,7 +134,7 @@ fun FolderCell(
             modifier = Modifier.padding(vertical = 13.dp)
         ) {
             Text(
-                text = "${folder.title} (${folder.items.count()})",
+                text = "${folder.title}",
                 color = LocalWorkspaceColorsPalette.current.textHeaders,
                 fontSize = 14.sp,
                 fontFamily = InterFontFamily,

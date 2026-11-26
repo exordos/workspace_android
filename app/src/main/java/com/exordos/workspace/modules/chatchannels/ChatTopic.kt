@@ -61,7 +61,7 @@ fun ChatTopic(
     navController: NavHostController
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
-    val lastMessage = item.lastMessage
+    val lastMessage = viewModel.lastMessage(item)
     val scope = rememberCoroutineScope()
     Box {
         Row(
@@ -80,7 +80,7 @@ fun ChatTopic(
                         viewModel.currentTopicName = item.name
                         navController.navigate(
                             ChatFlow.ChatDialog(
-                                stream.displayableName(),
+                                stream.name,
                                 stream.uuid,
                                 item.name,
                                 item.uuid,
@@ -125,7 +125,7 @@ fun ChatTopic(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        val lastMessageUser = lastMessage.user
+                        val lastMessageUser = viewModel.author(lastMessage)
                         if (lastMessageUser != null) {
                             Text(
                                 text = lastMessageUser.displayableName(),

@@ -59,7 +59,9 @@ import com.exordos.workspace.data.uio.TopicUIO
 import com.exordos.workspace.data.remote.dto.UpdateStreamNotificationModeRequest
 import com.exordos.workspace.data.remote.dto.UpdateTopicNotificationModeRequest
 import com.exordos.workspace.data.remote.dto.UsersRequest
+import com.exordos.workspace.data.uio.LastMessageUIO
 import com.exordos.workspace.data.uio.UserUIO
+import com.exordos.workspace.data.uio.toMessageUIO
 import com.exordos.workspace.modules.chooseserver.QueryState
 import com.exordos.workspace.ui.theme.LocalWorkspaceColorsPalette
 import kotlin.collections.first
@@ -104,24 +106,6 @@ class ChatViewModel(
     })
     val encryptedPreviews: StateFlow<Map<String, EncryptedChatListPreview>> = previewProjector.previews
     private var previewRefresh: Job? = null
-    private val previewObserver = viewModelScope.launch {
-        merge(
-            eventsRepo.flatMapLatest { repo -> if (repo == null) flowOf(Unit) else merge(
-                repo.streams.map { Unit }, repo.currentUser.map { Unit }, repo.messagesPool.map { Unit }, repo.streamBindings.map { Unit },
-                repo.streamTopicMessages.map { Unit }, repo.users.map { Unit }, repo.verifiedOwnerAuthentication.map { Unit }) },
-            userViewModel.selectedServer.map { Unit }, userViewModel.selectedServerId.map { Unit },
-            userViewModel.accessToken.map { Unit }, previewRows.map { Unit }, previewAttached,
-            EncryptedChatRuntime.localKeyChanges.filter(previewProjector::affectedBy).map { Unit },
-            ConfirmedAccountContext.invalidations.filter { previewProjector.accountChanged() }.map { Unit },
-        ).collect {
-            previewProjector.invalidate()
-            previewRefresh?.cancel()
-            if (previewContext != null && previewRows.value.isNotEmpty()) previewRefresh = launch {
-                try { previewProjector.refresh() }
-                catch (cancelled: CancellationException) { throw cancelled }
-            }
-        }
-    }
 
     fun attachEncryptedPreviews(context: Context) {
         if (previewContext == null) { previewContext = context.applicationContext; previewAttached.tryEmit(Unit) }
@@ -135,6 +119,29 @@ class ChatViewModel(
 
     fun encryptedPreview(streamUuid: String): EncryptedChatListPreview? = previewProjector.preview(streamUuid)
 
+    fun directUser(stream: StreamUIO): UserUIO? {
+        val directUserUuid = stream.directUserUuid ?: return null
+
+        return eventsRepo.value?.userDao?.getUser(directUserUuid)
+    }
+
+    fun author(lastMessage: LastMessageUIO?): UserUIO? {
+        val message = lastMessage ?: return null
+        return eventsRepo.value?.userDao?.getUser(message.authorUuid)
+    }
+
+    fun lastMessage(stream: StreamUIO): LastMessageUIO? {
+        val lastMessageUuid = stream.lastMessageUuid ?: return null
+
+        return eventsRepo.value?.lastMessageDao?.getLastMessage(lastMessageUuid)
+    }
+
+    fun lastMessage(topic: TopicUIO): LastMessageUIO? {
+        val lastMessageUuid = topic.lastMessageUuid ?: return null
+
+        return eventsRepo.value?.lastMessageDao?.getLastMessage(lastMessageUuid)
+    }
+
     private fun previewSnapshot(): EncryptedPreviewSnapshot? {
         val repo = eventsRepo.value ?: return null
         val selected = userViewModel.selectedServer.value ?: return null
@@ -146,19 +153,22 @@ class ChatViewModel(
         val pool = repo.messagesPool.value
         val conversations = repo.streamTopicMessages.value
         val bindings = repo.streamBindings.value
-        val users = repo.users.value
-        val currentStreams = repo.streams.value
+        val users = repo.users.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList(),
+        )
+        val currentStreams = streams.value
         val visible = previewRows.value
         val cacheKey = listOf(repo, selected.copy(), own.uuid, proof,
-            currentStreams, pool, conversations, bindings, users, visible)
+            currentStreams, pool, conversations, bindings, users.value, visible)
         synchronized(previewCacheLock) {
             if (previewCacheKey == cacheKey) return previewCache
             val loadedConversations = conversations.values.flatten()
             val rows = currentStreams.filter { it.uuid in visible }.mapNotNull { stream ->
                 val message = latestLoadedEncryptedPreviewMessage(stream, pool, loadedConversations)
-                val withAuthor = message?.let { it.copy(user = it.user ?: users.firstOrNull { user -> user.uuid == it.authorUuid }) }
-                val last = pool.firstOrNull { it.uuid == stream.lastMessageUuid } ?: stream.lastMessage
-                encryptedPreviewSource(stream, withAuthor, own.uuid, requireNotNull(selected.projectUuid), bindings[stream.uuid], last)
+                val lastMessage = lastMessage(stream)
+                encryptedPreviewSource(stream, message, own.uuid, requireNotNull(selected.projectUuid), bindings[stream.uuid], lastMessage?.toMessageUIO())
             }.sortedBy { it.streamUuid }
             return EncryptedPreviewSnapshot(account, rows).also { previewCacheKey = cacheKey; previewCache = it }
         }
@@ -179,15 +189,6 @@ class ChatViewModel(
     private val _currentlySelectedStream = MutableStateFlow<StreamUIO?>(null)
     var currentlySelectedStream: StateFlow<StreamUIO?> = _currentlySelectedStream
 
-    val streamTopics: StateFlow<Map<String, List<TopicUIO>>> = eventsRepo
-        .flatMapLatest { repo ->
-            repo?.streamTopics ?: flowOf(emptyMap())
-        }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = emptyMap(),
-        )
     val folders: StateFlow<List<FolderUIO>> = eventsRepo
         .flatMapLatest { repo ->
             repo?.folders ?: flowOf(emptyList())
@@ -262,10 +263,6 @@ class ChatViewModel(
 
     var currentStreamId: String = ""
 
-    fun poolMessage(uuid: String?): MessageUIO? {
-        return eventsRepo.value?.messagesPool?.value?.firstOrNull { it.uuid == uuid }
-    }
-
     fun updateCurrentlySelectedFolder(newFolder: FolderUIO) {
         if (newFolder.uuid != currentlySelectedFolder.value?.uuid) {
             eventsRepo.value?.updateCurrentlySelectedFolder(newFolder)
@@ -294,8 +291,6 @@ class ChatViewModel(
             val currentStreamBindings = streamBindings.value[newChat.uuid]
             if (currentStreamBindings?.isEmpty() ?: true) {
                 loadStreamBindings(newChat)
-            } else if (streamTopics.value[newChat.uuid]?.isEmpty() ?: true) {
-                loadTopics(newChat)
             }
         }
     }
@@ -315,44 +310,8 @@ class ChatViewModel(
                 is ApiResult.Error -> Unit
             }
         }
-        loadTopics(stream)
     }
 
-    suspend fun loadTopics(stream: StreamUIO) {
-        _topicsQueryState.value = QueryState.Loading
-        val response = client.performRequest(TopicsRequest(listOf(stream.uuid)))
-        when(response) {
-            is ApiResult.Success -> {
-                val messageIds = response.value.mapNotNull { it.lastMessageUuid }
-                if (!messageIds.isEmpty()) {
-                    val messagesResponse = client.performRequest(MessagesByIdsRequest(messageIds))
-                    when (messagesResponse) {
-                        is ApiResult.Success -> {
-                            eventsRepo.value?.updateMessagesPool(messagesResponse.value)
-                            val topicsWithMessages = response.value.map { topic ->
-                                var updatedTopic = topic
-                                updatedTopic.lastMessage = poolMessage(topic.lastMessageUuid)
-                                updatedTopic
-                            }
-                            eventsRepo.value?.addStreamTopics(stream.uuid, topicsWithMessages)
-                            _topicsQueryState.value = QueryState.Success
-                        }
-
-                        is ApiResult.Error -> {
-                            eventsRepo.value?.addStreamTopics(stream.uuid, response.value)
-                            _topicsQueryState.value = QueryState.Success
-                        }
-                    }
-                } else {
-                    eventsRepo.value?.addStreamTopics(stream.uuid, response.value)
-                    _topicsQueryState.value = QueryState.Success
-                }
-            }
-            is ApiResult.Error -> {
-                _topicsQueryState.value = QueryState.Error("")
-            }
-        }
-    }
 
     suspend fun addFolder(name: String) {
         val response = client.performRequest(AddFolderRequest(name))
@@ -455,7 +414,7 @@ class ChatViewModel(
     }
 
     suspend fun deleteChatFromFolder(chatId: String, folder: FolderUIO) {
-        val folderChat = folder.items.firstOrNull() { it.streamUuid == chatId }
+        val folderChat = eventsRepo.value.folderItemDao.getFolderItem(folder.uuid, chatId)
         if (folderChat != null) {
             val response = client.performRequest(DeleteChatFromFolderRequest(folderChat.uuid))
             when (response) {

@@ -47,6 +47,13 @@ class CreateStreamViewModel(
             initialValue = emptyList()
         )
 
+    val streams: StateFlow<List<StreamUIO>> = eventsRepository.streams
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList(),
+        )
+
     var createdStream: StreamUIO? = null
     private val _encrypted = MutableStateFlow(false)
     val encrypted: StateFlow<Boolean> = _encrypted.asStateFlow()
@@ -191,7 +198,7 @@ class CreateStreamViewModel(
                 }
             }
             check(isCurrent()) { "Учётная запись изменилась" }
-            if (eventsRepository.streams.value.none { it.uuid == created.uuid }) eventsRepository.addStream(created)
+            if (streams.value.none { it.uuid == created.uuid }) eventsRepository.addStream(created)
             _createQueryState.value = QueryState.Success
         } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
         catch (error: Exception) {

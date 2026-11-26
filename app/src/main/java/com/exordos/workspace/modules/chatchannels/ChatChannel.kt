@@ -104,8 +104,9 @@ fun ChatChannel(
         Row(
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            val avatarUrn = item.directUser?.avatar
-            val lastMessage = item.lastMessage
+            val directUser = viewModel.directUser(item)
+            val avatarUrn = directUser?.avatar
+            val lastMessage = viewModel.lastMessage(item)
             val encryptedPreview = if (item.encryption && encryptedPreviews.containsKey(item.uuid)) viewModel.encryptedPreview(item.uuid)
                 ?.takeIf { it.catalogMessageUuid == lastMessage?.uuid } else null
             Box(Modifier.padding(start = 8.dp, top = 12.dp, end = 12.dp, bottom = 12.dp).size(40.dp)) {
@@ -114,7 +115,7 @@ fun ChatChannel(
                     viewModel.client.userViewModel?.baseUrl?.value ?: "",
                     viewModel.client.authHeaders(),
                     item.color,
-                    item.displayableName(),
+                    item.name,
                     Modifier.size(40.dp).clip(RoundedCornerShape(8.dp))
                         .background(if (currentlySelectedStream?.uuid == item.uuid) palette.cardBackgroundBase else Color.Transparent)
                 )
@@ -129,7 +130,7 @@ fun ChatChannel(
 
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
-                    text = item.displayableName(),
+                    text = item.name,
                     color = LocalWorkspaceColorsPalette.current.textHeaders,
                     fontSize = 14.sp,
                     fontFamily = InterFontFamily,
@@ -144,7 +145,7 @@ fun ChatChannel(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        val lastMessageAuthor = encryptedPreview?.authorName ?: lastMessage.user?.displayableName()
+                        val lastMessageAuthor = encryptedPreview?.authorName ?: viewModel.author(lastMessage)?.displayableName()
                         if (lastMessageAuthor != null) {
                             Text(
                                 text = lastMessageAuthor,

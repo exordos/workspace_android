@@ -53,7 +53,14 @@ class StreamInfoViewModel(
     context: Context? = null,
 ): ViewModel() {
     val repo = eventsRepositoryStore.get(client.getCurrentServerId()) ?: error("Cannot get current event repository")
-    private var mountedProtectedStream = repo.streams.value.firstOrNull { it.uuid == streamUuid }?.encryption == true
+
+    val streams: StateFlow<List<StreamUIO>> = repo.streams
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList(),
+        )
+    private var mountedProtectedStream = streams.value.firstOrNull { it.uuid == streamUuid }?.encryption == true
     val hasMountedProtectedStream: Boolean get() = mountedProtectedStream
     private val notificationMountServer = client.requireUserViewModel().selectedServer.value?.takeIf { it.id == repo.serverId }?.copy()
     private val notificationMountOwner = notificationMountServer?.let { server -> repo.currentUser.value?.uuid?.let {
@@ -70,8 +77,10 @@ class StreamInfoViewModel(
             }
         },
         commit = { _, mode ->
-            repo.streams.value.firstOrNull { it.uuid == streamUuid }?.let {
-                repo.updateStream(it.copy(notificationMode = mode))
+            streams.value.firstOrNull { it.uuid == streamUuid }?.let {
+                viewModelScope.launch {
+                    repo.updateStream(it.copy(notificationMode = mode))
+                }
             }
         },
         initialOwner = notificationMountOwner,
@@ -86,9 +95,15 @@ class StreamInfoViewModel(
             body.name, body.description)), captured.server.id, captured.server) },
         commit = { _, response ->
             // Metadata edits must not roll a concurrently rotated key back to an older response.
-            repo.streams.value.firstOrNull { it.uuid == streamUuid }?.let { current ->
-                repo.updateStream(current.copy(name = response.name, description = response.description,
-                    updatedAt = response.updatedAt))
+            streams.value.firstOrNull { it.uuid == streamUuid }?.let { current ->
+                viewModelScope.launch {
+                    repo.updateStream(
+                        current.copy(
+                            name = response.name, description = response.description,
+                            updatedAt = response.updatedAt
+                        )
+                    )
+                }
             }
         },
         deleteDetails = { captured -> client.performRequest(captured.pin(DeleteProtectedStreamRequest(streamUuid)),
@@ -131,7 +146,7 @@ class StreamInfoViewModel(
             merge(combine(client.requireUserViewModel().selectedServer, client.requireUserViewModel().accessToken,
                 repo.currentUser, repo.streams, repo.verifiedOwnerAuthentication) { _, _, _, _, _ -> Unit },
                 ConfirmedAccountContext.invalidations.map { Unit }).collect {
-                    if (repo.streams.value.any { it.uuid == streamUuid && it.encryption }) mountedProtectedStream = true
+                    if (streams.value.any { it.uuid == streamUuid && it.encryption }) mountedProtectedStream = true
                     protectedStreamEditor.onContextChanged()
                     protectedCallStarter.onContextChanged()
                     protectedNotifications.onContextChanged()
@@ -158,16 +173,15 @@ class StreamInfoViewModel(
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = repo.streams.value.firstOrNull { it.uuid == streamUuid }
+            initialValue = streams.value.firstOrNull { it.uuid == streamUuid }
         )
 
-    val topic: StateFlow<TopicUIO?> = repo.streamTopics
-        .map { map -> map[streamUuid] }
+    val topic: StateFlow<TopicUIO?> = repo.topics
         .map { list -> list?.firstOrNull { it.uuid == topicUuid } }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = repo.streamTopics.value[streamUuid]?.firstOrNull { it.uuid == topicUuid }
+            initialValue = null
         )
 
     val streamBindings: StateFlow<Map<String, List<StreamBindingUIO>>> = repo.streamBindings
@@ -187,7 +201,7 @@ class StreamInfoViewModel(
     suspend fun setStreamNotificationMode(notificationMode: String) {
         // A mounted protected VM must never fall back to the current account's ordinary transport,
         // including after its original stream disappears during account switching.
-        if (mountedProtectedStream || repo.streams.value.any { it.uuid == streamUuid && it.encryption }) {
+        if (mountedProtectedStream || streams.value.any { it.uuid == streamUuid && it.encryption }) {
             mountedProtectedStream = true
             protectedNotifications.update(notificationMode)
             return

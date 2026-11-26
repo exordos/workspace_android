@@ -32,12 +32,12 @@ class ChatUserInfoViewModel(
 ): ViewModel() {
     val repo = eventsRepositoryStore.get(client.getCurrentServerId()) ?: error("Cannot get current event repository")
 
-    val user: StateFlow<UserUIO> = repo.users
+    val user: StateFlow<UserUIO?> = repo.users
         .map { list -> list.first { it.uuid == userUuid } }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = repo.users.value.first { it.uuid == userUuid }
+            initialValue = repo.userDao.getUser(userUuid)
         )
     private val _createQueryState = MutableStateFlow<QueryState>(QueryState.Idle)
     val createQueryState: StateFlow<QueryState> = _createQueryState

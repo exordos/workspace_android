@@ -132,14 +132,14 @@ fun StreamInfoView(
                     viewModel.client.userViewModel?.baseUrl?.value ?: "",
                     viewModel.client.authHeaders(),
                     stream.color,
-                    stream.displayableName(),
+                    stream.name,
                     Modifier
                         .padding(end = 12.dp)
                         .size(64.dp)
                 )
                 Column {
                     Text(
-                        text = stream.displayableName(),
+                        text = stream.name,
                         color = LocalWorkspaceColorsPalette.current.textHeaders,
                         fontSize = 20.sp,
                         fontFamily = InterFontFamily,
@@ -170,7 +170,7 @@ fun StreamInfoView(
             )
             ActionButtonsRow(
                 shareEnabled = shareLink != null,
-                onShare = { shareLink?.let { shareWorkspaceLink(context, stream.displayableName(), it) } }
+                onShare = { shareLink?.let { shareWorkspaceLink(context, stream.name, it) } }
             )
             NotificationButtonsRow(viewModel)
             val summary = topic?.summary

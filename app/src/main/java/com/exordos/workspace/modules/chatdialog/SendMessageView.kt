@@ -239,8 +239,9 @@ fun SendMessageView(
                                 .padding(8.dp)
                                 .clickable( onClick = { viewModel.onClickOnQuotedMessage(quotedMessage) })
                         ) {
+                            val author = viewModel.author(quotedMessage.message)
                             Text(
-                                quotedMessage.message.user?.displayableName() ?: "Пользователь",
+                                author?.displayableName() ?: "Пользователь",
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Medium,
                                 color = if (quotedMessage == currentlyQuotedMessage) LocalWorkspaceColorsPalette.current.textHeaders else LocalWorkspaceColorsPalette.current.textHeaders

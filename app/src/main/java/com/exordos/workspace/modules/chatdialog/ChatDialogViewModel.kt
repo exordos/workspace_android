@@ -59,7 +59,10 @@ import com.exordos.workspace.data.uio.StreamBindingUIO
 import com.exordos.workspace.data.remote.dto.StreamBindingsRequest
 import com.exordos.workspace.data.uio.TopicUIO
 import com.exordos.workspace.data.remote.dto.UsersRequest
+import com.exordos.workspace.data.uio.LastMessageUIO
 import com.exordos.workspace.data.uio.UserUIO
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import java.io.File
 import kotlin.collections.filter
 import kotlin.collections.first
@@ -107,6 +110,11 @@ class ChatDialogViewModel(
         }
         encryptionRuntime.requestKey(keyUuid, recovery)
     }
+
+    fun author(lastMessage: MessageUIO?): UserUIO? {
+        val message = lastMessage ?: return null
+        return repo.userDao.getUser(message.authorUuid)
+    }
     fun requestEncryptionKeyForMessage(message: MessageUIO) = encryptionAction {
         // Resolve the current wire snapshot by message UUID rather than using a plaintext projection.
         val raw = (repo.streamTopicMessages.value["$chatId.$topicUuid"].orEmpty() + repo.messagesPool.value)
@@ -152,12 +160,24 @@ class ChatDialogViewModel(
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = emptyMap()
         )
-    val stream: StateFlow<StreamUIO?> = repo.streams
+    val streams: StateFlow<List<StreamUIO>> = repo.streams
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList(),
+        )
+    val topics: StateFlow<List<TopicUIO>> = repo.topics
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList(),
+        )
+    val stream: StateFlow<StreamUIO?> = streams
         .map { list -> list.firstOrNull { it.uuid == chatId } }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = repo.streams.value.firstOrNull { it.uuid == chatId }
+            initialValue = streams.value.firstOrNull { it.uuid == chatId }
         )
 
     val directUser: StateFlow<UserUIO?> = combine(repo.users, stream) { users, currentStream ->
@@ -176,11 +196,11 @@ class ChatDialogViewModel(
             initialValue = emptyList()
         )
 
-    val drafts: StateFlow<List<DraftUIO>> = repo.draftsPool
+    val drafts: StateFlow<List<DraftUIO>> = repo.drafts
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = repo.draftsPool.value
+            initialValue = emptyList()
         )
 
     private var possibleMessage: MessageUIO? = null
@@ -386,8 +406,8 @@ class ChatDialogViewModel(
 
     fun initialMessageIndex(messages: List<MessageUIO>): Int =
         initialChatMessageIndex(messages, firstUnreadMessageUuid) { message ->
-            val streamMode = repo.streams.value.firstOrNull { it.uuid == chatId }?.notificationMode ?: "all_messages"
-            val topicMode = repo.streamTopics.value[chatId]?.firstOrNull { it.uuid == topicUuid }?.notificationMode ?: "default"
+            val streamMode = streams.value.firstOrNull { it.uuid == chatId }?.notificationMode ?: "all_messages"
+            val topicMode = topics.value.firstOrNull { it.uuid == topicUuid }?.notificationMode ?: "default"
             message.isActiveUnread(streamMode, topicMode)
         }
 
@@ -427,7 +447,7 @@ class ChatDialogViewModel(
     }
 
     fun getUser(userUuid: String): UserUIO? {
-        return repo.users.value.firstOrNull { it.uuid == userUuid }
+        return repo.userDao.getUser(userUuid)
     }
 
     private val states = mutableMapOf<String, MutableStateFlow<FileUiState>>()
@@ -542,7 +562,7 @@ class ChatDialogViewModel(
             else sendMessage(context)
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (error: Exception) {
-            if (repo.streams.value.firstOrNull { it.uuid == chatId }?.encryption == true)
+            if (streams.value.firstOrNull { it.uuid == chatId }?.encryption == true)
                 messageDeletion.showActionError(R.string.encrypted_chat_error)
             else throw error
         }
@@ -550,7 +570,7 @@ class ChatDialogViewModel(
 
     suspend fun sendMessage(context: Context) {
         val attachmentList = _uriList.value
-        val currentStream = repo.streams.value.firstOrNull { it.uuid == chatId }
+        val currentStream = streams.value.firstOrNull { it.uuid == chatId }
         if (currentStream == null) { messageDeletion.showActionError(R.string.chat_send_unavailable); return }
         val encrypted = currentStream.encryption
         if (encrypted && encryptionRuntime.readySession().state.value.sendingKeyUuid == null) {
@@ -562,7 +582,8 @@ class ChatDialogViewModel(
             mentions.text
         } else {
             val quotedMessagesStrings = quotedMessages.value.map {
-                "[${it.message.user?.displayableName() ?: "user"}](urn:quote:${it.message.uuid})\n\n${it.text}"
+                val author = author(it.message)
+                "[${author?.displayableName() ?: "user"}](urn:quote:${it.message.uuid})\n\n${it.text}"
             }
             val resultString = quotedMessagesStrings.joinToString("\n\n")
             resultString
@@ -594,7 +615,7 @@ class ChatDialogViewModel(
 
     @OptIn(ExperimentalUuidApi::class)
     suspend fun sendTextMessage(messageText: String) {
-        val currentStream = repo.streams.value.firstOrNull { it.uuid == chatId }
+        val currentStream = streams.value.firstOrNull { it.uuid == chatId }
         if (currentStream == null) { messageDeletion.showActionError(R.string.chat_send_unavailable); return }
         if (currentStream.encryption) {
             try {
@@ -630,7 +651,6 @@ class ChatDialogViewModel(
             emptyMap(),
             false
         )
-        newMessage.user = repo.currentUser.value
         repo.addPendingMessage(newMessage)
         possibleMessage = newMessage
         mentions.setText("")
@@ -680,7 +700,7 @@ class ChatDialogViewModel(
     }
 
     suspend fun sendEditMessage(messageUuid: String, messageText: String) {
-        val currentStream = repo.streams.value.firstOrNull { it.uuid == chatId }
+        val currentStream = streams.value.firstOrNull { it.uuid == chatId }
         if (currentStream == null) { messageDeletion.showActionError(R.string.chat_send_unavailable); return }
         if (currentStream.encryption || editingMessage?.originalEncryptedPayload != null) {
             try {
@@ -737,7 +757,7 @@ class ChatDialogViewModel(
                 loadStreamBindings()
             }
             val draft = drafts.value.firstOrNull { it.streamUuid == chatId && it.topicUuid == topicUuid }
-            if (draft != null && repo.streams.value.firstOrNull { it.uuid == chatId }?.encryption != true) {
+            if (draft != null && streams.value.firstOrNull { it.uuid == chatId }?.encryption != true) {
                 mentions.setText(draft.payload.content)
             }
         }
@@ -757,6 +777,10 @@ class ChatDialogViewModel(
                 _isLoading.value = false
             }
         }
+    }
+
+    suspend fun loadNextMessages() {
+
     }
 
     suspend fun loadStreamBindings() {

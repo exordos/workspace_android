@@ -1,14 +1,17 @@
 package com.exordos.workspace.data
 
+import android.content.Context
 import com.exordos.workspace.data.uio.TopicUIO
 
 import io.ktor.client.HttpClient
 import com.exordos.workspace.UserViewModel
 import com.exordos.workspace.data.remote.WorkspaceAPIClient
+import org.webrtc.ApplicationContextProvider
 
 class EventsRepositoryStore(
     private val tokenStore: SecureTokenStore,
-    var client: WorkspaceAPIClient
+    var client: WorkspaceAPIClient,
+    val context: Context
 ) {
     private val repos = mutableMapOf<String, EventsRepository>()
     var onPushTopicUpdated: (String, String?, TopicUIO, Long, String) -> Unit = { _, _, _, _, _ -> }
@@ -20,7 +23,7 @@ class EventsRepositoryStore(
             if (existing.matchesServerConfiguration(config)) return existing
             existing.close()
         }
-        return EventsRepository(config.id, config.copy(), tokenStore, client).also { repo ->
+        return EventsRepository(config.id, config.copy(), tokenStore, client, context).also { repo ->
             repo.onPushTopicUpdated = { topic, epoch, generation -> onPushTopicUpdated(config.id, repo.currentUser.value?.uuid, topic, epoch, generation) }
             repo.onPushRefreshNeeded = { onPushRefreshNeeded() }
             repos[config.id] = repo

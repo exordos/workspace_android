@@ -32,6 +32,7 @@ data class FolderResponseData(
 @Serializable
 data class FolderItem(
     val uuid: String,
+    val folder: String,
     @SerialName("stream_uuid") val streamUuid: String,
     @SerialName("chat_type") val chatType: String,
     @SerialName("unread_count") val unreadCount: Int,

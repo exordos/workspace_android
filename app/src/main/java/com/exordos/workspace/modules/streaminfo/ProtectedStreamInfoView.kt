@@ -230,7 +230,7 @@ fun ProtectedStreamInfoView(viewModel: StreamInfoViewModel, navController: NavHo
                     }
                     ProtectedActionTile(R.drawable.ic_share, R.string.protected_stream_share, shareLink != null,
                         "protected-stream-share", Modifier.weight(1f)) {
-                        shareLink?.let { shareWorkspaceLink(context, current.displayableName(), it) }
+                        shareLink?.let { shareWorkspaceLink(context, current.name, it) }
                     }
                 }
                 if (callFailed) ProtectedText(stringResource(R.string.protected_stream_call_failed), ProtectedDelete, Modifier.padding(20.dp))
@@ -335,7 +335,7 @@ private fun ProtectedInfoHeader(title: String?, onBack: () -> Unit, onClose: () 
 @Composable
 private fun ProtectedAvatar(stream: StreamUIO, size: Int, baseUrl: String, viewModel: StreamInfoViewModel) {
     Box(Modifier.size(size.dp), contentAlignment = Alignment.Center) {
-        Avatar(null, baseUrl, viewModel.client.authHeaders(), stream.color, stream.displayableName(), Modifier.fillMaxSize())
+        Avatar(null, baseUrl, viewModel.client.authHeaders(), stream.color, stream.name, Modifier.fillMaxSize())
         EncryptedChatAvatarBadge(Modifier.size(if (size >= 80) 28.dp else 24.dp))
     }
 }

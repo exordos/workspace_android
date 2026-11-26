@@ -35,7 +35,7 @@ internal fun latestLoadedEncryptedPreviewMessage(stream: StreamUIO, pool: List<M
 
 /** Captures only public wire fields; repository objects and ciphertext are never replaced with plaintext. */
 internal fun encryptedPreviewSource(stream: StreamUIO, message: MessageUIO?, ownUserUuid: String,
-                                    projectUuid: String, bindings: List<StreamBindingUIO>?, catalogLast: MessageUIO? = stream.lastMessage): EncryptedPreviewSource? {
+                                    projectUuid: String, bindings: List<StreamBindingUIO>?, catalogLast: MessageUIO?): EncryptedPreviewSource? {
     if (message == null || !stream.encryption || message.payload.kind != "e2ee" || message.payload.keyUuid.isNullOrBlank()) return null
     val memberRoles = setOf("owner", "administrator", "moderator", "member")
     val authorized = stream.userUuid == ownUserUuid && (stream.projectId == null || stream.projectId == projectUuid) &&

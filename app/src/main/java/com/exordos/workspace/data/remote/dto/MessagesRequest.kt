@@ -14,14 +14,16 @@ import com.exordos.workspace.data.remote.HTTPMethod
 @Serializable
 data class MessagesRequest(
     val streamId: String,
-    val topicId: String?
+    val topicId: String?,
+    val pageLimit: Int,
+    val pageMarker: String?
 ): UIORequest<MessagesRequestData, List<MessageResponse>, List<MessageUIO>, ApiError> {
     override fun toUio(dto: List<MessageResponse>): List<MessageUIO> = dto.map { it.toUio() }
     override val method: HTTPMethod = HTTPMethod.GET
     override val requiresApiKey: Boolean = true
     override val url: String = "/api/workspace/v1/messenger/messages/"
     override val data = MessagesRequestData(
-        streamId, topicId
+        streamId, topicId, pageLimit, pageMarker, "created_at", "desc"
     )
 }
 
@@ -51,7 +53,11 @@ class MentionedMessagesRequest: UIORequest<MentionedMessagesRequestData, List<Me
 @Serializable
 data class MessagesRequestData(
     @SerialName("stream_uuid") val streamUuid: String,
-    @SerialName("topic_uuid") val topicUuid: String?
+    @SerialName("topic_uuid") val topicUuid: String?,
+    @SerialName("page_limit") val pageLimit: Int,
+    @SerialName("page_marker") val pageMarker: String?,
+    @SerialName("sort_key") val sortKey: String,
+    @SerialName("sort_dir") val sortDir: String
 )
 
 @Serializable

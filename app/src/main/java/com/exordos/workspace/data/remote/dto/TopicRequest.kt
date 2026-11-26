@@ -12,7 +12,7 @@ import com.exordos.workspace.data.remote.HTTPMethod
 
 @Serializable
 data class TopicsRequest(
-    val streamUuids: List<String>
+    val streamUuids: List<String>? = null
 ): UIORequest<TopicsRequestData, List<TopicsResponseData>, List<TopicUIO>, ApiError> {
     override fun toUio(dto: List<TopicsResponseData>): List<TopicUIO> = dto.map { it.toUio() }
     override val method: HTTPMethod = HTTPMethod.GET
@@ -23,7 +23,7 @@ data class TopicsRequest(
 
 @Serializable
 data class TopicsRequestData(
-    val stream_uuid: List<String>
+    val stream_uuid: List<String>?
 )
 @Serializable
 data class TopicsByIdsRequest(

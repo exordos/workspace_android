@@ -15,9 +15,9 @@ internal fun workspaceStreamShareLink(
     return "${target.origin}/org/${target.organizationRouteId}/project/$projectUuid/stream/$streamUuid"
 }
 
-internal fun workspaceUserShareLink(baseUrl: String?, userUuid: String): String? {
+internal fun workspaceUserShareLink(baseUrl: String?, userUuid: String?): String? {
     val target = workspaceShareTarget(baseUrl) ?: return null
-    if (!isShareUuid(userUuid)) return null
+    if (!isShareUuid(userUuid ?: "")) return null
     return "${target.origin}/#user/$userUuid"
 }
 

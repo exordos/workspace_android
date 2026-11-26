@@ -52,6 +52,7 @@ fun CallMessageView(
     var menuExpanded by remember(item.uuid) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val author = viewModel.author(item)
     val itemUrl = URL(item.payload.content)
     val bubbleShape = if (item.isOwn) {
         RoundedCornerShape(
@@ -83,9 +84,9 @@ fun CallMessageView(
                                 onClick = {
                                     navController.navigate(
                                         ChatFlow.ChatUserInfo(
-                                            item.user?.displayableName() ?: "",
+                                            author?.displayableName() ?: "",
                                             item.authorUuid,
-                                            item.user?.avatar ?: "",
+                                            author?.avatar ?: "",
                                             ""
                                         )
                                     )
@@ -93,11 +94,11 @@ fun CallMessageView(
                             )
                     ) {
                         Avatar(
-                            item.user?.avatar,
+                            author?.avatar,
                             viewModel.userViewModel.baseUrl.value ?: "",
                             viewModel.client.authHeaders(),
                             null,
-                            item.user?.displayableName() ?: "",
+                            author?.displayableName() ?: "",
                             Modifier.size(30.dp)
                         )
                     }
@@ -116,21 +117,21 @@ fun CallMessageView(
                             onClick = {
                                 navController.navigate(
                                     ChatFlow.ChatUserInfo(
-                                        item.user?.displayableName() ?: "",
+                                        author?.displayableName() ?: "",
                                         item.authorUuid,
-                                        item.user?.avatar ?: "",
-                                        item.user?.email ?: ""
+                                        author?.avatar ?: "",
+                                        author?.email ?: ""
                                     )
                                 )
                             }
                         )
                 ) {
                     Avatar(
-                        item.user?.avatar,
+                        author?.avatar,
                         viewModel.userViewModel.baseUrl.value ?: "",
                         viewModel.client.authHeaders(),
                         null,
-                        item.user?.displayableName() ?: "",
+                        author?.displayableName() ?: "",
                         Modifier.size(30.dp)
                     )
                 }

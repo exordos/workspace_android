@@ -64,7 +64,7 @@ fun HomeInboundsScreen(
     navController: NavHostController
 ) {
     val streams by viewModel.streams.collectAsStateWithLifecycle()
-    val streamTopics by viewModel.streamTopics.collectAsStateWithLifecycle()
+    val streamTopics by viewModel.topics.collectAsStateWithLifecycle()
     val topicsQueryState by viewModel.topicsQueryState.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
@@ -123,9 +123,7 @@ fun HomeInboundsScreen(
             }
             is QueryState.Error -> {
                 FullScreenError {
-                    scope.launch {
-                        viewModel.loadTopicsIfNeeded()
-                    }
+
                 }
             }
             QueryState.Success -> {
@@ -139,11 +137,12 @@ fun HomeInboundsScreen(
                         modifier = Modifier
                             .fillMaxSize()
                     ) {
-                        val unreadStreams = streams.filter { it.hasInboxUnread && streamTopics[it.uuid].orEmpty().any { topic -> topic.hasInboxUnread } }
+                        val unreadStreams = streams.filter {
+                            it.hasInboxUnread  }
                         items(
                             items = unreadStreams, key = { it.uuid }
                         ) { item ->
-                            StreamInboundView(item, viewModel, streamTopics[item.uuid].orEmpty()) { topic -> open(item, topic) }
+                            StreamInboundView(item, viewModel, emptyList()) { topic -> open(item, topic) }
                         }
                     }
                 }
@@ -171,13 +170,14 @@ fun StreamInboundView(
         Row(
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            val avatarUrn = stream.directUser?.avatar
+            val user = viewModel.eventsRepository.userDao.getUser(stream.directUserUuid ?: "")
+            val avatarUrn = user?.avatar
             Avatar(
                 avatarUrn,
                 viewModel.client.userViewModel?.baseUrl?.value ?: "",
                 viewModel.client.authHeaders(),
                 stream.color,
-                stream.displayableName(),
+                stream.name,
                 Modifier
                     .clip(
                         RoundedCornerShape(8.dp)
@@ -186,7 +186,7 @@ fun StreamInboundView(
                     .size(40.dp)
             )
             Text(
-                text = stream.displayableName(),
+                text = stream.name,
                 color = LocalWorkspaceColorsPalette.current.textHeaders,
                 fontSize = 14.sp,
                 fontFamily = InterFontFamily,

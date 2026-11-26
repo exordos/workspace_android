@@ -69,9 +69,9 @@ fun ChatWithTopics(
     val searchQuery by chatViewModel.searchQuery.collectAsState()
     val currentlySelectedStream by chatViewModel.currentlySelectedStream.collectAsState()
     val scope = rememberCoroutineScope()
-    val streamTopics by chatViewModel.streamTopics.collectAsStateWithLifecycle()
     val streamsQueryState by chatViewModel.streamsQueryState.collectAsStateWithLifecycle()
     val topicsQueryState by chatViewModel.topicsQueryState.collectAsStateWithLifecycle()
+    val repo by chatViewModel.eventsRepo.collectAsState()
 
     when (streamsQueryState) {
         QueryState.Loading -> {
@@ -93,7 +93,7 @@ fun ChatWithTopics(
 
         QueryState.Success -> {
             val filteredSubscriptions = remember(searchQuery, streams, currentlySelectedFolder) {
-                val folderItems = currentlySelectedFolder?.items
+                val folderItems = chatViewModel.eventsRepo.value?.folderItemDao?.getFolderItems(currentlySelectedFolder?.uuid ?: "")
                 val folderSubscriptions = if (folderItems != null) {
                     folderItems.mapNotNull { folderItem ->
                         streams.firstOrNull { it.uuid == folderItem.streamUuid }
@@ -105,7 +105,7 @@ fun ChatWithTopics(
                     folderSubscriptions
                 } else {
                     folderSubscriptions.filter {
-                        it.displayableName().contains(searchQuery, ignoreCase = true)
+                        it.name.contains(searchQuery, ignoreCase = true)
                     }
                 }
             }
@@ -224,12 +224,7 @@ fun ChatWithTopics(
 
                                 is QueryState.Error -> {
                                     FullScreenError {
-                                        val currentlySelectedStream = chatViewModel.currentlySelectedStream.value
-                                        if (currentlySelectedStream != null) {
-                                            scope.launch {
-                                                chatViewModel.loadTopics(currentlySelectedStream)
-                                            }
-                                        }
+
                                     }
                                 }
 
@@ -239,7 +234,7 @@ fun ChatWithTopics(
                                     ) {
                                         val selectedStream = currentlySelectedStream
                                         if (selectedStream != null) {
-                                            val topics = streamTopics[selectedStream.uuid]
+                                            val topics = repo?.topicDao?.getTopics(selectedStream.uuid)
                                             if (topics?.isEmpty() ?: true) {
                                                 Box(
                                                     modifier = Modifier.fillMaxSize(),
@@ -298,7 +293,7 @@ fun ChatWithTopics(
 }
 
 fun StreamUIO.sortKey(): Instant =
-    WorkspaceDateTime.parse(lastMessage?.createdAt ?: updatedAt)
+    WorkspaceDateTime.parse( updatedAt)
 
 fun List<StreamUIO>.sortedForInbox(): List<StreamUIO> =
     sortedWith(
@@ -310,7 +305,7 @@ fun List<StreamUIO>.sortedByActivity(): List<StreamUIO> =
     sortedByDescending { it.sortKey() }
 
 fun TopicUIO.sortKey(): Instant =
-    WorkspaceDateTime.parse(lastMessage?.createdAt ?: updatedAt)
+    WorkspaceDateTime.parse(updatedAt)
 private val TopicUIO.isNotMuted: Boolean
     get() = notificationMode != "mute"
 
