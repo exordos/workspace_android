@@ -81,10 +81,10 @@ class WorkspaceUioMappingTest {
         assertEquals(listOf(3, 4, 2), listOf(topic.color, topic.unreadCount, topic.activeUnreadCount))
         assertTrue(topic.isDone && !topic.isDefault)
         val folderDto = json.decodeFromString<FolderResponseData>("""{"uuid":"folder","title":"Folder",
-            "unread_count":4,"system_type":"custom","created_at":"created","folder_items":[
-            {"uuid":"item","folder":"folder","stream_uuid":"stream","chat_type":"stream","unread_count":4}]}""")
+            "unread_count":4,"system_type":"created","created_at":"created","folder_items":[
+            {"uuid":"item","folder_uuid":"folder","stream_uuid":"stream","chat_type":"stream","unread_count":4}]}""")
         val folder = folderDto.toUio()
-        assertEquals(listOf("folder", "Folder", "custom", "created"), listOf(folder.uuid, folder.title, folder.systemType, folder.creationDate))
+        assertEquals(listOf("folder", "Folder", "created", "created"), listOf(folder.uuid, folder.title, folder.systemType, folder.creationDate))
         assertEquals(4, folder.unreadCount)
         val item = folderDto.items.single().toUio()
         assertEquals(listOf("item", "folder", "stream", "stream"), listOf(item.uuid, item.folder, item.streamUuid, item.chatType))
