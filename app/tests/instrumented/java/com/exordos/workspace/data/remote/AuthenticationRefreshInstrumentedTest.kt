@@ -51,8 +51,10 @@ import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
 import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
@@ -382,6 +384,19 @@ class AuthenticationRefreshInstrumentedTest {
     }
 
     @Test
+    fun serverFixtureClosesAClientWaitingToSendItsRequest() {
+        Socket().use { client ->
+            AuthenticationTestServer(acceptedAccessToken = "stored-access").use { server ->
+                val url = URI(server.baseUrl)
+                client.connect(InetSocketAddress(url.host, url.port), 5_000)
+                client.soTimeout = 5_000
+                assertTrue(server.connectionAccepted.await(5, TimeUnit.SECONDS))
+            }
+            assertEquals(-1, client.getInputStream().read())
+        }
+    }
+
+    @Test
     fun chatOpenedBeforeStreamsArriveAndRemovedStreamDoNotCrash() = runBlocking {
         AuthenticationTestServer(acceptedAccessToken = "stored-access").use { server ->
             saveSession(server, "stored-access", "stored-refresh")
@@ -594,7 +609,9 @@ private class AuthenticationTestServer(
     private val server = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
     private val running = AtomicBoolean(true)
     private val workers = Executors.newCachedThreadPool()
+    private val activeSockets = mutableSetOf<Socket>()
     private val rejectedRequests = CountDownLatch(simultaneousRejectedRequests)
+    val connectionAccepted = CountDownLatch(1)
     val protectedRequestCount = AtomicInteger()
     val refreshRequestCount = AtomicInteger()
     val ownerRequestCount = AtomicInteger()
@@ -610,13 +627,23 @@ private class AuthenticationTestServer(
             while (running.get()) {
                 try {
                     val socket = server.accept()
-                    workers.execute {
-                        try { handle(socket) } catch (_: java.net.SocketException) {
-                            // Clients may cancel a request during fixture teardown.
-                        } catch (interrupted: InterruptedException) {
-                            // shutdownNow interrupts handlers waiting on fixture latches.
-                            if (running.get()) throw interrupted
-                            Thread.currentThread().interrupt()
+                    synchronized(activeSockets) {
+                        if (!running.get()) {
+                            socket.close()
+                            return@synchronized
+                        }
+                        activeSockets += socket
+                        workers.execute {
+                            connectionAccepted.countDown()
+                            try { handle(socket) } catch (_: java.net.SocketException) {
+                                // Clients may cancel a request during fixture teardown.
+                            } catch (interrupted: InterruptedException) {
+                                // shutdownNow interrupts handlers waiting on fixture latches.
+                                if (running.get()) throw interrupted
+                                Thread.currentThread().interrupt()
+                            } finally {
+                                synchronized(activeSockets) { activeSockets -= socket }
+                            }
                         }
                     }
                 } catch (_: Exception) {
@@ -753,8 +780,11 @@ private class AuthenticationTestServer(
     }
 
     override fun close() {
-        running.set(false)
-        server.close()
+        synchronized(activeSockets) {
+            running.set(false)
+            server.close()
+            for (socket in activeSockets) socket.close()
+        }
         workers.shutdownNow()
         check(workers.awaitTermination(5, TimeUnit.SECONDS))
     }
