@@ -3,6 +3,7 @@ package com.exordos.workspace.data.push
 import android.Manifest
 import android.os.Build
 import android.os.SystemClock
+import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.WindowManager
@@ -18,6 +19,7 @@ import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.isDisplayed
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.longClick
@@ -219,12 +221,13 @@ class PushLinkNavigationTest {
         // WindowManager must route this tap between the popup, activity and IME.
         val target = node.fetchSemanticsNode()
         val center = target.positionOnScreen + Offset(target.size.width / 2f, target.size.height / 2f)
-        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val input = InstrumentationRegistry.getInstrumentation().uiAutomation
         val downTime = SystemClock.uptimeMillis()
         for (action in listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP)) {
             val event = MotionEvent.obtain(downTime, SystemClock.uptimeMillis(), action, center.x, center.y, 0)
+            event.source = InputDevice.SOURCE_TOUCHSCREEN
             try {
-                instrumentation.sendPointerSync(event)
+                assertTrue("WindowManager did not inject the menu tap", input.injectInputEvent(event, true))
             } finally {
                 event.recycle()
             }
@@ -242,7 +245,8 @@ class PushLinkNavigationTest {
         try {
             compose.waitUntil(5_000) {
                 val top = keyboardTop() ?: return@waitUntil false
-                gap = top - composer.fetchSemanticsNode().boundsInWindow.bottom
+                val node = composer.fetchSemanticsNode()
+                gap = top - (node.positionOnScreen.y + node.size.height)
                 abs(gap) <= 1f
             }
         } catch (failure: ComposeTimeoutException) {
@@ -256,7 +260,9 @@ class PushLinkNavigationTest {
         InstrumentationRegistry.getInstrumentation().runOnMainSync {
             val insets = ViewCompat.getRootWindowInsets(decor)
             if (insets?.isVisible(WindowInsetsCompat.Type.ime()) == true) {
-                top = decor.height - insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+                val origin = IntArray(2)
+                decor.getLocationOnScreen(origin)
+                top = origin[1] + decor.height - insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
             }
         }
         return top
@@ -281,7 +287,9 @@ class PushLinkNavigationTest {
 
     private fun assertLinkedMessageOpens(expectedHandled: Int = 1) {
         compose.waitUntil(8_000) { handled.get() == expectedHandled }
-        compose.mainClock.advanceTimeBy(1_000)
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithTag("chat-message-$message").fetchSemanticsNodes().isNotEmpty()
+        }
         compose.waitForIdle()
         onView(withText("Old push message")).check(matches(isDisplayed()))
         compose.runOnIdle {

@@ -15,6 +15,7 @@ import androidx.room3.ColumnTypeConverters
 import androidx.room3.Database
 import androidx.room3.Room
 import androidx.room3.RoomDatabase
+import androidx.room3.withWriteTransaction
 import androidx.sqlite.driver.AndroidSQLiteDriver
 import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.client.plugins.websocket.webSocket
@@ -67,7 +68,9 @@ import com.exordos.workspace.data.remote.dto.DraftsRequest
 import com.exordos.workspace.data.remote.dto.EpochRequest
 import com.exordos.workspace.data.remote.dto.EventsProbeRequest
 import com.exordos.workspace.data.uio.FolderUIO
+import com.exordos.workspace.data.remote.dto.FolderSnapshot
 import com.exordos.workspace.data.remote.dto.FoldersRequest
+import com.exordos.workspace.data.remote.dto.toFolderSnapshot
 import com.exordos.workspace.data.uio.MessageReactionUIO
 import com.exordos.workspace.data.remote.dto.MessageReactionsRequest
 import com.exordos.workspace.data.uio.MessageUIO
@@ -104,10 +107,17 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.firstOrNull
 import org.webrtc.ApplicationContextProvider
 import java.net.URI
+import java.security.MessageDigest
 import kotlin.collections.map
 import kotlin.collections.orEmpty
 import kotlin.collections.plus
 import kotlin.plus
+
+private fun repositoryDatabaseName(config: ServerConfig): String {
+    val scope = "${config.baseUrl}\u0000${config.projectUuid}"
+    val key = MessageDigest.getInstance("SHA-256").digest(scope.toByteArray()).joinToString("") { "%02x".format(it) }
+    return "database-${config.id}-$key"
+}
 
 private const val INITIAL_RETRY_DELAY_MILLIS = 1_000L
 private const val MAX_RETRY_DELAY_MILLIS = 30_000L
@@ -158,7 +168,7 @@ class EventsRepository(
     fun notificationRead() { onPushRefreshNeeded() }
 
     val db =
-        Room.databaseBuilder<AppDatabase>(context, "database-${config.id}")
+        Room.databaseBuilder<AppDatabase>(context, repositoryDatabaseName(config))
             .setDriver(AndroidSQLiteDriver())
             .build()
 
@@ -178,6 +188,7 @@ class EventsRepository(
     var epochGeneration: String = ""
     private val connectionMutex = Mutex()
     private val realtimeStateLock = Any()
+    private val historyMutex = Mutex()
 
     private val pageLimit = 25
     @Volatile
@@ -190,6 +201,16 @@ class EventsRepository(
     private val openConversation = MutableStateFlow<OpenConversation?>(null)
     private var historyGeneration = 0L
     private val streamRemovalRevisions = mutableMapOf<String, Long>()
+    private val streamBindingRevisions = mutableMapOf<Pair<String, String>, Long>()
+
+    fun streamBindingRevision(streamUuid: String, userUuid: String): Long = synchronized(realtimeStateLock) {
+        streamBindingRevisions[streamUuid to userUuid] ?: 0
+    }
+
+    private fun noteStreamBindingChange(streamUuid: String, userUuid: String) = synchronized(realtimeStateLock) {
+        streamBindingRevisions[streamUuid to userUuid] = streamBindingRevision(streamUuid, userUuid) + 1
+    }
+
 
     fun streamRemovalRevision(streamUuid: String): Long = synchronized(realtimeStateLock) {
         streamRemovalRevisions[streamUuid] ?: 0L
@@ -200,6 +221,7 @@ class EventsRepository(
         if (streamRemovalRevision(streamUuid) == expected) block() else null
     }
     private val staleConversations = mutableSetOf<String>()
+    private val requestedConversations = mutableSetOf<String>()
     private val pendingMessageUuids = MutableStateFlow<Set<String>>(emptySet())
     private val heartbeatJob: Job = scope.every30Seconds {
         val webSocketClient = client ?: return@every30Seconds
@@ -287,19 +309,69 @@ class EventsRepository(
     internal fun isConversationStale(streamUuid: String, topicUuid: String): Boolean =
         synchronized(realtimeStateLock) { "$streamUuid.$topicUuid" in staleConversations }
 
+    internal suspend fun loadConversationPage(
+        streamUuid: String,
+        topicUuid: String,
+        pageMarker: String? = null,
+        recovering: Boolean = false,
+    ): ApiResult<List<MessageUIO>, ApiError> {
+        val key = "$streamUuid.$topicUuid"
+        val captured = client.requireUserViewModel().getServer(serverId)
+            ?.takeIf(::matchesServerConfiguration) ?: return ApiResult.Error(ApiError("Account changed", "ACCOUNT_CHANGED"))
+        val (generation, streamRevision, replaceHistory) = synchronized(realtimeStateLock) {
+            requestedConversations += key
+            if (messageResyncRequired) staleConversations += key
+            Triple(historyGeneration, streamRemovalRevision(streamUuid),
+                pageMarker == null && (recovering || key in staleConversations && !messageResyncRequired))
+        }
+        val before = messageDao.loadConversation(streamUuid, topicUuid)
+        val response = client.performRequest(MessagesRequest(streamUuid, topicUuid, pageLimit, pageMarker), serverId, captured)
+        if (response is ApiResult.Error) return response
+        val snapshot = (response as ApiResult.Success).value.filter {
+            it.streamUuid == streamUuid && it.topicUuid == topicUuid
+        }
+        return historyMutex.withLock {
+            val obsolete = synchronized(realtimeStateLock) {
+                historyGeneration != generation || streamRemovalRevision(streamUuid) != streamRevision
+            }
+            if (obsolete || client.requireUserViewModel().getServer(serverId) != captured) {
+                return@withLock ApiResult.Error(ApiError("History response is obsolete", "HISTORY_RESPONSE_OBSOLETE"))
+            }
+            db.withWriteTransaction {
+                val current = messageDao.loadConversation(streamUuid, topicUuid)
+                val merged = mergeMessageHistorySnapshot(before, current, snapshot, pendingMessageUuids.value)
+                if (replaceHistory) messageDao.deleteConversation(streamUuid, topicUuid)
+                messageDao.upsert(merged)
+            }
+            if (replaceHistory) synchronized(realtimeStateLock) { staleConversations -= key }
+            ApiResult.Success(snapshot)
+        }
+    }
+
     fun addPendingMessage(message: MessageUIO) {
         pendingMessageUuids.update { it + message.uuid }
         scope.launch {
-            addLastMessage(message.toLastMessageUIO())
-            addMessageToStreamTopic(message)
+            historyMutex.withLock {
+                if (message.uuid !in pendingMessageUuids.value) return@withLock
+                db.withWriteTransaction {
+                    lastMessageDao.upsert(message.toLastMessageUIO())
+                    messageDao.upsert(message)
+                }
+            }
         }
     }
+
     suspend fun addMessageToStreamTopic(message: MessageUIO) {
         messageDao.upsert(message)
     }
 
     suspend fun updateMessage(updatedMessage: MessageUIO) {
-        messageDao.upsert(updatedMessage)
+        val notification = updatedMessage.copy(payload = updatedMessage.payload.copy(), reactions = updatedMessage.reactions.toMap())
+        db.withWriteTransaction {
+            messageDao.upsert(updatedMessage)
+            lastMessageDao.upsert(updatedMessage.toLastMessageUIO())
+        }
+        _messageUpdatedEvents.emit(notification)
     }
 
     suspend fun addMessages(messageList: List<MessageUIO>) {
@@ -307,40 +379,58 @@ class EventsRepository(
     }
 
     suspend fun removeMessage(messageUuid: String) {
-        val messageToDelete = messageDao.getMessage(messageUuid)
-        if (messageToDelete != null) {
-            messageDao.delete(messageToDelete)
+        db.withWriteTransaction {
+            messageDao.deleteByUuid(messageUuid)
+            lastMessageDao.deleteByUuid(messageUuid)
+            messageReactionDao.deleteForMessages(listOf(messageUuid))
+            streamDao.clearMessagePreview(messageUuid)
+            topicDao.clearMessagePreview(messageUuid)
         }
-        if (!_messageDeletedEvents.tryEmit(messageUuid)) {
-            scope.launch { _messageDeletedEvents.emit(messageUuid) }
-        }
+        pendingMessageUuids.update { it - messageUuid }
+        _messageDeletedEvents.emit(messageUuid)
     }
 
-    /** Reconcile HTTP confirmation with either ordering of the matching WS event. */
-    fun reconcileSentMessage(pendingUuid: String, confirmed: MessageUIO) {
-        scope.launch {
-            updateMessage(confirmed)
-            pendingMessageUuids.update { it - pendingUuid }
+    /** Keep the server event if it reached Room before the corresponding HTTP response. */
+    suspend fun reconcileSentMessage(pendingUuid: String, confirmed: MessageUIO) = historyMutex.withLock {
+        db.withWriteTransaction {
+            val existing = messageDao.findByUuid(confirmed.uuid)
+            if (pendingUuid != confirmed.uuid) {
+                messageDao.deleteByUuid(pendingUuid)
+                lastMessageDao.deleteByUuid(pendingUuid)
+            }
+            val canonical = existing ?: confirmed
+            messageDao.upsert(canonical)
+            lastMessageDao.upsert(canonical.toLastMessageUIO())
         }
+        pendingMessageUuids.update { it - pendingUuid }
     }
 
-    /** One repository belongs to one server/account projection; invalidate before removing its caches. */
-    fun removeStream(streamUuid: String) {
+    /** Invalidate protected views before publishing the deletion from storage. */
+    suspend fun removeStream(streamUuid: String) {
         synchronized(realtimeStateLock) {
             streamRemovalRevisions[streamUuid] = streamRemovalRevision(streamUuid) + 1
-            historyGeneration++ // An older HTTP history response must not restore a deleted conversation.
             staleConversations.removeAll { it.startsWith("$streamUuid.") }
+            requestedConversations.removeAll { it.startsWith("$streamUuid.") }
             if (openConversation.value?.streamUuid == streamUuid) openConversation.value = null
-            if (!_streamDeletedEvents.tryEmit(streamUuid)) scope.launch { _streamDeletedEvents.emit(streamUuid) }
         }
+        val removedMessages = historyMutex.withLock {
+            synchronized(realtimeStateLock) { historyGeneration++ }
+            db.withWriteTransaction {
+                val messageIds = messageDao.loadStreamMessageIds(streamUuid)
+                messageIds.chunked(200).forEach { messageReactionDao.deleteForMessages(it) }
+                streamBindingDao.deleteByStream(streamUuid)
+                folderItemDao.deleteByStream(streamUuid)
+                messageDao.deleteByStream(streamUuid)
+                lastMessageDao.deleteByStream(streamUuid)
+                draftDao.deleteByStream(streamUuid)
+                topicDao.deleteByStream(streamUuid)
+                streamDao.deleteByUuid(streamUuid)
+                messageIds
+            }.also { ids -> pendingMessageUuids.update { it - ids.toSet() } }
+        }
+        _streamDeletedEvents.emit(streamUuid)
+        for (uuid in removedMessages) _messageDeletedEvents.emit(uuid)
     }
-
-    private fun TopicUIO.withoutDeletedMessage(messageUuid: String): TopicUIO =
-        if (lastMessageUuid == messageUuid) {
-            copy(lastMessageUuid = null)
-        } else {
-            this
-        }
 
     val messages: Flow<List<MessageUIO>> = messageDao.observeMessages()
 
@@ -451,23 +541,38 @@ class EventsRepository(
     }
 
     val folders: Flow<List<FolderUIO>> = folderDao.observeFolders()
-    suspend fun updateFolder(updatedFolder: FolderUIO) {
-        folderDao.upsert(updatedFolder)
-    }
-
-    suspend fun removeFolder(folderUuid: String) {
-        val folderToDelete = folderDao.getFolder(folderUuid)
-        if (folderToDelete != null) {
-            folderDao.delete(folderToDelete)
+    private suspend fun storeFolder(snapshot: FolderSnapshot) {
+        db.withWriteTransaction {
+            folderDao.upsert(snapshot.folder)
+            folderItemDao.deleteByFolder(snapshot.folder.uuid)
+            folderItemDao.upsert(snapshot.items)
+        }
+        _currentlySelectedFolder.update { selected ->
+            if (selected?.uuid == snapshot.folder.uuid) snapshot.folder else selected
         }
     }
 
-    suspend fun addFolder(newFolder: FolderUIO) {
-        folderDao.upsert(newFolder)
+    suspend fun removeFolder(folderUuid: String) {
+        db.withWriteTransaction {
+            folderItemDao.deleteByFolder(folderUuid)
+            folderDao.deleteByUuid(folderUuid)
+        }
+        val first = folders.first().minByOrNull { WorkspaceDateTime.parse(it.creationDate) }
+        _currentlySelectedFolder.update { selected ->
+            if (selected?.uuid == folderUuid) first else selected
+        }
     }
 
     suspend fun setInitialFolders(newList: List<FolderUIO>) {
         folderDao.upsert(newList)
+    }
+
+    suspend fun replaceTopicsForStreams(streamUuids: List<String>, newTopics: List<TopicUIO>) {
+        val matching = newTopics.filter { it.streamUuid in streamUuids }
+        db.withWriteTransaction {
+            topicDao.deleteMissingForStreams(streamUuids, matching.map { it.uuid })
+            topicDao.upsert(matching)
+        }
     }
 
     private fun CoroutineScope.every30Seconds(block: suspend () -> Unit): Job = launch {
@@ -512,16 +617,11 @@ class EventsRepository(
             }
 
             is ApiResult.Error -> {
-                val invalidated = synchronized(realtimeStateLock) {
-                    if (response.error.httpStatusCode == EVENTS_CURSOR_EXPIRED_STATUS_CODE &&
-                        activeSession === probedSession &&
-                        latestEpoch == probedEpochVersion &&
-                        epochGeneration == probedEpochGeneration
-                    ) {
-                        invalidateRealtimeCursor()
-                        true
-                    } else false
-                }
+                val invalidated = response.error.httpStatusCode == EVENTS_CURSOR_EXPIRED_STATUS_CODE &&
+                    invalidateRealtimeCursor {
+                        activeSession === probedSession && latestEpoch == probedEpochVersion &&
+                            epochGeneration == probedEpochGeneration
+                    }
                 if (invalidated) {
                     Log.d("WebSocket", "Event cursor expired; reconnecting with a fresh cursor")
                     probedSession.close(
@@ -589,6 +689,15 @@ class EventsRepository(
                 }
             }
 
+            if (messageResyncRequired) {
+                val failed = reloadOpenConversation()
+                if (failed != null) {
+                    withTimeoutOrNull(retryDelayMillis) { openConversation.first { it != failed } }
+                    retryDelayMillis = nextRetryDelayMillis(retryDelayMillis)
+                    continue
+                }
+            }
+
             var connectionEstablished = false
             try {
                 startWebsocketConnection(webSocketClient, currentBaseUrl) {
@@ -614,12 +723,62 @@ class EventsRepository(
         }
     }
 
-    private fun invalidateRealtimeCursor() = synchronized(realtimeStateLock) {
-        historyGeneration++
-        openConversation.value?.let { staleConversations += it.key }
-        messageResyncRequired = true
-        latestEpoch = 0
-        epochGeneration = ""
+    private suspend fun invalidateRealtimeCursor(isCurrent: () -> Boolean = { true }): Boolean = historyMutex.withLock {
+        val cached = messageDao.cachedConversationKeys()
+        synchronized(realtimeStateLock) {
+            if (!isCurrent()) return@synchronized false
+            historyGeneration++
+            staleConversations += cached
+            staleConversations += requestedConversations
+            openConversation.value?.let { staleConversations += it.key }
+            messageResyncRequired = true
+            latestEpoch = 0
+            epochGeneration = ""
+            true
+        }
+    }
+
+    private suspend fun reloadOpenConversation(): OpenConversation? = coroutineScope {
+        while (true) {
+            val active = synchronized(realtimeStateLock) {
+                val current = openConversation.value
+                if (current == null || current.key !in staleConversations) {
+                    messageResyncRequired = false
+                    return@coroutineScope null
+                }
+                current
+            }
+            val reload = async { loadConversationPage(active.streamUuid, active.topicUuid, recovering = true) }
+            val switched = async { openConversation.first { it != active } }
+            val response = try {
+                select {
+                    reload.onAwait { it }
+                    switched.onAwait { null }
+                }
+            } finally {
+                reload.cancelAndJoin()
+                switched.cancelAndJoin()
+            }
+            if (openConversation.value == active && response is ApiResult.Error) {
+                if (response.error.httpStatusCode in setOf(403, 404)) {
+                    historyMutex.withLock {
+                        if (openConversation.value == active) {
+                            messageDao.deleteConversation(active.streamUuid, active.topicUuid)
+                        }
+                    }
+                    synchronized(realtimeStateLock) {
+                        if (openConversation.value == active) {
+                            messageResyncRequired = false
+                            return@coroutineScope null
+                        }
+                    }
+                } else {
+                    return@coroutineScope active
+                }
+            }
+        }
+        @Suppress("UNREACHABLE_CODE")
+        null
     }
 
     private suspend fun startWebsocketConnection(
@@ -748,166 +907,105 @@ class EventsRepository(
         }
     }
 
-    fun didReceiveStreamBindingEvent(payload: String, action: String) {
+    private suspend fun storeRealtimeBindings(bindings: List<StreamBindingUIO>) {
+        db.withWriteTransaction {
+            streamBindingDao.upsert(bindings)
+            for (binding in bindings) {
+                noteStreamBindingChange(binding.streamUuid, binding.userUuid)
+                if (binding.userUuid == currentUser.value?.uuid) {
+                    streamDao.setOwnRole(binding.streamUuid, binding.role)
+                }
+            }
+        }
+    }
+
+    suspend fun didReceiveStreamBindingEvent(payload: String, action: String) {
         when (action) {
             "created" -> {
-                val streamBindingUIO = json.decodeFromString<StreamBindingUIO>(payload)
-                scope.launch {
-                    addStreamBinding(streamBindingUIO)
-                }
+                val batch = json.decodeFromString<CreatedStreamBindingsEvent>(payload)
+                storeRealtimeBindings(batch.items.filter { it.streamUuid == batch.uuid }.map { it.toUio() })
             }
-            "updated" -> {
-                val streamBindingUIO = json.decodeFromString<StreamBindingUIO>(payload)
-                scope.launch {
-                    updateStreamBinding(streamBindingUIO)
-                }
-            }
+            "updated" -> storeRealtimeBindings(listOf(json.decodeFromString<StreamBindingResponseData>(payload).toUio()))
             "deleted" -> {
-                val streamBindingUIO = json.decodeFromString<StreamBindingUIO>(payload)
-                scope.launch {
-                    deleteStreamBinding(streamBindingUIO)
-                }
-            }
-        }
-    }
-
-    fun didReceiveUserEvent(payload: String, action: String) {
-        when(action) {
-            "created" -> {
-                scope.launch {
-                    val user = json.decodeFromString<UserResponseData>(payload).toUio()
-                    addUser(user)
-                }
-            }
-            "updated" -> {
-                scope.launch {
-                    val user = json.decodeFromString<UserResponseData>(payload).toUio()
-                    val currentUser = _currentUser.value
-                    if (currentUser?.uuid == user.uuid) {
-                        updateCurrentUser(user)
+                val deleted = json.decodeFromString<DeletedStreamBindingEvent>(payload)
+                if (deleted.userUuid == currentUser.value?.uuid) {
+                    removeStream(deleted.streamUuid)
+                } else {
+                    db.withWriteTransaction {
+                        streamBindingDao.deleteBinding(deleted.uuid, deleted.streamUuid)
+                        noteStreamBindingChange(deleted.streamUuid, deleted.userUuid)
                     }
-                    updateUser(user)
                 }
-            }
-            "deleted" -> {
-
             }
         }
     }
 
-    fun didReceiveMessageEvent(payload: String, action: String) {
-        when(action) {
+    suspend fun didReceiveUserEvent(payload: String, action: String) {
+        when (action) {
+            "created" -> addUser(json.decodeFromString<UserResponseData>(payload).toUio())
+            "updated" -> {
+                val user = json.decodeFromString<UserResponseData>(payload).toUio()
+                if (currentUser.value?.uuid == user.uuid) updateCurrentUser(user)
+                updateUser(user)
+            }
+        }
+    }
+
+    suspend fun didReceiveMessageEvent(payload: String, action: String) {
+        when (action) {
             "created" -> {
                 val message = json.decodeFromString<MessageResponse>(payload).toUio()
-                scope.launch {
-                    addLastMessage(message.toLastMessageUIO())
-                    addMessageToStreamTopic(message)
+                db.withWriteTransaction {
+                    lastMessageDao.upsert(message.toLastMessageUIO())
+                    messageDao.upsert(message)
                 }
             }
+            "updated" -> updateMessage(json.decodeFromString<MessageResponse>(payload).toUio())
+            "deleted" -> {
+                val uuid = json.decodeFromString<JsonObject>(payload)["uuid"]?.jsonPrimitive?.contentOrNull
+                if (uuid != null) removeMessage(uuid)
+            }
+        }
+    }
+
+    suspend fun didReceiveFolderEvent(payload: String, action: String) {
+        when (action) {
+            "created", "updated" -> storeFolder(json.decodeFromString<FolderResponseData>(payload).toFolderSnapshot())
+            "deleted" -> {
+                val uuid = json.decodeFromString<JsonObject>(payload)["uuid"]?.jsonPrimitive?.contentOrNull
+                if (uuid != null) removeFolder(uuid)
+            }
+        }
+    }
+
+    suspend fun didReceiveReactionEvent(payload: String, action: String) {
+        when (action) {
+            "created" -> addReaction(json.decodeFromString<MessageReaction>(payload).toUio())
+            "deleted" -> deleteReaction(json.decodeFromString<DeletedMessageReaction>(payload))
+        }
+    }
+
+    suspend fun didReceiveStreamEvent(payload: String, action: String) {
+        when (action) {
+            "created" -> addStream(json.decodeFromString<Stream>(payload).toUio())
+            "updated" -> updateStream(json.decodeFromString<Stream>(payload).toUio())
+            "deleted" -> {
+                val uuid = json.decodeFromString<JsonObject>(payload)["uuid"]?.jsonPrimitive?.contentOrNull
+                if (uuid != null) removeStream(uuid)
+            }
+        }
+    }
+
+    suspend fun didReceiveTopicEvent(payload: String, action: String, epochVersion: Long? = null, generation: String? = null) {
+        when (action) {
+            "created" -> addTopic(json.decodeFromString<TopicsResponseData>(payload).toUio())
             "updated" -> {
-                val message = json.decodeFromString<MessageResponse>(payload).toUio()
-                scope.launch {
-                    addLastMessage(message.toLastMessageUIO())
-                    updateMessage(message)
-                }
-            }
-            "deleted" -> {
-                val messageUuid = json.decodeFromString<JsonObject>(payload)["uuid"]?.jsonPrimitive?.contentOrNull
-                if (messageUuid != null) {
-                    scope.launch {
-                        removeMessage(messageUuid)
-                    }
-                }
+                val topic = json.decodeFromString<TopicsResponseData>(payload).toUio()
+                updateTopic(topic)
+                if (epochVersion != null && generation != null) onPushTopicUpdated(topic, epochVersion, generation)
             }
         }
-    }
-
-    fun didReceiveFolderEvent(payload: String, action: String) {
-        when(action) {
-            "created" -> {
-                val folder = json.decodeFromString<FolderResponseData>(payload).toUio()
-                scope.launch {
-                    addFolder(folder)
-                }
-            }
-            "updated" -> {
-                val folder = json.decodeFromString<FolderResponseData>(payload).toUio()
-                scope.launch {
-                    updateFolder(folder)
-                }
-            }
-            "deleted" -> {
-                val folderUuid = json.decodeFromString<JsonObject>(payload)["uuid"]?.jsonPrimitive?.contentOrNull
-                if (folderUuid != null) {
-                    scope.launch {
-                        removeFolder(folderUuid)
-                    }
-                }
-            }
-        }
-    }
-
-    fun didReceiveReactionEvent(payload: String, action: String) {
-        when(action) {
-            "created" -> {
-                val reaction = json.decodeFromString<MessageReaction>(payload).toUio()
-                scope.launch {
-                    addReaction(reaction)
-                }
-            }
-            "deleted" -> {
-                val reaction = json.decodeFromString<DeletedMessageReaction>(payload)
-                scope.launch {
-                    deleteReaction(reaction)
-                }
-            }
-        }
-    }
-
-    fun didReceiveStreamEvent(payload: String, action: String) {
-        when(action) {
-            "created" -> {
-                val stream = json.decodeFromString<Stream>(payload).toUio()
-                scope.launch {
-                    addStream(stream)
-                }
-            }
-            "updated" -> {
-                val stream = json.decodeFromString<Stream>(payload).toUio()
-                scope.launch {
-                    updateStream(stream)
-                }
-            }
-            "deleted" -> {
-                json.decodeFromString<JsonObject>(payload)["uuid"]?.jsonPrimitive?.contentOrNull?.let(::removeStream)
-            }
-        }
-    }
-
-    fun didReceiveTopicEvent(payload: String, action: String, epochVersion: Long? = null, generation: String? = null) {
         onPushRefreshNeeded()
-        when(action) {
-            "created" -> {
-                val topic = json.decodeFromString<TopicsResponseData>(payload).toUio()
-                scope.launch {
-                    addTopic(topic)
-                }
-            }
-            "updated" -> {
-                val topic = json.decodeFromString<TopicsResponseData>(payload).toUio()
-                scope.launch {
-                    updateTopic(topic)
-                    if (epochVersion != null && generation != null) onPushTopicUpdated(
-                        topic,
-                        epochVersion,
-                        generation
-                    )
-                }
-            }
-            "deleted" -> {
-
-            }
-        }
     }
 
     fun startLoader() {
@@ -1030,11 +1128,16 @@ class EventsRepository(
         val response = webSocketClient.performRequest(FoldersRequest(), serverId)
         when(response) {
             is ApiResult.Success -> {
-                val sortedFolders = response.value.sortedBy { WorkspaceDateTime.parse(it.creationDate) }
-                setInitialFolders(sortedFolders)
-                if (!sortedFolders.isEmpty()) {
-                    _currentlySelectedFolder.value = sortedFolders.first()
+                val sortedFolders = response.value.sortedBy { WorkspaceDateTime.parse(it.folder.creationDate) }
+                db.withWriteTransaction {
+                    folderItemDao.deleteAll()
+                    folderDao.deleteAll()
+                    folderDao.upsert(sortedFolders.map { it.folder })
+                    folderItemDao.upsert(sortedFolders.flatMap { it.items })
                 }
+                val selected = currentlySelectedFolder.value?.uuid
+                _currentlySelectedFolder.value = (sortedFolders.firstOrNull { it.folder.uuid == selected }
+                    ?: sortedFolders.firstOrNull())?.folder
                 loadStreamBindings()
             }
 

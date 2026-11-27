@@ -159,7 +159,9 @@ class StartupUioInstrumentedTest {
     @Test fun foldersRequestReadsNestedItemsWithFolderUuid(): Unit = runBlocking {
         val response = account.api.performRequest(FoldersRequest())
         assertTrue(response is ApiResult.Success)
-        assertEquals("folder", (response as ApiResult.Success).value.single().uuid)
+        val snapshot = (response as ApiResult.Success).value.single()
+        assertEquals("folder", snapshot.folder.uuid)
+        assertEquals("folder", snapshot.items.single().folder)
     }
 
     @Test fun realtimeMapsEveryEntityBeforeUpdatingPresentationState() = runBlocking {

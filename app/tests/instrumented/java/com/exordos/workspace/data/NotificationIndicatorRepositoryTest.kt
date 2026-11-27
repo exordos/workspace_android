@@ -11,6 +11,7 @@ import kotlinx.serialization.json.Json
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -49,7 +50,7 @@ class NotificationIndicatorRepositoryTest {
     }
 
     @Test
-    fun topicRealtimeCursorReachesThePushConsumer() {
+    fun topicRealtimeCursorReachesThePushConsumer() = runBlocking {
         val update = topic(activeUnread = 0)
         var received: Triple<TopicUIO, Long, String>? = null
         repository.onPushTopicUpdated = { topic, epoch, generation -> received = Triple(topic, epoch, generation) }
@@ -120,6 +121,7 @@ class NotificationIndicatorRepositoryTest {
     fun removingTheLastItemClearsTheSelectedFolderWithoutSwitchingTabs() = runBlocking {
         val before = folder().copy(unreadCount = 1, items = listOf(item("first", 1)))
         repository.setInitialFolders(listOf(before).map { it.toUio() })
+        repository.folderItemDao.upsert(before.items.map { it.toUio() })
         repository.updateCurrentlySelectedFolder(before.toUio())
         val authoritative = before.copy(unreadCount = 0, items = emptyList())
 
@@ -127,6 +129,7 @@ class NotificationIndicatorRepositoryTest {
 
         assertEquals(authoritative.toUio(), repository.currentlySelectedFolder.value)
         assertEquals(authoritative.toUio(), repository.folders.first().single())
+        assertTrue(repository.folderItemDao.observeFolderItems(before.uuid).first().isEmpty())
     }
 
     @Test

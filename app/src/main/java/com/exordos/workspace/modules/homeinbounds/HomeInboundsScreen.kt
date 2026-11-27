@@ -65,6 +65,7 @@ fun HomeInboundsScreen(
 ) {
     val streams by viewModel.streams.collectAsStateWithLifecycle()
     val streamTopics by viewModel.topics.collectAsStateWithLifecycle()
+    val topicsByStream = remember(streamTopics) { streamTopics.groupBy { it.streamUuid } }
     val topicsQueryState by viewModel.topicsQueryState.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
@@ -122,9 +123,7 @@ fun HomeInboundsScreen(
                 }
             }
             is QueryState.Error -> {
-                FullScreenError {
-
-                }
+                FullScreenError { viewModel.retryLoadTopics() }
             }
             QueryState.Success -> {
                 Column(
@@ -142,7 +141,7 @@ fun HomeInboundsScreen(
                         items(
                             items = unreadStreams, key = { it.uuid }
                         ) { item ->
-                            StreamInboundView(item, viewModel, emptyList()) { topic -> open(item, topic) }
+                            StreamInboundView(item, viewModel, topicsByStream[item.uuid].orEmpty()) { topic -> open(item, topic) }
                         }
                     }
                 }

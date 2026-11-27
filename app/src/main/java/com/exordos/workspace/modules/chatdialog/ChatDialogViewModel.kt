@@ -56,7 +56,6 @@ import com.exordos.workspace.data.uio.MessageReactionUIO
 import com.exordos.workspace.data.uio.MessageUIO
 import com.exordos.workspace.data.uio.MessagePayloadUIO
 import com.exordos.workspace.data.remote.dto.MessagesByIdsRequest
-import com.exordos.workspace.data.remote.dto.MessagesRequest
 import com.exordos.workspace.data.remote.dto.RemoveMessageReactionRequest
 import com.exordos.workspace.data.remote.dto.SendMessageRequest
 import com.exordos.workspace.data.uio.StreamUIO
@@ -580,7 +579,7 @@ class ChatDialogViewModel(
 
     suspend fun sendMessage(context: Context) {
         val attachmentList = _uriList.value
-        val currentStream = stream.value
+        val currentStream = repo.streamDao.findByUuid(chatId)
         if (currentStream == null) { messageDeletion.showActionError(R.string.chat_send_unavailable); return }
         val encrypted = currentStream.encryption
         if (encrypted && encryptionRuntime.readySession().state.value.sendingKeyUuid == null) {
@@ -625,7 +624,7 @@ class ChatDialogViewModel(
 
     @OptIn(ExperimentalUuidApi::class)
     suspend fun sendTextMessage(messageText: String) {
-        val currentStream = stream.value
+        val currentStream = repo.streamDao.findByUuid(chatId)
         if (currentStream == null) { messageDeletion.showActionError(R.string.chat_send_unavailable); return }
         if (currentStream.encryption) {
             try {
@@ -710,7 +709,7 @@ class ChatDialogViewModel(
     }
 
     suspend fun sendEditMessage(messageUuid: String, messageText: String) {
-        val currentStream = stream.value
+        val currentStream = repo.streamDao.findByUuid(chatId)
         if (currentStream == null) { messageDeletion.showActionError(R.string.chat_send_unavailable); return }
         if (currentStream.encryption || editingMessage?.originalEncryptedPayload != null) {
             try {
@@ -772,15 +771,12 @@ class ChatDialogViewModel(
 
     suspend fun loadLatestMessages() {
         try {
-            val server = userViewModel.getServer(repo.serverId)?.takeIf(repo::matchesServerConfiguration) ?: return
-            val response = client.performRequest(MessagesRequest(chatId, topicUuid, 25, null), repo.serverId, server)
-            if (response is ApiResult.Success) {
-                val page = response.value.filter { it.streamUuid == chatId && it.topicUuid == topicUuid }
-                repo.addMessages(page)
-                val lastMessage = page.maxWithOrNull(compareBy<MessageUIO> { WorkspaceDateTime.parse(it.createdAt) }.thenBy { it.uuid })
-                if (lastMessage != null && firstUnreadMessageUuid == null) {
-                    markMessagesReadUpTo(lastMessage.uuid)
-                }
+            val response = repo.loadConversationPage(chatId, topicUuid)
+            if (response is ApiResult.Success && firstUnreadMessageUuid == null) {
+                val lastMessage = response.value.maxWithOrNull(
+                    compareBy<MessageUIO> { WorkspaceDateTime.parse(it.createdAt) }.thenBy { it.uuid }
+                )
+                if (lastMessage != null) markMessagesReadUpTo(lastMessage.uuid)
             }
         } finally {
             _isLoading.value = false
@@ -788,21 +784,8 @@ class ChatDialogViewModel(
     }
 
     suspend fun loadNextMessages(anchor: MessageUIO?) {
-        try {
-            val pageMarker = storedMessages
-            val server = userViewModel.getServer(repo.serverId)?.takeIf(repo::matchesServerConfiguration) ?: return
-            val response = client.performRequest(MessagesRequest(chatId, topicUuid, 25, anchor?.uuid), repo.serverId, server)
-            if (response is ApiResult.Success) {
-                val page = response.value.filter { it.streamUuid == chatId && it.topicUuid == topicUuid }
-                repo.addMessages(page)
-                val lastMessage = page.maxWithOrNull(compareBy<MessageUIO> { WorkspaceDateTime.parse(it.createdAt) }.thenBy { it.uuid })
-                if (lastMessage != null && firstUnreadMessageUuid == null) {
-                    markMessagesReadUpTo(lastMessage.uuid)
-                }
-            }
-        } finally {
-            _isLoading.value = false
-        }
+        if (anchor == null) return
+        repo.loadConversationPage(chatId, topicUuid, pageMarker = anchor.uuid)
     }
 
     suspend fun markMessagesReadUpTo(messageUuid: String) {

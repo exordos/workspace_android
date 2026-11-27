@@ -27,6 +27,16 @@ data class TopicUIO(
 
 @Dao
 interface TopicDao {
+
+    @Query("UPDATE TopicUIO SET lastMessageUuid = NULL WHERE lastMessageUuid = :messageUuid")
+    suspend fun clearMessagePreview(messageUuid: String)
+
+    @Query("DELETE FROM TopicUIO WHERE streamUuid = :streamUuid")
+    suspend fun deleteByStream(streamUuid: String)
+
+    @Query("DELETE FROM TopicUIO WHERE streamUuid IN (:streamUuids) AND uuid NOT IN (:keptUuids)")
+    suspend fun deleteMissingForStreams(streamUuids: List<String>, keptUuids: List<String>)
+
     @Query("SELECT * FROM TopicUIO")
     fun observeTopics(): Flow<List<TopicUIO>>
 

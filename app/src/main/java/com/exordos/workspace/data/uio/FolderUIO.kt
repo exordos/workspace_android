@@ -20,6 +20,10 @@ data class FolderUIO(
 
 @Dao
 interface FolderDao {
+
+    @Query("DELETE FROM FolderUIO WHERE uuid = :uuid")
+    suspend fun deleteByUuid(uuid: String)
+
     @Query("SELECT * FROM FolderUIO")
     fun observeFolders(): Flow<List<FolderUIO>>
 

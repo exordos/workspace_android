@@ -198,6 +198,13 @@ fun LastMessageUIO.toMessageUIO() = MessageUIO(
 )
 @Dao
 interface LastMessageDao {
+
+    @Query("DELETE FROM LastMessageUIO WHERE uuid = :uuid")
+    suspend fun deleteByUuid(uuid: String)
+
+    @Query("DELETE FROM LastMessageUIO WHERE streamUuid = :streamUuid")
+    suspend fun deleteByStream(streamUuid: String)
+
     @Query("SELECT * FROM LastMessageUIO")
     fun observeLastMessages(): Flow<List<LastMessageUIO>>
 
@@ -219,6 +226,28 @@ interface LastMessageDao {
 
 @Dao
 interface MessageDao {
+
+    @Query("SELECT * FROM MessageUIO WHERE uuid = :uuid")
+    suspend fun findByUuid(uuid: String): MessageUIO?
+
+    @Query("SELECT * FROM MessageUIO WHERE streamUuid = :streamUuid AND topicUuid = :topicUuid")
+    suspend fun loadConversation(streamUuid: String, topicUuid: String): List<MessageUIO>
+
+    @Query("SELECT DISTINCT streamUuid || '.' || topicUuid FROM MessageUIO")
+    suspend fun cachedConversationKeys(): List<String>
+
+    @Query("SELECT uuid FROM MessageUIO WHERE streamUuid = :streamUuid UNION SELECT uuid FROM LastMessageUIO WHERE streamUuid = :streamUuid")
+    suspend fun loadStreamMessageIds(streamUuid: String): List<String>
+
+    @Query("DELETE FROM MessageUIO WHERE uuid = :uuid")
+    suspend fun deleteByUuid(uuid: String)
+
+    @Query("DELETE FROM MessageUIO WHERE streamUuid = :streamUuid")
+    suspend fun deleteByStream(streamUuid: String)
+
+    @Query("DELETE FROM MessageUIO WHERE streamUuid = :streamUuid AND topicUuid = :topicUuid")
+    suspend fun deleteConversation(streamUuid: String, topicUuid: String)
+
     @Query("SELECT * FROM MessageUIO")
     fun observeMessages(): Flow<List<MessageUIO>>
 
