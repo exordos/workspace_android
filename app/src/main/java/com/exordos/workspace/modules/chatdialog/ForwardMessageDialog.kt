@@ -64,7 +64,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.CancellationException
 import com.exordos.workspace.R
 import com.exordos.workspace.UserViewModel
@@ -73,6 +75,7 @@ import com.exordos.workspace.data.remote.ApiResult
 import com.exordos.workspace.data.remote.ApiError
 import com.exordos.workspace.data.remote.WorkspaceAPIClient
 import com.exordos.workspace.data.uio.FolderUIO
+import com.exordos.workspace.data.uio.FolderItemUIO
 import com.exordos.workspace.data.remote.dto.ForwardMessageRequest
 import com.exordos.workspace.data.uio.MessageUIO
 import com.exordos.workspace.data.remote.dto.SendMessageResponse
@@ -82,6 +85,7 @@ import com.exordos.workspace.data.remote.dto.StreamsRequest
 import com.exordos.workspace.data.remote.dto.TopicsRequest
 import com.exordos.workspace.data.uio.TopicUIO
 import com.exordos.workspace.data.uio.UserUIO
+import com.exordos.workspace.modules.chatchannels.chatDisplayName
 import com.exordos.workspace.ui.Avatar
 import com.exordos.workspace.ui.theme.InterFontFamily
 import com.exordos.workspace.ui.theme.LocalWorkspaceColorsPalette
@@ -91,6 +95,7 @@ import com.exordos.workspace.modules.encryptedchat.encryptedMessagePlacementUuid
 
 @Composable
 internal fun ForwardMessagesDialog(
+    chatDialogViewModel: ChatDialogViewModel,
     sources: List<MessageUIO>,
     client: WorkspaceAPIClient,
     repo: EventsRepository,
@@ -105,14 +110,20 @@ internal fun ForwardMessagesDialog(
     val baseUrl by userViewModel.baseUrl.collectAsStateWithLifecycle()
     val selectedServer by userViewModel.selectedServer.collectAsStateWithLifecycle()
     val currentUser by repo.currentUser.collectAsStateWithLifecycle()
-    val cachedTopics by repo.streamTopics.collectAsStateWithLifecycle()
-    val cachedBindings by repo.streamBindings.collectAsStateWithLifecycle()
-    val users by repo.users.collectAsState()
-    val folders by repo.folders.collectAsState()
-    var streams by remember { mutableStateOf(forwardableStreams(repo.streams.value)) }
+    val cachedTopics by chatDialogViewModel.topics.collectAsStateWithLifecycle()
+    val users by chatDialogViewModel.users.collectAsStateWithLifecycle()
+    val folders by repo.folders.collectAsStateWithLifecycle(emptyList())
+    val cachedStreams by chatDialogViewModel.streams.collectAsStateWithLifecycle()
+    val folderItems by chatDialogViewModel.forwardFolderItems.collectAsStateWithLifecycle(emptyMap())
+    var fetchedStreams by remember { mutableStateOf<List<StreamUIO>?>(null) }
+    val streams = fetchedStreams ?: remember(cachedStreams) { forwardableStreams(cachedStreams) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<Int?>(null) }
     var selectedStream by remember { mutableStateOf<StreamUIO?>(null) }
+    val selectedStreamUuid = selectedStream?.uuid
+    val selectedBindings by remember(repo, selectedStreamUuid) {
+        selectedStreamUuid?.let(repo.streamBindingDao::observeStreamBindings) ?: flowOf(emptyList())
+    }.collectAsStateWithLifecycle(emptyList())
     var topics by remember { mutableStateOf(emptyList<TopicUIO>()) }
     var topicsLoading by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
@@ -131,8 +142,8 @@ internal fun ForwardMessagesDialog(
             currentUserUuid = currentUserUuid,
             post = { uuid, target, markdown ->
                 encryptedAccess.requireCurrent()
-                val stream = repo.streams.value.firstOrNull { it.uuid == target.streamUuid }
-                    ?: streams.firstOrNull { it.uuid == target.streamUuid }
+                val stream = repo.streams.first().firstOrNull { it.uuid == target.streamUuid }
+                    ?: (fetchedStreams ?: cachedStreams).firstOrNull { it.uuid == target.streamUuid }
                     ?: throw ForwardPreparationFailure(R.string.forward_destination_unavailable)
                 encryptedDestinations[target.streamUuid] = stream.encryption
                 if (stream.encryption) {
@@ -159,7 +170,7 @@ internal fun ForwardMessagesDialog(
             },
             onConfirmed = {
                 repo.addMessageToStreamTopic(it)
-                repo.updateMessagesPool(listOf(it))
+                repo.messageDao.upsert(it)
             },
             prepare = preparation::prepare,
             verificationUuid = { canonical, target ->
@@ -182,7 +193,7 @@ internal fun ForwardMessagesDialog(
         loading = true
         error = null
         when (val response = client.performRequest(StreamsRequest())) {
-            is ApiResult.Success -> streams = forwardableStreams(response.value)
+            is ApiResult.Success -> fetchedStreams = forwardableStreams(response.value)
             is ApiResult.Error -> error = R.string.forward_load_chats_failed
         }
         loading = false
@@ -209,7 +220,7 @@ internal fun ForwardMessagesDialog(
                         }.distinctBy(TopicUIO::uuid).sortedWith(
                             compareByDescending<TopicUIO> { it.isDefault }.thenBy { it.name.lowercase() },
                         )
-                        repo.addStreamTopics(stream.uuid, topics)
+                        repo.setInitialTopics(topics)
                         if (stream.isPrivate && !stream.directUserUuid.isNullOrBlank()) {
                             topics.singleOrNull { it.isDefault }?.let { topic ->
                                 destination = ForwardDestination(stream.uuid, topic.uuid)
@@ -245,10 +256,12 @@ internal fun ForwardMessagesDialog(
         Column(
             Modifier.fillMaxSize().background(colors.background),
         ) {
-            val memberIds = selectedStream?.uuid?.let { cachedBindings[it] }?.map { it.userUuid }?.distinct()
+            val memberIds = selectedBindings.filter { it.streamUuid == selectedStreamUuid }
+                .map { it.userUuid }.distinct().takeIf { it.isNotEmpty() }
             ForwardRecipientPicker(
                 streams = streams,
                 folders = folders,
+                folderItems = folderItems,
                 users = users,
                 selectedStream = selectedStream,
                 topics = topics,
@@ -280,7 +293,7 @@ internal fun ForwardMessagesDialog(
             if (!delivery.canEdit) {
                 forwarding.pendingDestination?.let { pending ->
                     val chat = streams.firstOrNull { it.uuid == pending.streamUuid }
-                    val topic = cachedTopics[pending.streamUuid]?.firstOrNull { it.uuid == pending.topicUuid }
+                    val topic = cachedTopics.firstOrNull { it.streamUuid == pending.streamUuid && it.uuid == pending.topicUuid }
                     Text(
                         pluralStringResource(
                             R.plurals.forward_message_destination, forwarding.sources.size, forwarding.sources.size,
@@ -400,10 +413,11 @@ internal fun ForwardRecipientPicker(
     modifier: Modifier = Modifier,
     participantCount: Int? = null,
     onlineCount: Int? = null,
+    folderItems: Map<String, List<FolderItemUIO>> = emptyMap(),
 ) {
     val colors = LocalWorkspaceColorsPalette.current
-    val actualFolders = folders.filter { it.systemType != "all" && it.items.isNotEmpty() }
-    val folderIds = folders.firstOrNull { it.uuid == selectedFolder }?.items?.map { it.streamUuid }?.toSet()
+    val actualFolders = folders.filter { it.systemType != "all" && !folderItems[it.uuid].isNullOrEmpty() }
+    val folderIds = folderItems[selectedFolder]?.map { it.streamUuid }?.toSet()
     val visibleStreams = streams.filter { stream ->
         (folderIds == null || stream.uuid in folderIds) &&
             (selectedStream != null || forwardStreamTitle(stream, users).contains(query, ignoreCase = true))
@@ -548,7 +562,7 @@ internal fun ForwardRecipientPicker(
 }
 
 internal fun forwardStreamTitle(stream: StreamUIO, users: List<UserUIO>): String =
-    users.firstOrNull { it.uuid == stream.directUserUuid }?.displayableName() ?: stream.name
+    chatDisplayName(stream, users.firstOrNull { it.uuid == stream.directUserUuid })
 
 @Composable
 private fun ForwardAvatar(stream: StreamUIO, users: List<UserUIO>, baseUrl: String, client: WorkspaceAPIClient?, modifier: Modifier) {

@@ -37,7 +37,7 @@ internal fun canDeleteMessage(
 internal class MessageDeletion(
     private val canDelete: (MessageUIO) -> Boolean,
     private val request: suspend (String) -> ApiResult<String, ApiError>,
-    private val onDeleted: (String) -> Unit,
+    private val onDeleted: suspend (String) -> Unit,
 ) {
     private val mutex = Mutex()
     private val _deletingMessageUuids = MutableStateFlow<Set<String>>(emptySet())

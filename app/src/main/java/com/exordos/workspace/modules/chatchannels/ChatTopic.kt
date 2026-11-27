@@ -43,6 +43,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import dev.jeziellago.compose.markdowntext.MarkdownText
 import kotlinx.coroutines.launch
@@ -60,8 +61,10 @@ fun ChatTopic(
     stream: StreamUIO,
     navController: NavHostController
 ) {
+    val users by viewModel.users.collectAsStateWithLifecycle(emptyMap())
+    val lastMessages by viewModel.lastMessages.collectAsStateWithLifecycle(emptyMap())
     var menuExpanded by remember { mutableStateOf(false) }
-    val lastMessage = item.lastMessage
+    val lastMessage = lastMessages[item.lastMessageUuid]
     val scope = rememberCoroutineScope()
     Box {
         Row(
@@ -80,7 +83,7 @@ fun ChatTopic(
                         viewModel.currentTopicName = item.name
                         navController.navigate(
                             ChatFlow.ChatDialog(
-                                stream.displayableName(),
+                                stream.name,
                                 stream.uuid,
                                 item.name,
                                 item.uuid,
@@ -125,7 +128,7 @@ fun ChatTopic(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        val lastMessageUser = lastMessage.user
+                        val lastMessageUser = users[lastMessage.authorUuid]
                         if (lastMessageUser != null) {
                             Text(
                                 text = lastMessageUser.displayableName(),

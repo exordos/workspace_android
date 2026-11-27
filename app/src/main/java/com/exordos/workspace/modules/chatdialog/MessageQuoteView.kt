@@ -67,11 +67,10 @@ fun QuotedMessagePartView(
     }
     val state = if (recursive) MessageQuoteState.Unavailable else states[uuid] ?: MessageQuoteState.Loading
     val ready = (state as? MessageQuoteState.Ready)?.message
-    val author = ready?.let { source -> users.firstOrNull { it.uuid == source.authorUuid } }
+    val author = users.firstOrNull { it.uuid == ready?.authorUuid }
     MessageQuoteCard(
         state = state,
         authorLabel = author?.displayableName()
-            ?: ready?.user?.takeIf { it.uuid == ready.authorUuid }?.displayableName()
             ?: ready?.authorUuid ?: fallbackAuthor,
         isOwn = isOwn,
         onRetry = { viewModel.retryQuotedMessage(uuid) },

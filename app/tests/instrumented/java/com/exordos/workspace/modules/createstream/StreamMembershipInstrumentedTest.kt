@@ -126,9 +126,9 @@ class StreamMembershipInstrumentedTest {
         val observer = launch { model.users.collect() }
         try {
             withTimeout(5_000) { model.users.first { it.size == 2 } }
-            owner.repo.addStreamBindings(peer.initial.uuid, listOf(peer.binding(1)).map { it.toUio() })
+            owner.repo.setInitialStreamBindings(listOf(peer.binding(1)).map { it.toUio() })
             withTimeout(5_000) { model.users.first { it.map { person -> person.uuid } == listOf(peer.people[2].uuid) } }
-            owner.repo.addStreamBindings(peer.initial.uuid, emptyList())
+            owner.repo.deleteStreamBinding(peer.binding(1).toUio())
             withTimeout(5_000) { model.users.first { it.size == 2 } }
         } finally { observer.cancelAndJoin() }
         Unit
@@ -186,7 +186,7 @@ class StreamMembershipInstrumentedTest {
         peer.failInvitation = true
         model.addUsersToStream()
         assertTrue(model.createQueryState.value is QueryState.Error)
-        owner.repo.addStreamBindings(peer.initial.uuid, listOf(peer.binding(0), peer.binding(1)).map { it.toUio() })
+        owner.repo.setInitialStreamBindings(listOf(peer.binding(0), peer.binding(1)).map { it.toUio() })
         model.addUsersToStream()
         assertEquals(QueryState.Success, model.createQueryState.value)
         assertEquals(1, peer.invitations.size)
@@ -198,10 +198,10 @@ class StreamMembershipInstrumentedTest {
         model.didTapOnUser(peer.people[1].toUio())
         model.addUsersToStream()
         assertEquals(QueryState.Success, model.createQueryState.value)
-        val snapshot = owner.repo.streamBindings.value.getValue(peer.initial.uuid)
+        val snapshot = owner.repo.streamBindingDao.observeStreamBindings(peer.initial.uuid).first()
         assertEquals(peer.people.take(2).map { it.uuid }.toSet(), snapshot.map { it.userUuid }.toSet())
-        owner.repo.mergeStreamBindings(peer.initial.uuid, snapshot)
-        assertEquals(2, owner.repo.streamBindings.value.getValue(peer.initial.uuid).size)
+        owner.repo.setInitialStreamBindings(snapshot)
+        assertEquals(2, owner.repo.streamBindingDao.observeStreamBindings(peer.initial.uuid).first().size)
     }
 
     @Test fun canonicalBindingEventsUpdatePickerRolesAndRemovalWithoutReloadingUsers(): Unit = runBlocking {
@@ -218,10 +218,10 @@ class StreamMembershipInstrumentedTest {
             }.toString()
             repeat(2) { owner.repo.didReceiveStreamBindingEvent(batch, "created") }
             withTimeout(5_000) { model.users.first { it.map { user -> user.uuid } == listOf(peer.people[2].uuid) } }
-            assertEquals(2, owner.repo.streamBindings.value.getValue(peer.initial.uuid).size)
-            val own = owner.repo.streamBindings.value.getValue(peer.initial.uuid).first { it.userUuid == peer.people[0].uuid }
+            assertEquals(2, owner.repo.streamBindingDao.observeStreamBindings(peer.initial.uuid).first().size)
+            val own = owner.repo.streamBindingDao.observeStreamBindings(peer.initial.uuid).first().first { it.userUuid == peer.people[0].uuid }
             owner.repo.didReceiveStreamBindingEvent(Json.encodeToString(peer.binding(0).copy(role = "administrator")), "updated")
-            assertEquals("administrator", owner.repo.streams.value.single().role)
+            assertEquals("administrator", owner.repo.streams.first().single().role)
             owner.repo.didReceiveStreamBindingEvent(buildJsonObject {
                 put("uuid", added.uuid); put("stream_uuid", added.streamUuid); put("user_uuid", added.userUuid)
             }.toString(), "deleted")
@@ -229,7 +229,7 @@ class StreamMembershipInstrumentedTest {
             owner.repo.didReceiveStreamBindingEvent(buildJsonObject {
                 put("uuid", own.uuid); put("stream_uuid", own.streamUuid); put("user_uuid", own.userUuid)
             }.toString(), "deleted")
-            assertTrue(owner.repo.streams.value.isEmpty())
+            assertTrue(owner.repo.streams.first().isEmpty())
         } finally { observer.cancelAndJoin() }
     }
 
@@ -296,7 +296,7 @@ class StreamMembershipInstrumentedTest {
         val replacement = owner.events.getOrCreate(selected)
         assertNotSame(owner.repo, replacement)
         assertTrue(replacement.matchesServerConfiguration(selected))
-        assertTrue(replacement.streamBindings.value.isEmpty())
+        assertTrue(replacement.streamBindingDao.observeStreamBindings(peer.initial.uuid).first().isEmpty())
     }
 
     @Test fun delayedInvitationHttpResponseCannotRestoreADeletedMember(): Unit = runBlocking {
@@ -321,7 +321,7 @@ class StreamMembershipInstrumentedTest {
                 response.await()
             }
             assertEquals(QueryState.Success, model.createQueryState.value)
-            assertEquals(listOf(peer.people[0].uuid), owner.repo.streamBindings.value.getValue(peer.initial.uuid).map { it.userUuid })
+            assertEquals(listOf(peer.people[0].uuid), owner.repo.streamBindingDao.observeStreamBindings(peer.initial.uuid).first().map { it.userUuid })
         } finally { gate.countDown() }
     }
 
@@ -361,7 +361,7 @@ class StreamMembershipInstrumentedTest {
         account.repo.updateCurrentUser(peer.people[index].toUio())
         account.repo.setInitialUsers(peer.people.map { it.toUio() })
         account.repo.setInitialStreams(listOf(peer.initial).map { it.toUio() })
-        account.repo.addStreamBindings(peer.initial.uuid, listOf(peer.binding(0)).map { it.toUio() })
+        account.repo.setInitialStreamBindings(listOf(peer.binding(0)).map { it.toUio() })
         return account
     }
 }

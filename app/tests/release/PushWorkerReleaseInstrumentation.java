@@ -94,8 +94,10 @@ public final class PushWorkerReleaseInstrumentation extends Instrumentation {
         Set<String> ids = new HashSet<>();
         File file = new File(getTargetContext().getNoBackupFilesDir(), "androidx.work.workdb");
         if (!file.exists()) return ids;
+        // The pre-start snapshot may need to recover the WorkManager journal left by a force-stop.
+        int access = succeededOnly ? SQLiteDatabase.OPEN_READONLY : SQLiteDatabase.OPEN_READWRITE;
         try (SQLiteDatabase database = SQLiteDatabase.openDatabase(file.getPath(), null,
-                SQLiteDatabase.OPEN_READONLY | SQLiteDatabase.NO_LOCALIZED_COLLATORS);
+                access | SQLiteDatabase.NO_LOCALIZED_COLLATORS);
              Cursor rows = database.query("WorkSpec", new String[]{"id", "state"},
                      "worker_class_name = ?", new String[]{workerClass}, null, null, null)) {
             while (rows.moveToNext()) {

@@ -39,7 +39,6 @@ class WorkspaceUioMappingTest {
         assertNotSame(dto.reactions, uio.reactions)
         assertTrue(uio.mentioned && uio.isOwn && !uio.read)
         assertEquals("project", uio.projectId)
-        assertNull(uio.user)
         assertNull(uio.originalEncryptedPayload)
         uio.payload.content = "presentation plaintext"
         uio.uuid = "local"
@@ -63,8 +62,6 @@ class WorkspaceUioMappingTest {
             uio.lastMessageUuid, uio.defaultTopicUuid, uio.directUserUuid, uio.notificationMode,
             uio.currentEncryptionKeyUuid, uio.ownerUuid, uio.projectId, uio.userUuid, uio.role, uio.description))
         assertTrue(uio.isPrivate && uio.isArchived && uio.encryption && uio.inviteOnly && uio.announce)
-        assertNull(uio.directUser)
-        assertNull(uio.lastMessage)
     }
 
     @Test fun usersTopicsFoldersBindingsReactionsDraftsProjectsAndSettingsMapFromWire() {
@@ -83,15 +80,15 @@ class WorkspaceUioMappingTest {
             listOf(topic.uuid, topic.name, topic.streamUuid, topic.updatedAt, topic.lastMessageUuid, topic.notificationMode, topic.summary))
         assertEquals(listOf(3, 4, 2), listOf(topic.color, topic.unreadCount, topic.activeUnreadCount))
         assertTrue(topic.isDone && !topic.isDefault)
-        assertNull(topic.lastMessage)
         val folderDto = json.decodeFromString<FolderResponseData>("""{"uuid":"folder","title":"Folder",
-            "unread_count":4,"system_type":"custom","created_at":"created","folder_items":[
-            {"uuid":"item","stream_uuid":"stream","chat_type":"stream","unread_count":4}]}""")
+            "unread_count":4,"system_type":"created","created_at":"created","folder_items":[
+            {"uuid":"item","folder_uuid":"folder","stream_uuid":"stream","chat_type":"stream","unread_count":4}]}""")
         val folder = folderDto.toUio()
-        assertEquals(listOf("folder", "Folder", "custom", "created"), listOf(folder.uuid, folder.title, folder.systemType, folder.creationDate))
+        assertEquals(listOf("folder", "Folder", "created", "created"), listOf(folder.uuid, folder.title, folder.systemType, folder.creationDate))
         assertEquals(4, folder.unreadCount)
-        assertEquals(listOf("item", "stream", "stream"), folder.items.single().let { listOf(it.uuid, it.streamUuid, it.chatType) })
-        folder.items.single().unreadCount = 0
+        val item = folderDto.items.single().toUio()
+        assertEquals(listOf("item", "folder", "stream", "stream"), listOf(item.uuid, item.folder, item.streamUuid, item.chatType))
+        item.unreadCount = 0
         assertEquals(4, folderDto.items.single().unreadCount)
         val binding = json.decodeFromString<StreamBindingResponseData>("""{"uuid":"binding","role":"owner",
             "stream_uuid":"stream","user_uuid":"person"}""").toUio()

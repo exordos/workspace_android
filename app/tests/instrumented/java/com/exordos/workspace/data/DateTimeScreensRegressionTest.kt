@@ -121,8 +121,8 @@ class DateTimeScreensRegressionTest {
         }
         account = WorkspaceTestAccount.create(server.url)
         account.repo.setInitialStreams(listOf(stream).map { it.toUio() })
-        account.repo.appendItemsToTopicsPool(topics.map { it.toUio() })
-        account.repo.setInitialDraftsPool(drafts.map { it.toUio() })
+        account.repo.setInitialTopics(topics.map { it.toUio() })
+        account.repo.setInitialDrafts(drafts.map { it.toUio() })
         account.repo.setInitialUsers(listOf(UserResponseData(username = "cassi", uuid = "user",
             status = "active", avatar = "")).map { it.toUio() })
     }

@@ -67,6 +67,7 @@ fun HomeMentionsScreen(
     val messagesQueryState by viewModel.messagesQueryState.collectAsStateWithLifecycle()
     val streams by viewModel.streams.collectAsStateWithLifecycle()
     val messages by viewModel.messages.collectAsStateWithLifecycle()
+    val users by viewModel.users.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     Scaffold(
         topBar = {
@@ -131,6 +132,7 @@ fun HomeMentionsScreen(
                             items = messages.sortedByDescending  { WorkspaceDateTime.parse(it.createdAt) }
                         ) { item ->
 
+                            val author = users.firstOrNull { it.uuid == item.authorUuid }
                             val stream = streams.firstOrNull { it.uuid == item.streamUuid }
                             if (stream != null) {
                                 Row(
@@ -139,7 +141,7 @@ fun HomeMentionsScreen(
                                             onClick = {
                                                 navController.navigate(
                                                     HomeFlow.ChatDialog(
-                                                        stream.displayableName(),
+                                                        stream.name,
                                                         stream.uuid,
                                                         "",
                                                         stream.defaultTopicUuid ?: "",
@@ -153,11 +155,11 @@ fun HomeMentionsScreen(
                                     verticalAlignment = Alignment.Top
                                 ) {
                                     Avatar(
-                                        item.user?.avatar,
+                                        author?.avatar,
                                         viewModel.client.userViewModel?.baseUrl?.value ?: "",
                                         viewModel.client.authHeaders(),
                                         null,
-                                        item.user?.displayableName() ?: "",
+                                        author?.displayableName() ?: "",
                                         Modifier.padding(16.dp)
                                             .size(30.dp)
                                     )
@@ -173,7 +175,7 @@ fun HomeMentionsScreen(
                                         ) {
                                             val defaultName = if (item.isOwn) "Я" else "Собеседник"
                                             Text(
-                                                text = item.user?.displayableName() ?: defaultName,
+                                                text = author?.displayableName() ?: defaultName,
                                                 color = if (item.isOwn) LocalWorkspaceColorsPalette.current.indicatorBlue else LocalWorkspaceColorsPalette.current.indicatorPurple,
                                                 fontSize = 14.sp,
                                                 fontFamily = InterFontFamily,

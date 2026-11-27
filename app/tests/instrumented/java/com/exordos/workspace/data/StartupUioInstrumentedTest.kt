@@ -1,9 +1,11 @@
 package com.exordos.workspace.data
 
+import androidx.lifecycle.viewModelScope
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.exordos.workspace.data.remote.ApiError
 import com.exordos.workspace.data.remote.ApiResult
 import com.exordos.workspace.data.remote.ProtectedRequestAuthentication
+import com.exordos.workspace.data.remote.dto.FoldersRequest
 import com.exordos.workspace.data.remote.dto.MessageReactionsRequest
 import com.exordos.workspace.data.remote.dto.MessagesRequest
 import com.exordos.workspace.data.remote.dto.ProjectsRequest
@@ -19,7 +21,12 @@ import com.exordos.workspace.data.uio.TopicUIO
 import com.exordos.workspace.fixtures.LoopbackWorkspaceServer
 import com.exordos.workspace.fixtures.WorkspaceTestAccount
 import com.exordos.workspace.modules.chooseserver.QueryState
+import com.exordos.workspace.modules.chatdialog.AttachmentStorage
+import com.exordos.workspace.modules.chatdialog.ChatDialogViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
@@ -46,8 +53,8 @@ class StartupUioInstrumentedTest {
     private val topic = """{"uuid":"topic","stream_uuid":"stream","name":"Topic","color":1,
         "updated_at":"2026-01-01T00:00:00Z","unread_count":1,"active_unread_count":1,
         "is_done":false,"is_default":true,"notification_mode":"follow"}"""
-    private val folder = """{"uuid":"folder","title":"Folder","unread_count":1,"system_type":"custom",
-        "created_at":"2026-01-01T00:00:00Z","folder_items":[{"uuid":"item","stream_uuid":"stream","chat_type":"stream","unread_count":1}]}"""
+    private val folder = """{"uuid":"folder","title":"Folder","unread_count":1,"system_type":"created",
+        "created_at":"2026-01-01T00:00:00Z","folder_items":[{"uuid":"item","folder_uuid":"folder","stream_uuid":"stream","chat_type":"stream","unread_count":1}]}"""
     private val binding = """{"uuid":"binding","stream_uuid":"stream","user_uuid":"person","role":"owner"}"""
     private val reaction = """{"uuid":"reaction","user_uuid":"person","message_uuid":"message","emoji_name":"smile"}"""
 
@@ -86,25 +93,49 @@ class StartupUioInstrumentedTest {
         repo.loadServerSettings()
         withTimeout(10_000) { repo.streamsQueryState.first { it == QueryState.Success } }
         assertEquals("CASSI fixture", repo.currentUser.value!!.displayableName())
-        assertEquals("person", repo.users.value.single().uuid)
-        val loaded = repo.streams.value.single()
-        assertEquals("CASSI fixture", loaded.displayableName())
-        assertEquals("Hello", loaded.lastMessage!!.description())
-        assertEquals("person", loaded.lastMessage!!.user!!.uuid)
-        assertEquals("stream", repo.folders.value.single().items.single().streamUuid)
+        assertEquals("person", repo.users.first().single().uuid)
+        val loaded = repo.streams.first().single()
+        assertEquals("CASSI fixture", repo.users.first().single { it.uuid == loaded.directUserUuid }.displayableName())
+        val lastMessage = repo.lastMessageDao.observeLastMessages().first().single { it.uuid == loaded.lastMessageUuid }
+        assertEquals("Hello", lastMessage.description())
+        assertEquals("person", lastMessage.authorUuid)
+        assertEquals("stream", repo.folderItemDao.observeFolderItems("folder").first().single().streamUuid)
         assertEquals("folder", repo.currentlySelectedFolder.value!!.uuid)
-        assertEquals("reaction", repo.userReactions.value.single().uuid)
-        assertEquals("Draft", repo.draftsPool.value.single().payload.content)
+        assertEquals("reaction", repo.userReactions.first().single().uuid)
+        assertEquals("Draft", repo.drafts.first().single().payload.content)
         assertEquals("https://meet.example.invalid", repo.jitsiServerUrl)
-        val history: ApiResult<List<MessageUIO>, ApiError> = repo.refreshConversation("stream", "topic")
-        assertTrue(history is ApiResult.Success)
-        assertEquals("Hello", repo.streamTopicMessages.value.getValue("stream.topic").single().payload.content)
+    }
+
+    @Test fun openingAChatRequestsItsLatestPageAndPublishesStoredHistory(): Unit = runBlocking {
+        val repo = account.repo
+        assertTrue(repo.messageDao.observeMessages("stream", "topic").first().isEmpty())
+        val chat = withContext(Dispatchers.Main) {
+            ChatDialogViewModel(account.api, account.user, "Channel", "stream", "Topic", "topic",
+                false, account.events, null, AttachmentStorage(repo.context, account.api)).also { it.onChatOpened() }
+        }
+        try {
+            val visible = withTimeout(10_000) {
+                chat.streamTopicMessages.first { it["stream.topic"].orEmpty().isNotEmpty() }
+            }.getValue("stream.topic")
+            assertEquals(listOf("Hello"), visible.map { it.payload.content })
+            assertEquals(visible, repo.messageDao.observeMessages("stream", "topic").first())
+            val request = requests.single { it.path == "/api/workspace/v1/messenger/messages/" }
+            assertEquals("GET", request.method)
+            assertTrue("stream_uuid=stream" in request.query.split('&'))
+            assertTrue("topic_uuid=topic" in request.query.split('&'))
+            assertTrue("page_limit=25" in request.query.split('&'))
+        } finally {
+            withContext(Dispatchers.Main) {
+                chat.onChatClosed()
+                chat.viewModelScope.cancel()
+            }
+        }
     }
 
     @Test fun typedHttpAndPinnedRequestsReturnUios(): Unit = runBlocking {
         val api = account.api
         val topics: ApiResult<List<TopicUIO>, ApiError> = api.performRequest(TopicsRequest(listOf("stream")))
-        val messages: ApiResult<List<MessageUIO>, ApiError> = api.performRequest(MessagesRequest("stream", "topic"))
+        val messages: ApiResult<List<MessageUIO>, ApiError> = api.performRequest(MessagesRequest("stream", "topic", 25, null))
         val reactions: ApiResult<List<MessageReactionUIO>, ApiError> = api.performRequest(MessageReactionsRequest("person"))
         val projects: ApiResult<List<ProjectUIO>, ApiError> = api.performRequest(ProjectsRequest())
         val settings: ApiResult<ServerSettingsUIO, ApiError> = api.performRequest(ServerSettingsRequest(server.url))
@@ -125,25 +156,30 @@ class StartupUioInstrumentedTest {
         assertEquals(count + 1, requests.count { it.path.endsWith("/stream_bindings/") })
     }
 
-    @Test fun realtimeMapsEveryEntityBeforeUpdatingPresentationState() {
+    @Test fun foldersRequestReadsNestedItemsWithFolderUuid(): Unit = runBlocking {
+        val response = account.api.performRequest(FoldersRequest())
+        assertTrue(response is ApiResult.Success)
+        val snapshot = (response as ApiResult.Success).value.single()
+        assertEquals("folder", snapshot.folder.uuid)
+        assertEquals("folder", snapshot.items.single().folder)
+    }
+
+    @Test fun realtimeMapsEveryEntityBeforeUpdatingPresentationState() = runBlocking {
         val repo = account.repo
         repo.didReceiveUserEvent(person, "created")
-        repo.updateCurrentUser(repo.users.value.single())
+        repo.updateCurrentUser(withTimeout(5_000) { repo.users.first { it.isNotEmpty() } }.single())
         repo.didReceiveStreamEvent(stream, "created")
-        repo.addStreamTopics("stream", emptyList())
         repo.didReceiveTopicEvent(topic, "created")
         repo.didReceiveMessageEvent(message, "created")
         repo.didReceiveFolderEvent(folder, "created")
-        repo.addStreamBindings("stream", emptyList())
         repo.didReceiveStreamBindingEvent("""{"uuid":"stream","items":[$binding]}""", "created")
         repo.didReceiveStreamBindingEvent(binding.replace("owner", "administrator"), "updated")
         repo.didReceiveReactionEvent(reaction, "created")
-        assertEquals("CASSI fixture", repo.users.value.single().displayableName())
-        assertEquals("Hello", repo.messagesPool.value.single().description())
-        assertEquals("Topic", repo.streamTopics.value.getValue("stream").single().name)
-        assertEquals("Topic", repo.topicsPool.value.single().name)
-        assertEquals("Folder", repo.folders.value.single().title)
-        assertEquals("administrator", repo.streamBindings.value.getValue("stream").single().role)
-        assertEquals("smile", repo.userReactions.value.single().emojiName)
+        assertEquals("CASSI fixture", repo.users.first().single().displayableName())
+        assertEquals("Hello", withTimeout(5_000) { repo.lastMessageDao.observeLastMessages().first { it.isNotEmpty() } }.single().description())
+        assertEquals("Topic", withTimeout(5_000) { repo.topics.first { it.isNotEmpty() } }.single().name)
+        assertEquals("Folder", repo.folders.first().single().title)
+        assertEquals("administrator", repo.streamBindingDao.observeStreamBindings("stream").first().single().role)
+        assertEquals("smile", repo.userReactions.first().single().emojiName)
     }
 }

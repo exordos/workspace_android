@@ -69,7 +69,7 @@ fun ChatUserInfoScreen(
     val context = LocalContext.current
     val state by viewModel.createQueryState.collectAsStateWithLifecycle()
     val user by viewModel.user.collectAsStateWithLifecycle()
-    val shareLink = workspaceUserShareLink(viewModel.client.userViewModel?.baseUrl?.collectAsState()?.value, user.uuid)
+    val shareLink = workspaceUserShareLink(viewModel.client.userViewModel?.baseUrl?.collectAsState()?.value, user?.uuid)
 
     LaunchedEffect(state) {
         if (state is QueryState.Success) {
@@ -143,11 +143,11 @@ fun ChatUserInfoScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Avatar(
-                    user.avatar,
+                    user?.avatar,
                     viewModel.client.userViewModel?.baseUrl?.value ?: "",
                     viewModel.client.authHeaders(),
                     null,
-                    user.displayableName(),
+                    user?.displayableName() ?: "",
                     Modifier.padding(end = 8.dp).size(64.dp)
                 )
                 Column(
@@ -162,7 +162,7 @@ fun ChatUserInfoScreen(
                         fontWeight = FontWeight.Medium
                     )
                     Text(
-                        text = user.statusDescription(),
+                        text = user?.statusDescription() ?: "",
                         color = LocalWorkspaceColorsPalette.current.textAdditional50,
                         fontSize = 12.sp,
                         fontFamily = InterFontFamily,
@@ -173,13 +173,21 @@ fun ChatUserInfoScreen(
             }
             ChatUserActionButtonsRow(
                 shareEnabled = shareLink != null,
-                onMessage = { scope.launch { viewModel.createPrivateStream(user) } },
+                onMessage = {
+                    val currentUser = user
+                    if (currentUser != null) {
+                        scope.launch { viewModel.createPrivateStream(currentUser) }
+                    }
+                            },
                 onCall = {
                     viewModel.shouldSendMessage = true
-                    scope.launch { viewModel.createPrivateStream(user) }
+                    val currentUser = user
+                    if (currentUser != null) {
+                        scope.launch { viewModel.createPrivateStream(currentUser) }
+                    }
                 },
                 onShare = {
-                    shareLink?.let { shareWorkspaceLink(context, user.displayableName(), it) }
+                    shareLink?.let { shareWorkspaceLink(context, user?.displayableName() ?: "", it) }
                 }
             )
             ProfileRow(
@@ -189,7 +197,7 @@ fun ChatUserInfoScreen(
             )
             ProfileRow(
                 "ID пользователя",
-                user.uuid,
+                user?.uuid ?: "",
                 R.drawable.ic_userid
             )
         }

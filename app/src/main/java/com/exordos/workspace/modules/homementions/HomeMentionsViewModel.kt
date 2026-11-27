@@ -32,14 +32,14 @@ class HomeMentionsViewModel(
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = eventsRepository.users.value
+            initialValue = emptyList()
         )
 
     val streams: StateFlow<List<StreamUIO>> = eventsRepository.streams
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = eventsRepository.streams.value
+            initialValue = emptyList()
         )
 
     private val _messages = MutableStateFlow<List<MessageUIO>>(emptyList())
@@ -56,12 +56,7 @@ class HomeMentionsViewModel(
         val messagesResponse = client.performRequest(MentionedMessagesRequest())
         when(messagesResponse) {
             is ApiResult.Success -> {
-                val messages = messagesResponse.value
-                val messagesWithUser = messages.map { message ->
-                    message.user = users.value.firstOrNull { it.uuid == message.authorUuid }
-                    message
-                }
-                _messages.value = messagesWithUser
+                _messages.value = messagesResponse.value
                 _messagesQueryState.value = QueryState.Success
             }
             is ApiResult.Error -> {

@@ -90,6 +90,7 @@ import kotlin.math.max
 import kotlin.math.min
 import android.provider.OpenableColumns
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -239,8 +240,10 @@ fun SendMessageView(
                                 .padding(8.dp)
                                 .clickable( onClick = { viewModel.onClickOnQuotedMessage(quotedMessage) })
                         ) {
+                            val users by viewModel.users.collectAsStateWithLifecycle()
+                            val author = users.firstOrNull { it.uuid == quotedMessage.message.authorUuid }
                             Text(
-                                quotedMessage.message.user?.displayableName() ?: "Пользователь",
+                                author?.displayableName() ?: "Пользователь",
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Medium,
                                 color = if (quotedMessage == currentlyQuotedMessage) LocalWorkspaceColorsPalette.current.textHeaders else LocalWorkspaceColorsPalette.current.textHeaders

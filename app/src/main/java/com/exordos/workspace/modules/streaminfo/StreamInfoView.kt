@@ -132,24 +132,23 @@ fun StreamInfoView(
                     viewModel.client.userViewModel?.baseUrl?.value ?: "",
                     viewModel.client.authHeaders(),
                     stream.color,
-                    stream.displayableName(),
+                    stream.name,
                     Modifier
                         .padding(end = 12.dp)
                         .size(64.dp)
                 )
                 Column {
                     Text(
-                        text = stream.displayableName(),
+                        text = stream.name,
                         color = LocalWorkspaceColorsPalette.current.textHeaders,
                         fontSize = 20.sp,
                         fontFamily = InterFontFamily,
                         fontWeight = FontWeight.Medium
                     )
-                    val currentStreamBindings = streamBindings[viewModel.streamUuid]
-                    if (currentStreamBindings != null && currentStreamBindings.count() > 0) {
-                        val currentBindedOnlineUsers = currentStreamBindings.mapNotNull { binding -> users.firstOrNull { binding.userUuid == it.uuid && it.status == "active" } }
+                    if (streamBindings.isNotEmpty()) {
+                        val currentBindedOnlineUsers = streamBindings.mapNotNull { binding -> users.firstOrNull { binding.userUuid == it.uuid && it.status == "active" } }
                         var baseText = context.resources.getQuantityString(
-                            R.plurals.participants_count, currentStreamBindings.count(), currentStreamBindings.count()
+                            R.plurals.participants_count, streamBindings.size, streamBindings.size
                         )
                         if (currentBindedOnlineUsers.count() > 0) {
                             baseText += ", ${currentBindedOnlineUsers.count()} онлайн"
@@ -170,7 +169,7 @@ fun StreamInfoView(
             )
             ActionButtonsRow(
                 shareEnabled = shareLink != null,
-                onShare = { shareLink?.let { shareWorkspaceLink(context, stream.displayableName(), it) } }
+                onShare = { shareLink?.let { shareWorkspaceLink(context, stream.name, it) } }
             )
             NotificationButtonsRow(viewModel)
             val summary = topic?.summary
@@ -348,10 +347,9 @@ fun BoundUsers(
                 )
             }
         }
-        val currentStreamBindings = streamBindings[viewModel.streamUuid]
-        if (currentStreamBindings != null && currentStreamBindings.count() > 0) {
+        if (streamBindings.isNotEmpty()) {
             val currentBindedOnlineUsers =
-                currentStreamBindings.mapNotNull { binding -> users.firstOrNull { binding.userUuid == it.uuid } }
+                streamBindings.mapNotNull { binding -> users.firstOrNull { binding.userUuid == it.uuid } }
             Column(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
                 modifier = Modifier

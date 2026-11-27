@@ -31,6 +31,7 @@ import com.exordos.workspace.ui.theme.LocalWorkspaceColorsPalette
 /** Native Sharesheet first, then the Workspace picker only when its target is chosen. */
 @Composable
 internal fun ForwardMessagesAction(
+    chatDialogViewModel: ChatDialogViewModel,
     sources: List<MessageUIO>,
     client: WorkspaceAPIClient,
     repo: EventsRepository,
@@ -81,7 +82,7 @@ internal fun ForwardMessagesAction(
     }
     LaunchedEffect(Unit) { if (!resumed) share() }
     if (internalRequested) {
-        ForwardMessagesDialog(sources, client, repo, userViewModel, sessionStore, onDismiss, onForwarded)
+        ForwardMessagesDialog(chatDialogViewModel, sources, client, repo, userViewModel, sessionStore, onDismiss, onForwarded)
     } else if (preparing || error != null) {
         AlertDialog(
             onDismissRequest = onDismiss,

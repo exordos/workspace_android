@@ -85,10 +85,9 @@ fun ProtectedStreamInfoView(viewModel: StreamInfoViewModel, navController: NavHo
     val deletion by viewModel.protectedStreamDeleteState.collectAsStateWithLifecycle()
     val callState by viewModel.protectedStreamCallState.collectAsStateWithLifecycle()
     val users by viewModel.users.collectAsStateWithLifecycle()
-    val bindingsByStream by viewModel.streamBindings.collectAsStateWithLifecycle()
+    val streamBindings by viewModel.streamBindings.collectAsStateWithLifecycle()
     val encryption by viewModel.encryptedChatState.collectAsStateWithLifecycle()
-    val rawMessages by viewModel.repo.streamTopicMessages.collectAsStateWithLifecycle()
-    val pooledMessages by viewModel.repo.messagesPool.collectAsStateWithLifecycle()
+    val pooledMessages by viewModel.repo.messages.collectAsStateWithLifecycle(emptyList())
     val selectedServer by viewModel.client.requireUserViewModel().selectedServer.collectAsStateWithLifecycle()
     val memberBaseUrl = selectedServer?.takeIf { it.id == viewModel.repo.serverId }?.baseUrl.orEmpty()
     val memberAuthHeaders = viewModel.client.authHeaders(viewModel.repo.serverId)
@@ -103,15 +102,15 @@ fun ProtectedStreamInfoView(viewModel: StreamInfoViewModel, navController: NavHo
     var description by remember(viewModel.streamUuid) { mutableStateOf(stream?.description.orEmpty()) }
     var dirty by remember { mutableStateOf(false) }
     var callFailed by remember { mutableStateOf(false) }
-    val bound = bindingsByStream[viewModel.streamUuid].orEmpty().distinctBy { it.userUuid }
+    val bound = streamBindings.distinctBy { it.userUuid }
     val editable = details?.role in setOf("owner", "administrator") &&
         stream?.role in setOf("owner", "administrator") && stream?.isArchived == false
     val busy = update.busy || deletion.busy || callState.busy
     val isKeyPage = page == ProtectedInfoPage.KEYS || page == ProtectedInfoPage.LOCAL_KEYS
-    val keyCreatedAt = remember(rawMessages, pooledMessages, encryption.currentKeyUuid, stream?.uuid, selectedServer?.projectUuid) {
+    val keyCreatedAt = remember(pooledMessages, encryption.currentKeyUuid, stream?.uuid, selectedServer?.projectUuid) {
         val targetStream = stream?.uuid
         val currentKey = encryption.currentKeyUuid
-        if (targetStream == null || currentKey.isNullOrBlank()) null else (pooledMessages.asSequence() + rawMessages.values.asSequence().flatten()).filter {
+        if (targetStream == null || currentKey.isNullOrBlank()) null else pooledMessages.asSequence().filter {
             it.streamUuid == targetStream && it.payload.kind == "key_announced" && it.payload.keyUuid == currentKey &&
                 (it.projectId == null || it.projectId == selectedServer?.projectUuid)
         }.mapNotNull { runCatching { WorkspaceDateTime.parse(it.createdAt).toEpochMilli() }.getOrNull() }.minOrNull()
@@ -230,7 +229,7 @@ fun ProtectedStreamInfoView(viewModel: StreamInfoViewModel, navController: NavHo
                     }
                     ProtectedActionTile(R.drawable.ic_share, R.string.protected_stream_share, shareLink != null,
                         "protected-stream-share", Modifier.weight(1f)) {
-                        shareLink?.let { shareWorkspaceLink(context, current.displayableName(), it) }
+                        shareLink?.let { shareWorkspaceLink(context, current.name, it) }
                     }
                 }
                 if (callFailed) ProtectedText(stringResource(R.string.protected_stream_call_failed), ProtectedDelete, Modifier.padding(20.dp))
@@ -335,7 +334,7 @@ private fun ProtectedInfoHeader(title: String?, onBack: () -> Unit, onClose: () 
 @Composable
 private fun ProtectedAvatar(stream: StreamUIO, size: Int, baseUrl: String, viewModel: StreamInfoViewModel) {
     Box(Modifier.size(size.dp), contentAlignment = Alignment.Center) {
-        Avatar(null, baseUrl, viewModel.client.authHeaders(), stream.color, stream.displayableName(), Modifier.fillMaxSize())
+        Avatar(null, baseUrl, viewModel.client.authHeaders(), stream.color, stream.name, Modifier.fillMaxSize())
         EncryptedChatAvatarBadge(Modifier.size(if (size >= 80) 28.dp else 24.dp))
     }
 }

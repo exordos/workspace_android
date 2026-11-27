@@ -188,7 +188,7 @@ class WorkspaceApplication : Application(), Configuration.Provider {
             client = httpClient
         )
         val tokenStore = SecureTokenStore(this)
-        eventsRepositoryStore = EventsRepositoryStore(tokenStore, workspaceApiClient)
+        eventsRepositoryStore = EventsRepositoryStore(tokenStore, workspaceApiClient, applicationContext)
         serverRepository = ServerRepository(
             context = this,
             tokenStore = SecureTokenStore(this),
@@ -644,7 +644,7 @@ fun ChatNavigation(
         val message = (messages as? ApiResult.Success)?.value
             ?.firstOrNull { it.uuid == route.messageUuid && it.streamUuid == route.streamUuid && it.topicUuid == route.topicUuid }
             ?: run { onDeepLinkHandled(); return@LaunchedEffect }
-        navController.navigate(ChatFlow.ChatDialog(stream?.displayableName() ?: "Workspace", route.streamUuid, topic?.name,
+        navController.navigate(ChatFlow.ChatDialog(stream.name, route.streamUuid, topic?.name,
             route.topicUuid, stream?.directUserUuid != null, null, route.messageUuid)) {
             popUpTo<ChatFlow.ChatList>()
             launchSingleTop = true

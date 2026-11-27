@@ -11,7 +11,7 @@ import com.exordos.workspace.data.remote.HTTPMethod
 
 @Serializable
 data class StreamBindingsRequest(
-    val streamUuid: String
+    val streamUuid: String? = null
 ): UIORequest<StreamBindingsRequestData, List<StreamBindingResponseData>, List<StreamBindingUIO>, ApiError> {
     override fun toUio(dto: List<StreamBindingResponseData>): List<StreamBindingUIO> = dto.map { it.toUio() }
     override val method: HTTPMethod = HTTPMethod.GET
@@ -22,7 +22,7 @@ data class StreamBindingsRequest(
 
 @Serializable
 data class StreamBindingsRequestData(
-    val stream_uuid: String
+    val stream_uuid: String?
 )
 
 @Serializable

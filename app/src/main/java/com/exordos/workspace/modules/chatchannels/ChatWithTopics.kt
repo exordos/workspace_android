@@ -45,6 +45,7 @@ import androidx.navigation.NavHostController
 import kotlinx.coroutines.launch
 import com.exordos.workspace.data.WorkspaceDateTime
 import com.exordos.workspace.ChatFlow
+import com.exordos.workspace.data.uio.LastMessageUIO
 import com.exordos.workspace.data.uio.StreamUIO
 import com.exordos.workspace.data.uio.TopicUIO
 import com.exordos.workspace.modules.chooseserver.QueryState
@@ -69,9 +70,11 @@ fun ChatWithTopics(
     val searchQuery by chatViewModel.searchQuery.collectAsState()
     val currentlySelectedStream by chatViewModel.currentlySelectedStream.collectAsState()
     val scope = rememberCoroutineScope()
-    val streamTopics by chatViewModel.streamTopics.collectAsStateWithLifecycle()
+    val lastMessages by chatViewModel.allLastMessages.collectAsStateWithLifecycle()
     val streamsQueryState by chatViewModel.streamsQueryState.collectAsStateWithLifecycle()
     val topicsQueryState by chatViewModel.topicsQueryState.collectAsStateWithLifecycle()
+    val folderItems by chatViewModel.selectedFolderItems.collectAsStateWithLifecycle(emptyList())
+    val topics by chatViewModel.selectedStreamTopics.collectAsStateWithLifecycle(emptyList())
 
     when (streamsQueryState) {
         QueryState.Loading -> {
@@ -92,9 +95,8 @@ fun ChatWithTopics(
         }
 
         QueryState.Success -> {
-            val filteredSubscriptions = remember(searchQuery, streams, currentlySelectedFolder) {
-                val folderItems = currentlySelectedFolder?.items
-                val folderSubscriptions = if (folderItems != null) {
+            val filteredSubscriptions = remember(searchQuery, streams, currentlySelectedFolder, folderItems) {
+                val folderSubscriptions = if (currentlySelectedFolder?.systemType?.let { it != "all" } == true) {
                     folderItems.mapNotNull { folderItem ->
                         streams.firstOrNull { it.uuid == folderItem.streamUuid }
                     }
@@ -105,7 +107,7 @@ fun ChatWithTopics(
                     folderSubscriptions
                 } else {
                     folderSubscriptions.filter {
-                        it.displayableName().contains(searchQuery, ignoreCase = true)
+                        it.name.contains(searchQuery, ignoreCase = true)
                     }
                 }
             }
@@ -139,7 +141,7 @@ fun ChatWithTopics(
                             .fillMaxSize()
                     ) {
                         items(
-                            items = if (chatViewModel.client.userViewModel?.streamsOrderIsUnreadFirst?.value ?: true) filteredSubscriptions.sortedForInbox() else filteredSubscriptions.sortedByActivity()
+                            items = if (chatViewModel.client.userViewModel?.streamsOrderIsUnreadFirst?.value ?: true) filteredSubscriptions.sortedForInbox(lastMessages) else filteredSubscriptions.sortedByActivity(lastMessages)
                         ) { item ->
                             Row(
                                 verticalAlignment = Alignment.CenterVertically
@@ -224,12 +226,7 @@ fun ChatWithTopics(
 
                                 is QueryState.Error -> {
                                     FullScreenError {
-                                        val currentlySelectedStream = chatViewModel.currentlySelectedStream.value
-                                        if (currentlySelectedStream != null) {
-                                            scope.launch {
-                                                chatViewModel.loadTopics(currentlySelectedStream)
-                                            }
-                                        }
+
                                     }
                                 }
 
@@ -239,8 +236,7 @@ fun ChatWithTopics(
                                     ) {
                                         val selectedStream = currentlySelectedStream
                                         if (selectedStream != null) {
-                                            val topics = streamTopics[selectedStream.uuid]
-                                            if (topics?.isEmpty() ?: true) {
+                                            if (topics.isEmpty()) {
                                                 Box(
                                                     modifier = Modifier.fillMaxSize(),
                                                     contentAlignment = Alignment.Center
@@ -255,7 +251,7 @@ fun ChatWithTopics(
                                                         .weight(1f)
                                                 ) {
                                                     items(
-                                                        items = if (chatViewModel.client.userViewModel?.streamsOrderIsUnreadFirst?.value ?: true) topics.topicsSortedForInbox() else topics.topicsSortedByActivity()
+                                                        items = if (chatViewModel.client.userViewModel?.streamsOrderIsUnreadFirst?.value ?: true) topics.topicsSortedForInbox(lastMessages) else topics.topicsSortedByActivity(lastMessages)
                                                     ) { item ->
                                                         ChatTopic(
                                                             chatViewModel,
@@ -297,32 +293,46 @@ fun ChatWithTopics(
     }
 }
 
-fun StreamUIO.sortKey(): Instant =
-    WorkspaceDateTime.parse(lastMessage?.createdAt ?: updatedAt)
+fun StreamUIO.sortKey(lastMessage: LastMessageUIO?): Instant {
+    return WorkspaceDateTime.parse(lastMessage?.createdAt ?: updatedAt)
+}
 
-fun List<StreamUIO>.sortedForInbox(): List<StreamUIO> =
+fun List<StreamUIO>.sortedForInbox(lastMessages: List<LastMessageUIO>): List<StreamUIO> =
     sortedWith(
         compareByDescending<StreamUIO> { it.activeUnreadCount > 0 }
-            .thenByDescending { it.sortKey() }
+            .thenByDescending {  stream ->
+                val lastMessage = lastMessages.firstOrNull { it.streamUuid == stream.uuid }
+                stream.sortKey(lastMessage)
+            }
     )
 
-fun List<StreamUIO>.sortedByActivity(): List<StreamUIO> =
-    sortedByDescending { it.sortKey() }
+fun List<StreamUIO>.sortedByActivity(lastMessages: List<LastMessageUIO>): List<StreamUIO> =
+    sortedByDescending { stream ->
+        val lastMessage = lastMessages.firstOrNull { it.streamUuid == stream.uuid }
+        stream.sortKey(lastMessage)
+    }
 
-fun TopicUIO.sortKey(): Instant =
-    WorkspaceDateTime.parse(lastMessage?.createdAt ?: updatedAt)
+fun TopicUIO.sortKey(lastMessage: LastMessageUIO?): Instant {
+    return WorkspaceDateTime.parse(lastMessage?.createdAt ?: updatedAt)
+}
 private val TopicUIO.isNotMuted: Boolean
     get() = notificationMode != "mute"
 
-fun List<TopicUIO>.topicsSortedForInbox(): List<TopicUIO> =
+fun List<TopicUIO>.topicsSortedForInbox(lastMessages: List<LastMessageUIO>): List<TopicUIO> =
     sortedWith(
         compareByDescending<TopicUIO> { it.isNotMuted }
             .thenByDescending { it.unreadCount }
-            .thenByDescending { it.sortKey() }
+            .thenByDescending { topic ->
+    val lastMessage = lastMessages.firstOrNull { it.topicUuid == topic.uuid }
+    topic.sortKey(lastMessage)
+}
     )
 
-fun List<TopicUIO>.topicsSortedByActivity(): List<TopicUIO> =
+fun List<TopicUIO>.topicsSortedByActivity(lastMessages: List<LastMessageUIO>): List<TopicUIO> =
     sortedWith(
         compareByDescending<TopicUIO> { it.isNotMuted }
-            .thenByDescending { it.sortKey() }
+            .thenByDescending { topic ->
+                val lastMessage = lastMessages.firstOrNull { it.topicUuid == topic.uuid }
+                topic.sortKey(lastMessage)
+            }
     )

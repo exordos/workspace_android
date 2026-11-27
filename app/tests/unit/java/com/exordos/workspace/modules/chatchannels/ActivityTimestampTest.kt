@@ -2,8 +2,6 @@ package com.exordos.workspace.modules.chatchannels
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
-import com.exordos.workspace.data.uio.MessageUIO
-import com.exordos.workspace.data.uio.MessagePayloadUIO
 import com.exordos.workspace.data.uio.StreamUIO
 import com.exordos.workspace.data.uio.TopicUIO
 import com.exordos.workspace.modules.chatdialog.forwardableStreams
@@ -18,29 +16,21 @@ class ActivityTimestampTest {
     @Test fun `stream activity compares instants across midnight and offsets`() {
         val early = stream("early", "2026-10-30T00:15:00+03:00")
         val late = stream("late", "2026-10-29T21:30:00Z")
-        for (useLastMessage in listOf(false, true)) {
-            val items = listOf(early, late).map { if (useLastMessage) it.copy(
-                updatedAt = "2026-01-01T00:00:00Z", lastMessage = message(it.uuid, it.updatedAt),
-            ) else it }
-            assertEquals(listOf("late", "early"), items.sortedByActivity().map { it.uuid })
-            assertEquals(listOf("late", "early"), items.sortedForInbox().map { it.uuid })
-            assertEquals("early", items.map { if (it.uuid == "early") it.copy(activeUnreadCount = 1) else it }
-                .sortedForInbox().first().uuid)
-        }
+        val items = listOf(early, late)
+        assertEquals(listOf("late", "early"), items.sortedByActivity(lastMessages = emptyList()).map { it.uuid })
+        assertEquals(listOf("late", "early"), items.sortedForInbox(lastMessages = emptyList()).map { it.uuid })
+        assertEquals("early", items.map { if (it.uuid == "early") it.copy(activeUnreadCount = 1) else it }
+            .sortedForInbox(lastMessages = emptyList()).first().uuid)
     }
 
     @Test fun `topic activity compares instants while retaining mute and unread rules`() {
         val early = topic("early", "2026-10-30T00:15:00+03:00")
         val late = topic("late", "2026-10-29T21:30:00Z")
-        for (useLastMessage in listOf(false, true)) {
-            val items = listOf(early, late).map { if (useLastMessage) it.copy(
-                updatedAt = "2026-01-01T00:00:00Z", lastMessage = message(it.uuid, it.updatedAt),
-            ) else it }
-            assertEquals(listOf("late", "early"), items.topicsSortedByActivity().map { it.uuid })
-            assertEquals(listOf("late", "early"), items.topicsSortedForInbox().map { it.uuid })
-            assertEquals("early", items.map { if (it.uuid == "late") it.copy(notificationMode = "mute") else it }
-                .topicsSortedByActivity().first().uuid)
-        }
+        val items = listOf(early, late)
+        assertEquals(listOf("late", "early"), items.topicsSortedByActivity(lastMessages = emptyList()).map { it.uuid })
+        assertEquals(listOf("late", "early"), items.topicsSortedForInbox(lastMessages = emptyList()).map { it.uuid })
+        assertEquals("early", items.map { if (it.uuid == "late") it.copy(notificationMode = "mute") else it }
+            .topicsSortedByActivity(lastMessages = emptyList()).first().uuid)
     }
 
     private fun stream(id: String, date: String) =
@@ -48,7 +38,4 @@ class ActivityTimestampTest {
 
     private fun topic(id: String, date: String) =
         TopicUIO(id, id, 0, "stream", date, 0, 0, false, false, notificationMode = "default")
-
-    private fun message(id: String, date: String) = MessageUIO(id, date, date, "stream", "topic",
-        "user", "user", MessagePayloadUIO("markdown", "Synthetic"), true, emptyMap(), true)
 }

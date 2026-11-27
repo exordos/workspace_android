@@ -210,7 +210,7 @@ class EncryptedConversationUiTest {
         }
         val api = WorkspaceAPIClient(http)
         val tokens = SecureTokenStore(context)
-        events = EventsRepositoryStore(tokens, api)
+        events = EventsRepositoryStore(tokens, api, context)
         preferences = ServerRepository(dataStore, tokens, events, storeScope)
         serverId = "cassi-encrypted-conversation-${UUID.randomUUID()}"
         val config = ServerConfig(serverId, fixture.url, "", "CASSI test", projectUuid = PROJECT)
@@ -233,8 +233,8 @@ class EncryptedConversationUiTest {
         assertTrue(repo.verifiedOwnerAuthentication.value != null)
         repo.setInitialUsers(listOf(fixture.owner, fixture.participant).map { it.toUio() })
         repo.setInitialStreams(listOf(fixture.stream).map { it.toUio() })
-        repo.addStreamBindings(STREAM, fixture.bindings.map { it.toUio() })
-        repo.addStreamTopicMessages(STREAM, TOPIC, fixture.messages.toList().map { it.toUio() })
+        repo.setInitialStreamBindings(fixture.bindings.map { it.toUio() })
+        repo.addMessages(fixture.messages.toList().map { it.toUio() })
         chat = withContext(Dispatchers.Main) {
             ChatDialogViewModel(api, user, "Команда продукта", STREAM, "Общий чат", TOPIC,
                 false, events, null, AttachmentStorage(context, api))
@@ -690,10 +690,10 @@ class EncryptedConversationUiTest {
         assertTrue(fixture.rejectedPayloadKinds.isEmpty())
         assertTrue(fixture.transportFailureTypes.isEmpty())
         assertFalse(fixture.sentBodies.any { "Ответы и реакции работают" in it || "Согласна" in it || "urn:file:" in it || "urn:image:" in it })
-        assertTrue(chat.repo.streamTopicMessages.value["$STREAM.$TOPIC"].orEmpty().all { it.payload.kind != "markdown" })
+        assertTrue(chat.repo.messageDao.observeMessages(STREAM, TOPIC).first().all { it.payload.kind != "markdown" })
         val postedBeforeMissingSnapshot = fixture.sentBodies.size
         withContext(Dispatchers.Main) {
-            chat.repo.setInitialStreams(emptyList())
+            chat.repo.streamDao.deleteAll()
             chat.sendTextMessage("should never plaintext")
             assertEquals(R.string.chat_send_unavailable, chat.actionError.value?.resourceId)
         }
@@ -709,7 +709,7 @@ class EncryptedConversationUiTest {
         val history = (1..14).map { index ->
             fixture.incomingEncryptedMessage(("Сообщение $index: " + "Длинная строка меняет переносы при выделении. ".repeat(4)).trimEnd())
         }
-        withContext(Dispatchers.Main) { chat.repo.addStreamTopicMessages(STREAM, TOPIC, fixture.messages.toList().map { it.toUio() }) }
+        withContext(Dispatchers.Main) { chat.repo.addMessages(fixture.messages.toList().map { it.toUio() }) }
         showConversation()
         compose.waitUntil(10_000) { chat.encryptedPresentations.value[history.last().uuid] is EncryptedChatPresentation.Text }
         val latestText = (chat.encryptedPresentations.value.getValue(history.last().uuid) as EncryptedChatPresentation.Text).text
@@ -801,7 +801,7 @@ class EncryptedConversationUiTest {
                     recipientDeviceId = request.payload.deviceId),
             )
             fixture.messages += rejection
-            chat.repo.addStreamTopicMessages(STREAM, TOPIC, fixture.messages.toList().map { it.toUio() })
+            chat.repo.addMessages(fixture.messages.toList().map { it.toUio() })
             chat.encryptionRuntime.refresh(force = true)
             assertTrue(chat.encryptedChatState.value.requestStatus[CURRENT] == EncryptedChatRequestStatus.REJECTED)
             val previous = chat
@@ -844,9 +844,10 @@ class EncryptedConversationUiTest {
                 // Receipt by the server is not acknowledgement by the runtime or its UI.
                 compose.onNodeWithText(context.getString(R.string.encrypted_chat_requested)).assertDoesNotExist()
             } finally { retryReply.countDown() }
+            val requestedLabel = compose.onNodeWithText(context.getString(R.string.encrypted_chat_requested))
             compose.waitUntil(5_000) {
                 chat.encryptedChatState.value.let { it.requestStatus[CURRENT] == EncryptedChatRequestStatus.REQUESTED && !it.pending } &&
-                    compose.onNodeWithText(context.getString(R.string.encrypted_chat_requested)).isDisplayed()
+                    runCatching { requestedLabel.isDisplayed() }.getOrDefault(false)
             }
             compose.onNodeWithText(context.getString(R.string.encrypted_chat_requested)).assertIsDisplayed()
             compose.onNodeWithText(rejectedText, substring = true).assertDoesNotExist()

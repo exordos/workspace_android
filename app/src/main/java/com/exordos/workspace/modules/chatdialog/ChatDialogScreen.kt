@@ -142,12 +142,11 @@ fun ChatDialogScreen(
     val encryptedChatState by viewModel.encryptedChatState.collectAsStateWithLifecycle()
     val protectedCallState by viewModel.protectedCallState.collectAsStateWithLifecycle()
     val streamTopicMessages by viewModel.streamTopicMessages.collectAsStateWithLifecycle()
-    val messagePool by viewModel.repo.messagesPool.collectAsStateWithLifecycle()
-    val rawTopicMessages by viewModel.repo.streamTopicMessages.collectAsStateWithLifecycle()
     val viewer by viewModel.repo.currentUser.collectAsStateWithLifecycle()
-    val history = remember(viewModel, streamTopicMessages, messagePool, rawTopicMessages, viewer?.uuid, stream?.encryption, encryptedChatState) {
+    val messagePool by viewModel.storedMessages.collectAsStateWithLifecycle(emptyList())
+    val history = remember(viewModel, streamTopicMessages, messagePool, viewer?.uuid, stream?.encryption, encryptedChatState) {
         deriveChatHistoryPresentation(streamTopicMessages["${viewModel.chatId}.${viewModel.topicUuid}"], messagePool,
-            rawTopicMessages, viewModel.chatId, stream?.encryption == true, viewer?.uuid, encryptedChatState)
+            emptyMap(), viewModel.chatId, stream?.encryption == true, viewer?.uuid, encryptedChatState)
     }
     val messages = history.orderedMessages
     val streamBindings by viewModel.streamBindings.collectAsStateWithLifecycle()
@@ -328,6 +327,19 @@ fun ChatDialogScreen(
             }
     }
 
+    LaunchedEffect(listState,messages) {
+        snapshotFlow {
+            listState.firstVisibleItemIndex to listState.layoutInfo.totalItemsCount
+        }
+            .distinctUntilChanged()
+            .collect { (firstVisible, total) ->
+                val nearTop = firstVisible <= 2
+                if (nearTop && total > 0 && !isLoading) {
+                    viewModel.loadNextMessages(messages?.firstOrNull())
+                }
+            }
+    }
+
     Box(Modifier.fillMaxSize()) {
         Scaffold(
             modifier = Modifier.imePadding()
@@ -383,7 +395,7 @@ fun ChatDialogScreen(
                             )
                         ) {
                             val title = if (viewModel.isDirectMessages) {
-                                stream?.displayableName(directUser) ?: viewModel.chatTitle
+                                stream?.name ?: viewModel.chatTitle
                             } else {
                                 viewModel.topicName ?: viewModel.chatTitle
                             }
@@ -406,15 +418,14 @@ fun ChatDialogScreen(
                                     overflow = TextOverflow.Ellipsis
                                 )
                             }
-                            val currentStreamBindings = streamBindings[viewModel.chatId]
                             val user = directUser
-                            if (currentStreamBindings != null && currentStreamBindings.count() > 0) {
-                                val currentBindedOnlineUsers = currentStreamBindings.mapNotNull { binding -> users.firstOrNull { binding.userUuid == it.uuid && it.status == "active" } }
+                            if (streamBindings.isNotEmpty()) {
+                                val currentBindedOnlineUsers = streamBindings.mapNotNull { binding -> users.firstOrNull { binding.userUuid == it.uuid && it.status == "active" } }
                                 var baseText = if (viewModel.isDirectMessages && user != null) {
                                     user.statusDescription()
                                 } else {
                                     context.resources.getQuantityString(
-                                        R.plurals.participants_count, currentStreamBindings.count(), currentStreamBindings.count()
+                                        R.plurals.participants_count, streamBindings.size, streamBindings.size
                                     )
                                 }
                                 if (!viewModel.isDirectMessages && currentBindedOnlineUsers.count() > 0) {
@@ -594,6 +605,7 @@ fun ChatDialogScreen(
         }
         forwardingMessages?.let { sources ->
             ForwardMessagesAction(
+                chatDialogViewModel = viewModel,
                 sources = sources,
                 sessionStore = viewModel.forwardSession,
                 client = viewModel.client,
@@ -709,9 +721,11 @@ internal fun ChatMessage(
                     lockedPresentation = encryptedPresentation)
             } else if (encryptedPresentation is EncryptedChatPresentation.Service) {
                 val ownRequestKey = history.requestKey(item.streamUuid, encryptedPresentation.payload.keyUuid)
+                val users by viewModel.users.collectAsStateWithLifecycle()
+                val author = users.firstOrNull { it.uuid == item.authorUuid }
                 EncryptedChatServiceMessage(
                     payload = encryptedPresentation.payload,
-                    authorName = item.user?.displayableName() ?: stringResource(R.string.encrypted_chat_member),
+                    authorName = author?.displayableName() ?: stringResource(R.string.encrypted_chat_member),
                     requestOutcome = encryptedChatState.requests.firstOrNull { it.message.uuid == item.uuid }?.outcome,
                     canManage = encryptedChatState.canManageKeys,
                     pending = encryptedChatState.pending,

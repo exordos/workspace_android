@@ -13,7 +13,6 @@ import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.first
@@ -31,7 +30,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Test
 import org.junit.runner.RunWith
 import com.exordos.workspace.UserViewModel
-import com.exordos.workspace.data.remote.ApiResult
 import com.exordos.workspace.data.remote.WorkspaceAPIClient
 import com.exordos.workspace.data.remote.dto.MessageResponse
 import com.exordos.workspace.data.remote.dto.MessageResponsePayload
@@ -101,7 +99,7 @@ class RealtimeRecoveryInstrumentedTest {
             install(WebSockets)
         }
         val api = WorkspaceAPIClient(http)
-        val eventsStore = EventsRepositoryStore(tokens, api)
+        val eventsStore = EventsRepositoryStore(tokens, api, context)
         val sessions = ServerRepository(store, tokens, eventsStore, storeScope)
         val user = UserViewModel(sessions)
         api.attachUserViewModel(user)
@@ -127,21 +125,21 @@ class RealtimeRecoveryInstrumentedTest {
                         assertEquals(listOf(10, 11), server.socketCursors.toList())
                         assertEquals(2, server.historyRequests)
                         assertTrue(chat.isLoading.value) // Ordinary request A is still held.
-                        assertTrue(events.streamTopicMessages.value.getValue("stream.topic").isEmpty())
-                        assertTrue(events.messagesPool.value.isEmpty())
+                        assertTrue(events.messageDao.observeMessages("stream", "topic").first().isEmpty())
+                        assertTrue(events.messages.first().isEmpty())
                         // B has committed an empty, fresh history. Now finish the obsolete A with [M].
                         server.releaseHistory.countDown()
                         withTimeout(5_000) { chat.isLoading.first { !it } }
-                        assertTrue("Obsolete history resurrected M", events.streamTopicMessages.value.getValue("stream.topic").isEmpty())
-                        assertTrue(events.messagesPool.value.isEmpty())
+                        assertTrue("Obsolete history resurrected M", events.messageDao.observeMessages("stream", "topic").first().isEmpty())
+                        assertTrue(events.messages.first().isEmpty())
                         assertFalse(chat.streamTopicMessages.value["stream.topic"].orEmpty().any { it.uuid == "deleted-before-recovery" })
                         assertFalse(events.isConversationStale("stream", "topic"))
                         server.sendLive("live-after-overlap")
                         withTimeout(5_000) { chat.streamTopicMessages.first { cache ->
                             cache["stream.topic"].orEmpty().any { it.uuid == "live-after-overlap" }
                         } }
-                        assertEquals(listOf("live-after-overlap"), events.streamTopicMessages.value.getValue("stream.topic").map { it.uuid })
-                        assertFalse(events.messagesPool.value.any { it.uuid == "deleted-before-recovery" })
+                        assertEquals(listOf("live-after-overlap"), events.messageDao.observeMessages("stream", "topic").first().map { it.uuid })
+                        assertFalse(events.messages.first().any { it.uuid == "deleted-before-recovery" })
                         withContext(Dispatchers.Main) { chat.onChatClosed(); chat.onChatOpened() }
                         assertFalse(chat.isLoading.value)
                         assertEquals(2, server.historyRequests)
@@ -182,7 +180,7 @@ class RealtimeRecoveryInstrumentedTest {
             install(WebSockets)
         }
         val api = WorkspaceAPIClient(http)
-        val eventsStore = EventsRepositoryStore(tokens, api)
+        val eventsStore = EventsRepositoryStore(tokens, api, context)
         val sessions = ServerRepository(store, tokens, eventsStore, storeScope)
         val user = UserViewModel(sessions)
         api.attachUserViewModel(user)
@@ -193,17 +191,18 @@ class RealtimeRecoveryInstrumentedTest {
                 sessions.addServer(config, TokenPair("synthetic-access", "synthetic-refresh"))
                 withTimeout(5_000) { user.selectedServer.first { it?.id == serverId } }
                 val events = eventsStore.getOrCreate(config)
-                events.addStreamTopicMessages("stream", "topic", listOf(recoveryMessage("baseline")).map { it.toUio() })
+                events.addMessages(listOf(recoveryMessage("baseline")).map { it.toUio() })
                 events.addPendingMessage(recoveryMessage("pending-send").copy(isOwn = true).toUio())
                 if (!preExpiryHistory) {
-                    events.addStreamTopicMessages("stream", "inactive", listOf(recoveryMessage("cached-inactive").copy(topicUuid = "inactive")).map { it.toUio() })
+                    events.addMessages(listOf(recoveryMessage("cached-inactive").copy(topicUuid = "inactive")).map { it.toUio() })
                 }
-                val olderLoad = if (preExpiryHistory) storeScope.async {
-                    events.refreshConversation("stream", "inactive")
+                val olderChat = if (preExpiryHistory) withContext(Dispatchers.Main) {
+                    ChatDialogViewModel(api, user, "Inactive", "stream", "Inactive", "inactive",
+                        false, eventsStore, null, AttachmentStorage(context, api))
                 } else null
                 if (preExpiryHistory) {
                     assertTrue(withContext(Dispatchers.IO) { server.olderHistoryStarted.await(5, TimeUnit.SECONDS) })
-                    assertTrue(events.streamTopicMessages.value["stream.inactive"].isNullOrEmpty())
+                    assertTrue(events.messageDao.observeMessages("stream", "inactive").first().isEmpty())
                 }
                 val owner = Any()
                 if (!noOpenChat) {
@@ -220,9 +219,9 @@ class RealtimeRecoveryInstrumentedTest {
                         events.closeConversation(owner)
                     }
                     val messages = withTimeout(45_000) {
-                        events.streamTopicMessages.first { cache ->
-                            cache["stream.topic"].orEmpty().map { it.uuid }.containsAll(listOf("missed", "during-reload"))
-                        }.getValue("stream.topic")
+                        events.messageDao.observeMessages("stream", "topic").first { history ->
+                            history.map { it.uuid }.containsAll(listOf("missed", "during-reload"))
+                        }
                     }
                     assertEquals(setOf("baseline", "missed", "pending-send", "during-reload"), messages.map { it.uuid }.toSet())
                     assertEquals(4, messages.size)
@@ -243,10 +242,8 @@ class RealtimeRecoveryInstrumentedTest {
                     if (preExpiryHistory) {
                         // Finish a snapshot captured before expiry only after recovery has reconnected.
                         server.releaseOlderHistory.countDown()
-                        val obsolete = withTimeout(5_000) { olderLoad!!.await() }
-                        assertTrue(obsolete is ApiResult.Error)
-                        assertEquals("HISTORY_RESPONSE_OBSOLETE", (obsolete as ApiResult.Error).error.code)
-                        assertTrue(events.streamTopicMessages.value.getValue("stream.inactive").isEmpty())
+                        withTimeout(5_000) { requireNotNull(olderChat).isLoading.first { !it } }
+                        assertTrue(events.messageDao.observeMessages("stream", "inactive").first().isEmpty())
                         assertTrue(events.isConversationStale("stream", "inactive"))
                         server.failInactive.set(false)
                         val chat = withContext(Dispatchers.Main) {
@@ -257,7 +254,7 @@ class RealtimeRecoveryInstrumentedTest {
                             withTimeout(5_000) {
                                 while (chat.isLoading.value || events.isConversationStale("stream", "inactive")) delay(20)
                             }
-                            assertEquals(listOf("fresh-inactive"), events.streamTopicMessages.value.getValue("stream.inactive").map { it.uuid })
+                            assertEquals(listOf("fresh-inactive"), events.messageDao.observeMessages("stream", "inactive").first().map { it.uuid })
                             assertEquals(2, server.inactiveHistories.get())
                         } finally {
                             withContext(Dispatchers.Main) { chat.onChatClosed(); chat.viewModelScope.cancel() }
@@ -277,16 +274,16 @@ class RealtimeRecoveryInstrumentedTest {
                             awaitInactiveAttempt(1)
                             assertTrue(events.isConversationStale("stream", "inactive"))
                             server.sendLive("after-inactive-failure")
-                            withTimeout(5_000) { events.streamTopicMessages.first { cache ->
-                                cache["stream.topic"].orEmpty().any { it.uuid == "after-inactive-failure" }
+                            withTimeout(5_000) { events.messageDao.observeMessages("stream", "topic").first { history ->
+                                history.any { it.uuid == "after-inactive-failure" }
                             } }
                             withContext(Dispatchers.Main) { chat.onChatClosed(); chat.onChatOpened() }
                             awaitInactiveAttempt(2)
                             assertTrue(events.isConversationStale("stream", "inactive"))
                             server.failInactive.set(false)
                             withContext(Dispatchers.Main) { chat.onChatClosed(); chat.onChatOpened() }
-                            withTimeout(5_000) { events.streamTopicMessages.first { cache ->
-                                cache["stream.inactive"].orEmpty().any { it.uuid == "fresh-inactive" }
+                            withTimeout(5_000) { events.messageDao.observeMessages("stream", "inactive").first { history ->
+                                history.any { it.uuid == "fresh-inactive" }
                             } }
                             awaitInactiveAttempt(3)
                             assertFalse(events.isConversationStale("stream", "inactive"))
@@ -296,6 +293,7 @@ class RealtimeRecoveryInstrumentedTest {
                         }
                     }
                 } finally {
+                    withContext(Dispatchers.Main) { olderChat?.viewModelScope?.cancel() }
                     connection.cancelAndJoin()
                 }
             }

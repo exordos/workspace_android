@@ -37,17 +37,19 @@ class RequestQuerySerializationTest {
     @Test
     fun nullableTopicIsOmittedWhileStreamFilterRemains() {
         val url = URLBuilder("https://workspace.example/messages/").apply {
-            appendGetQueryParameters(Properties.encodeToStringMap(MessagesRequest("stream", null).data))
+            appendGetQueryParameters(Properties.encodeToStringMap(MessagesRequest("stream", null, 25, null).data))
         }.build()
 
         assertEquals("stream", url.parameters["stream_uuid"])
         assertNull(url.parameters["topic_uuid"])
+        assertNull(url.parameters["page_marker"])
     }
 
     @Test
     fun conversationAndMentionQueriesKeepTheirWireNames() {
-        assertEquals(mapOf("stream_uuid" to "stream", "topic_uuid" to "topic"),
-            Properties.encodeToStringMap(MessagesRequest("stream", "topic").data))
+        assertEquals(mapOf("stream_uuid" to "stream", "topic_uuid" to "topic",
+            "page_limit" to "25", "sort_key" to "created_at", "sort_dir" to "desc"),
+            Properties.encodeToStringMap(MessagesRequest("stream", "topic", 25, null).data))
         assertEquals(mapOf("mentioned" to "true"),
             Properties.encodeToStringMap(MentionedMessagesRequest().data))
     }

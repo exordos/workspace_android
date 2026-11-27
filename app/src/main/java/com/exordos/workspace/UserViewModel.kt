@@ -53,7 +53,6 @@ class UserViewModel(
         .map { it?.imageUrl }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
     val baseUrl: StateFlow<String?> = organizationUrl
-
     val accessToken: StateFlow<String?> = repo.selectedAccessTokenFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
     val refreshToken: StateFlow<String?> = repo.selectedRefreshTokenFlow

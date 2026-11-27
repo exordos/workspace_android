@@ -10,6 +10,8 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.firebase)
     alias(libs.plugins.crashlytics)
+    alias(libs.plugins.ksp)
+    alias(libs.plugins.androidx.room3)
 }
 
 android {
@@ -95,6 +97,11 @@ tasks.withType<GoogleServicesTask>().configureEach {
     }
 }
 
+
+room3 {
+    schemaDirectory("$projectDir/schemas")
+}
+
 dependencies {
     implementation("androidx.work:work-runtime-ktx:2.11.2")
     implementation(libs.androidx.core.ktx)
@@ -134,6 +141,9 @@ dependencies {
     implementation(libs.androidx.compose.foundation.layout)
     implementation(libs.androidx.compose.ui.text)
     implementation(libs.fellbaum.jemoji)
+    implementation(libs.androidx.room3.runtime)
+    implementation(libs.androidx.sqlite.bundled)
+    ksp(libs.androidx.room3.compiler)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

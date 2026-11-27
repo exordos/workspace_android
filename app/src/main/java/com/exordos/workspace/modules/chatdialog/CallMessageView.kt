@@ -40,6 +40,7 @@ import com.exordos.workspace.ui.theme.InterFontFamily
 import com.exordos.workspace.ui.theme.LocalWorkspaceColorsPalette
 import java.net.URL
 import kotlin.time.ExperimentalTime
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @OptIn(ExperimentalTime::class)
 @Composable
@@ -52,6 +53,8 @@ fun CallMessageView(
     var menuExpanded by remember(item.uuid) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val users by viewModel.users.collectAsStateWithLifecycle()
+    val author = users.firstOrNull { it.uuid == item.authorUuid }
     val itemUrl = URL(item.payload.content)
     val bubbleShape = if (item.isOwn) {
         RoundedCornerShape(
@@ -83,9 +86,9 @@ fun CallMessageView(
                                 onClick = {
                                     navController.navigate(
                                         ChatFlow.ChatUserInfo(
-                                            item.user?.displayableName() ?: "",
+                                            author?.displayableName() ?: "",
                                             item.authorUuid,
-                                            item.user?.avatar ?: "",
+                                            author?.avatar ?: "",
                                             ""
                                         )
                                     )
@@ -93,11 +96,11 @@ fun CallMessageView(
                             )
                     ) {
                         Avatar(
-                            item.user?.avatar,
+                            author?.avatar,
                             viewModel.userViewModel.baseUrl.value ?: "",
                             viewModel.client.authHeaders(),
                             null,
-                            item.user?.displayableName() ?: "",
+                            author?.displayableName() ?: "",
                             Modifier.size(30.dp)
                         )
                     }
@@ -116,21 +119,21 @@ fun CallMessageView(
                             onClick = {
                                 navController.navigate(
                                     ChatFlow.ChatUserInfo(
-                                        item.user?.displayableName() ?: "",
+                                        author?.displayableName() ?: "",
                                         item.authorUuid,
-                                        item.user?.avatar ?: "",
-                                        item.user?.email ?: ""
+                                        author?.avatar ?: "",
+                                        author?.email ?: ""
                                     )
                                 )
                             }
                         )
                 ) {
                     Avatar(
-                        item.user?.avatar,
+                        author?.avatar,
                         viewModel.userViewModel.baseUrl.value ?: "",
                         viewModel.client.authHeaders(),
                         null,
-                        item.user?.displayableName() ?: "",
+                        author?.displayableName() ?: "",
                         Modifier.size(30.dp)
                     )
                 }

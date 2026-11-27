@@ -73,7 +73,7 @@ class ProfileNavigationUiTest {
         http = HttpClient(CIO) { install(ContentNegotiation) { json() } }
         api = WorkspaceAPIClient(http)
         val tokens = SecureTokenStore(context)
-        events = EventsRepositoryStore(tokens, api)
+        events = EventsRepositoryStore(tokens, api, context)
         repository = ServerRepository(store, tokens, events, scope)
         user = UserViewModel(repository)
         api.attachUserViewModel(user)

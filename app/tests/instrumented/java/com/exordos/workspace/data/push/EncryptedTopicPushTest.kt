@@ -187,7 +187,7 @@ class EncryptedTopicPushTest {
         SQLiteDatabase.openDatabase(context.getDatabasePath("workspace_push_inbox.db").path,
             null, SQLiteDatabase.OPEN_READWRITE).use { db ->
             db.execSQL("UPDATE push_receipts SET created_at=? WHERE server_id=? AND state='closed' AND topic_update=1",
-                arrayOf(now - PushInbox.DELIVERY_WINDOW_MILLIS - 1, registration.serverId))
+                arrayOf<Any>(now - PushInbox.DELIVERY_WINDOW_MILLIS - 1, registration.serverId))
         }
         inbox.pruneTransientDecisions(now)
         for (entry in listOf(route, withoutRoute, zero)) assertFalse(hasTopic(entry.identity))

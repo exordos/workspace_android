@@ -1,14 +1,17 @@
 package com.exordos.workspace.data
 
+import kotlinx.coroutines.flow.first
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -36,6 +39,7 @@ class NotificationIndicatorRepositoryTest {
             ServerConfig(id, "http://127.0.0.1", "", "Notification indicator test"),
             SecureTokenStore(context),
             WorkspaceAPIClient(http),
+            context,
         )
     }
 
@@ -46,7 +50,7 @@ class NotificationIndicatorRepositoryTest {
     }
 
     @Test
-    fun topicRealtimeCursorReachesThePushConsumer() {
+    fun topicRealtimeCursorReachesThePushConsumer() = runBlocking {
         val update = topic(activeUnread = 0)
         var received: Triple<TopicUIO, Long, String>? = null
         repository.onPushTopicUpdated = { topic, epoch, generation -> received = Triple(topic, epoch, generation) }
@@ -58,49 +62,44 @@ class NotificationIndicatorRepositoryTest {
     }
 
     @Test
-    fun topicUpdatedAppliesActiveUnreadToEveryCachedProjection() {
+    fun topicUpdatedAppliesActiveUnreadToStoredTopic() = runBlocking {
         val before = topic(activeUnread = 0)
         val cached = before.toUio()
-        repository.addStreamTopics(before.streamUuid, listOf(cached))
+        repository.setInitialTopics(listOf(cached))
         val authoritative = before.copy(activeUnreadCount = 3, notificationMode = "follow")
 
         repository.didReceiveTopicEvent(Json.encodeToString(authoritative), "updated")
 
-        assertEquals(authoritative.toUio(), repository.streamTopics.value.getValue("stream").single())
-        assertEquals(authoritative.toUio(), repository.topicsPool.value.single())
+        assertEquals(authoritative.toUio(), repository.topics.first().single())
         assertEquals(0, cached.activeUnreadCount)
     }
 
     @Test
-    fun mutedAndReadTopicSnapshotsClearActiveUnreadInBothCaches() {
+    fun mutedAndReadTopicSnapshotsClearStoredActiveUnread() = runBlocking {
         val before = topic(activeUnread = 3).copy(notificationMode = "follow")
-        repository.addStreamTopics(before.streamUuid, listOf(before).map { it.toUio() })
+        repository.setInitialTopics(listOf(before).map { it.toUio() })
         val muted = before.copy(activeUnreadCount = 0, notificationMode = "mute")
 
         repository.didReceiveTopicEvent(Json.encodeToString(muted), "updated")
 
-        assertEquals(muted.toUio(), repository.streamTopics.value.getValue("stream").single())
-        assertEquals(muted.toUio(), repository.topicsPool.value.single())
+        assertEquals(muted.toUio(), repository.topics.first().single())
         val read = muted.copy(unreadCount = 0)
         repository.didReceiveTopicEvent(Json.encodeToString(read), "updated")
-        assertEquals(read.toUio(), repository.streamTopics.value.getValue("stream").single())
-        assertEquals(read.toUio(), repository.topicsPool.value.single())
+        assertEquals(read.toUio(), repository.topics.first().single())
     }
 
     @Test
-    fun topicUpdatedRefreshesThePoolEvenWhenItsStreamTopicsAreNotLoaded() {
+    fun topicUpdatedInsertsPreviouslyUnknownTopic() = runBlocking {
         val before = topic(activeUnread = 0)
-        repository.appendItemsToTopicsPool(listOf(before).map { it.toUio() })
         val authoritative = before.copy(activeUnreadCount = 3, notificationMode = "follow")
 
         repository.didReceiveTopicEvent(Json.encodeToString(authoritative), "updated")
 
-        assertEquals(authoritative.toUio(), repository.topicsPool.value.single())
-        assertEquals(emptyMap<String, List<TopicUIO>>(), repository.streamTopics.value)
+        assertEquals(authoritative.toUio(), repository.topics.first().single())
     }
 
     @Test
-    fun selectedFolderReceivesTheSameItemsAndCounterAsItsTab() {
+    fun selectedFolderReceivesTheSameItemsAndCounterAsItsTab() = runBlocking {
         val before = folder().copy(unreadCount = 1, items = listOf(item("first", 1)))
         val cached = before.toUio()
         repository.setInitialFolders(listOf(cached))
@@ -113,26 +112,28 @@ class NotificationIndicatorRepositoryTest {
 
         repository.didReceiveFolderEvent(Json.encodeToString(authoritative), "updated")
 
-        assertEquals(authoritative.toUio(), repository.folders.value.single())
+        assertEquals(authoritative.toUio(), repository.folders.first().single())
         assertEquals(authoritative.toUio(), repository.currentlySelectedFolder.value)
-        assertEquals(listOf("first"), cached.items.map { it.streamUuid })
+        assertEquals(listOf("first", "second"), repository.folderItemDao.observeFolderItems(before.uuid).first().map { it.streamUuid }.sorted())
     }
 
     @Test
-    fun removingTheLastItemClearsTheSelectedFolderWithoutSwitchingTabs() {
+    fun removingTheLastItemClearsTheSelectedFolderWithoutSwitchingTabs() = runBlocking {
         val before = folder().copy(unreadCount = 1, items = listOf(item("first", 1)))
         repository.setInitialFolders(listOf(before).map { it.toUio() })
+        repository.folderItemDao.upsert(before.items.map { it.toUio() })
         repository.updateCurrentlySelectedFolder(before.toUio())
         val authoritative = before.copy(unreadCount = 0, items = emptyList())
 
         repository.didReceiveFolderEvent(Json.encodeToString(authoritative), "updated")
 
         assertEquals(authoritative.toUio(), repository.currentlySelectedFolder.value)
-        assertEquals(authoritative.toUio(), repository.folders.value.single())
+        assertEquals(authoritative.toUio(), repository.folders.first().single())
+        assertTrue(repository.folderItemDao.observeFolderItems(before.uuid).first().isEmpty())
     }
 
     @Test
-    fun updatingAnotherFolderKeepsTheCurrentSelection() {
+    fun updatingAnotherFolderKeepsTheCurrentSelection() = runBlocking {
         val selected = folder().copy(uuid = "selected")
         val other = folder()
         repository.setInitialFolders(listOf(selected, other).map { it.toUio() })
@@ -141,39 +142,39 @@ class NotificationIndicatorRepositoryTest {
 
         repository.didReceiveFolderEvent(Json.encodeToString(authoritative), "updated")
 
-        assertEquals(listOf(selected.toUio(), authoritative.toUio()), repository.folders.value)
+        assertEquals(listOf(selected.toUio(), authoritative.toUio()), repository.folders.first())
         assertEquals(selected.toUio(), repository.currentlySelectedFolder.value)
     }
 
     @Test
-    fun deletingTheSelectedFolderFallsBackToTheFirstRemainingFolder() {
+    fun deletingTheSelectedFolderFallsBackToTheFirstRemainingFolder() = runBlocking {
         val all = folder().copy(uuid = "all", systemType = "all")
         val deleted = folder()
         repository.setInitialFolders(listOf(all, deleted).map { it.toUio() })
         repository.updateCurrentlySelectedFolder(deleted.toUio())
-        repository.addStreamTopics("stream", listOf(topic(activeUnread = 3)).map { it.toUio() })
+        repository.setInitialTopics(listOf(topic(activeUnread = 3)).map { it.toUio() })
 
         repository.didReceiveFolderEvent("""{"uuid":"folder"}""", "deleted")
 
-        assertEquals(listOf(all.toUio()), repository.folders.value)
+        assertEquals(listOf(all.toUio()), repository.folders.first())
         assertEquals(all.toUio(), repository.currentlySelectedFolder.value)
-        assertEquals(1, repository.streamTopics.value.getValue("stream").size)
+        assertEquals(1, repository.topics.first().count { it.streamUuid == "stream" })
     }
 
     @Test
-    fun deletingTheLastFolderClearsItsSelection() {
+    fun deletingTheLastFolderClearsItsSelection() = runBlocking {
         val deleted = folder()
         repository.setInitialFolders(listOf(deleted).map { it.toUio() })
         repository.updateCurrentlySelectedFolder(deleted.toUio())
 
         repository.didReceiveFolderEvent("""{"uuid":"folder"}""", "deleted")
 
-        assertEquals(emptyList<FolderUIO>(), repository.folders.value)
+        assertEquals(emptyList<FolderUIO>(), repository.folders.first())
         assertNull(repository.currentlySelectedFolder.value)
     }
 
     @Test
-    fun duplicateAndUnselectedDeletionsDoNotDisturbOtherFolders() {
+    fun duplicateAndUnselectedDeletionsDoNotDisturbOtherFolders() = runBlocking {
         val selected = folder().copy(uuid = "selected")
         repository.setInitialFolders(listOf(selected, folder()).map { it.toUio() })
         repository.updateCurrentlySelectedFolder(selected.toUio())
@@ -183,7 +184,7 @@ class NotificationIndicatorRepositoryTest {
         }
         repository.didReceiveFolderEvent("""{"uuid":"unknown"}""", "deleted")
 
-        assertEquals(listOf(selected.toUio()), repository.folders.value)
+        assertEquals(listOf(selected.toUio()), repository.folders.first())
         assertEquals(selected.toUio(), repository.currentlySelectedFolder.value)
     }
 
@@ -209,6 +210,6 @@ class NotificationIndicatorRepositoryTest {
     )
 
     private fun item(streamUuid: String, unread: Int) = FolderItem(
-        "item-$streamUuid", streamUuid, "stream", unread,
+        "item-$streamUuid", "folder", streamUuid, "stream", unread,
     )
 }

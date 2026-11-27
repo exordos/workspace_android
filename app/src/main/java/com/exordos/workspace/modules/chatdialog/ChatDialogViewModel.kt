@@ -16,11 +16,14 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.exordos.workspace.data.WorkspaceDateTime
 import com.exordos.workspace.modules.encryptedchat.*
 import com.exordos.workspace.modules.streaminfo.ProtectedCallStarter
 import com.exordos.workspace.modules.streaminfo.currentProtectedStreamContext
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
@@ -43,6 +46,7 @@ import com.exordos.workspace.data.remote.dto.AddMessageReactionRequest
 import com.exordos.workspace.data.remote.dto.DeleteDraftRequest
 import com.exordos.workspace.data.remote.dto.DeleteMessageRequest
 import com.exordos.workspace.data.uio.DraftUIO
+import com.exordos.workspace.data.uio.FolderItemUIO
 import com.exordos.workspace.data.remote.dto.parseCanonicalUuid
 import com.exordos.workspace.data.remote.dto.EditMessageRequest
 import com.exordos.workspace.data.remote.dto.MarkMessagesReadRequest
@@ -60,6 +64,8 @@ import com.exordos.workspace.data.remote.dto.StreamBindingsRequest
 import com.exordos.workspace.data.uio.TopicUIO
 import com.exordos.workspace.data.remote.dto.UsersRequest
 import com.exordos.workspace.data.uio.UserUIO
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import java.io.File
 import kotlin.collections.filter
 import kotlin.collections.first
@@ -84,11 +90,24 @@ class ChatDialogViewModel(
 ): ViewModel() {
     val repo = eventsRepositoryStore.get(client.getCurrentServerId()) ?: error("Cannot get current event repository")
     
+    val stream: StateFlow<StreamUIO?> = repo.streams
+        .map { list -> list.firstOrNull { it.uuid == chatId } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    internal val storedMessages = repo.messages
+    private val topicMessages = repo.messageDao.observeMessages(chatId, topicUuid)
+    internal val forwardFolderItems: Flow<Map<String, List<FolderItemUIO>>> = repo.folders.flatMapLatest { folders ->
+        val userFolders = folders.filter { it.systemType != "all" }
+        if (userFolders.isEmpty()) flowOf(emptyMap())
+        else combine(userFolders.map { folder ->
+            repo.folderItemDao.observeFolderItems(folder.uuid).map { folder.uuid to it }
+        }) { it.toMap() }
+    }
+
     internal val encryptionRuntime = EncryptedChatRuntime(storage.context, client, repo, viewModelScope, chatId, topicUuid)
     val encryptedChatState = encryptionRuntime.state
     val encryptedPresentations = encryptionRuntime.presentations
     private val protectedCallStarter = ProtectedCallStarter(
-        currentContext = { currentProtectedStreamContext(client, repo, chatId) },
+        currentContext = { currentProtectedStreamContext(client, repo, stream.value) },
         serverUrl = { repo.jitsiServerUrl },
         topicUuid = topicUuid,
         createRoom = { JitsiStyleRoomNameGenerator.generate() + "-" + UUID.randomUUID().toString() },
@@ -101,15 +120,16 @@ class ChatDialogViewModel(
         try { block() } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { }
     } }
     fun requestEncryptionKey(keyUuid: String) = encryptionAction {
-        val recovery = repo.streamTopicMessages.value.values.flatten().firstOrNull {
+        val recovery = storedMessages.first().firstOrNull {
             it.streamUuid == chatId && it.payload.keyUuid == keyUuid && it.payload.kind == "e2ee" &&
                 (encryptedPresentations.value[it.uuid] as? EncryptedChatPresentation.Locked)?.invalidCiphertext == true
         }
         encryptionRuntime.requestKey(keyUuid, recovery)
     }
+
     fun requestEncryptionKeyForMessage(message: MessageUIO) = encryptionAction {
         // Resolve the current wire snapshot by message UUID rather than using a plaintext projection.
-        val raw = (repo.streamTopicMessages.value["$chatId.$topicUuid"].orEmpty() + repo.messagesPool.value)
+        val raw = topicMessages.first()
             .firstOrNull { it.uuid == message.uuid && it.streamUuid == chatId && it.topicUuid == topicUuid && it.payload.kind == "e2ee" }
             ?: return@encryptionAction
         val target = encryptedMessageKeyTarget(raw, chatId, topicUuid, userViewModel.selectedServer.value?.projectUuid)
@@ -132,34 +152,46 @@ class ChatDialogViewModel(
     fun clearEncryptedError() = encryptionRuntime.clearError()
 
     val streamTopicMessages: StateFlow<Map<String, List<MessageUIO>>> = combine(
-        repo.streamTopicMessages, encryptedPresentations,
-    ) { conversations, presentations ->
-        conversations.mapValues { (_, messages) -> messages.map { message ->
+        topicMessages, encryptedPresentations,
+    ) { messages, presentations ->
+        val presented = messages.map { message ->
             val presentation = presentations[message.uuid]
-            if (message.streamUuid == chatId && presentation is EncryptedChatPresentation.Text)
+            if (presentation is EncryptedChatPresentation.Text)
                 message.copy(payload = MessagePayloadUIO("markdown", presentation.text), originalEncryptedPayload = message.payload.copy())
             else message
-        } }
+        }
+        mapOf("$chatId.$topicUuid" to presented)
     }.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = emptyMap()
         )
 
-    val streamBindings: StateFlow<Map<String, List<StreamBindingUIO>>> = repo.streamBindings
+    val streamBindings: StateFlow<List<StreamBindingUIO>> = repo.streamBindingDao.observeStreamBindings(chatId)
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = emptyMap()
+            initialValue = emptyList()
         )
-    val stream: StateFlow<StreamUIO?> = repo.streams
-        .map { list -> list.firstOrNull { it.uuid == chatId } }
+    val streams: StateFlow<List<StreamUIO>> = repo.streams
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = repo.streams.value.firstOrNull { it.uuid == chatId }
+            initialValue = emptyList(),
         )
 
+    val userReactions: StateFlow<List<MessageReactionUIO>> = repo.userReactions
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList(),
+        )
+    val topics: StateFlow<List<TopicUIO>> = repo.topics
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList(),
+        )
     val directUser: StateFlow<UserUIO?> = combine(repo.users, stream) { users, currentStream ->
         users.firstOrNull { it.uuid == currentStream?.directUserUuid }
     }
@@ -170,17 +202,13 @@ class ChatDialogViewModel(
         )
 
     val users: StateFlow<List<UserUIO>> = repo.users
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val drafts: StateFlow<List<DraftUIO>> = repo.drafts
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = emptyList()
-        )
-
-    val drafts: StateFlow<List<DraftUIO>> = repo.draftsPool
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = repo.draftsPool.value
         )
 
     private var possibleMessage: MessageUIO? = null
@@ -217,7 +245,7 @@ class ChatDialogViewModel(
         canDelete = { canDeleteMessage(it) },
         request = { client.performRequest(DeleteMessageRequest(it)) },
         onDeleted = { messageUuid ->
-            repo.removeMessage(messageUuid)
+            withContext(Dispatchers.IO) { repo.removeMessage(messageUuid) }
             clearDeletedComposerReference(messageUuid)
         },
     )
@@ -345,14 +373,15 @@ class ChatDialogViewModel(
 
     private fun loadHistoryIfNeeded() {
         if (historyLoadJob?.isActive == true) return
-        val key = "$chatId.$topicUuid"
-        val cached = repo.streamTopicMessages.value[key].orEmpty()
-        val missingAnchor = firstUnreadMessageUuid != null && cached.none { it.uuid == firstUnreadMessageUuid }
-        if (missingAnchor || repo.isConversationStale(chatId, topicUuid) || cached.isEmpty()) {
-            _isLoading.value = true
-            historyLoadJob = viewModelScope.launch { loadLatestMessages() }
-        } else {
-            _isLoading.value = false
+        historyLoadJob = viewModelScope.launch {
+            val cached = topicMessages.first()
+            val missingAnchor = firstUnreadMessageUuid != null && cached.none { it.uuid == firstUnreadMessageUuid }
+            if (missingAnchor || repo.isConversationStale(chatId, topicUuid) || cached.isEmpty()) {
+                _isLoading.value = true
+                loadLatestMessages()
+            } else {
+                _isLoading.value = false
+            }
         }
     }
 
@@ -386,8 +415,8 @@ class ChatDialogViewModel(
 
     fun initialMessageIndex(messages: List<MessageUIO>): Int =
         initialChatMessageIndex(messages, firstUnreadMessageUuid) { message ->
-            val streamMode = repo.streams.value.firstOrNull { it.uuid == chatId }?.notificationMode ?: "all_messages"
-            val topicMode = repo.streamTopics.value[chatId]?.firstOrNull { it.uuid == topicUuid }?.notificationMode ?: "default"
+            val streamMode = stream.value?.notificationMode ?: "all_messages"
+            val topicMode = topics.value.firstOrNull { it.uuid == topicUuid }?.notificationMode ?: "default"
             message.isActiveUnread(streamMode, topicMode)
         }
 
@@ -427,7 +456,7 @@ class ChatDialogViewModel(
     }
 
     fun getUser(userUuid: String): UserUIO? {
-        return repo.users.value.firstOrNull { it.uuid == userUuid }
+        return users.value.firstOrNull { it.uuid == userUuid }
     }
 
     private val states = mutableMapOf<String, MutableStateFlow<FileUiState>>()
@@ -531,7 +560,7 @@ class ChatDialogViewModel(
 
 
     fun hasMyReaction(reaction: String, messageUuid: String): Boolean {
-        return  !repo.userReactions.value.none { it.emojiName == reaction && it.messageUuid == messageUuid }
+        return  !userReactions.value.none { it.emojiName == reaction && it.messageUuid == messageUuid }
     }
 
     suspend fun onSendClicked(context: Context) {
@@ -542,7 +571,7 @@ class ChatDialogViewModel(
             else sendMessage(context)
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (error: Exception) {
-            if (repo.streams.value.firstOrNull { it.uuid == chatId }?.encryption == true)
+            if (stream.value?.encryption == true)
                 messageDeletion.showActionError(R.string.encrypted_chat_error)
             else throw error
         }
@@ -550,7 +579,7 @@ class ChatDialogViewModel(
 
     suspend fun sendMessage(context: Context) {
         val attachmentList = _uriList.value
-        val currentStream = repo.streams.value.firstOrNull { it.uuid == chatId }
+        val currentStream = repo.streamDao.findByUuid(chatId)
         if (currentStream == null) { messageDeletion.showActionError(R.string.chat_send_unavailable); return }
         val encrypted = currentStream.encryption
         if (encrypted && encryptionRuntime.readySession().state.value.sendingKeyUuid == null) {
@@ -562,7 +591,8 @@ class ChatDialogViewModel(
             mentions.text
         } else {
             val quotedMessagesStrings = quotedMessages.value.map {
-                "[${it.message.user?.displayableName() ?: "user"}](urn:quote:${it.message.uuid})\n\n${it.text}"
+                val author = getUser(it.message.authorUuid)
+                "[${author?.displayableName() ?: "user"}](urn:quote:${it.message.uuid})\n\n${it.text}"
             }
             val resultString = quotedMessagesStrings.joinToString("\n\n")
             resultString
@@ -594,7 +624,7 @@ class ChatDialogViewModel(
 
     @OptIn(ExperimentalUuidApi::class)
     suspend fun sendTextMessage(messageText: String) {
-        val currentStream = repo.streams.value.firstOrNull { it.uuid == chatId }
+        val currentStream = repo.streamDao.findByUuid(chatId)
         if (currentStream == null) { messageDeletion.showActionError(R.string.chat_send_unavailable); return }
         if (currentStream.encryption) {
             try {
@@ -630,7 +660,6 @@ class ChatDialogViewModel(
             emptyMap(),
             false
         )
-        newMessage.user = repo.currentUser.value
         repo.addPendingMessage(newMessage)
         possibleMessage = newMessage
         mentions.setText("")
@@ -680,7 +709,7 @@ class ChatDialogViewModel(
     }
 
     suspend fun sendEditMessage(messageUuid: String, messageText: String) {
-        val currentStream = repo.streams.value.firstOrNull { it.uuid == chatId }
+        val currentStream = repo.streamDao.findByUuid(chatId)
         if (currentStream == null) { messageDeletion.showActionError(R.string.chat_send_unavailable); return }
         if (currentStream.encryption || editingMessage?.originalEncryptedPayload != null) {
             try {
@@ -733,41 +762,30 @@ class ChatDialogViewModel(
         _isLoading.value = true
         loadHistoryIfNeeded()
         viewModelScope.launch {
-            if (streamBindings.value[chatId]?.isEmpty() ?: true) {
-                loadStreamBindings()
-            }
             val draft = drafts.value.firstOrNull { it.streamUuid == chatId && it.topicUuid == topicUuid }
-            if (draft != null && repo.streams.value.firstOrNull { it.uuid == chatId }?.encryption != true) {
+            if (draft != null && stream.value?.encryption != true) {
                 mentions.setText(draft.payload.content)
             }
         }
     }
 
     suspend fun loadLatestMessages() {
-        val messagesResponse = repo.refreshConversation(chatId, topicUuid)
-        when(messagesResponse) {
-            is ApiResult.Success -> {
-                val lastMessage = messagesResponse.value.maxWithOrNull(compareBy<MessageUIO> { WorkspaceDateTime.parse(it.createdAt) }.thenBy { it.uuid })
-                if (lastMessage != null && firstUnreadMessageUuid == null) {
-                    markMessagesReadUpTo(lastMessage.uuid)
-                }
-                _isLoading.value = false
+        try {
+            val response = repo.loadConversationPage(chatId, topicUuid)
+            if (response is ApiResult.Success && firstUnreadMessageUuid == null) {
+                val lastMessage = response.value.maxWithOrNull(
+                    compareBy<MessageUIO> { WorkspaceDateTime.parse(it.createdAt) }.thenBy { it.uuid }
+                )
+                if (lastMessage != null) markMessagesReadUpTo(lastMessage.uuid)
             }
-            is ApiResult.Error -> {
-                _isLoading.value = false
-            }
+        } finally {
+            _isLoading.value = false
         }
     }
 
-    suspend fun loadStreamBindings() {
-        val server = client.requireUserViewModel().selectedServer.value?.copy() ?: return
-        if (!repo.matchesServerConfiguration(server)) return
-        repo.beginStreamBindingsRequest(chatId).use { request ->
-            when (val response = client.performRequest(StreamBindingsRequest(chatId), server.id, server)) {
-                is ApiResult.Success -> repo.applyStreamBindingsSnapshot(request, response.value)
-                is ApiResult.Error -> Unit
-            }
-        }
+    suspend fun loadNextMessages(anchor: MessageUIO?) {
+        if (anchor == null) return
+        repo.loadConversationPage(chatId, topicUuid, pageMarker = anchor.uuid)
     }
 
     suspend fun markMessagesReadUpTo(messageUuid: String) {
@@ -822,7 +840,7 @@ class ChatDialogViewModel(
     }
 
     suspend fun onMessageReactionTap(messageUuid: String, emoji: String) {
-        val reaction = repo.userReactions.value.firstOrNull { it.emojiName == emoji && it.messageUuid == messageUuid }
+        val reaction = userReactions.value.firstOrNull { it.emojiName == emoji && it.messageUuid == messageUuid }
         if (reaction != null) {
             val removeReactionResponse =
                 client.performRequest(RemoveMessageReactionRequest(reaction.uuid))

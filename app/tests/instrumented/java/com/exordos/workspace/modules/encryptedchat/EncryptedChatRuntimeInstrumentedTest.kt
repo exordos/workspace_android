@@ -17,11 +17,13 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.async
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
@@ -129,7 +131,7 @@ class EncryptedChatRuntimeInstrumentedTest {
         member.sync()
         assertEquals(historicalText, (memberRuntime.presentation(historical) as EncryptedChatPresentation.Text).text)
         assertNotEquals(historicalText, historical.payload.content)
-        assertTrue(member.repo.messagesPool.value.all { it.payload.kind != "markdown" })
+        assertTrue(member.repo.messages.first().all { it.payload.kind != "markdown" })
 
         val editable = ownerRuntime.sendText("Before encrypted edit")
         val editedText = "Edited through the production JSON default policy"
@@ -257,7 +259,7 @@ class EncryptedChatRuntimeInstrumentedTest {
         issuer.refresh(force = true)
         issuer.grantKey(request.uuid)
         val valid = backend.messages.last { it.payload.kind == "key_grant" }
-        val originalPool = member.repo.messagesPool.value.toList()
+        val originalPool = member.repo.messages.first().toList()
         val altered = listOf(
             valid.copy(authorUuid = member.userUuid),
             valid.copy(streamUuid = UUID.randomUUID().toString()),
@@ -269,12 +271,13 @@ class EncryptedChatRuntimeInstrumentedTest {
             valid.copy(payload = valid.payload.copy(content = WorkspaceChatCrypto.toBase64(ByteArray(85)))),
         )
         altered.forEach { bad ->
-            member.repo.setInitialMessagesPool(originalPool + bad.copy(uuid = UUID.randomUUID().toString()).toUio())
+            member.repo.messageDao.upsert(originalPool + bad.copy(uuid = UUID.randomUUID().toString()).toUio())
             val failure = runCatching { receiver.refresh(force = true) }.exceptionOrNull()
             if (failure != null) assertTrue(failure is EncryptedChatException && failure.failure == EncryptedChatFailure.INVALID_MESSAGE)
             assertNull(keys.readChatKey(member.address(CURRENT)))
             assertEquals(EncryptedChatRequestStatus.REQUESTED, receiver.state.value.requestStatus[CURRENT])
-            member.repo.setInitialMessagesPool(originalPool)
+            member.repo.messageDao.deleteAll()
+            member.repo.messageDao.upsert(originalPool)
             receiver.refresh(force = true)
         }
         member.sync()
@@ -478,7 +481,7 @@ class EncryptedChatRuntimeInstrumentedTest {
                 // Fresh UserViewModel, repositories and encrypted preferences; no in-memory owner proof survives.
                 account.events.clear()
                 account.user.viewModelScope.cancel()
-                events = EventsRepositoryStore(SecureTokenStore(context), account.api)
+                events = EventsRepositoryStore(SecureTokenStore(context), account.api, context)
                 extraScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
                 preferences = ServerRepository(account.dataStore, SecureTokenStore(context), events, extraScope)
                 user = UserViewModel(preferences)
@@ -510,8 +513,8 @@ class EncryptedChatRuntimeInstrumentedTest {
                 val remaining = events.getOrCreate(other)
                 remaining.loadUserInfo()
                 remaining.setInitialStreams(listOf(backend.stream.copy(userUuid = backend.participant.uuid)).map { it.toUio() })
-                remaining.addStreamBindings(STREAM, backend.bindings.map { it.toUio() })
-                remaining.addStreamTopicMessages(STREAM, TOPIC, backend.messages.map { it.copy(isOwn = it.authorUuid == backend.participant.uuid) }.map { it.toUio() })
+                remaining.setInitialStreamBindings(backend.bindings.map { it.toUio() })
+                remaining.addMessages(backend.messages.map { it.copy(isOwn = it.authorUuid == backend.participant.uuid) }.map { it.toUio() })
                 val runtime = EncryptedChatRuntime(context, account.api, remaining, account.scope, STREAM, TOPIC)
                 try { assertTrue(runtime.presentation(currentEncryptedMessage()) is EncryptedChatPresentation.Text) }
                 finally { runtime.close() }
@@ -541,55 +544,60 @@ class EncryptedChatRuntimeInstrumentedTest {
 
     @Test fun decryptResultsCannotPublishOrReturnAcrossRemovalBeforeObserversRun() = runBlocking {
         for (refresh in listOf(false, true)) {
-            val observers = CoroutineScope(SupervisorJob() + QueuedDispatcher())
-            val work = QueuedDispatcher()
-            val worker = CoroutineScope(SupervisorJob() + work)
-            val runtime = EncryptedChatRuntime(context, owner.api, owner.repo, observers, STREAM, TOPIC)
+            val dispatcher = QueuedDispatcher()
+            val observers = CoroutineScope(SupervisorJob() + dispatcher)
+            val decrypted = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            val runtime = EncryptedChatRuntime(context, owner.api, owner.repo, observers, STREAM, TOPIC,
+                beforePlaintextPublication = {
+                    decrypted.complete(Unit)
+                    release.await()
+                })
             try {
                 owner.repo.setInitialStreams(listOf(backend.stream.copy(userUuid = owner.userUuid)).map { it.toUio() })
                 owner.sync()
                 runtime.readySession()
-                val result = worker.async {
+                val result = async(Dispatchers.Default) {
                     runCatching { if (refresh) runtime.refresh(true) else runtime.presentation(currentEncryptedMessage()) }
                 }
-                fun dispatchToIo() {
-                    // Keep the live-check monitor until withContext has actually suspended.
-                    // A fast IO result can otherwise complete inline without a queued resumption.
-                    work.next { continuation ->
-                        owner.repo.withStreamRevision(STREAM, owner.repo.streamRemovalRevision(STREAM)) { continuation.run() }
-                    }
+                try {
+                    withTimeout(5_000) { decrypted.await() }
+                    val revision = owner.repo.streamRemovalRevision(STREAM)
+                    owner.repo.removeStream(STREAM)
+                    assertEquals(revision + 1, owner.repo.streamRemovalRevision(STREAM))
+                    // No observer has run; even restoring older Room rows cannot authorize this result.
+                    owner.repo.setInitialStreams(listOf(backend.stream.copy(userUuid = owner.userUuid)).map { it.toUio() })
+                    owner.sync()
+                    release.complete(Unit)
+                    val error = withTimeout(5_000) { result.await() }.exceptionOrNull()
+                    assertTrue(error is EncryptedChatException && error.failure == EncryptedChatFailure.STALE)
+                    assertTrue(runtime.presentations.value.isEmpty())
+                } finally {
+                    release.complete(Unit)
+                    result.cancelAndJoin()
                 }
-                dispatchToIo() // Dispatch ingest (refresh) or decrypt (presentation) to IO.
-                if (refresh) repeat(backend.messages.size) { dispatchToIo() }
-                val decrypted = work.take() // Final IO result exists, but its caller has not resumed.
-                val revision = owner.repo.streamRemovalRevision(STREAM)
-                owner.repo.removeStream(STREAM)
-                assertEquals(revision + 1, owner.repo.streamRemovalRevision(STREAM))
-                // No observer has run. Reject even if an older projection is restored before resumption.
-                owner.repo.setInitialStreams(listOf(backend.stream.copy(userUuid = owner.userUuid)).map { it.toUio() })
-                owner.sync()
-                decrypted.run()
-                val error = withTimeout(5_000) { result.await() }.exceptionOrNull()
-                assertTrue(error is EncryptedChatException && error.failure == EncryptedChatFailure.STALE)
-                assertTrue(runtime.presentations.value.isEmpty())
-            } finally { runtime.close(); observers.cancel(); worker.cancel() }
+            } finally {
+                runtime.close()
+                observers.cancel()
+                dispatcher.drain()
+            }
         }
     }
 
     private class QueuedDispatcher : CoroutineDispatcher() {
         private val tasks = LinkedBlockingQueue<Runnable>()
         override fun dispatch(context: CoroutineContext, block: Runnable) { tasks.add(block) }
-        fun take(): Runnable = checkNotNull(tasks.poll(5, TimeUnit.SECONDS)) { "Expected a suspended result" }
-        fun next(run: (Runnable) -> Unit = { it.run() }) {
-            run(take())
+
+        fun drain() {
+            while (true) (tasks.poll() ?: return).run()
         }
     }
 
     @Test fun ordinaryMountedChatRetainsComposerQuotesAndSelectionAcrossProofAndCredentialUpdates() = runBlocking {
         owner.repo.updateStream(backend.stream.copy(encryption = false, currentEncryptionKeyUuid = null, userUuid = OWNER).toUio())
         val ordinary = backend.messages.first().copy(payload = backend.messages.first().payload.copy(kind = "markdown", content = "ordinary message", keyUuid = null))
-        owner.repo.addStreamTopicMessages(STREAM, TOPIC, listOf(ordinary).map { it.toUio() })
-        owner.repo.setInitialMessagesPool(listOf(ordinary).map { it.toUio() })
+        owner.repo.addMessages(listOf(ordinary).map { it.toUio() })
+        owner.repo.messageDao.upsert(listOf(ordinary).map { it.toUio() })
         val chat = withContext(Dispatchers.Main) {
             ChatDialogViewModel(owner.api, owner.user, "Ordinary", STREAM, "General", TOPIC,
                 false, owner.events, null, AttachmentStorage(context, owner.api))
@@ -650,7 +658,7 @@ class EncryptedChatRuntimeInstrumentedTest {
             }
             assertEquals(created.uuid, backend.createdStreams.single().uuid)
             assertArrayEquals(stored, keys.readChatKey(keyAddress))
-            assertTrue(owner.repo.streams.value.any { it.uuid == created.uuid && it.encryption })
+            assertTrue(owner.repo.streams.first().any { it.uuid == created.uuid && it.encryption })
             stored.fill(0)
         } finally { viewModel.viewModelScope.cancel() }
     }
@@ -674,7 +682,7 @@ class EncryptedChatRuntimeInstrumentedTest {
             val created = requireNotNull(viewModel.createdStream)
             assertFalse(created.encryption)
             assertNull(created.currentEncryptionKeyUuid)
-            assertTrue(legacy.repo.streams.value.any { it.uuid == created.uuid && !it.encryption })
+            assertTrue(legacy.repo.streams.first().any { it.uuid == created.uuid && !it.encryption })
             assertEquals(stagedBefore, keys.listStagedCreations(legacy.keyScope).map { it.creationId })
             assertTrue(keys.listChatKeys(legacy.keyScope, created.uuid).isEmpty())
         } finally { viewModel.viewModelScope.cancel() }
@@ -776,7 +784,7 @@ class EncryptedChatRuntimeInstrumentedTest {
         }
         val api = WorkspaceAPIClient(http)
         val tokens = SecureTokenStore(context)
-        val events = EventsRepositoryStore(tokens, api)
+        val events = EventsRepositoryStore(tokens, api, context)
         val preferences = ServerRepository(dataStore, tokens, events, scope)
         val config = ServerConfig("cassi-runtime-${UUID.randomUUID()}", backend.url, "", "CASSI test", projectUuid = projectUuid)
         preferences.addServer(config, TokenPair(token, "synthetic-refresh"))
@@ -801,8 +809,8 @@ class EncryptedChatRuntimeInstrumentedTest {
         assertTrue(repo.verifiedOwnerAuthentication.value != null)
         repo.setInitialUsers(listOf(backend.owner, backend.participant).map { it.toUio() })
         repo.setInitialStreams(listOf(backend.stream.copy(userUuid = person.uuid)).map { it.toUio() })
-        repo.addStreamBindings(STREAM, backend.bindings.map { it.toUio() })
-        repo.addStreamTopicMessages(STREAM, TOPIC, backend.messages.map { it.copy(isOwn = it.authorUuid == person.uuid) }.map { it.toUio() })
+        repo.setInitialStreamBindings(backend.bindings.map { it.toUio() })
+        repo.addMessages(backend.messages.map { it.copy(isOwn = it.authorUuid == person.uuid) }.map { it.toUio() })
         return Account(config, scope, preferences, events, user, http, api, repo, directory, keyScope, person.uuid, dataStore).also { accounts += it }
     }
 
@@ -813,9 +821,9 @@ class EncryptedChatRuntimeInstrumentedTest {
         val runtimes = mutableListOf<EncryptedChatRuntime>()
         fun address(keyUuid: String) = ChatKeyAddress(keyScope, STREAM, keyUuid)
         fun runtime() = EncryptedChatRuntime(context, api, repo, scope, STREAM, TOPIC).also { runtimes += it }
-        fun sync() {
+        suspend fun sync() {
             repo.updateStream(backend.stream.copy(userUuid = userUuid).toUio())
-            repo.updateMessagesPool(backend.messages.map { it.copy(isOwn = it.authorUuid == userUuid) }.map { it.toUio() })
+            repo.messageDao.upsert(backend.messages.map { it.copy(isOwn = it.authorUuid == userUuid) }.map { it.toUio() })
         }
     }
 

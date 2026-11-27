@@ -7,7 +7,7 @@ junitVersion = "1.1.5"
 espressoCore = "3.5.1"
 lifecycleRuntimeKtx = "2.6.1"
 activityCompose = "1.8.0"
-kotlin = "2.0.21"
+kotlin = "2.3.10"
 composeBom = "2025.07.00"
 navigationRuntimeKtx = "2.9.7"
 navigationCompose = "2.9.7"
@@ -27,6 +27,9 @@ foundationLayout = "1.11.2"
 uiText = "1.11.2"
 emoji = "1.7.6"
 security-crypto = "1.1.0-alpha06"
+room3 = "3.0.3"
+ksp = "2.3.6"
+sqlite = "2.6.2"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -71,6 +74,9 @@ androidx-app-compat = { group = "androidx.appcompat", name = "appcompat", versio
 androidx-compose-foundation-layout = { group = "androidx.compose.foundation", name = "foundation-layout", version.ref = "foundationLayout" }
 androidx-compose-ui-text = { group = "androidx.compose.ui", name = "ui-text", version.ref = "uiText" }
 fellbaum-jemoji = { group = "net.fellbaum", name = "jemoji", version.ref = "emoji" }
+androidx-room3-runtime = { module = "androidx.room3:room3-runtime", version.ref = "room3" }
+androidx-room3-compiler = { module = "androidx.room3:room3-compiler", version.ref = "room3" }
+androidx-sqlite-bundled = { module = "androidx.sqlite:sqlite-bundled", version.ref = "sqlite" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
@@ -79,3 +85,5 @@ kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", versi
 firebase = { id = "com.google.gms.google-services", version.ref = "firebasePlugin" }
 crashlytics = { id = "com.google.firebase.crashlytics", version.ref = "crashlyticsPlugin" }
 spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
+androidx-room3 = { id = "androidx.room3", version.ref = "room3" }

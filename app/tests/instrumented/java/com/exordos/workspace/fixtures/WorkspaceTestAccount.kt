@@ -68,7 +68,7 @@ class WorkspaceTestAccount private constructor(
             }
             val api = WorkspaceAPIClient(http)
             val tokens = SecureTokenStore(context)
-            val events = EventsRepositoryStore(tokens, api)
+            val events = EventsRepositoryStore(tokens, api, context)
             val preferences = ServerRepository(store, tokens, events, scope)
             val config = ServerConfig("cassi-account-${UUID.randomUUID()}", url, "", "CASSI test", projectUuid = "project")
             preferences.addServer(config, TokenPair("cassi-fixture-$index", "cassi-fixture-refresh"))
