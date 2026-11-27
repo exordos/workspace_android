@@ -512,7 +512,7 @@ class EncryptedChatRuntimeInstrumentedTest {
                 remaining.loadUserInfo()
                 remaining.setInitialStreams(listOf(backend.stream.copy(userUuid = backend.participant.uuid)).map { it.toUio() })
                 remaining.setInitialStreamBindings(backend.bindings.map { it.toUio() })
-                remaining.addStreamTopicMessages(STREAM, TOPIC, backend.messages.map { it.copy(isOwn = it.authorUuid == backend.participant.uuid) }.map { it.toUio() })
+                remaining.addMessages(backend.messages.map { it.copy(isOwn = it.authorUuid == backend.participant.uuid) }.map { it.toUio() })
                 val runtime = EncryptedChatRuntime(context, account.api, remaining, account.scope, STREAM, TOPIC)
                 try { assertTrue(runtime.presentation(currentEncryptedMessage()) is EncryptedChatPresentation.Text) }
                 finally { runtime.close() }
@@ -589,7 +589,7 @@ class EncryptedChatRuntimeInstrumentedTest {
     @Test fun ordinaryMountedChatRetainsComposerQuotesAndSelectionAcrossProofAndCredentialUpdates() = runBlocking {
         owner.repo.updateStream(backend.stream.copy(encryption = false, currentEncryptionKeyUuid = null, userUuid = OWNER).toUio())
         val ordinary = backend.messages.first().copy(payload = backend.messages.first().payload.copy(kind = "markdown", content = "ordinary message", keyUuid = null))
-        owner.repo.addStreamTopicMessages(STREAM, TOPIC, listOf(ordinary).map { it.toUio() })
+        owner.repo.addMessages(listOf(ordinary).map { it.toUio() })
         owner.repo.messageDao.upsert(listOf(ordinary).map { it.toUio() })
         val chat = withContext(Dispatchers.Main) {
             ChatDialogViewModel(owner.api, owner.user, "Ordinary", STREAM, "General", TOPIC,
@@ -803,7 +803,7 @@ class EncryptedChatRuntimeInstrumentedTest {
         repo.setInitialUsers(listOf(backend.owner, backend.participant).map { it.toUio() })
         repo.setInitialStreams(listOf(backend.stream.copy(userUuid = person.uuid)).map { it.toUio() })
         repo.setInitialStreamBindings(backend.bindings.map { it.toUio() })
-        repo.addStreamTopicMessages(STREAM, TOPIC, backend.messages.map { it.copy(isOwn = it.authorUuid == person.uuid) }.map { it.toUio() })
+        repo.addMessages(backend.messages.map { it.copy(isOwn = it.authorUuid == person.uuid) }.map { it.toUio() })
         return Account(config, scope, preferences, events, user, http, api, repo, directory, keyScope, person.uuid, dataStore).also { accounts += it }
     }
 

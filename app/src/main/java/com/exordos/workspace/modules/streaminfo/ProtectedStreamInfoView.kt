@@ -87,7 +87,6 @@ fun ProtectedStreamInfoView(viewModel: StreamInfoViewModel, navController: NavHo
     val users by viewModel.users.collectAsStateWithLifecycle()
     val streamBindings by viewModel.streamBindings.collectAsStateWithLifecycle()
     val encryption by viewModel.encryptedChatState.collectAsStateWithLifecycle()
-    val rawMessages by viewModel.repo.streamTopicMessages.collectAsStateWithLifecycle()
     val pooledMessages by viewModel.repo.messages.collectAsStateWithLifecycle(emptyList())
     val selectedServer by viewModel.client.requireUserViewModel().selectedServer.collectAsStateWithLifecycle()
     val memberBaseUrl = selectedServer?.takeIf { it.id == viewModel.repo.serverId }?.baseUrl.orEmpty()
@@ -108,10 +107,10 @@ fun ProtectedStreamInfoView(viewModel: StreamInfoViewModel, navController: NavHo
         stream?.role in setOf("owner", "administrator") && stream?.isArchived == false
     val busy = update.busy || deletion.busy || callState.busy
     val isKeyPage = page == ProtectedInfoPage.KEYS || page == ProtectedInfoPage.LOCAL_KEYS
-    val keyCreatedAt = remember(rawMessages, pooledMessages, encryption.currentKeyUuid, stream?.uuid, selectedServer?.projectUuid) {
+    val keyCreatedAt = remember(pooledMessages, encryption.currentKeyUuid, stream?.uuid, selectedServer?.projectUuid) {
         val targetStream = stream?.uuid
         val currentKey = encryption.currentKeyUuid
-        if (targetStream == null || currentKey.isNullOrBlank()) null else (pooledMessages.asSequence() + rawMessages.values.asSequence().flatten()).filter {
+        if (targetStream == null || currentKey.isNullOrBlank()) null else pooledMessages.asSequence().filter {
             it.streamUuid == targetStream && it.payload.kind == "key_announced" && it.payload.keyUuid == currentKey &&
                 (it.projectId == null || it.projectId == selectedServer?.projectUuid)
         }.mapNotNull { runCatching { WorkspaceDateTime.parse(it.createdAt).toEpochMilli() }.getOrNull() }.minOrNull()

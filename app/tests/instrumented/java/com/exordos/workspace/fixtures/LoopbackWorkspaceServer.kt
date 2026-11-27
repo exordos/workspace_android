@@ -22,7 +22,13 @@ import java.util.concurrent.Executors
 
 /** Bounded loopback HTTP transport shared by instrumented contract and screen tests. */
 class LoopbackWorkspaceServer(private val handle: (Request) -> Response) : Closeable {
-    data class Request(val method: String, val path: String, val headers: Map<String, String>, val body: String)
+    data class Request(
+        val method: String,
+        val path: String,
+        val headers: Map<String, String>,
+        val body: String,
+        val query: String,
+    )
     data class Response(val body: String, val status: Int = 200)
     private val socket = ServerSocket(0, 16, InetAddress.getByName("127.0.0.1"))
     private val workers = Executors.newCachedThreadPool()
@@ -67,7 +73,9 @@ class LoopbackWorkspaceServer(private val handle: (Request) -> Response) : Close
             check(read > 0)
             offset += read
         }
-        val response = handle(Request(start[0], start[1].substringBefore('?'), headers, body.decodeToString()))
+        val (method, target) = start
+        val response = handle(Request(method, target.substringBefore('?'), headers, body.decodeToString(),
+            target.substringAfter('?', "")))
         val bytes = response.body.toByteArray()
         connection.getOutputStream().apply {
             write("HTTP/1.1 ${response.status} Result\r\nContent-Type: application/json\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\n\r\n".toByteArray())

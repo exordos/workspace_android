@@ -154,13 +154,12 @@ class ChatViewModel(
         val currentStreams = streams.value
         val visible = previewRows.value
         val cacheKey = listOf(repo, selected.copy(), own.uuid, proof,
-            currentStreams, catalog, conversations, bindings, visible)
+            currentStreams, catalog, bindings, visible)
         synchronized(previewCacheLock) {
             if (previewCacheKey == cacheKey) return previewCache
-            val loadedConversations = conversations.values.flatten()
             val rows = currentStreams.filter { it.uuid in visible }.mapNotNull { stream ->
                 val lastMessage = catalog.lastMessages[stream.lastMessageUuid]?.toMessageUIO()
-                val message = latestLoadedEncryptedPreviewMessage(stream, catalog.messages, loadedConversations, lastMessage)
+                val message = latestLoadedEncryptedPreviewMessage(stream, catalog.messages, emptyList(), lastMessage)
                 encryptedPreviewSource(
                     stream, message, own.uuid, requireNotNull(selected.projectUuid),
                     bindings[stream.uuid].orEmpty(), lastMessage, catalog.users[message?.authorUuid]?.displayableName(),
@@ -195,7 +194,7 @@ class ChatViewModel(
         merge(
             eventsRepo.flatMapLatest { repo -> if (repo == null) flowOf(Unit) else merge(
                 repo.currentUser.map { Unit },
-                repo.streamTopicMessages.map { Unit }, repo.verifiedOwnerAuthentication.map { Unit },
+                repo.verifiedOwnerAuthentication.map { Unit },
             ) },
             streams.map { Unit }, chatListData.map { Unit }, previewBindings.map { Unit },
             userViewModel.selectedServer.map { Unit }, userViewModel.selectedServerId.map { Unit },

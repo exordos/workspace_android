@@ -134,7 +134,7 @@ class MessageDeletionTest {
 
     private fun deletion(
         request: suspend (String) -> ApiResult<String, ApiError>,
-        onDeleted: (String) -> Unit = {},
+        onDeleted: suspend (String) -> Unit = {},
     ) = MessageDeletion(
         canDelete = { canDeleteMessage(it, STREAM_UUID, TOPIC_UUID) },
         request = request,

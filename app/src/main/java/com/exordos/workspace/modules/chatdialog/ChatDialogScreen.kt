@@ -142,12 +142,11 @@ fun ChatDialogScreen(
     val encryptedChatState by viewModel.encryptedChatState.collectAsStateWithLifecycle()
     val protectedCallState by viewModel.protectedCallState.collectAsStateWithLifecycle()
     val streamTopicMessages by viewModel.streamTopicMessages.collectAsStateWithLifecycle()
-    val rawTopicMessages by viewModel.repo.streamTopicMessages.collectAsStateWithLifecycle()
     val viewer by viewModel.repo.currentUser.collectAsStateWithLifecycle()
     val messagePool by viewModel.storedMessages.collectAsStateWithLifecycle(emptyList())
-    val history = remember(viewModel, streamTopicMessages, messagePool, rawTopicMessages, viewer?.uuid, stream?.encryption, encryptedChatState) {
+    val history = remember(viewModel, streamTopicMessages, messagePool, viewer?.uuid, stream?.encryption, encryptedChatState) {
         deriveChatHistoryPresentation(streamTopicMessages["${viewModel.chatId}.${viewModel.topicUuid}"], messagePool,
-            rawTopicMessages, viewModel.chatId, stream?.encryption == true, viewer?.uuid, encryptedChatState)
+            emptyMap(), viewModel.chatId, stream?.encryption == true, viewer?.uuid, encryptedChatState)
     }
     val messages = history.orderedMessages
     val streamBindings by viewModel.streamBindings.collectAsStateWithLifecycle()

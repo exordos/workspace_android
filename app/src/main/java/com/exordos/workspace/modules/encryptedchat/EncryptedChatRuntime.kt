@@ -88,7 +88,7 @@ class EncryptedChatRuntime(
         merge(
             repo.streams.onEach { streams -> stream.value = streams.firstOrNull { it.uuid == streamId } }.map { Unit },
             repo.currentUser.map { Unit }, storedBindings.onEach { streamBindings.value = it }.map { Unit }, repo.messages.map { Unit },
-            repo.streamTopicMessages.map { Unit }, user.selectedServer.map { Unit },
+            user.selectedServer.map { Unit },
             user.accessToken.map { Unit }, repo.verifiedOwnerAuthentication.map { Unit },
             ConfirmedAccountContext.invalidations.map { Unit },
         ).collect {
@@ -313,7 +313,7 @@ class EncryptedChatRuntime(
     }
 
     private suspend fun wireMessages(): List<MessageUIO> = latestEncryptedChatWireMessages(
-        repo.messages.first(), repo.streamTopicMessages.value.values.flatten(), streamId)
+        repo.messages.first(), emptyList(), streamId)
 
     internal suspend fun refresh(force: Boolean = false) = refreshMutex.withLock {
         val active = readySession()

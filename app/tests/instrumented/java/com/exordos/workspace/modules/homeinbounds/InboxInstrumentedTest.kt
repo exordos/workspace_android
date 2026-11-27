@@ -106,7 +106,7 @@ class InboxInstrumentedTest {
         account.repo.loadUserInfo()
         account.repo.setInitialUsers(listOf(viewer,
             UserResponseData(username = "Preview author", uuid = authorId, status = "active", avatar = "")).map { it.toUio() })
-        if (cached.isNotEmpty()) account.repo.addStreamTopicMessages(streamId, topicId, cached.map { it.toUio() })
+        if (cached.isNotEmpty()) account.repo.addMessages(cached.map { it.toUio() })
         compose.runOnUiThread { inbox = HomeInboundsViewModel(account.api, account.events) }
         compose.setContent {
             WokspaceTheme {
@@ -298,7 +298,8 @@ class InboxInstrumentedTest {
         compose.onNodeWithTag("chat-message-${message(49, encrypted).uuid}").assertDoesNotExist()
         compose.waitUntil(8_000) { reads.isNotEmpty() }
         assertTrue(reads.none { "read_up_to" in it || message(49, encrypted).uuid in it })
-        compose.runOnIdle { account.repo.addMessageToStreamTopic(message(50, encrypted).toUio()) }
+        compose.waitForIdle()
+        runBlocking { account.repo.addMessageToStreamTopic(message(50, encrypted).toUio()) }
         compose.onNodeWithTag("chat-message-${message(target, encrypted).uuid}").assertIsDisplayed()
         compose.onNodeWithTag("chat-message-${message(50, encrypted).uuid}").assertDoesNotExist()
     }

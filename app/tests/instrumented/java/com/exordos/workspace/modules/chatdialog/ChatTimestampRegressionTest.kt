@@ -22,6 +22,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
@@ -134,17 +135,17 @@ class ChatTimestampRegressionTest {
         compose.onNodeWithTag("message-composer-input").performTextInput("CASSI offset message")
         compose.onNodeWithTag("message-composer-send").performClick()
         compose.waitUntil(5_000) {
-            account.repo.streamTopicMessages.value["$STREAM.$TOPIC"].orEmpty()
+            runBlocking { account.repo.messageDao.observeMessages(STREAM, TOPIC).first() }
                 .any { it.payload.content == "CASSI offset message" }
         }
-        val pending = account.repo.streamTopicMessages.value.getValue("$STREAM.$TOPIC")
+        val pending = account.repo.messageDao.observeMessages(STREAM, TOPIC).first()
             .single { it.payload.content == "CASSI offset message" }
         assertTrue(pending.createdAt.endsWith("Z"))
         assertEquals(pending.createdAt, pending.updatedAt)
         compose.onNodeWithTag("chat-message-${pending.uuid}").assertIsDisplayed()
         releaseResponse.countDown()
         compose.waitUntil(5_000) {
-            account.repo.streamTopicMessages.value["$STREAM.$TOPIC"].orEmpty().any { it.uuid == CONFIRMED }
+            runBlocking { account.repo.messageDao.observeMessages(STREAM, TOPIC).first() }.any { it.uuid == CONFIRMED }
         }
         compose.onNodeWithTag("chat-message-$CONFIRMED").assertIsDisplayed()
         assertEquals(
@@ -176,7 +177,7 @@ class ChatTimestampRegressionTest {
         account.repo.setInitialUsers(listOf(owner).map { it.toUio() })
         account.repo.setInitialStreams(listOf(Stream(STREAM, 0, 0, 0, history.first().createdAt,
             "CASSI timestamps", false, 0, defaultTopicUuid = TOPIC, notificationMode = "all_messages")).map { it.toUio() })
-        account.repo.addStreamTopicMessages(STREAM, TOPIC, history.map { it.toUio() })
+        account.repo.addMessages(history.map { it.toUio() })
         chat = withContext(Dispatchers.Main) {
             ChatDialogViewModel(account.api, account.user, "CASSI timestamps", STREAM, "Topic", TOPIC,
                 false, account.events, null,
