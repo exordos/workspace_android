@@ -190,7 +190,7 @@ class EventsRepository(
     private val realtimeStateLock = Any()
     private val historyMutex = Mutex()
 
-    private val pageLimit = 25
+    private val pageLimit = 100
     @Volatile
     private var activeSession: DefaultClientWebSocketSession? = null
     @Volatile
