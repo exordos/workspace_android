@@ -37,7 +37,6 @@ class StartupUioInstrumentedTest {
     private lateinit var account: WorkspaceTestAccount
     private val requests = CopyOnWriteArrayList<LoopbackWorkspaceServer.Request>()
     @Volatile private var bindingStatus = 200
-    @Volatile private var omitFolderItemParent = false
     private val person = """{"uuid":"person","username":"CASSI fixture","status":"active","avatar":""}"""
     private val message = """{"uuid":"message","updated_at":"2026-01-01T00:00:00Z","created_at":"2026-01-01T00:00:00Z",
         "stream_uuid":"stream","topic_uuid":"topic","user_uuid":"person","author_uuid":"person",
@@ -48,8 +47,8 @@ class StartupUioInstrumentedTest {
     private val topic = """{"uuid":"topic","stream_uuid":"stream","name":"Topic","color":1,
         "updated_at":"2026-01-01T00:00:00Z","unread_count":1,"active_unread_count":1,
         "is_done":false,"is_default":true,"notification_mode":"follow"}"""
-    private val folder = """{"uuid":"folder","title":"Folder","unread_count":1,"system_type":"custom",
-        "created_at":"2026-01-01T00:00:00Z","folder_items":[{"uuid":"item","folder":"folder","stream_uuid":"stream","chat_type":"stream","unread_count":1}]}"""
+    private val folder = """{"uuid":"folder","title":"Folder","unread_count":1,"system_type":"created",
+        "created_at":"2026-01-01T00:00:00Z","folder_items":[{"uuid":"item","folder_uuid":"folder","stream_uuid":"stream","chat_type":"stream","unread_count":1}]}"""
     private val binding = """{"uuid":"binding","stream_uuid":"stream","user_uuid":"person","role":"owner"}"""
     private val reaction = """{"uuid":"reaction","user_uuid":"person","message_uuid":"message","emoji_name":"smile"}"""
 
@@ -63,10 +62,7 @@ class StartupUioInstrumentedTest {
                 request.path.endsWith("/streams/") -> "[$stream]"
                 request.path.endsWith("/stream_topics/") -> "[$topic]"
                 request.path.endsWith("/messages/") -> "[$message]"
-                request.path.endsWith("/folders/") -> {
-                    val payload = if (omitFolderItemParent) folder.replace("\"folder\":\"folder\",", "") else folder
-                    "[$payload]"
-                }
+                request.path.endsWith("/folders/") -> "[$folder]"
                 request.path.endsWith("/stream_bindings/") -> "[$binding]"
                 request.path.endsWith("/message_reactions/") -> "[$reaction]"
                 request.path.endsWith("/drafts/") -> """[{"uuid":"draft","stream_uuid":"stream","topic_uuid":"topic",
@@ -131,8 +127,7 @@ class StartupUioInstrumentedTest {
         assertEquals(count + 1, requests.count { it.path.endsWith("/stream_bindings/") })
     }
 
-    @Test fun foldersRequestAcceptsNestedItemWithoutParent(): Unit = runBlocking {
-        omitFolderItemParent = true
+    @Test fun foldersRequestReadsNestedItemsWithFolderUuid(): Unit = runBlocking {
         val response = account.api.performRequest(FoldersRequest())
         assertTrue(response is ApiResult.Success)
         assertEquals("folder", (response as ApiResult.Success).value.single().uuid)
