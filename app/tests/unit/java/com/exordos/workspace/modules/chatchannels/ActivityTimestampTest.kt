@@ -17,20 +17,20 @@ class ActivityTimestampTest {
         val early = stream("early", "2026-10-30T00:15:00+03:00")
         val late = stream("late", "2026-10-29T21:30:00Z")
         val items = listOf(early, late)
-        assertEquals(listOf("late", "early"), items.sortedByActivity().map { it.uuid })
-        assertEquals(listOf("late", "early"), items.sortedForInbox().map { it.uuid })
+        assertEquals(listOf("late", "early"), items.sortedByActivity(lastMessages = emptyList()).map { it.uuid })
+        assertEquals(listOf("late", "early"), items.sortedForInbox(lastMessages = emptyList()).map { it.uuid })
         assertEquals("early", items.map { if (it.uuid == "early") it.copy(activeUnreadCount = 1) else it }
-            .sortedForInbox().first().uuid)
+            .sortedForInbox(lastMessages = emptyList()).first().uuid)
     }
 
     @Test fun `topic activity compares instants while retaining mute and unread rules`() {
         val early = topic("early", "2026-10-30T00:15:00+03:00")
         val late = topic("late", "2026-10-29T21:30:00Z")
         val items = listOf(early, late)
-        assertEquals(listOf("late", "early"), items.topicsSortedByActivity().map { it.uuid })
-        assertEquals(listOf("late", "early"), items.topicsSortedForInbox().map { it.uuid })
+        assertEquals(listOf("late", "early"), items.topicsSortedByActivity(lastMessages = emptyList()).map { it.uuid })
+        assertEquals(listOf("late", "early"), items.topicsSortedForInbox(lastMessages = emptyList()).map { it.uuid })
         assertEquals("early", items.map { if (it.uuid == "late") it.copy(notificationMode = "mute") else it }
-            .topicsSortedByActivity().first().uuid)
+            .topicsSortedByActivity(lastMessages = emptyList()).first().uuid)
     }
 
     private fun stream(id: String, date: String) =
