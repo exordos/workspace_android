@@ -148,10 +148,17 @@ class ChatDialogViewModel(
     }
     fun clearEncryptedError() = encryptionRuntime.clearError()
 
+    val messages = repo.messages
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList(),
+        )
+
     val streamTopicMessages: StateFlow<Map<String, List<MessageUIO>>> = combine(
-        repo.streamTopicMessages, encryptedPresentations,
+        messages, encryptedPresentations,
     ) { conversations, presentations ->
-        conversations.mapValues { (_, messages) -> messages.map { message ->
+        conversations.mapValues { (_, message -> messages.map { message ->
             val presentation = presentations[message.uuid]
             if (message.streamUuid == chatId && presentation is EncryptedChatPresentation.Text)
                 message.copy(payload = MessagePayloadUIO("markdown", presentation.text), originalEncryptedPayload = message.payload.copy())

@@ -242,8 +242,6 @@ class EventsRepository(
     private val _currentlySelectedFolder = MutableStateFlow<FolderUIO?>(null)
     var currentlySelectedFolder: StateFlow<FolderUIO?> = _currentlySelectedFolder
 
-    private val _streamTopicMessages = MutableStateFlow<Map<String, List<MessageUIO>>>(emptyMap())
-    val streamTopicMessages: StateFlow<Map<String, List<MessageUIO>>> = _streamTopicMessages.asStateFlow()
     private val _messageDeletedEvents = MutableSharedFlow<String>(extraBufferCapacity = 64)
     val messageDeletedEvents = _messageDeletedEvents.asSharedFlow()
     private val _messageUpdatedEvents = MutableSharedFlow<MessageUIO>(extraBufferCapacity = 64)
@@ -267,12 +265,6 @@ class EventsRepository(
     fun updateCurrentlySelectedFolder(newFolder: FolderUIO?) {
         _currentlySelectedFolder.update { newFolder }
     }
-    fun addStreamTopicMessages(streamUuid: String, topicUuid: String, messages: List<MessageUIO>) {
-        val key = "$streamUuid.$topicUuid"
-        _streamTopicMessages.update { current ->
-            current + (key to messages)
-        }
-    }
 
     internal fun openConversation(owner: Any, streamUuid: String, topicUuid: String) {
         synchronized(realtimeStateLock) {
@@ -291,129 +283,40 @@ class EventsRepository(
     internal fun isConversationStale(streamUuid: String, topicUuid: String): Boolean =
         synchronized(realtimeStateLock) { "$streamUuid.$topicUuid" in staleConversations }
 
-    suspend fun refreshConversation(
-        streamUuid: String,
-        topicUuid: String,
-    ): ApiResult<List<MessageUIO>, ApiError> = refreshConversation(streamUuid, topicUuid, false)
-
-    private suspend fun refreshConversation(
-        streamUuid: String,
-        topicUuid: String,
-        coveredByRecoveryCursor: Boolean,
-    ): ApiResult<List<MessageUIO>, ApiError> {
-        val key = "$streamUuid.$topicUuid"
-        // Events can arrive before the first history request completes.
-        _streamTopicMessages.update { current ->
-            if (key in current) current else current + (key to emptyList())
-        }
-        val beforeRequest = _streamTopicMessages.value[key].orEmpty().map {
-            it.copy(payload = it.payload.copy(), reactions = it.reactions.toMap())
-        }
-        val (generation, canClearStale) = synchronized(realtimeStateLock) {
-            if (messageResyncRequired) staleConversations += key
-            // A normal load may precede the fresh cursor and leave an uncovered event gap.
-            historyGeneration to (!messageResyncRequired || coveredByRecoveryCursor)
-        }
-        val response = client.performRequest(MessagesRequest(streamUuid, topicUuid, pageLimit, null), serverId, config)
-        if (response is ApiResult.Success) {
-            // Check and publish atomically with cursor invalidation. An older response must
-            // not overwrite a newer recovery snapshot, even if that snapshot was empty.
-            synchronized(realtimeStateLock) {
-                if (historyGeneration != generation) {
-                    return ApiResult.Error(ApiError("History response is obsolete", "HISTORY_RESPONSE_OBSOLETE"))
-                }
-                val snapshot = response.value
-                _streamTopicMessages.update { current ->
-                    current + (key to mergeMessageHistorySnapshot(
-                        beforeRequest, current[key].orEmpty(), snapshot, pendingMessageUuids.value,
-                    ))
-                }
-                if (canClearStale) staleConversations -= key
-            }
-        }
-        return response
-    }
-
     fun addPendingMessage(message: MessageUIO) {
         pendingMessageUuids.update { it + message.uuid }
         scope.launch {
             addLastMessage(message.toLastMessageUIO())
-        }
-        addMessageToStreamTopic(message)
-    }
-    fun addMessageToStreamTopic(message: MessageUIO) {
-        val key = "${message.streamUuid}.${message.topicUuid}"
-
-        _streamTopicMessages.update { current ->
-            if (current[key] != null ) {
-                val existingMessages = current[key].orEmpty()
-                val pendingMessages = existingMessages.filter {
-                    it.uuid == "" && it.authorUuid == message.authorUuid && it.payload.content == message.payload.content
-                }
-                val filteredExistingMessages = existingMessages.filter { it.uuid == message.uuid }
-                if (filteredExistingMessages.isEmpty() && pendingMessages.isEmpty()) {
-                    current + (key to (existingMessages + message))
-                } else {
-                    current
-                }
-            } else {
-                current
-            }
+            addMessageToStreamTopic(message)
         }
     }
+    suspend fun addMessageToStreamTopic(message: MessageUIO) {
+        messageDao.upsert(message)
+    }
 
-    fun updateMessage(updatedMessage: MessageUIO) {
-        val key = "${updatedMessage.streamUuid}.${updatedMessage.topicUuid}"
-        _streamTopicMessages.update { current ->
-            val messages = current[key] ?: return@update current
-            val updatedMessages = messages.map { message ->
-                if (message.uuid == updatedMessage.uuid) {
-                    message.copy(
-                        payload = updatedMessage.payload,
-                        updatedAt = updatedMessage.updatedAt,
-                        mentioned = updatedMessage.mentioned,
-                        reactions = updatedMessage.reactions
-                    )
-                } else {
-                    message
-                }
-            }
+    suspend fun updateMessage(updatedMessage: MessageUIO) {
+        messageDao.upsert(updatedMessage)
+    }
 
-            if (updatedMessages == messages) return@update current
-            current + (key to updatedMessages)
+    suspend fun addMessages(messageList: List<MessageUIO>) {
+        messageDao.upsert(messageList)
+    }
+
+    suspend fun removeMessage(messageUuid: String) {
+        val messageToDelete = messageDao.getMessage(messageUuid)
+        if (messageToDelete != null) {
+            messageDao.delete(messageToDelete)
         }
-        val referenceUpdate = updatedMessage.copy(payload = updatedMessage.payload.copy())
-        if (!_messageUpdatedEvents.tryEmit(referenceUpdate)) {
-            scope.launch { _messageUpdatedEvents.emit(referenceUpdate) }
+        if (!_messageDeletedEvents.tryEmit(messageUuid)) {
+            scope.launch { _messageDeletedEvents.emit(messageUuid) }
         }
     }
 
     /** Reconcile HTTP confirmation with either ordering of the matching WS event. */
     fun reconcileSentMessage(pendingUuid: String, confirmed: MessageUIO) {
-        val key = "${confirmed.streamUuid}.${confirmed.topicUuid}"
-        _streamTopicMessages.update { current ->
-            val hadPending = current.values.any { messages -> messages.any { it.uuid == pendingUuid } }
-            val cleaned = current.mapValues { (_, messages) ->
-                messages.filterNot { it.uuid == pendingUuid }
-            }
-            if (!hadPending && key !in cleaned) return@update cleaned
-            val messages = cleaned[key].orEmpty()
-            val reconciled = if (messages.any { it.uuid == confirmed.uuid }) {
-                messages.distinctBy { it.uuid }
-            } else messages + confirmed
-            cleaned + (key to reconciled)
-        }
-        pendingMessageUuids.update { it - pendingUuid }
-    }
-
-    fun removeMessage(messageUuid: String) {
-        _streamTopicMessages.update { current ->
-            current.mapValues { (_, messages) ->
-                messages.filterNot { it.uuid == messageUuid }
-            }
-        }
-        if (!_messageDeletedEvents.tryEmit(messageUuid)) {
-            scope.launch { _messageDeletedEvents.emit(messageUuid) }
+        scope.launch {
+            updateMessage(confirmed)
+            pendingMessageUuids.update { it - pendingUuid }
         }
     }
 
@@ -422,7 +325,6 @@ class EventsRepository(
         synchronized(realtimeStateLock) {
             streamRemovalRevisions[streamUuid] = streamRemovalRevision(streamUuid) + 1
             historyGeneration++ // An older HTTP history response must not restore a deleted conversation.
-            _streamTopicMessages.update { it.filterKeys { key -> !key.startsWith("$streamUuid.") } }
             staleConversations.removeAll { it.startsWith("$streamUuid.") }
             if (openConversation.value?.streamUuid == streamUuid) openConversation.value = null
             if (!_streamDeletedEvents.tryEmit(streamUuid)) scope.launch { _streamDeletedEvents.emit(streamUuid) }
@@ -680,20 +582,6 @@ class EventsRepository(
                 }
             }
 
-            // Capture the cursor before reading snapshots. Replaying from it then
-            // covers messages created while those HTTP requests are in flight.
-            if (messageResyncRequired) {
-                val failedConversation = refreshOpenConversationForRecovery()
-                if (failedConversation != null) {
-                    // Closing or switching the failed chat must not wait for its retry backoff.
-                    withTimeoutOrNull(retryDelayMillis) {
-                        openConversation.first { it != failedConversation }
-                    }
-                    retryDelayMillis = nextRetryDelayMillis(retryDelayMillis)
-                    continue
-                }
-            }
-
             var connectionEstablished = false
             try {
                 startWebsocketConnection(webSocketClient, currentBaseUrl) {
@@ -721,49 +609,10 @@ class EventsRepository(
 
     private fun invalidateRealtimeCursor() = synchronized(realtimeStateLock) {
         historyGeneration++
-        staleConversations += _streamTopicMessages.value.keys
         openConversation.value?.let { staleConversations += it.key }
         messageResyncRequired = true
         latestEpoch = 0
         epochGeneration = ""
-    }
-
-    private suspend fun refreshOpenConversationForRecovery(): OpenConversation? = coroutineScope {
-        while (true) {
-            val active = synchronized(realtimeStateLock) {
-                val current = openConversation.value
-                if (current == null || current.key !in staleConversations) {
-                    messageResyncRequired = false
-                    return@coroutineScope null
-                }
-                current
-            }
-            val reload = async { refreshConversation(active.streamUuid, active.topicUuid, true) }
-            val switched = async { openConversation.first { it != active } }
-            val response = try {
-                select {
-                    reload.onAwait { it }
-                    switched.onAwait { null }
-                }
-            } finally {
-                reload.cancelAndJoin()
-                switched.cancelAndJoin()
-            }
-            synchronized(realtimeStateLock) {
-                if (openConversation.value == active && response is ApiResult.Error) {
-                    if (response.error.httpStatusCode in setOf(403, 404)) {
-                        addStreamTopicMessages(active.streamUuid, active.topicUuid, emptyList())
-                        // Keep the stale marker: only a successful history response clears it.
-                        messageResyncRequired = false
-                        return@coroutineScope null
-                    }
-                    Log.d("WebSocket", "Failed to reload open chat history; recovery will retry")
-                    return@coroutineScope active
-                }
-            }
-        }
-        @Suppress("UNREACHABLE_CODE")
-        null
     }
 
     private suspend fun startWebsocketConnection(
@@ -945,19 +794,23 @@ class EventsRepository(
                 val message = json.decodeFromString<MessageResponse>(payload).toUio()
                 scope.launch {
                     addLastMessage(message.toLastMessageUIO())
+                    addMessageToStreamTopic(message)
                 }
-                addMessageToStreamTopic(message)
             }
             "updated" -> {
                 val message = json.decodeFromString<MessageResponse>(payload).toUio()
                 scope.launch {
                     addLastMessage(message.toLastMessageUIO())
+                    updateMessage(message)
                 }
-                updateMessage(message)
             }
             "deleted" -> {
-                val message = json.decodeFromString<JsonObject>(payload)
-                message["uuid"]?.jsonPrimitive?.contentOrNull?.let(::removeMessage)
+                val messageUuid = json.decodeFromString<JsonObject>(payload)["uuid"]?.jsonPrimitive?.contentOrNull
+                if (messageUuid != null) {
+                    scope.launch {
+                        removeMessage(messageUuid)
+                    }
+                }
             }
         }
     }

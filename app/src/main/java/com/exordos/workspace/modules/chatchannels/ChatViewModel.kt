@@ -150,7 +150,6 @@ class ChatViewModel(
         val proof = repo.verifiedOwnerAuthentication.value
         val account = confirmedAccountContext(client, repo) ?: return null
         val catalog = chatListData.value?.takeIf { it.repository === repo } ?: return null
-        val conversations = repo.streamTopicMessages.value
         val bindings = previewBindings.value?.takeIf { it.first === repo }?.second.orEmpty()
         val currentStreams = streams.value
         val visible = previewRows.value
