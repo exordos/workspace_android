@@ -133,7 +133,7 @@ class DeleteMessageHttpContractTest {
     fun successfulHttpDeletionRemovesOnlyTheSelectedMessage() = runBlocking {
         val selected = message(MESSAGE_UUID)
         val kept = message(KEPT_MESSAGE_UUID)
-        messages.addStreamTopicMessages(STREAM_UUID, TOPIC_UUID, listOf(selected, kept))
+        messages.addMessages(listOf(selected, kept))
         messages.messageDao.upsert(listOf(selected, kept))
         LoopbackDeleteServer(204, "No Content").use { server ->
             saveSession(server.baseUrl)
@@ -142,7 +142,7 @@ class DeleteMessageHttpContractTest {
             deletion.delete(selected)
 
             assertEquals(listOf(kept), messages.messages.first())
-            assertEquals(listOf(kept), messages.streamTopicMessages.value["$STREAM_UUID.$TOPIC_UUID"])
+            assertEquals(listOf(kept), messages.messageDao.observeMessages(STREAM_UUID, TOPIC_UUID).first())
             assertTrue(deletion.deletingMessageUuids.value.isEmpty())
             assertNull(deletion.actionError.value)
             assertDeleteContract(server.awaitRequest())
@@ -163,7 +163,7 @@ class DeleteMessageHttpContractTest {
     fun partialHttpBatchKeepsFailuresSelectedAndRetriesOnlyFailures() = runBlocking {
         val first = message(MESSAGE_UUID)
         val second = message(KEPT_MESSAGE_UUID)
-        messages.addStreamTopicMessages(STREAM_UUID, TOPIC_UUID, listOf(first, second))
+        messages.addMessages(listOf(first, second))
         messages.messageDao.upsert(listOf(first, second))
         LoopbackDeleteServer(
             listOf(
@@ -205,7 +205,7 @@ class DeleteMessageHttpContractTest {
 
     private suspend fun assertFailedDeletionKeepsMessage(status: Int, reason: String) {
         val selected = message(MESSAGE_UUID)
-        messages.addStreamTopicMessages(STREAM_UUID, TOPIC_UUID, listOf(selected))
+        messages.addMessages(listOf(selected))
         messages.messageDao.upsert(listOf(selected))
         LoopbackDeleteServer(status, reason, """{"error":"Cannot delete message"}""").use { server ->
             saveSession(server.baseUrl)
@@ -214,7 +214,7 @@ class DeleteMessageHttpContractTest {
             deletion.delete(selected)
 
             assertEquals(listOf(selected), messages.messages.first())
-            assertEquals(listOf(selected), messages.streamTopicMessages.value["$STREAM_UUID.$TOPIC_UUID"])
+            assertEquals(listOf(selected), messages.messageDao.observeMessages(STREAM_UUID, TOPIC_UUID).first())
             assertTrue(deletion.deletingMessageUuids.value.isEmpty())
             assertNotNull(deletion.actionError.value)
             assertDeleteContract(server.awaitRequest())

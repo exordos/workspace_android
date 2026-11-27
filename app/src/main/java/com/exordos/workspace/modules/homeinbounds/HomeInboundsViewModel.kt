@@ -15,7 +15,7 @@ import com.exordos.workspace.data.EventsRepositoryStore
 import com.exordos.workspace.data.remote.ApiResult
 import com.exordos.workspace.data.remote.WorkspaceAPIClient
 import com.exordos.workspace.data.uio.MessageUIO
-import com.exordos.workspace.data.remote.dto.MessagesByIdsRequest
+import com.exordos.workspace.data.remote.dto.MessagesRequest
 import com.exordos.workspace.data.uio.StreamUIO
 import com.exordos.workspace.data.remote.dto.TopicsRequest
 import com.exordos.workspace.data.uio.TopicUIO
@@ -61,10 +61,15 @@ class HomeInboundsViewModel(
 
 
     suspend fun unreadDestination(stream: StreamUIO, topic: TopicUIO): HomeFlow.ChatDialog? {
-        val messages = when (val response = eventsRepository.refreshConversation(stream.uuid, topic.uuid)) {
-            is ApiResult.Success -> response.value.filter { it.streamUuid == stream.uuid }
+        val serverId = eventsRepository.serverId
+        val server = client.requireUserViewModel().getServer(serverId)
+            ?.takeIf(eventsRepository::matchesServerConfiguration) ?: return null
+        val request = MessagesRequest(stream.uuid, topic.uuid, 25, null)
+        val messages = when (val response = client.performRequest(request, serverId, server)) {
+            is ApiResult.Success -> response.value.filter { it.streamUuid == stream.uuid && it.topicUuid == topic.uuid }
             is ApiResult.Error -> return null
         }
+        eventsRepository.addMessages(messages)
         val first = firstInboxUnread(messages, stream, topic)
         return HomeFlow.ChatDialog(stream.name, stream.uuid, topic.name,
             topic.uuid, stream.isPrivate, null, first?.uuid)

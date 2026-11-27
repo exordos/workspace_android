@@ -58,8 +58,7 @@ class MessageDeletionRepositoryTest {
     fun `deletion event removes only matching message and clears its cached previews`() = runBlocking {
         val deleted = message("deleted")
         val kept = message("kept")
-        repository.addStreamTopicMessages("stream", "topic", listOf(kept, deleted))
-        repository.messageDao.upsert(listOf(kept, deleted))
+        repository.addMessages(listOf(kept, deleted))
         repository.setInitialLastMessages(listOf(kept, deleted).map { it.toLastMessageUIO() })
         repository.setInitialMessageReactions(
             listOf(
@@ -75,7 +74,7 @@ class MessageDeletionRepositoryTest {
             "deleted",
         )
 
-        assertEquals(listOf(kept), repository.streamTopicMessages.value["stream.topic"])
+        assertEquals(listOf(kept), repository.messageDao.observeMessages("stream", "topic").first())
         assertEquals(listOf(kept), repository.messages.first())
         assertEquals(listOf("kept-reaction"), repository.userReactions.first().map { it.uuid })
         assertNull(repository.streams.first().single { it.uuid == "stream" }.lastMessageUuid)
@@ -88,15 +87,13 @@ class MessageDeletionRepositoryTest {
     }
 
     @Test
-    fun `minimal deletion payload removes cached copies from every conversation`() {
+    fun `minimal deletion payload removes the message from storage`() = runBlocking {
         val deleted = message("deleted")
-        repository.addStreamTopicMessages("stream", "topic", listOf(deleted))
-        repository.addStreamTopicMessages("stream", "another-topic", listOf(deleted))
+        repository.addMessages(listOf(deleted))
 
         repository.didReceiveMessageEvent("""{"uuid":"deleted"}""", "deleted")
 
-        assertEquals(emptyList<MessageUIO>(), repository.streamTopicMessages.value["stream.topic"])
-        assertEquals(emptyList<MessageUIO>(), repository.streamTopicMessages.value["stream.another-topic"])
+        assertEquals(emptyList<MessageUIO>(), repository.messageDao.observeMessages("stream", "topic").first())
     }
 
     @Test
@@ -122,22 +119,19 @@ class MessageDeletionRepositoryTest {
         update.payload.content = "Changed outside event"
 
         assertEquals("cross-chat-source", received.payload.content)
-        assertTrue(repository.streamTopicMessages.value.isEmpty())
     }
 
     @Test
     fun `WebSocket before HTTP confirmation leaves one message without mutating the pending snapshot`() = runBlocking {
         val pending = message("pending-client-id")
         val server = message("server-id").copy(payload = MessagePayloadUIO("markdown", "Server content"))
-        repository.addStreamTopicMessages("stream", "topic", listOf(pending))
-        repository.messageDao.upsert(listOf(pending))
+        repository.addMessages(listOf(pending))
         repository.addMessageToStreamTopic(server)
-        repository.messageDao.upsert(listOf(server))
 
         repository.reconcileSentMessage(pending.uuid, pending.copy(uuid = server.uuid))
 
         assertEquals("pending-client-id", pending.uuid)
-        assertEquals(listOf(server), repository.streamTopicMessages.value["stream.topic"])
+        assertEquals(listOf(server), repository.messageDao.observeMessages("stream", "topic").first())
         assertEquals(listOf(server), repository.messages.first())
     }
 
@@ -145,14 +139,13 @@ class MessageDeletionRepositoryTest {
     fun `HTTP confirmation before WebSocket leaves one canonical message`() = runBlocking {
         val pending = message("pending-client-id")
         val confirmed = pending.copy(uuid = "server-id")
-        repository.addStreamTopicMessages("stream", "topic", listOf(pending))
-        repository.messageDao.upsert(listOf(pending))
+        repository.addMessages(listOf(pending))
 
         repository.reconcileSentMessage(pending.uuid, confirmed)
         repository.addMessageToStreamTopic(confirmed)
 
         assertEquals("pending-client-id", pending.uuid)
-        assertEquals(listOf(confirmed), repository.streamTopicMessages.value["stream.topic"])
+        assertEquals(listOf(confirmed), repository.messageDao.observeMessages("stream", "topic").first())
         assertEquals(listOf(confirmed), repository.messages.first())
     }
 
@@ -163,9 +156,8 @@ class MessageDeletionRepositoryTest {
         repository.setInitialStreams(listOf(stream(deleted), stream(kept).copy(uuid = "other")))
         repository.setInitialStreamBindings(listOf(StreamBindingUIO("binding", "member", "stream", "user")))
         repository.setInitialStreamBindings(listOf(StreamBindingUIO("other-binding", "member", "other", "user")))
-        repository.addStreamTopicMessages("stream", "topic", listOf(deleted))
-        repository.addStreamTopicMessages("other", "topic", listOf(kept))
-        repository.messageDao.upsert(listOf(deleted, kept))
+        repository.addMessages(listOf(deleted))
+        repository.addMessages(listOf(kept))
         repository.setInitialTopics(listOf(topic(deleted)))
         repository.setInitialTopics(listOf(topic(kept).copy(uuid = "other-topic", streamUuid = "other")))
         repository.setInitialDrafts(listOf(DraftUIO("draft", "stream", "topic", deleted.updatedAt, deleted.payload, 1)))
@@ -179,7 +171,7 @@ class MessageDeletionRepositoryTest {
         assertTrue(repository.streamBindingDao.observeStreamBindings("stream").first().isEmpty())
         assertEquals(listOf("other-binding"), repository.streamBindingDao.observeStreamBindings("other").first().map { it.uuid })
         assertEquals(listOf("other"), repository.topics.first().map { it.streamUuid })
-        assertEquals(setOf("other.topic"), repository.streamTopicMessages.value.keys)
+        assertEquals(setOf("other.topic"), repository.messages.first().map { "${it.streamUuid}.${it.topicUuid}" }.toSet())
         assertEquals(listOf(kept), repository.messages.first())
         assertTrue(repository.drafts.first().isEmpty())
         assertTrue(repository.userReactions.first().isEmpty())

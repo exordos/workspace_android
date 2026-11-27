@@ -1,5 +1,6 @@
 package com.exordos.workspace.data
 
+import androidx.lifecycle.viewModelScope
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.exordos.workspace.data.remote.ApiError
 import com.exordos.workspace.data.remote.ApiResult
@@ -20,7 +21,12 @@ import com.exordos.workspace.data.uio.TopicUIO
 import com.exordos.workspace.fixtures.LoopbackWorkspaceServer
 import com.exordos.workspace.fixtures.WorkspaceTestAccount
 import com.exordos.workspace.modules.chooseserver.QueryState
+import com.exordos.workspace.modules.chatdialog.AttachmentStorage
+import com.exordos.workspace.modules.chatdialog.ChatDialogViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
@@ -98,9 +104,32 @@ class StartupUioInstrumentedTest {
         assertEquals("reaction", repo.userReactions.first().single().uuid)
         assertEquals("Draft", repo.drafts.first().single().payload.content)
         assertEquals("https://meet.example.invalid", repo.jitsiServerUrl)
-        val history: ApiResult<List<MessageUIO>, ApiError> = repo.refreshConversation("stream", "topic")
-        assertTrue(history is ApiResult.Success)
-        assertEquals("Hello", repo.streamTopicMessages.value.getValue("stream.topic").single().payload.content)
+    }
+
+    @Test fun openingAChatRequestsItsLatestPageAndPublishesStoredHistory(): Unit = runBlocking {
+        val repo = account.repo
+        assertTrue(repo.messageDao.observeMessages("stream", "topic").first().isEmpty())
+        val chat = withContext(Dispatchers.Main) {
+            ChatDialogViewModel(account.api, account.user, "Channel", "stream", "Topic", "topic",
+                false, account.events, null, AttachmentStorage(repo.context, account.api)).also { it.onChatOpened() }
+        }
+        try {
+            val visible = withTimeout(10_000) {
+                chat.streamTopicMessages.first { it["stream.topic"].orEmpty().isNotEmpty() }
+            }.getValue("stream.topic")
+            assertEquals(listOf("Hello"), visible.map { it.payload.content })
+            assertEquals(visible, repo.messageDao.observeMessages("stream", "topic").first())
+            val request = requests.single { it.path == "/api/workspace/v1/messenger/messages/" }
+            assertEquals("GET", request.method)
+            assertTrue("stream_uuid=stream" in request.query.split('&'))
+            assertTrue("topic_uuid=topic" in request.query.split('&'))
+            assertTrue("page_limit=25" in request.query.split('&'))
+        } finally {
+            withContext(Dispatchers.Main) {
+                chat.onChatClosed()
+                chat.viewModelScope.cancel()
+            }
+        }
     }
 
     @Test fun typedHttpAndPinnedRequestsReturnUios(): Unit = runBlocking {

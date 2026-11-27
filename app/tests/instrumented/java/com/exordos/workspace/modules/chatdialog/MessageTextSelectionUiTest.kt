@@ -236,7 +236,7 @@ class MessageTextSelectionUiTest {
         account.repo.setInitialUsers(listOf(owner, author).distinctBy { it.uuid })
         account.repo.setInitialStreams(listOf(StreamUIO(STREAM, 0, 0, 0, TIME,
             "CASSI selection", false, 0, defaultTopicUuid = TOPIC, notificationMode = "all_messages")))
-        account.repo.addStreamTopicMessages(STREAM, TOPIC, listOf(MessageUIO(MESSAGE, TIME, TIME,
+        account.repo.addMessages(listOf(MessageUIO(MESSAGE, TIME, TIME,
             STREAM, TOPIC, author.uuid, author.uuid,
             MessagePayloadUIO("markdown", content), own, emptyMap(), true)))
         chat = withContext(Dispatchers.Main) {

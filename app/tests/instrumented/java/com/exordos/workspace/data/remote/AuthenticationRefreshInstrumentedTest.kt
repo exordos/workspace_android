@@ -424,7 +424,7 @@ class AuthenticationRefreshInstrumentedTest {
             val message = MessageUIO("00000000-0000-0000-0000-000000000001",
                 "2026-10-07T12:00:00Z", "2026-10-07T12:00:00Z", "stream", "topic", "author", "author",
                 MessagePayloadUIO("markdown", "CASSI vitals regression"), false, emptyMap(), true)
-            chat.repo.addStreamTopicMessages("stream", "topic", listOf(message, message.copy()))
+            chat.repo.addMessages(listOf(message, message.copy()))
             val activity = instrumentation.startActivitySync(requireNotNull(
                 context.packageManager.getLaunchIntentForPackage(context.packageName))
                 .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) as ComponentActivity
@@ -445,7 +445,7 @@ class AuthenticationRefreshInstrumentedTest {
                     }
                 }
                 // Exercise a later list update and the production auto-scroll effect.
-                chat.repo.addStreamTopicMessages("stream", "topic", listOf(message,
+                chat.repo.addMessages(listOf(message,
                     message.copy(uuid = "00000000-0000-0000-0000-000000000002",
                         payload = MessagePayloadUIO("markdown", "CASSI next message"))))
                 withTimeout(10_000) {
