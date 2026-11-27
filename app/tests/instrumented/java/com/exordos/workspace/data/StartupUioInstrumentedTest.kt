@@ -123,7 +123,7 @@ class StartupUioInstrumentedTest {
             assertEquals("GET", request.method)
             assertTrue("stream_uuid=stream" in request.query.split('&'))
             assertTrue("topic_uuid=topic" in request.query.split('&'))
-            assertTrue("page_limit=25" in request.query.split('&'))
+            assertTrue("page_limit=100" in request.query.split('&'))
         } finally {
             withContext(Dispatchers.Main) {
                 chat.onChatClosed()
