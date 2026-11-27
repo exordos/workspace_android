@@ -172,11 +172,11 @@ class StreamInfoViewModel(
             initialValue = null
         )
 
-    val streamBindings: StateFlow<Map<String, List<StreamBindingUIO>>> = repo.streamBindings
+    val streamBindings: StateFlow<List<StreamBindingUIO>> = repo.streamBindingDao.observeStreamBindings(streamUuid)
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = emptyMap()
+            initialValue = emptyList()
         )
 
     val users: StateFlow<List<UserUIO>> = repo.users

@@ -163,13 +163,20 @@ class ChatDialogViewModel(
             initialValue = emptyMap()
         )
 
-    val streamBindings: StateFlow<Map<String, List<StreamBindingUIO>>> = repo.streamBindings
+    val streamBindings: StateFlow<List<StreamBindingUIO>> = repo.streamBindingDao.observeStreamBindings(chatId)
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = emptyMap()
+            initialValue = emptyList()
         )
     val streams: StateFlow<List<StreamUIO>> = repo.streams
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList(),
+        )
+
+    val userReactions: StateFlow<List<MessageReactionUIO>> = repo.userReactions
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
@@ -548,7 +555,7 @@ class ChatDialogViewModel(
 
 
     fun hasMyReaction(reaction: String, messageUuid: String): Boolean {
-        return  !repo.userReactions.value.none { it.emojiName == reaction && it.messageUuid == messageUuid }
+        return  !userReactions.value.none { it.emojiName == reaction && it.messageUuid == messageUuid }
     }
 
     suspend fun onSendClicked(context: Context) {
@@ -750,9 +757,6 @@ class ChatDialogViewModel(
         _isLoading.value = true
         loadHistoryIfNeeded()
         viewModelScope.launch {
-            if (streamBindings.value[chatId]?.isEmpty() ?: true) {
-                loadStreamBindings()
-            }
             val draft = drafts.value.firstOrNull { it.streamUuid == chatId && it.topicUuid == topicUuid }
             if (draft != null && stream.value?.encryption != true) {
                 mentions.setText(draft.payload.content)
@@ -778,17 +782,6 @@ class ChatDialogViewModel(
 
     suspend fun loadNextMessages() {
 
-    }
-
-    suspend fun loadStreamBindings() {
-        val server = client.requireUserViewModel().selectedServer.value?.copy() ?: return
-        if (!repo.matchesServerConfiguration(server)) return
-        repo.beginStreamBindingsRequest(chatId).use { request ->
-            when (val response = client.performRequest(StreamBindingsRequest(chatId), server.id, server)) {
-                is ApiResult.Success -> repo.applyStreamBindingsSnapshot(request, response.value)
-                is ApiResult.Error -> Unit
-            }
-        }
     }
 
     suspend fun markMessagesReadUpTo(messageUuid: String) {
@@ -843,7 +836,7 @@ class ChatDialogViewModel(
     }
 
     suspend fun onMessageReactionTap(messageUuid: String, emoji: String) {
-        val reaction = repo.userReactions.value.firstOrNull { it.emojiName == emoji && it.messageUuid == messageUuid }
+        val reaction = userReactions.value.firstOrNull { it.emojiName == emoji && it.messageUuid == messageUuid }
         if (reaction != null) {
             val removeReactionResponse =
                 client.performRequest(RemoveMessageReactionRequest(reaction.uuid))

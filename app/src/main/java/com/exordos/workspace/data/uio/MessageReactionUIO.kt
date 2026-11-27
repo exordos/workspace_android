@@ -22,7 +22,7 @@ interface MessageReactionDao {
     @Query("SELECT * FROM MessageReactionUIO")
     fun observeMessageReactions(): Flow<List<MessageReactionUIO>>
     @Query("SELECT * FROM MessageReactionUIO WHERE messageUuid LIKE :messageUuid LIMIT 1")
-    fun getMessageReactions(messageUuid: String): MessageReactionUIO?
+    fun getMessageReactionForMessage(messageUuid: String): MessageReactionUIO?
     @Query("SELECT * FROM MessageReactionUIO WHERE uuid LIKE :uuid LIMIT 1")
     fun getMessageReaction(uuid: String): MessageReactionUIO?
     @Insert(onConflict = OnConflictStrategy.REPLACE)

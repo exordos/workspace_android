@@ -25,8 +25,8 @@ class AddUsersToStreamViewModel(
 ): ViewModel() {
     val eventsRepository = eventsRepositoryStore.get(client.getCurrentServerId()) ?: error("Cannot get current event repository")
 
-    val users: StateFlow<List<UserUIO>> = combine(eventsRepository.users, eventsRepository.streamBindings, eventsRepository.currentUser) { list, bindings, current ->
-            val members = bindings[streamUuid].orEmpty().map { it.userUuid }.toSet()
+    val users: StateFlow<List<UserUIO>> = combine(eventsRepository.users, eventsRepository.streamBindingDao.observeStreamBindings(streamUuid), eventsRepository.currentUser) { list, bindings, current ->
+            val members = bindings.orEmpty().map { it.userUuid }.toSet()
             list.filter { it.uuid !in members && it.uuid != current?.uuid }
         }
         .stateIn(
@@ -46,7 +46,7 @@ class AddUsersToStreamViewModel(
     fun didTapOnUser(user: UserUIO) {
         if (_createQueryState.value is QueryState.Loading || _createQueryState.value is QueryState.Success ||
             user.uuid == eventsRepository.currentUser.value?.uuid ||
-            eventsRepository.streamBindings.value[streamUuid].orEmpty().any { it.userUuid == user.uuid }) return
+            eventsRepository.streamBindingDao.getStreamBinding(streamUuid, user.uuid) == null) return
         if (_selectedUserUuids.value.contains(user.uuid)) {
             _selectedUserUuids.update { it - user.uuid }
         } else {

@@ -24,6 +24,9 @@ interface StreamBindingDao {
 
     @Query("SELECT * FROM StreamBindingUIO WHERE uuid LIKE :uuid LIMIT 1")
     fun getStreamBinding(uuid: String): StreamBindingUIO?
+
+    @Query("SELECT * FROM StreamBindingUIO WHERE streamUuid LIKE :streamUuid AND userUuid LIKE :userUuid LIMIT 1")
+    fun getStreamBinding(streamUuid: String, userUuid: String): StreamBindingUIO?
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(streamBindings: List<StreamBindingUIO>)
     @Insert(onConflict = OnConflictStrategy.REPLACE)

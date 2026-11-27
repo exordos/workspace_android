@@ -151,11 +151,10 @@ class ChatViewModel(
         val account = confirmedAccountContext(client, repo) ?: return null
         val catalog = chatListData.value?.takeIf { it.repository === repo } ?: return null
         val conversations = repo.streamTopicMessages.value
-        val bindings = repo.streamBindings.value
         val currentStreams = streams.value
         val visible = previewRows.value
         val cacheKey = listOf(repo, selected.copy(), own.uuid, proof,
-            currentStreams, catalog, conversations, bindings, visible)
+            currentStreams, catalog, conversations, visible)
         synchronized(previewCacheLock) {
             if (previewCacheKey == cacheKey) return previewCache
             val loadedConversations = conversations.values.flatten()
@@ -163,7 +162,7 @@ class ChatViewModel(
                 val lastMessage = catalog.lastMessages[stream.lastMessageUuid]?.toMessageUIO()
                 val message = latestLoadedEncryptedPreviewMessage(stream, catalog.messages, loadedConversations, lastMessage)
                 encryptedPreviewSource(
-                    stream, message, own.uuid, requireNotNull(selected.projectUuid), bindings[stream.uuid],
+                    stream, message, own.uuid, requireNotNull(selected.projectUuid),
                     lastMessage, catalog.users[message?.authorUuid]?.displayableName(),
                 )
             }.sortedBy { it.streamUuid }
@@ -214,15 +213,6 @@ class ChatViewModel(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = emptyList(),
-        )
-    val streamBindings: StateFlow<Map<String, List<StreamBindingUIO>>> = eventsRepo
-        .flatMapLatest { repo ->
-            repo?.streamBindings ?: flowOf(emptyMap())
-        }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = emptyMap(),
         )
     val currentlySelectedFolder: StateFlow<FolderUIO?> = eventsRepo
         .flatMapLatest { repo ->
@@ -314,36 +304,11 @@ class ChatViewModel(
 
     suspend fun updateSelectedChat(newChat: StreamUIO?) {
         _currentlySelectedStream.update { newChat }
-        if (newChat != null) {
-            val currentStreamBindings = streamBindings.value[newChat.uuid]
-            if (currentStreamBindings.isNullOrEmpty()) {
-                loadStreamBindings(newChat)
-            } else {
-                _topicsQueryState.value = QueryState.Success
-            }
-        }
     }
 
     suspend fun loadServerSettings() {
         eventsRepo.value?.loadServerSettings()
     }
-
-    suspend fun loadStreamBindings(stream: StreamUIO) {
-        val repo = eventsRepo.value ?: return
-        val server = client.requireUserViewModel().selectedServer.value?.copy() ?: return
-        if (!repo.matchesServerConfiguration(server)) return
-        _topicsQueryState.value = QueryState.Loading
-        repo.beginStreamBindingsRequest(stream.uuid).use { request ->
-            when (val response = client.performRequest(StreamBindingsRequest(stream.uuid), server.id, server)) {
-                is ApiResult.Success -> repo.applyStreamBindingsSnapshot(request, response.value)
-                is ApiResult.Error -> Unit
-            }
-        }
-        if (eventsRepo.value === repo && currentlySelectedStream.value?.uuid == stream.uuid) {
-            _topicsQueryState.value = QueryState.Success
-        }
-    }
-
 
     suspend fun addFolder(name: String) {
         val response = client.performRequest(AddFolderRequest(name))
