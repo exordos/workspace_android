@@ -29,6 +29,9 @@ data class TopicUIO(
 interface TopicDao {
     @Query("SELECT * FROM TopicUIO")
     fun observeTopics(): Flow<List<TopicUIO>>
+
+    @Query("SELECT COUNT(*) FROM TopicUIO")
+    fun countObjects(): Int
     @Query("SELECT * FROM TopicUIO WHERE streamUuid LIKE :streamUuid")
     fun observeTopics(streamUuid: String): Flow<List<TopicUIO>>
     @Query("SELECT * FROM TopicUIO WHERE streamUuid LIKE :streamUuid")

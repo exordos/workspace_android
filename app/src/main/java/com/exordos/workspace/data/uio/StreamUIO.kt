@@ -44,6 +44,9 @@ data class StreamUIO(
 interface StreamDao {
     @Query("SELECT * FROM StreamUIO")
     fun observeStreams(): Flow<List<StreamUIO>>
+
+    @Query("SELECT COUNT(*) FROM StreamUIO")
+    fun countObjects(): Int
     @Query("SELECT * FROM StreamUIO WHERE uuid LIKE :uuid LIMIT 1")
     fun getStream(uuid: String): StreamUIO?
     @Insert(onConflict = OnConflictStrategy.REPLACE)

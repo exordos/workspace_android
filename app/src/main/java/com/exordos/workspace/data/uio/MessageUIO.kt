@@ -200,6 +200,9 @@ fun LastMessageUIO.toMessageUIO() = MessageUIO(
 interface LastMessageDao {
     @Query("SELECT * FROM LastMessageUIO")
     fun observeLastMessages(): Flow<List<LastMessageUIO>>
+
+    @Query("SELECT COUNT(*) FROM LastMessageUIO")
+    fun countObjects(): Int
     @Query("SELECT * FROM LastMessageUIO WHERE streamUuid LIKE :streamUuid AND topicUuid LIKE :topicUuid LIMIT 1")
     fun getLastMessage(streamUuid: String, topicUuid: String): LastMessageUIO?
     @Query("SELECT * FROM LastMessageUIO WHERE uuid LIKE :uuid LIMIT 1")
@@ -218,6 +221,9 @@ interface LastMessageDao {
 interface MessageDao {
     @Query("SELECT * FROM MessageUIO")
     fun observeMessages(): Flow<List<MessageUIO>>
+
+    @Query("SELECT COUNT(*) FROM MessageUIO")
+    fun countObjects(): Int
     @Query("SELECT * FROM MessageUIO WHERE streamUuid LIKE :streamUuid AND topicUuid LIKE :topicUuid")
     fun observeMessages(streamUuid: String, topicUuid: String): Flow<List<MessageUIO>>
     @Query("SELECT * FROM MessageUIO WHERE uuid LIKE :uuid LIMIT 1")

@@ -239,6 +239,10 @@ class EventsRepository(
     val streamsQueryState: StateFlow<QueryState> = _streamsQueryState
 
 
+    private val _additionalQueryState = MutableStateFlow<QueryState>(QueryState.Idle)
+    val additionalQueryState: StateFlow<QueryState> = _additionalQueryState
+
+
     private val _currentlySelectedFolder = MutableStateFlow<FolderUIO?>(null)
     var currentlySelectedFolder: StateFlow<FolderUIO?> = _currentlySelectedFolder
 
@@ -430,6 +434,9 @@ class EventsRepository(
     suspend fun setInitialTopics(newList: List<TopicUIO>) {
         topicDao.upsert(newList)
     }
+
+
+    val lastMessages: Flow<List<LastMessageUIO>> = lastMessageDao.observeLastMessages()
 
     suspend fun addLastMessage(newMessage: LastMessageUIO) {
         lastMessageDao.upsert(newMessage)
@@ -903,10 +910,19 @@ class EventsRepository(
         }
     }
 
+    fun startLoader() {
+        if (streamDao.countObjects() > 0 && topicDao.countObjects() >0 && lastMessageDao.countObjects() > 0) {
+            _additionalQueryState.value = QueryState.Loading
+            _streamsQueryState.value = QueryState.Success
+        } else {
+            _streamsQueryState.value = QueryState.Loading
+        }
+    }
+
     fun loadServerSettings() {
         scope.launch {
             val webSocketClient = client
-            _streamsQueryState.value = QueryState.Loading
+            startLoader()
             val response = webSocketClient.performRequest(
                 ServerSettingsRequest(
                     config.baseUrl,
@@ -921,6 +937,7 @@ class EventsRepository(
 
                 is ApiResult.Error -> {
                     _streamsQueryState.value = QueryState.Error("")
+                    _additionalQueryState.value = QueryState.Error("")
                 }
             }
         }
@@ -972,6 +989,7 @@ class EventsRepository(
 
             is ApiResult.Error -> {
                 _streamsQueryState.value = QueryState.Error("")
+                _additionalQueryState.value = QueryState.Error("")
             }
         }
     }
@@ -987,6 +1005,7 @@ class EventsRepository(
 
             is ApiResult.Error -> {
                 _streamsQueryState.value = QueryState.Error("")
+                _additionalQueryState.value = QueryState.Error("")
             }
         }
     }
@@ -1002,6 +1021,7 @@ class EventsRepository(
 
             is ApiResult.Error -> {
                 _streamsQueryState.value = QueryState.Error("")
+                _additionalQueryState.value = QueryState.Error("")
             }
         }
     }
@@ -1020,6 +1040,7 @@ class EventsRepository(
 
             is ApiResult.Error -> {
                 _streamsQueryState.value = QueryState.Error("")
+                _additionalQueryState.value = QueryState.Error("")
             }
         }
     }
@@ -1034,6 +1055,7 @@ class EventsRepository(
 
             is ApiResult.Error -> {
                 _streamsQueryState.value = QueryState.Error("")
+                _additionalQueryState.value = QueryState.Error("")
             }
         }
     }
@@ -1047,6 +1069,7 @@ class EventsRepository(
 
             is ApiResult.Error -> {
                 _streamsQueryState.value = QueryState.Error("")
+                _additionalQueryState.value = QueryState.Error("")
             }
         }
     }
@@ -1060,6 +1083,7 @@ class EventsRepository(
 
             is ApiResult.Error -> {
                 _streamsQueryState.value = QueryState.Error("")
+                _additionalQueryState.value = QueryState.Error("")
             }
         }
     }
@@ -1080,6 +1104,7 @@ class EventsRepository(
                     }
                     is ApiResult.Error -> {
                         _streamsQueryState.value = QueryState.Error("")
+                        _additionalQueryState.value = QueryState.Error("")
                     }
                 }
             }
@@ -1096,11 +1121,13 @@ class EventsRepository(
             is ApiResult.Success -> {
                 setInitialDrafts(response.value)
                 _streamsQueryState.value = QueryState.Success
+                _additionalQueryState.value = QueryState.Success
                 start()
             }
 
             is ApiResult.Error -> {
                 _streamsQueryState.value = QueryState.Success
+                _additionalQueryState.value = QueryState.Success
                 start()
             }
         }

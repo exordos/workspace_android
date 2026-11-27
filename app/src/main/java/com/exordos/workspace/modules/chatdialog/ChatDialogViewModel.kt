@@ -787,8 +787,22 @@ class ChatDialogViewModel(
         }
     }
 
-    suspend fun loadNextMessages() {
-
+    suspend fun loadNextMessages(anchor: MessageUIO?) {
+        try {
+            val pageMarker = storedMessages
+            val server = userViewModel.getServer(repo.serverId)?.takeIf(repo::matchesServerConfiguration) ?: return
+            val response = client.performRequest(MessagesRequest(chatId, topicUuid, 25, anchor?.uuid), repo.serverId, server)
+            if (response is ApiResult.Success) {
+                val page = response.value.filter { it.streamUuid == chatId && it.topicUuid == topicUuid }
+                repo.addMessages(page)
+                val lastMessage = page.maxWithOrNull(compareBy<MessageUIO> { WorkspaceDateTime.parse(it.createdAt) }.thenBy { it.uuid })
+                if (lastMessage != null && firstUnreadMessageUuid == null) {
+                    markMessagesReadUpTo(lastMessage.uuid)
+                }
+            }
+        } finally {
+            _isLoading.value = false
+        }
     }
 
     suspend fun markMessagesReadUpTo(messageUuid: String) {

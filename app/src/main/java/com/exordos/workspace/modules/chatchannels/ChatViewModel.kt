@@ -181,6 +181,17 @@ class ChatViewModel(
             initialValue = emptyList(),
         )
 
+    val allLastMessages: StateFlow<List<LastMessageUIO>> = eventsRepo
+        .flatMapLatest { repo ->
+            repo?.lastMessages ?: flowOf(emptyList())
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList(),
+        )
+
+
     private val previewBindings = combine(eventsRepo, previewRows, streams) { repo, visible, available ->
         repo to available.filter { it.encryption && it.uuid in visible }.map { it.uuid }
     }.distinctUntilChanged().flatMapLatest { (repo, streamUuids) ->

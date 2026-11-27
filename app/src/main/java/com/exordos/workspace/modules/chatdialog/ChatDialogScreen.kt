@@ -327,7 +327,7 @@ fun ChatDialogScreen(
             }
     }
 
-    LaunchedEffect(listState) {
+    LaunchedEffect(listState,messages) {
         snapshotFlow {
             listState.firstVisibleItemIndex to listState.layoutInfo.totalItemsCount
         }
@@ -335,7 +335,7 @@ fun ChatDialogScreen(
             .collect { (firstVisible, total) ->
                 val nearTop = firstVisible <= 2
                 if (nearTop && total > 0 && !isLoading) {
-                    viewModel.loadNextMessages()
+                    viewModel.loadNextMessages(messages?.firstOrNull())
                 }
             }
     }
