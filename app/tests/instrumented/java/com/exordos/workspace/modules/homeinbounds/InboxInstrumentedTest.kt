@@ -186,7 +186,11 @@ class InboxInstrumentedTest {
             it.config.getOrElse(androidx.compose.ui.semantics.SemanticsProperties.Text) { emptyList() }.any { text -> text.text == "9" }
         } }
         runBlocking { account.repo.updateStream(ordinary.copy(notificationMode = "muted", activeUnreadCount = 0).toUio()) }
+        compose.waitUntil(8_000) {
+            compose.onAllNodesWithTag("inbox-topic-$topicId").fetchSemanticsNodes().isEmpty()
+        }
         compose.onNodeWithTag("inbox-topic-$topicId").assertDoesNotExist()
+        compose.onNodeWithTag("inbox-topic-secret-topic").assertIsDisplayed()
     }
 
     @Test fun topicOpensFirstUnreadAndDoesNotMarkOrScrollToTheLatestMessage() = openFirstUnread(false)
