@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -54,7 +55,6 @@ import com.exordos.workspace.data.remote.dto.ServerSettingsRequest
 import com.exordos.workspace.data.remote.dto.StreamsRequest
 import com.exordos.workspace.data.uio.StreamUIO
 import com.exordos.workspace.data.uio.StreamBindingUIO
-import com.exordos.workspace.data.remote.dto.StreamBindingsRequest
 import com.exordos.workspace.data.remote.dto.ToggleTopicDoneRequest
 import com.exordos.workspace.data.remote.dto.TopicsRequest
 import com.exordos.workspace.data.uio.TopicUIO
@@ -151,10 +151,11 @@ class ChatViewModel(
         val account = confirmedAccountContext(client, repo) ?: return null
         val catalog = chatListData.value?.takeIf { it.repository === repo } ?: return null
         val conversations = repo.streamTopicMessages.value
+        val bindings = previewBindings.value?.takeIf { it.first === repo }?.second.orEmpty()
         val currentStreams = streams.value
         val visible = previewRows.value
         val cacheKey = listOf(repo, selected.copy(), own.uuid, proof,
-            currentStreams, catalog, conversations, visible)
+            currentStreams, catalog, conversations, bindings, visible)
         synchronized(previewCacheLock) {
             if (previewCacheKey == cacheKey) return previewCache
             val loadedConversations = conversations.values.flatten()
@@ -163,7 +164,7 @@ class ChatViewModel(
                 val message = latestLoadedEncryptedPreviewMessage(stream, catalog.messages, loadedConversations, lastMessage)
                 encryptedPreviewSource(
                     stream, message, own.uuid, requireNotNull(selected.projectUuid),
-                    lastMessage, catalog.users[message?.authorUuid]?.displayableName(),
+                    bindings[stream.uuid].orEmpty(), lastMessage, catalog.users[message?.authorUuid]?.displayableName(),
                 )
             }.sortedBy { it.streamUuid }
             return EncryptedPreviewSnapshot(account, rows).also { previewCacheKey = cacheKey; previewCache = it }
@@ -182,13 +183,22 @@ class ChatViewModel(
             initialValue = emptyList(),
         )
 
+    private val previewBindings = combine(eventsRepo, previewRows, streams) { repo, visible, available ->
+        repo to available.filter { it.encryption && it.uuid in visible }.map { it.uuid }
+    }.distinctUntilChanged().flatMapLatest { (repo, streamUuids) ->
+        if (repo == null || streamUuids.isEmpty()) return@flatMapLatest flowOf(null)
+        combine(streamUuids.map(repo.streamBindingDao::observeStreamBindings)) { lists ->
+            repo to streamUuids.zip(lists.asList()).toMap()
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
     private val previewObserver = viewModelScope.launch {
         merge(
             eventsRepo.flatMapLatest { repo -> if (repo == null) flowOf(Unit) else merge(
-                repo.currentUser.map { Unit }, repo.streamBindings.map { Unit },
+                repo.currentUser.map { Unit },
                 repo.streamTopicMessages.map { Unit }, repo.verifiedOwnerAuthentication.map { Unit },
             ) },
-            streams.map { Unit }, chatListData.map { Unit },
+            streams.map { Unit }, chatListData.map { Unit }, previewBindings.map { Unit },
             userViewModel.selectedServer.map { Unit }, userViewModel.selectedServerId.map { Unit },
             userViewModel.accessToken.map { Unit }, previewRows.map { Unit }, previewAttached,
             EncryptedChatRuntime.localKeyChanges.filter(previewProjector::affectedBy).map { Unit },
@@ -304,6 +314,7 @@ class ChatViewModel(
 
     suspend fun updateSelectedChat(newChat: StreamUIO?) {
         _currentlySelectedStream.update { newChat }
+        _topicsQueryState.value = if (newChat == null) QueryState.Idle else QueryState.Success
     }
 
     suspend fun loadServerSettings() {

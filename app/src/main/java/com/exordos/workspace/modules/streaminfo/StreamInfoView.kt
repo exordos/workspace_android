@@ -145,11 +145,10 @@ fun StreamInfoView(
                         fontFamily = InterFontFamily,
                         fontWeight = FontWeight.Medium
                     )
-                    val currentStreamBindings = streamBindings[viewModel.streamUuid]
-                    if (currentStreamBindings != null && currentStreamBindings.count() > 0) {
-                        val currentBindedOnlineUsers = currentStreamBindings.mapNotNull { binding -> users.firstOrNull { binding.userUuid == it.uuid && it.status == "active" } }
+                    if (streamBindings.isNotEmpty()) {
+                        val currentBindedOnlineUsers = streamBindings.mapNotNull { binding -> users.firstOrNull { binding.userUuid == it.uuid && it.status == "active" } }
                         var baseText = context.resources.getQuantityString(
-                            R.plurals.participants_count, currentStreamBindings.count(), currentStreamBindings.count()
+                            R.plurals.participants_count, streamBindings.size, streamBindings.size
                         )
                         if (currentBindedOnlineUsers.count() > 0) {
                             baseText += ", ${currentBindedOnlineUsers.count()} онлайн"
@@ -348,10 +347,9 @@ fun BoundUsers(
                 )
             }
         }
-        val currentStreamBindings = streamBindings[viewModel.streamUuid]
-        if (currentStreamBindings != null && currentStreamBindings.count() > 0) {
+        if (streamBindings.isNotEmpty()) {
             val currentBindedOnlineUsers =
-                currentStreamBindings.mapNotNull { binding -> users.firstOrNull { binding.userUuid == it.uuid } }
+                streamBindings.mapNotNull { binding -> users.firstOrNull { binding.userUuid == it.uuid } }
             Column(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
                 modifier = Modifier

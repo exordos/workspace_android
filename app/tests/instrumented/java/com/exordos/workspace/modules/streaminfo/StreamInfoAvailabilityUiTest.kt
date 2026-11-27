@@ -331,7 +331,7 @@ class StreamInfoAvailabilityUiTest {
             repo.loadUserInfo()
             assertTrue(repo.verifiedOwnerAuthentication.value != null)
             repo.setInitialUsers(listOf(peer.viewer, peer.partner).map { it.toUio() })
-            repo.addStreamBindings(STREAM, peer.bindings.map { it.toUio() })
+            repo.setInitialStreamBindings(peer.bindings.map { it.toUio() })
             repo.setInitialTopics(listOf(topic(TOPIC)).map { it.toUio() })
             if (initialStream) repo.setInitialStreams(listOf(peer.stream).map { it.toUio() })
             val viewModel = withContext(Dispatchers.Main) { StreamInfoViewModel(STREAM, TOPIC, api, events) }
