@@ -19,6 +19,10 @@ data class MessageReactionUIO(
 
 @Dao
 interface MessageReactionDao {
+
+    @Query("DELETE FROM MessageReactionUIO WHERE messageUuid IN (:messageUuids)")
+    suspend fun deleteForMessages(messageUuids: List<String>)
+
     @Query("SELECT * FROM MessageReactionUIO")
     fun observeMessageReactions(): Flow<List<MessageReactionUIO>>
     @Query("SELECT * FROM MessageReactionUIO WHERE messageUuid LIKE :messageUuid LIMIT 1")

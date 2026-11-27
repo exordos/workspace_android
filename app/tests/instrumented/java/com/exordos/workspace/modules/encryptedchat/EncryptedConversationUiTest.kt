@@ -844,9 +844,10 @@ class EncryptedConversationUiTest {
                 // Receipt by the server is not acknowledgement by the runtime or its UI.
                 compose.onNodeWithText(context.getString(R.string.encrypted_chat_requested)).assertDoesNotExist()
             } finally { retryReply.countDown() }
+            val requestedLabel = compose.onNodeWithText(context.getString(R.string.encrypted_chat_requested))
             compose.waitUntil(5_000) {
                 chat.encryptedChatState.value.let { it.requestStatus[CURRENT] == EncryptedChatRequestStatus.REQUESTED && !it.pending } &&
-                    compose.onNodeWithText(context.getString(R.string.encrypted_chat_requested)).isDisplayed()
+                    runCatching { requestedLabel.isDisplayed() }.getOrDefault(false)
             }
             compose.onNodeWithText(context.getString(R.string.encrypted_chat_requested)).assertIsDisplayed()
             compose.onNodeWithText(rejectedText, substring = true).assertDoesNotExist()

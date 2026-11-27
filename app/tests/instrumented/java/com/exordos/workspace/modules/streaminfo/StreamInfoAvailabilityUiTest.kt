@@ -122,6 +122,7 @@ class StreamInfoAvailabilityUiTest {
             compose.onNodeWithText(context.getString(R.string.encrypted_chat_key_screen_title)).assertIsDisplayed()
 
             repo.streamDao.deleteAll()
+            repo.topicDao.deleteByStream(STREAM)
             repo.setInitialTopics(listOf(topic(OTHER_TOPIC)).map { it.toUio() })
             compose.waitUntil(5_000) { viewModel.stream.value == null && viewModel.topic.value == null }
             compose.onNodeWithTag("encrypted-chat-keys-screen").assertDoesNotExist()

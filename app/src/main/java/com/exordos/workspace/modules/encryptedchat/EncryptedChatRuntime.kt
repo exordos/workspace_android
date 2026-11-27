@@ -48,13 +48,14 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
 /** Android binding for one mounted stream. Repositories and disk caches retain opaque payloads. */
-class EncryptedChatRuntime(
+class EncryptedChatRuntime internal constructor(
     context: Context,
     private val client: WorkspaceAPIClient,
     private val repo: EventsRepository,
     private val coroutineScope: CoroutineScope,
     private val streamId: String,
     private val topicId: String,
+    private val beforePlaintextPublication: suspend () -> Unit = {},
 ) {
     private val appContext = context.applicationContext
     private val user = client.requireUserViewModel()
@@ -331,6 +332,7 @@ class EncryptedChatRuntime(
             requireBound()
             projected[message.uuid] = active.decrypt(message.asEncryptedChatWire(active.scope.projectId))
         }
+        beforePlaintextPublication()
         withCurrentStream {
             if (active === session) {
                 mutablePresentations.value = projected
@@ -432,7 +434,7 @@ class EncryptedChatRuntime(
         val projected = action { active ->
             expectedAccount = account ?: throw EncryptedChatException(EncryptedChatFailure.STALE)
             expectedSession = active
-            active.decrypt(message.asEncryptedChatWire(active.scope.projectId))
+            active.decrypt(message.asEncryptedChatWire(active.scope.projectId)).also { beforePlaintextPublication() }
         }
         // Unlike a verified write receipt, plaintext cannot survive a failed post-action refresh.
         return withCurrentStream {

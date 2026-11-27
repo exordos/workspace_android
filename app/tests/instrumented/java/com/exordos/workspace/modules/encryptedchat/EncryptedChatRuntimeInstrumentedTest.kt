@@ -17,11 +17,13 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.async
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
@@ -542,47 +544,52 @@ class EncryptedChatRuntimeInstrumentedTest {
 
     @Test fun decryptResultsCannotPublishOrReturnAcrossRemovalBeforeObserversRun() = runBlocking {
         for (refresh in listOf(false, true)) {
-            val observers = CoroutineScope(SupervisorJob() + QueuedDispatcher())
-            val work = QueuedDispatcher()
-            val worker = CoroutineScope(SupervisorJob() + work)
-            val runtime = EncryptedChatRuntime(context, owner.api, owner.repo, observers, STREAM, TOPIC)
+            val dispatcher = QueuedDispatcher()
+            val observers = CoroutineScope(SupervisorJob() + dispatcher)
+            val decrypted = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            val runtime = EncryptedChatRuntime(context, owner.api, owner.repo, observers, STREAM, TOPIC,
+                beforePlaintextPublication = {
+                    decrypted.complete(Unit)
+                    release.await()
+                })
             try {
                 owner.repo.setInitialStreams(listOf(backend.stream.copy(userUuid = owner.userUuid)).map { it.toUio() })
                 owner.sync()
                 runtime.readySession()
-                val result = worker.async {
+                val result = async(Dispatchers.Default) {
                     runCatching { if (refresh) runtime.refresh(true) else runtime.presentation(currentEncryptedMessage()) }
                 }
-                fun dispatchToIo() {
-                    // Keep the live-check monitor until withContext has actually suspended.
-                    // A fast IO result can otherwise complete inline without a queued resumption.
-                    work.next { continuation ->
-                        owner.repo.withStreamRevision(STREAM, owner.repo.streamRemovalRevision(STREAM)) { continuation.run() }
-                    }
+                try {
+                    withTimeout(5_000) { decrypted.await() }
+                    val revision = owner.repo.streamRemovalRevision(STREAM)
+                    owner.repo.removeStream(STREAM)
+                    assertEquals(revision + 1, owner.repo.streamRemovalRevision(STREAM))
+                    // No observer has run; even restoring older Room rows cannot authorize this result.
+                    owner.repo.setInitialStreams(listOf(backend.stream.copy(userUuid = owner.userUuid)).map { it.toUio() })
+                    owner.sync()
+                    release.complete(Unit)
+                    val error = withTimeout(5_000) { result.await() }.exceptionOrNull()
+                    assertTrue(error is EncryptedChatException && error.failure == EncryptedChatFailure.STALE)
+                    assertTrue(runtime.presentations.value.isEmpty())
+                } finally {
+                    release.complete(Unit)
+                    result.cancelAndJoin()
                 }
-                dispatchToIo() // Dispatch ingest (refresh) or decrypt (presentation) to IO.
-                if (refresh) repeat(backend.messages.size) { dispatchToIo() }
-                val decrypted = work.take() // Final IO result exists, but its caller has not resumed.
-                val revision = owner.repo.streamRemovalRevision(STREAM)
-                owner.repo.removeStream(STREAM)
-                assertEquals(revision + 1, owner.repo.streamRemovalRevision(STREAM))
-                // No observer has run. Reject even if an older projection is restored before resumption.
-                owner.repo.setInitialStreams(listOf(backend.stream.copy(userUuid = owner.userUuid)).map { it.toUio() })
-                owner.sync()
-                decrypted.run()
-                val error = withTimeout(5_000) { result.await() }.exceptionOrNull()
-                assertTrue(error is EncryptedChatException && error.failure == EncryptedChatFailure.STALE)
-                assertTrue(runtime.presentations.value.isEmpty())
-            } finally { runtime.close(); observers.cancel(); worker.cancel() }
+            } finally {
+                runtime.close()
+                observers.cancel()
+                dispatcher.drain()
+            }
         }
     }
 
     private class QueuedDispatcher : CoroutineDispatcher() {
         private val tasks = LinkedBlockingQueue<Runnable>()
         override fun dispatch(context: CoroutineContext, block: Runnable) { tasks.add(block) }
-        fun take(): Runnable = checkNotNull(tasks.poll(5, TimeUnit.SECONDS)) { "Expected a suspended result" }
-        fun next(run: (Runnable) -> Unit = { it.run() }) {
-            run(take())
+
+        fun drain() {
+            while (true) (tasks.poll() ?: return).run()
         }
     }
 

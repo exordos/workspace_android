@@ -23,6 +23,10 @@ data class DraftUIO(
 
 @Dao
 interface DraftDao {
+
+    @Query("DELETE FROM DraftUIO WHERE streamUuid = :streamUuid")
+    suspend fun deleteByStream(streamUuid: String)
+
     @Query("SELECT * FROM DraftUIO")
     fun observeDrafts(): Flow<List<DraftUIO>>
 

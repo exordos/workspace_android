@@ -20,6 +20,13 @@ data class FolderItemUIO(
 
 @Dao
 interface FolderItemDao {
+
+    @Query("DELETE FROM FolderItemUIO WHERE folder = :folderUuid")
+    suspend fun deleteByFolder(folderUuid: String)
+
+    @Query("DELETE FROM FolderItemUIO WHERE streamUuid = :streamUuid")
+    suspend fun deleteByStream(streamUuid: String)
+
     @Query("SELECT * FROM FolderItemUIO WHERE folder LIKE :folderUuid")
     fun observeFolderItems(folderUuid: String): Flow<List<FolderItemUIO>>
 

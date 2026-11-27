@@ -42,6 +42,20 @@ data class StreamUIO(
 
 @Dao
 interface StreamDao {
+    @Query("SELECT * FROM StreamUIO WHERE uuid = :uuid")
+    suspend fun findByUuid(uuid: String): StreamUIO?
+
+
+    @Query("UPDATE StreamUIO SET role = :role WHERE uuid = :streamUuid")
+    suspend fun setOwnRole(streamUuid: String, role: String)
+
+
+    @Query("UPDATE StreamUIO SET lastMessageUuid = NULL WHERE lastMessageUuid = :messageUuid")
+    suspend fun clearMessagePreview(messageUuid: String)
+
+    @Query("DELETE FROM StreamUIO WHERE uuid = :uuid")
+    suspend fun deleteByUuid(uuid: String)
+
     @Query("SELECT * FROM StreamUIO")
     fun observeStreams(): Flow<List<StreamUIO>>
 

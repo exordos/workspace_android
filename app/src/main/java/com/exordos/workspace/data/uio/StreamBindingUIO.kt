@@ -19,6 +19,13 @@ data class StreamBindingUIO(
 
 @Dao
 interface StreamBindingDao {
+
+    @Query("DELETE FROM StreamBindingUIO WHERE uuid = :uuid AND streamUuid = :streamUuid")
+    suspend fun deleteBinding(uuid: String, streamUuid: String)
+
+    @Query("DELETE FROM StreamBindingUIO WHERE streamUuid = :streamUuid")
+    suspend fun deleteByStream(streamUuid: String)
+
     @Query("SELECT * FROM StreamBindingUIO WHERE streamUuid LIKE :streamUuid")
     fun observeStreamBindings(streamUuid: String): Flow<List<StreamBindingUIO>>
 

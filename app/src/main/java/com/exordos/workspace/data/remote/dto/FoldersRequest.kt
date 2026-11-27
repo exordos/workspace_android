@@ -2,6 +2,7 @@ package com.exordos.workspace.data.remote.dto
 
 import com.exordos.workspace.data.remote.UIORequest
 import com.exordos.workspace.data.uio.toUio
+import com.exordos.workspace.data.uio.FolderItemUIO
 import com.exordos.workspace.data.uio.FolderUIO
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -10,8 +11,12 @@ import com.exordos.workspace.data.remote.ApiRequest
 import com.exordos.workspace.data.remote.EmptyRequestData
 import com.exordos.workspace.data.remote.HTTPMethod
 
-class FoldersRequest(): UIORequest<EmptyRequestData, List<FolderResponseData>, List<FolderUIO>, ApiError> {
-    override fun toUio(dto: List<FolderResponseData>): List<FolderUIO> = dto.map { it.toUio() }
+data class FolderSnapshot(val folder: FolderUIO, val items: List<FolderItemUIO>)
+
+fun FolderResponseData.toFolderSnapshot(): FolderSnapshot = FolderSnapshot(toUio(), items.map { it.toUio() })
+
+class FoldersRequest : UIORequest<EmptyRequestData, List<FolderResponseData>, List<FolderSnapshot>, ApiError> {
+    override fun toUio(dto: List<FolderResponseData>): List<FolderSnapshot> = dto.map { it.toFolderSnapshot() }
     override val method: HTTPMethod = HTTPMethod.GET
     override val requiresApiKey: Boolean = true
     override val url: String = "/api/workspace/v1/messenger/folders/"

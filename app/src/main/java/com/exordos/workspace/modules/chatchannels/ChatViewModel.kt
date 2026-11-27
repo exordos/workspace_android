@@ -443,7 +443,7 @@ class ChatViewModel(
                         is ApiResult.Success -> {
 
                             if (currentlySelectedFolder.value != null) {
-                                val updatedCurrentlySelectedFolder = foldersResponse.value.firstOrNull() { it.uuid == currentlySelectedFolder.value?.uuid }
+                                val updatedCurrentlySelectedFolder = foldersResponse.value.firstOrNull { it.folder.uuid == currentlySelectedFolder.value?.uuid }?.folder
                                 eventsRepo.value?.updateCurrentlySelectedFolder(updatedCurrentlySelectedFolder)
                             }
                             _queryState.value = QueryState.Success
@@ -461,7 +461,7 @@ class ChatViewModel(
                         is ApiResult.Success -> {
 
                             if (currentlySelectedFolder.value != null) {
-                                val updatedCurrentlySelectedFolder = foldersResponse.value.firstOrNull() { it.uuid == currentlySelectedFolder.value?.uuid }
+                                val updatedCurrentlySelectedFolder = foldersResponse.value.firstOrNull { it.folder.uuid == currentlySelectedFolder.value?.uuid }?.folder
 
                             }
                             _queryState.value = QueryState.Success

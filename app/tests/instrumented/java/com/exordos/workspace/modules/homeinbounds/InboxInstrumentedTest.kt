@@ -186,7 +186,11 @@ class InboxInstrumentedTest {
             it.config.getOrElse(androidx.compose.ui.semantics.SemanticsProperties.Text) { emptyList() }.any { text -> text.text == "9" }
         } }
         runBlocking { account.repo.updateStream(ordinary.copy(notificationMode = "muted", activeUnreadCount = 0).toUio()) }
+        compose.waitUntil(8_000) {
+            compose.onAllNodesWithTag("inbox-topic-$topicId").fetchSemanticsNodes().isEmpty()
+        }
         compose.onNodeWithTag("inbox-topic-$topicId").assertDoesNotExist()
+        compose.onNodeWithTag("inbox-topic-secret-topic").assertIsDisplayed()
     }
 
     @Test fun topicOpensFirstUnreadAndDoesNotMarkOrScrollToTheLatestMessage() = openFirstUnread(false)
@@ -214,10 +218,12 @@ class InboxInstrumentedTest {
             compose.onNodeWithTag("inbox-count-$topicId", useUnmergedTree = true).assertTextEquals("40")
             compose.waitUntil(8_000) { topicRequests.get() == 2 }
             secondResponse.countDown()
+            val updatedBadge = compose.onNodeWithTag("inbox-count-$topicId", useUnmergedTree = true)
             compose.waitUntil(8_000) {
-                account.repo.topicDao.getTopic(topicId)?.activeUnreadCount == 64
+                account.repo.topicDao.getTopic(topicId)?.activeUnreadCount == 64 &&
+                    runCatching { updatedBadge.assertTextEquals("64") }.isSuccess
             }
-            compose.onNodeWithTag("inbox-count-$topicId", useUnmergedTree = true).assertTextEquals("64")
+            updatedBadge.assertTextEquals("64")
             assertEquals("The pending burst needs just one refresh", 2, topicRequests.get())
         } finally {
             firstResponse.countDown()

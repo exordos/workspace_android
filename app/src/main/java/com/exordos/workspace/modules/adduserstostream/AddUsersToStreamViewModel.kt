@@ -86,6 +86,7 @@ class AddUsersToStreamViewModel(
             _createQueryState.value = QueryState.Error("Организация изменилась. Откройте экран заново.")
             return
         }
+        val revisions = selected.associateWith { eventsRepository.streamBindingRevision(streamUuid, it) }
         val response = client.performRequest(invitation, account.server.id, account.server)
         if (!account.isCurrent()) {
             _createQueryState.value = QueryState.Error("Организация изменилась. Откройте экран заново.")
@@ -98,10 +99,10 @@ class AddUsersToStreamViewModel(
                     return@withWriteTransaction QueryState.Error("Сервер вернул участников другого стрима")
                 if (!account.isCurrent() || eventsRepository.streamRemovalRevision(streamUuid) != streamRevision)
                     return@withWriteTransaction QueryState.Error("Стрим больше недоступен")
-                val before = initialBindings.associateBy { it.uuid }
-                val current = storedBindings.first().associateBy { it.uuid }
-                // A change received while posting the invitation takes precedence.
-                eventsRepository.setInitialStreamBindings(response.value.filter { before[it.uuid] == current[it.uuid] })
+                // Realtime changes made after sending the invitation take precedence.
+                eventsRepository.setInitialStreamBindings(response.value.filter {
+                    revisions[it.userUuid] == eventsRepository.streamBindingRevision(streamUuid, it.userUuid)
+                })
                 QueryState.Success
             }
         }

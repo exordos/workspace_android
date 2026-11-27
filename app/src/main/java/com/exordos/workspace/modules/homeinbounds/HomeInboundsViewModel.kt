@@ -15,11 +15,12 @@ import com.exordos.workspace.data.EventsRepositoryStore
 import com.exordos.workspace.data.remote.ApiResult
 import com.exordos.workspace.data.remote.WorkspaceAPIClient
 import com.exordos.workspace.data.uio.MessageUIO
-import com.exordos.workspace.data.remote.dto.MessagesRequest
+import com.exordos.workspace.data.remote.dto.MessagesByIdsRequest
 import com.exordos.workspace.data.uio.StreamUIO
 import com.exordos.workspace.data.remote.dto.TopicsRequest
 import com.exordos.workspace.data.uio.TopicUIO
 import com.exordos.workspace.data.uio.UserUIO
+import com.exordos.workspace.data.uio.toLastMessageUIO
 import com.exordos.workspace.modules.chooseserver.QueryState
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
@@ -60,16 +61,49 @@ class HomeInboundsViewModel(
     val topicsQueryState: StateFlow<QueryState> = _topicsQueryState
 
 
-    suspend fun unreadDestination(stream: StreamUIO, topic: TopicUIO): HomeFlow.ChatDialog? {
+    init {
+        viewModelScope.launch {
+            eventsRepository.streams.map { streams -> streams.filter { it.hasInboxUnread } }
+                .distinctUntilChanged().conflate().collect(::loadTopics)
+        }
+    }
+
+    fun retryLoadTopics() {
+        viewModelScope.launch { loadTopics(streams.value.filter { it.hasInboxUnread }) }
+    }
+
+    private suspend fun loadTopics(unreadStreams: List<StreamUIO>) {
+        if (unreadStreams.isEmpty()) {
+            _topicsQueryState.value = QueryState.Success
+            return
+        }
+        if (_topicsQueryState.value != QueryState.Success) _topicsQueryState.value = QueryState.Loading
         val serverId = eventsRepository.serverId
         val server = client.requireUserViewModel().getServer(serverId)
-            ?.takeIf(eventsRepository::matchesServerConfiguration) ?: return null
-        val request = MessagesRequest(stream.uuid, topic.uuid, 25, null)
-        val messages = when (val response = client.performRequest(request, serverId, server)) {
-            is ApiResult.Success -> response.value.filter { it.streamUuid == stream.uuid && it.topicUuid == topic.uuid }
+            ?.takeIf(eventsRepository::matchesServerConfiguration) ?: return
+        val streamUuids = unreadStreams.map { it.uuid }
+        when (val response = client.performRequest(TopicsRequest(streamUuids), serverId, server)) {
+            is ApiResult.Success -> {
+                val topics = response.value.filter { it.streamUuid in streamUuids }
+                val messageIds = topics.mapNotNull { it.lastMessageUuid }.distinct()
+                for (batch in messageIds.chunked(100)) {
+                    val messages = client.performRequest(MessagesByIdsRequest(batch), serverId, server)
+                    if (messages is ApiResult.Success) {
+                        eventsRepository.addLastMessages(messages.value.filter { it.uuid in batch }.map { it.toLastMessageUIO() })
+                    }
+                }
+                eventsRepository.replaceTopicsForStreams(streamUuids, topics)
+                _topicsQueryState.value = QueryState.Success
+            }
+            is ApiResult.Error -> _topicsQueryState.value = QueryState.Error("")
+        }
+    }
+
+    suspend fun unreadDestination(stream: StreamUIO, topic: TopicUIO): HomeFlow.ChatDialog? {
+        val messages = when (val response = eventsRepository.loadConversationPage(stream.uuid, topic.uuid)) {
+            is ApiResult.Success -> response.value
             is ApiResult.Error -> return null
         }
-        eventsRepository.addMessages(messages)
         val first = firstInboxUnread(messages, stream, topic)
         return HomeFlow.ChatDialog(stream.name, stream.uuid, topic.name,
             topic.uuid, stream.isPrivate, null, first?.uuid)

@@ -332,7 +332,7 @@ internal class ProtectedStreamEditor(
     private val deleteDetails: suspend (ProtectedStreamEditContext) -> ApiResult<String, ApiError> = {
         ApiResult.Error(ApiError("Delete transport unavailable", "UNAVAILABLE"))
     },
-    private val commitDelete: (ProtectedStreamEditContext) -> Unit = {},
+    private val commitDelete: suspend (ProtectedStreamEditContext) -> Unit = {},
     private val currentDeletionAccount: (ProtectedStreamEditContext) -> Boolean = { captured ->
         currentContext()?.let { live -> live.owner() == captured.owner() && live.server == captured.server &&
             captured.sameAuthorization(live) } == true
