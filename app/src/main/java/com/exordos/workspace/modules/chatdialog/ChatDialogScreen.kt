@@ -419,15 +419,14 @@ fun ChatDialogScreen(
                                     overflow = TextOverflow.Ellipsis
                                 )
                             }
-                            val currentStreamBindings = streamBindings[viewModel.chatId]
                             val user = directUser
-                            if (currentStreamBindings != null && currentStreamBindings.count() > 0) {
-                                val currentBindedOnlineUsers = currentStreamBindings.mapNotNull { binding -> users.firstOrNull { binding.userUuid == it.uuid && it.status == "active" } }
+                            if (streamBindings.isNotEmpty()) {
+                                val currentBindedOnlineUsers = streamBindings.mapNotNull { binding -> users.firstOrNull { binding.userUuid == it.uuid && it.status == "active" } }
                                 var baseText = if (viewModel.isDirectMessages && user != null) {
                                     user.statusDescription()
                                 } else {
                                     context.resources.getQuantityString(
-                                        R.plurals.participants_count, currentStreamBindings.count(), currentStreamBindings.count()
+                                        R.plurals.participants_count, streamBindings.size, streamBindings.size
                                     )
                                 }
                                 if (!viewModel.isDirectMessages && currentBindedOnlineUsers.count() > 0) {

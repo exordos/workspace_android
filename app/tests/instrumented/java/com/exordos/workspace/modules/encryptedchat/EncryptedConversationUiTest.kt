@@ -233,7 +233,7 @@ class EncryptedConversationUiTest {
         assertTrue(repo.verifiedOwnerAuthentication.value != null)
         repo.setInitialUsers(listOf(fixture.owner, fixture.participant).map { it.toUio() })
         repo.setInitialStreams(listOf(fixture.stream).map { it.toUio() })
-        repo.addStreamBindings(STREAM, fixture.bindings.map { it.toUio() })
+        repo.setInitialStreamBindings(fixture.bindings.map { it.toUio() })
         repo.addStreamTopicMessages(STREAM, TOPIC, fixture.messages.toList().map { it.toUio() })
         chat = withContext(Dispatchers.Main) {
             ChatDialogViewModel(api, user, "Команда продукта", STREAM, "Общий чат", TOPIC,

@@ -85,7 +85,7 @@ fun ProtectedStreamInfoView(viewModel: StreamInfoViewModel, navController: NavHo
     val deletion by viewModel.protectedStreamDeleteState.collectAsStateWithLifecycle()
     val callState by viewModel.protectedStreamCallState.collectAsStateWithLifecycle()
     val users by viewModel.users.collectAsStateWithLifecycle()
-    val bindingsByStream by viewModel.streamBindings.collectAsStateWithLifecycle()
+    val streamBindings by viewModel.streamBindings.collectAsStateWithLifecycle()
     val encryption by viewModel.encryptedChatState.collectAsStateWithLifecycle()
     val rawMessages by viewModel.repo.streamTopicMessages.collectAsStateWithLifecycle()
     val pooledMessages by viewModel.repo.messages.collectAsStateWithLifecycle(emptyList())
@@ -103,7 +103,7 @@ fun ProtectedStreamInfoView(viewModel: StreamInfoViewModel, navController: NavHo
     var description by remember(viewModel.streamUuid) { mutableStateOf(stream?.description.orEmpty()) }
     var dirty by remember { mutableStateOf(false) }
     var callFailed by remember { mutableStateOf(false) }
-    val bound = bindingsByStream[viewModel.streamUuid].orEmpty().distinctBy { it.userUuid }
+    val bound = streamBindings.distinctBy { it.userUuid }
     val editable = details?.role in setOf("owner", "administrator") &&
         stream?.role in setOf("owner", "administrator") && stream?.isArchived == false
     val busy = update.busy || deletion.busy || callState.busy

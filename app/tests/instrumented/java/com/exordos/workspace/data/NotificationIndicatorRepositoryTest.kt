@@ -111,13 +111,13 @@ class NotificationIndicatorRepositoryTest {
 
         repository.didReceiveFolderEvent(Json.encodeToString(authoritative), "updated")
 
-        assertEquals(authoritative.toUio(), repository.folders.value.single())
+        assertEquals(authoritative.toUio(), repository.folders.first().single())
         assertEquals(authoritative.toUio(), repository.currentlySelectedFolder.value)
         assertEquals(listOf("first", "second"), repository.folderItemDao.observeFolderItems(before.uuid).first().map { it.streamUuid }.sorted())
     }
 
     @Test
-    fun removingTheLastItemClearsTheSelectedFolderWithoutSwitchingTabs() {
+    fun removingTheLastItemClearsTheSelectedFolderWithoutSwitchingTabs() = runBlocking {
         val before = folder().copy(unreadCount = 1, items = listOf(item("first", 1)))
         repository.setInitialFolders(listOf(before).map { it.toUio() })
         repository.updateCurrentlySelectedFolder(before.toUio())
@@ -126,11 +126,11 @@ class NotificationIndicatorRepositoryTest {
         repository.didReceiveFolderEvent(Json.encodeToString(authoritative), "updated")
 
         assertEquals(authoritative.toUio(), repository.currentlySelectedFolder.value)
-        assertEquals(authoritative.toUio(), repository.folders.value.single())
+        assertEquals(authoritative.toUio(), repository.folders.first().single())
     }
 
     @Test
-    fun updatingAnotherFolderKeepsTheCurrentSelection() {
+    fun updatingAnotherFolderKeepsTheCurrentSelection() = runBlocking {
         val selected = folder().copy(uuid = "selected")
         val other = folder()
         repository.setInitialFolders(listOf(selected, other).map { it.toUio() })
@@ -139,7 +139,7 @@ class NotificationIndicatorRepositoryTest {
 
         repository.didReceiveFolderEvent(Json.encodeToString(authoritative), "updated")
 
-        assertEquals(listOf(selected.toUio(), authoritative.toUio()), repository.folders.value)
+        assertEquals(listOf(selected.toUio(), authoritative.toUio()), repository.folders.first())
         assertEquals(selected.toUio(), repository.currentlySelectedFolder.value)
     }
 
@@ -153,25 +153,25 @@ class NotificationIndicatorRepositoryTest {
 
         repository.didReceiveFolderEvent("""{"uuid":"folder"}""", "deleted")
 
-        assertEquals(listOf(all.toUio()), repository.folders.value)
+        assertEquals(listOf(all.toUio()), repository.folders.first())
         assertEquals(all.toUio(), repository.currentlySelectedFolder.value)
         assertEquals(1, repository.topics.first().count { it.streamUuid == "stream" })
     }
 
     @Test
-    fun deletingTheLastFolderClearsItsSelection() {
+    fun deletingTheLastFolderClearsItsSelection() = runBlocking {
         val deleted = folder()
         repository.setInitialFolders(listOf(deleted).map { it.toUio() })
         repository.updateCurrentlySelectedFolder(deleted.toUio())
 
         repository.didReceiveFolderEvent("""{"uuid":"folder"}""", "deleted")
 
-        assertEquals(emptyList<FolderUIO>(), repository.folders.value)
+        assertEquals(emptyList<FolderUIO>(), repository.folders.first())
         assertNull(repository.currentlySelectedFolder.value)
     }
 
     @Test
-    fun duplicateAndUnselectedDeletionsDoNotDisturbOtherFolders() {
+    fun duplicateAndUnselectedDeletionsDoNotDisturbOtherFolders() = runBlocking {
         val selected = folder().copy(uuid = "selected")
         repository.setInitialFolders(listOf(selected, folder()).map { it.toUio() })
         repository.updateCurrentlySelectedFolder(selected.toUio())
@@ -181,7 +181,7 @@ class NotificationIndicatorRepositoryTest {
         }
         repository.didReceiveFolderEvent("""{"uuid":"unknown"}""", "deleted")
 
-        assertEquals(listOf(selected.toUio()), repository.folders.value)
+        assertEquals(listOf(selected.toUio()), repository.folders.first())
         assertEquals(selected.toUio(), repository.currentlySelectedFolder.value)
     }
 

@@ -64,6 +64,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.CancellationException
@@ -110,9 +111,8 @@ internal fun ForwardMessagesDialog(
     val selectedServer by userViewModel.selectedServer.collectAsStateWithLifecycle()
     val currentUser by repo.currentUser.collectAsStateWithLifecycle()
     val cachedTopics by chatDialogViewModel.topics.collectAsStateWithLifecycle()
-    val cachedBindings by repo.streamBindings.collectAsStateWithLifecycle()
     val users by chatDialogViewModel.users.collectAsStateWithLifecycle()
-    val folders by repo.folders.collectAsState()
+    val folders by repo.folders.collectAsStateWithLifecycle(emptyList())
     val cachedStreams by chatDialogViewModel.streams.collectAsStateWithLifecycle()
     val folderItems by chatDialogViewModel.forwardFolderItems.collectAsStateWithLifecycle(emptyMap())
     var fetchedStreams by remember { mutableStateOf<List<StreamUIO>?>(null) }
@@ -120,6 +120,10 @@ internal fun ForwardMessagesDialog(
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<Int?>(null) }
     var selectedStream by remember { mutableStateOf<StreamUIO?>(null) }
+    val selectedStreamUuid = selectedStream?.uuid
+    val selectedBindings by remember(repo, selectedStreamUuid) {
+        selectedStreamUuid?.let(repo.streamBindingDao::observeStreamBindings) ?: flowOf(emptyList())
+    }.collectAsStateWithLifecycle(emptyList())
     var topics by remember { mutableStateOf(emptyList<TopicUIO>()) }
     var topicsLoading by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
@@ -252,7 +256,8 @@ internal fun ForwardMessagesDialog(
         Column(
             Modifier.fillMaxSize().background(colors.background),
         ) {
-            val memberIds = selectedStream?.uuid?.let { cachedBindings[it] }?.map { it.userUuid }?.distinct()
+            val memberIds = selectedBindings.filter { it.streamUuid == selectedStreamUuid }
+                .map { it.userUuid }.distinct().takeIf { it.isNotEmpty() }
             ForwardRecipientPicker(
                 streams = streams,
                 folders = folders,

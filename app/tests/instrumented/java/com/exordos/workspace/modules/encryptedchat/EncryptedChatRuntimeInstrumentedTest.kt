@@ -511,7 +511,7 @@ class EncryptedChatRuntimeInstrumentedTest {
                 val remaining = events.getOrCreate(other)
                 remaining.loadUserInfo()
                 remaining.setInitialStreams(listOf(backend.stream.copy(userUuid = backend.participant.uuid)).map { it.toUio() })
-                remaining.addStreamBindings(STREAM, backend.bindings.map { it.toUio() })
+                remaining.setInitialStreamBindings(backend.bindings.map { it.toUio() })
                 remaining.addStreamTopicMessages(STREAM, TOPIC, backend.messages.map { it.copy(isOwn = it.authorUuid == backend.participant.uuid) }.map { it.toUio() })
                 val runtime = EncryptedChatRuntime(context, account.api, remaining, account.scope, STREAM, TOPIC)
                 try { assertTrue(runtime.presentation(currentEncryptedMessage()) is EncryptedChatPresentation.Text) }
@@ -802,7 +802,7 @@ class EncryptedChatRuntimeInstrumentedTest {
         assertTrue(repo.verifiedOwnerAuthentication.value != null)
         repo.setInitialUsers(listOf(backend.owner, backend.participant).map { it.toUio() })
         repo.setInitialStreams(listOf(backend.stream.copy(userUuid = person.uuid)).map { it.toUio() })
-        repo.addStreamBindings(STREAM, backend.bindings.map { it.toUio() })
+        repo.setInitialStreamBindings(backend.bindings.map { it.toUio() })
         repo.addStreamTopicMessages(STREAM, TOPIC, backend.messages.map { it.copy(isOwn = it.authorUuid == person.uuid) }.map { it.toUio() })
         return Account(config, scope, preferences, events, user, http, api, repo, directory, keyScope, person.uuid, dataStore).also { accounts += it }
     }
