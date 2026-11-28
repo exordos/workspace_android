@@ -32,8 +32,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -48,39 +51,48 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.util.lerp
 import androidx.core.graphics.toColorInt
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import com.exordos.workspace.ChatFlow
+import com.exordos.workspace.data.uio.FolderUIO
 import com.exordos.workspace.modules.chooseserver.QueryState
 import com.exordos.workspace.modules.home.HomeScreenContent
 import com.exordos.workspace.modules.home.HomeViewModel
@@ -110,6 +122,30 @@ fun ChatScreenContent(
     var showDetail by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val folders by chatViewModel.folders.collectAsStateWithLifecycle()
+    val repositoryFolder = chatViewModel.currentlySelectedFolder.collectAsStateWithLifecycle()
+    val folderIds = remember(folders) { folders.map { it.uuid } }
+    val changeDetail: (Boolean) -> Unit = { visible ->
+        showDetail = visible
+        if (!visible) scope.launch { chatViewModel.updateSelectedChat(null) }
+    }
+    val selectFolder by rememberUpdatedState<(Int) -> Unit> { index ->
+        folders.getOrNull(index)?.let { folder ->
+            changeDetail(false)
+            chatViewModel.updateCurrentlySelectedFolder(folder)
+        }
+    }
+    val folderPages = remember(folderIds) {
+        val selected = repositoryFolder.value?.uuid
+        FolderPageState(folderIds.size.coerceAtLeast(1), folderIds.indexOf(selected).coerceAtLeast(0), scope) {
+            selectFolder(it)
+        }
+    }
+    DisposableEffect(folderPages) { onDispose(folderPages::cancel) }
+    LaunchedEffect(folderPages) {
+        snapshotFlow { repositoryFolder.value?.uuid }.collect { uuid ->
+            folderPages.syncRepositoryPage(folderIds.indexOf(uuid).coerceAtLeast(0))
+        }
+    }
     val shouldShowCreateTopicView by chatViewModel.shouldShowCreateTopicView.collectAsStateWithLifecycle()
     val queryState by chatViewModel.queryState.collectAsState()
     val chatToAdd by chatViewModel.chatToAdd.collectAsState()
@@ -273,24 +309,10 @@ fun ChatScreenContent(
                             )
                         }
                         Spacer(modifier = Modifier.height(8.dp))
-                        if (!folders.isEmpty()) {
-                            FolderList(chatViewModel, {
-                                showDetail = it
-                                if (!showDetail) {
-                                    scope.launch {
-                                        chatViewModel.updateSelectedChat(null)
-                                    }
-                                }
-                            })
+                        if (folders.isNotEmpty()) {
+                            FolderList(folders, folderPages)
                         }
-                        ChatWithTopics(chatViewModel, navController, showDetail, {
-                            showDetail = it
-                            if (!showDetail) {
-                                scope.launch {
-                                    chatViewModel.updateSelectedChat(null)
-                                }
-                            }
-                        })
+                        ChatWithTopics(chatViewModel, navController, showDetail, changeDetail, folders, folderIds, folderPages)
                     }
             }
             val chat = chatToAdd
@@ -348,64 +370,48 @@ fun ChatScreenContent(
 }
 
 @Composable
-fun FolderList(
-    chatViewModel: ChatViewModel,
-    setShowDetail: (Boolean) -> Unit
+private fun FolderList(
+    folders: List<FolderUIO>,
+    pages: FolderPageState,
 ) {
-    val folders by chatViewModel.folders.collectAsStateWithLifecycle()
-    val currentlySelectedFolder by chatViewModel.currentlySelectedFolder.collectAsState()
-    val scope = rememberCoroutineScope()
-    Box(
-        contentAlignment = Alignment.BottomStart
-    ) {
-
+    val listState = rememberLazyListState(pages.page)
+    LaunchedEffect(listState, pages) {
+        snapshotFlow { pages.page }.collectLatest { selected ->
+            val layout = listState.layoutInfo
+            val item = layout.visibleItemsInfo.firstOrNull { it.index == selected }
+            if (item == null || item.offset < layout.viewportStartOffset ||
+                item.offset + item.size > layout.viewportEndOffset
+            ) {
+                listState.animateScrollToItem(selected)
+            }
+        }
+    }
+    Box(contentAlignment = Alignment.BottomStart) {
         HorizontalDivider(
             thickness = 1.dp,
             color = LocalWorkspaceColorsPalette.current.divider
         )
-        LazyRow {
-            items(
-                items = folders
-            ) { folder ->
-                val dividerColor =
-                    if (folder.uuid == currentlySelectedFolder?.uuid) {
-                        LocalWorkspaceColorsPalette.current.textHeaders
-                    } else {
-                        Color.Transparent
-                    }
+        LazyRow(state = listState) {
+            itemsIndexed(folders, key = { _, folder -> folder.uuid }) { index, folder ->
+                val selected by remember(pages, index) { derivedStateOf { pages.page == index } }
                 val unreadCount = folder.unreadCount
                 val endPadding = if (unreadCount > 0) 0f else 4f
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .drawBehind {
-                            val strokeWidth = 1.dp.toPx()
-                            drawLine(
-                                color = dividerColor,
-                                start = Offset(16f, size.height - strokeWidth / 2f),
-                                end = Offset(size.width - endPadding, size.height - strokeWidth / 2f),
-                                strokeWidth = strokeWidth
-                            )
-                        }
                         .padding(bottom = 8.dp)
                 ) {
                     Text(
                         folder.title,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Medium,
-                        color = if (folder.uuid == currentlySelectedFolder?.uuid) LocalWorkspaceColorsPalette.current.textHeaders else LocalWorkspaceColorsPalette.current.textAdditional30,
+                        color = if (selected) LocalWorkspaceColorsPalette.current.textHeaders else LocalWorkspaceColorsPalette.current.textAdditional30,
                         modifier = Modifier
                             .padding(start = 16.dp, 0.dp, endPadding.dp, 0.dp)
-                            .clickable(
-                                onClick = {
-                                    scope.launch {
-                                        setShowDetail(false)
-                                        chatViewModel.updateSelectedChat(null)
-                                    }
-                                    chatViewModel.updateCurrentlySelectedFolder(
-                                        folder
-                                    )
-                                }
+                            .selectable(
+                                selected = selected,
+                                role = Role.Tab,
+                                onClick = { pages.selectPage(index) },
                             ),
                     )
                     if (unreadCount > 0) {
@@ -427,5 +433,38 @@ fun FolderList(
                 }
             }
         }
+        FolderTabIndicator(pages, listState, Modifier.matchParentSize())
+    }
+}
+
+@Composable
+private fun FolderTabIndicator(
+    pages: FolderPageState,
+    listState: LazyListState,
+    modifier: Modifier,
+) {
+    val color = LocalWorkspaceColorsPalette.current.textHeaders
+    Layout(
+        content = { Box(Modifier.background(color).testTag("folder_tab_indicator")) },
+        modifier = modifier,
+    ) { measurables, constraints ->
+        val width = constraints.maxWidth
+        val height = constraints.maxHeight
+        val position = pages.position
+        val firstIndex = position.toInt()
+        val nextIndex = (firstIndex + 1).coerceAtMost(pages.pageCount - 1)
+        val items = listState.layoutInfo.visibleItemsInfo
+        val first = items.firstOrNull { it.index == firstIndex }
+        val next = items.firstOrNull { it.index == nextIndex }
+        val visible = first ?: next ?: return@Layout layout(width, height) {}
+        val firstEdge = first?.offset ?: (visible.offset - visible.size)
+        val nextEdge = next?.offset ?: (visible.offset + visible.size)
+        val fraction = position - firstIndex
+        val start = (lerp(firstEdge, nextEdge, fraction) + 6.dp.roundToPx()).coerceIn(0, width)
+        val end = (lerp(firstEdge + (first?.size ?: visible.size),
+            nextEdge + (next?.size ?: visible.size), fraction) - 2.dp.roundToPx()).coerceIn(start, width)
+        val thickness = 1.dp.roundToPx().coerceAtMost(height)
+        val mark = measurables.single().measure(Constraints.fixed(end - start, thickness))
+        layout(width, height) { mark.placeRelative(start, height - thickness) }
     }
 }

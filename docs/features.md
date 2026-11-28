@@ -12,7 +12,7 @@ is tracked separately. Source paths refer to the main Kotlin package
 | Conversation catalog | Channels and direct conversations, name/last message, unread badges, search, unread-first ordering | `modules/chatchannels`, `creationbase` |
 | Channels and members | Create channels/direct conversations, select and add members, view channel information; protected settings and roles | `modules/createstream`, `createdirectstream`, `adduserstostream`, `streaminfo` |
 | Topics | List, create, open conversations, mark done, set notification modes | `modules/topics`, `ui/CreateTopic.kt`, notification/done DTOs |
-| Folders | Create folders, manage contents, delete folders, update counters and the selected tab through realtime events | `modules/addfolder`, `foldersettings`; `data/EventsRepository.kt` |
+| Folders | Tap a tab or drag the chat list sideways. Pages and the tab indicator move together. Touch a moving page to catch it, then continue dragging in either direction. The first and last pages overscroll. Manage folders and receive realtime counter updates. | `modules/chatchannels`, `addfolder`, `foldersettings`; `data/EventsRepository.kt` |
 | Regular conversations | History, Markdown, sending and editing, optimistic sends reconciled with HTTP and events | `modules/chatdialog/ChatDialogViewModel.kt`, `ChatDialogScreen.kt` |
 | Quotes and mentions | Full/selected quotes, source loading with retry, author snapshots, composer suggestions, atomic mention editing | `MessageQuoteResolver.kt`, `MarkdownPayloadParser` in `ChatDialogViewModel.kt`, `ComposerMention.kt`, `SendMessageView.kt` |
 | Reactions | Display emoji/counts, add and remove reactions, handle aliases | `EmojiReactionsView.kt`, reaction DTOs, `ChatDialogScreen.kt` |

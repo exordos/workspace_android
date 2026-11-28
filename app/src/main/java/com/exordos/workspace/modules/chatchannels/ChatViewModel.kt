@@ -31,6 +31,7 @@ import com.exordos.workspace.data.EventsRepository
 import com.exordos.workspace.data.ConfirmedAccountContext
 import com.exordos.workspace.data.confirmedAccountContext
 import com.exordos.workspace.data.EventsRepositoryStore
+import com.exordos.workspace.data.WorkspaceDateTime
 import com.exordos.workspace.data.remote.ApiResult
 import com.exordos.workspace.data.remote.WorkspaceAPIClient
 import com.exordos.workspace.data.crypto.ChatKeyStorage
@@ -228,6 +229,9 @@ class ChatViewModel(
         .flatMapLatest { repo ->
             repo?.folders ?: flowOf(emptyList())
         }
+        .map { folders ->
+            folders.sortedWith(compareBy<FolderUIO> { WorkspaceDateTime.parse(it.creationDate) }.thenBy { it.uuid })
+        }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
@@ -243,10 +247,10 @@ class ChatViewModel(
             initialValue = null,
         )
 
-    internal val selectedFolderItems: Flow<List<FolderItemUIO>> = combine(eventsRepo, currentlySelectedFolder) { repo, folder ->
-        if (folder == null || folder.systemType == "all") flowOf(emptyList())
-        else repo?.folderItemDao?.observeFolderItems(folder.uuid)?.onStart { emit(emptyList()) } ?: flowOf(emptyList())
-    }.flatMapLatest { it }
+    internal fun observeFolderItems(folderUuid: String): Flow<List<FolderItemUIO>> =
+        eventsRepo.flatMapLatest { repo ->
+            repo?.folderItemDao?.observeFolderItems(folderUuid) ?: flowOf(emptyList())
+        }
 
     internal val selectedStreamTopics: Flow<List<TopicUIO>> = combine(eventsRepo, currentlySelectedStream) { repo, stream ->
         if (stream == null) flowOf(emptyList())
@@ -300,8 +304,9 @@ class ChatViewModel(
     var currentStreamId: String = ""
 
     fun updateCurrentlySelectedFolder(newFolder: FolderUIO) {
-        if (newFolder.uuid != currentlySelectedFolder.value?.uuid) {
-            eventsRepo.value?.updateCurrentlySelectedFolder(newFolder)
+        val repository = eventsRepo.value ?: return
+        if (newFolder.uuid != repository.currentlySelectedFolder.value?.uuid) {
+            repository.updateCurrentlySelectedFolder(newFolder)
         }
     }
 
