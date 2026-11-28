@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.LocalRippleConfiguration
 import androidx.compose.material3.Text
@@ -27,7 +26,6 @@ import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -40,11 +38,10 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import kotlinx.coroutines.launch
 import com.exordos.workspace.data.WorkspaceDateTime
-import com.exordos.workspace.ChatFlow
+import com.exordos.workspace.data.uio.FolderUIO
 import com.exordos.workspace.data.uio.LastMessageUIO
 import com.exordos.workspace.data.uio.StreamUIO
 import com.exordos.workspace.data.uio.TopicUIO
@@ -54,242 +51,215 @@ import com.exordos.workspace.ui.FullScreenError
 import com.exordos.workspace.ui.theme.InterFontFamily
 import com.exordos.workspace.ui.theme.LocalWorkspaceColorsPalette
 import java.time.Instant
-import kotlin.collections.mapNotNull
 import kotlin.collections.sortedByDescending
 import kotlin.math.roundToInt
 
 @Composable
-fun ChatWithTopics(
+internal fun ChatWithTopics(
     chatViewModel: ChatViewModel,
     navController: NavHostController,
     showDetail: Boolean,
-    onShowDetailChange: (Boolean) -> Unit
+    onShowDetailChange: (Boolean) -> Unit,
+    folders: List<FolderUIO>,
+    folderIds: List<String>,
+    pages: FolderPageState,
 ) {
-    val streams by chatViewModel.streams.collectAsStateWithLifecycle()
-    val currentlySelectedFolder by chatViewModel.currentlySelectedFolder.collectAsState()
-    val searchQuery by chatViewModel.searchQuery.collectAsState()
-    val currentlySelectedStream by chatViewModel.currentlySelectedStream.collectAsState()
-    val scope = rememberCoroutineScope()
-    val lastMessages by chatViewModel.allLastMessages.collectAsStateWithLifecycle()
     val streamsQueryState by chatViewModel.streamsQueryState.collectAsStateWithLifecycle()
-    val topicsQueryState by chatViewModel.topicsQueryState.collectAsStateWithLifecycle()
-    val folderItems by chatViewModel.selectedFolderItems.collectAsStateWithLifecycle(emptyList())
-    val topics by chatViewModel.selectedStreamTopics.collectAsStateWithLifecycle(emptyList())
-
+    val scope = rememberCoroutineScope()
     when (streamsQueryState) {
         QueryState.Loading -> {
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier
-                    .fillMaxSize()
-            ) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 AnimatedGif(Modifier.size(80.dp))
             }
         }
-        is QueryState.Error -> {
-                FullScreenError {
-                    scope.launch {
-                        chatViewModel.loadServerSettings()
-                    }
-            }
+        is QueryState.Error -> FullScreenError {
+            scope.launch { chatViewModel.loadServerSettings() }
         }
-
         QueryState.Success -> {
-            val filteredSubscriptions = remember(searchQuery, streams, currentlySelectedFolder, folderItems) {
-                val folderSubscriptions = if (currentlySelectedFolder?.systemType?.let { it != "all" } == true) {
-                    folderItems.mapNotNull { folderItem ->
-                        streams.firstOrNull { it.uuid == folderItem.streamUuid }
+            val streams by chatViewModel.streams.collectAsStateWithLifecycle()
+            val selectedStream by chatViewModel.currentlySelectedStream.collectAsStateWithLifecycle()
+            val searchQuery by chatViewModel.searchQuery.collectAsStateWithLifecycle()
+            val lastMessages by chatViewModel.allLastMessages.collectAsStateWithLifecycle()
+            val unreadFirst by chatViewModel.userViewModel.streamsOrderIsUnreadFirst.collectAsStateWithLifecycle()
+            val byUuid = remember(streams) { streams.associateBy { it.uuid } }
+            val keys = remember(folderIds) { folderIds.ifEmpty { listOf(null) } }
+            Box(Modifier.fillMaxSize()) {
+                FolderPages(pages, keys) { index ->
+                    val folder = folders.getOrNull(index)
+                    val folderStreams = if (folder == null || folder.systemType == "all") {
+                        streams
+                    } else {
+                        val items by remember(chatViewModel, folder.uuid) {
+                            chatViewModel.observeFolderItems(folder.uuid)
+                        }.collectAsStateWithLifecycle(initialValue = null)
+                        remember(items, byUuid) { items?.mapNotNull { byUuid[it.streamUuid] } }
+                            ?: return@FolderPages
                     }
-                } else {
-                    streams
-                }
-                if (searchQuery.isBlank()) {
-                    folderSubscriptions
-                } else {
-                    folderSubscriptions.filter {
-                        it.name.contains(searchQuery, ignoreCase = true)
+                    val visible = remember(folderStreams, searchQuery, lastMessages, unreadFirst) {
+                        val matching = if (searchQuery.isBlank()) folderStreams else {
+                            folderStreams.filter { it.name.contains(searchQuery, ignoreCase = true) }
+                        }
+                        if (unreadFirst) matching.sortedForInbox(lastMessages) else matching.sortedByActivity(lastMessages)
+                    }
+                    if (visible.isEmpty()) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("Список каналов пуст")
+                        }
+                    } else {
+                        LazyColumn(Modifier.fillMaxSize()) {
+                            items(visible) { stream ->
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    ChatChannel(
+                                        stream, chatViewModel, showDetail, folder, selectedStream,
+                                        onChatNumberToAddChange = chatViewModel::onChatToAddChange,
+                                        onClick = {
+                                            scope.launch {
+                                                onShowDetailChange(true)
+                                                chatViewModel.updateSelectedChat(stream)
+                                            }
+                                        },
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
+                ChatTopicsPanel(chatViewModel, navController, showDetail, onShowDetailChange, selectedStream, lastMessages)
             }
-            if (filteredSubscriptions.isEmpty()) {
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .fillMaxSize()
-                ) {
-                    Text("Список каналов пуст")
+        }
+        else -> Unit
+    }
+}
+
+@Composable
+private fun ChatTopicsPanel(
+    chatViewModel: ChatViewModel,
+    navController: NavHostController,
+    showDetail: Boolean,
+    onShowDetailChange: (Boolean) -> Unit,
+    selectedStream: StreamUIO?,
+    lastMessages: List<LastMessageUIO>,
+) {
+    val topicsQueryState by chatViewModel.topicsQueryState.collectAsStateWithLifecycle()
+    val topics by chatViewModel.selectedStreamTopics.collectAsStateWithLifecycle(emptyList())
+    val scope = rememberCoroutineScope()
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val density = LocalDensity.current
+        val openOffsetPx = with(density) { 60.dp.toPx() }
+        val closedOffsetPx = with(density) { maxWidth.toPx() } + 20
+        val offsetX = remember { Animatable(closedOffsetPx) }
+        LaunchedEffect(showDetail, openOffsetPx, closedOffsetPx) {
+            offsetX.animateTo(
+                if (showDetail) openOffsetPx else closedOffsetPx,
+                spring(dampingRatio = 0.9f, stiffness = 400f),
+            )
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .width(maxWidth - 60.dp)
+                .offset { IntOffset(offsetX.value.roundToInt(), 0) }
+                .background(LocalWorkspaceColorsPalette.current.background)
+                .pointerInput(Unit) {
+                    detectHorizontalDragGestures(
+                        onDragEnd = {
+                            scope.launch {
+                                val shouldOpen =
+                                    offsetX.value < (openOffsetPx + closedOffsetPx) / 2f
+                                onShowDetailChange(shouldOpen)
+                                offsetX.animateTo(
+                                    if (shouldOpen) openOffsetPx else closedOffsetPx
+                                )
+                            }
+                        },
+                        onHorizontalDrag = { _, dragAmount ->
+                            scope.launch {
+                                offsetX.snapTo(
+                                    (offsetX.value + dragAmount)
+                                        .coerceIn(openOffsetPx, closedOffsetPx)
+                                )
+                            }
+                        }
+                    )
                 }
-            } else {
-                BoxWithConstraints(Modifier.fillMaxSize()) {
-                    val density = LocalDensity.current
-                    val screenWidthPx = with(density) { maxWidth.toPx() }
-                    val openOffsetPx =
-                        with(density) { 60.dp.toPx() }
-                    val closedOffsetPx =
-                        screenWidthPx + 20
-                    val offsetX = remember { Animatable(closedOffsetPx) }
-
-                    LaunchedEffect(showDetail) {
-                        offsetX.animateTo(
-                            targetValue = if (showDetail) openOffsetPx else closedOffsetPx,
-                            animationSpec = spring(dampingRatio = 0.9f, stiffness = 400f)
-                        )
-                    }
-                    LazyColumn(
-                        verticalArrangement = Arrangement.spacedBy(0.dp),
-                        modifier = Modifier
-                            .fillMaxSize()
-                    ) {
-                        items(
-                            items = if (chatViewModel.client.userViewModel?.streamsOrderIsUnreadFirst?.value ?: true) filteredSubscriptions.sortedForInbox(lastMessages) else filteredSubscriptions.sortedByActivity(lastMessages)
-                        ) { item ->
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                ChatChannel(
-                                    item,
-                                    chatViewModel,
-                                    showDetail,
-                                    currentlySelectedFolder,
-                                    currentlySelectedStream,
-                                    onChatNumberToAddChange = { chatViewModel.onChatToAddChange(it) },
-                                    onClick = {
-//                                val defaultTopicUuid = item.defaultTopicUuid
-//                                if (defaultTopicUuid != null) {
-//                                    chatViewModel.currentStreamId = item.uuid
-//                                    navController.navigate(
-//                                        ChatFlow.ChatDialog(
-//                                            item.name,
-//                                            item.uuid,
-//                                            null,
-//                                            defaultTopicUuid,
-//                                            true,
-//                                            null
-//                                        )
-//                                    )
-//                                } else {
-                                        scope.launch {
-                                            onShowDetailChange(true)
-                                            chatViewModel.updateSelectedChat(item)
-                                        }
-//                                }
-                                    }
-                                )
-                            }
+        ) {
+            Row {
+                VerticalDivider(
+                    thickness = 1.dp,
+                    color = LocalWorkspaceColorsPalette.current.divider
+                )
+                when (topicsQueryState) {
+                    QueryState.Loading -> {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .fillMaxSize()
+                        ) {
+                            AnimatedGif(Modifier.size(80.dp))
                         }
                     }
-                    val scope = rememberCoroutineScope()
-                    Box(
-                        modifier = Modifier
-                            .fillMaxHeight()
-                            .width(maxWidth - 60.dp)
-                            .offset { IntOffset(offsetX.value.roundToInt(), 0) }
-                            .background(LocalWorkspaceColorsPalette.current.background)
-                            .pointerInput(Unit) {
-                                detectHorizontalDragGestures(
-                                    onDragEnd = {
-                                        scope.launch {
-                                            val shouldOpen =
-                                                offsetX.value < (openOffsetPx + closedOffsetPx) / 2f
-                                            onShowDetailChange(shouldOpen)
-                                            offsetX.animateTo(
-                                                if (shouldOpen) openOffsetPx else closedOffsetPx
-                                            )
-                                        }
-                                    },
-                                    onHorizontalDrag = { _, dragAmount ->
-                                        scope.launch {
-                                            offsetX.snapTo(
-                                                (offsetX.value + dragAmount)
-                                                    .coerceIn(openOffsetPx, closedOffsetPx)
-                                            )
-                                        }
-                                    }
-                                )
-                            }
-                    ) {
-                        Row {
-                            VerticalDivider(
-                                thickness = 1.dp,
-                                color = LocalWorkspaceColorsPalette.current.divider
-                            )
-                            when (topicsQueryState) {
-                                QueryState.Loading -> {
+
+                    is QueryState.Error -> {
+                        FullScreenError {
+
+                        }
+                    }
+
+                    QueryState.Success -> {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            if (selectedStream != null) {
+                                if (topics.isEmpty()) {
                                     Box(
-                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text("Список тем пуст")
+                                    }
+                                } else {
+                                    LazyColumn(
+                                        verticalArrangement = Arrangement.spacedBy(0.dp),
                                         modifier = Modifier
-                                            .fillMaxSize()
+                                            .fillMaxWidth()
+                                            .weight(1f)
                                     ) {
-                                        AnimatedGif(Modifier.size(80.dp))
-                                    }
-                                }
-
-                                is QueryState.Error -> {
-                                    FullScreenError {
-
-                                    }
-                                }
-
-                                QueryState.Success -> {
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally
-                                    ) {
-                                        val selectedStream = currentlySelectedStream
-                                        if (selectedStream != null) {
-                                            if (topics.isEmpty()) {
-                                                Box(
-                                                    modifier = Modifier.fillMaxSize(),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Text("Список тем пуст")
-                                                }
-                                            } else {
-                                                LazyColumn(
-                                                    verticalArrangement = Arrangement.spacedBy(0.dp),
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .weight(1f)
-                                                ) {
-                                                    items(
-                                                        items = if (chatViewModel.client.userViewModel?.streamsOrderIsUnreadFirst?.value ?: true) topics.topicsSortedForInbox(lastMessages) else topics.topicsSortedByActivity(lastMessages)
-                                                    ) { item ->
-                                                        ChatTopic(
-                                                            chatViewModel,
-                                                            item,
-                                                            selectedStream,
-                                                            navController
-                                                        )
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        CompositionLocalProvider(LocalRippleConfiguration provides null) {
-                                            TextButton(
-                                                onClick = {
-                                                    chatViewModel.onCreateTopicButtonTap()
-                                                },
-                                                colors = ButtonDefaults.textButtonColors(
-                                                    containerColor = Color.Transparent,
-                                                    contentColor = LocalWorkspaceColorsPalette.current.primary,
-                                                )
-                                            ) {
-                                                Text(
-                                                    "+ Новая тема",
-                                                    fontSize = 14.sp,
-                                                    fontFamily = InterFontFamily,
-                                                )
-                                            }
+                                        items(
+                                            items = if (chatViewModel.client.userViewModel?.streamsOrderIsUnreadFirst?.value ?: true) topics.topicsSortedForInbox(lastMessages) else topics.topicsSortedByActivity(lastMessages)
+                                        ) { item ->
+                                            ChatTopic(
+                                                chatViewModel,
+                                                item,
+                                                selectedStream,
+                                                navController
+                                            )
                                         }
                                     }
                                 }
-                                else -> {}
+                            }
+                            CompositionLocalProvider(LocalRippleConfiguration provides null) {
+                                TextButton(
+                                    onClick = {
+                                        chatViewModel.onCreateTopicButtonTap()
+                                    },
+                                    colors = ButtonDefaults.textButtonColors(
+                                        containerColor = Color.Transparent,
+                                        contentColor = LocalWorkspaceColorsPalette.current.primary,
+                                    )
+                                ) {
+                                    Text(
+                                        "+ Новая тема",
+                                        fontSize = 14.sp,
+                                        fontFamily = InterFontFamily,
+                                    )
+                                }
                             }
                         }
                     }
+                    else -> {}
                 }
             }
         }
-        else -> { }
     }
 }
 
